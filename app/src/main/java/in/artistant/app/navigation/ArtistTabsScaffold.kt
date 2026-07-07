@@ -23,8 +23,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.gigrequest.GigRequestDetailScreen
+import `in`.artistant.app.feature.messages.ChatScreen
+import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -68,13 +71,11 @@ fun ArtistTabsScaffold() {
             modifier = Modifier.padding(inner),
         ) {
             ArtistTab.entries.forEach { tab ->
-                if (tab == ArtistTab.Gigs) {
-                    // Gigs hosts the gig-request detail route (M3). The ArtistHome/
-                    // Gigs entry that seeds RequestStore + navigates here is M5;
-                    // ponytail: registered now so M5 only wires the navigate call.
-                    composable(tab.route) { GigsTab() }
-                } else {
-                    composable(tab.route) { Placeholder(tab.label) }
+                when (tab) {
+                    ArtistTab.Gigs -> composable(tab.route) { GigsTab() }
+                    // M4: Messages is a real tab for the artist too. Home/EPK stay stubs (M5+).
+                    ArtistTab.Messages -> composable(tab.route) { MessagesTab() }
+                    else -> composable(tab.route) { Placeholder(tab.label) }
                 }
             }
         }
@@ -93,9 +94,38 @@ private fun GigsTab() {
     }
 }
 
+/**
+ * Artist Messages tab — thread list + chat (SHARED screens, artist role). No
+ * artist-profile push from chat: the artist's counterpart is the client, whose
+ * avatar is static (parity with iOS's non-navigable artist-viewer avatar).
+ */
+@Composable
+private fun MessagesTab() {
+    val nav = rememberNavController()
+    NavHost(navController = nav, startDestination = ArtistMessagesRoot) {
+        composable<ArtistMessagesRoot> {
+            MessagesScreen(
+                role = AppRole.Artist,
+                onOpenThread = { nav.navigate(ArtistRoute.Chat(threadId = it)) },
+            )
+        }
+        composable<ArtistRoute.Chat> {
+            ChatScreen(
+                role = AppRole.Artist,
+                onBack = { nav.popBackStack() },
+                // No onArtist — artist viewer's counterpart avatar is not navigable.
+            )
+        }
+    }
+}
+
 /** Nested-graph root marker for the artist Gigs tab. */
 @kotlinx.serialization.Serializable
 private data object GigsRoot
+
+/** Nested-graph root marker for the artist Messages tab. */
+@kotlinx.serialization.Serializable
+private data object ArtistMessagesRoot
 
 /**
  * Shared bottom-nav click behaviour: single-top, restore state, and pop to the
