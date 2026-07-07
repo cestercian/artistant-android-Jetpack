@@ -10,7 +10,9 @@ import `in`.artistant.app.platform.auth.AuthCancelledException
 import `in`.artistant.app.platform.auth.AuthException
 import `in`.artistant.app.platform.auth.EmailAuthOutcome
 import `in`.artistant.app.platform.auth.SessionManager
+import io.github.jan.supabase.exceptions.HttpRequestException
 import kotlinx.coroutines.CancellationException
+import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -124,9 +126,10 @@ class AuthViewModel @Inject constructor(
      * structured concurrency (the scope must observe its own cancellation).
      */
     private fun errorFor(e: Throwable, map: (Throwable) -> String = { it.userMessage() }): String? =
-        when (e) {
-            is CancellationException -> throw e          // structured concurrency: never swallow
-            is AuthCancelledException -> null            // user dismissed the picker — silent
+        when {
+            e is CancellationException -> throw e        // structured concurrency: never swallow
+            e is AuthCancelledException -> null          // user dismissed the picker — silent
+            isNetworkError(e) -> NETWORK_ERROR_MESSAGE   // slow/flaky network — friendly, not the raw timeout text
             else -> map(e)
         }
 
@@ -143,4 +146,33 @@ class AuthViewModel @Inject constructor(
             else -> e.userMessage()
         }
     }
+}
+
+/** Shown for any connectivity failure so the user never sees a raw Ktor timeout string. */
+internal const val NETWORK_ERROR_MESSAGE = "Couldn't reach the server. Check your connection and try again."
+
+/**
+ * True if [error] (or anything in its cause chain) is a network / connectivity failure.
+ *
+ * All four types the task cares about — Ktor's `HttpRequestTimeoutException` (the reported
+ * signup-timeout symptom), `ConnectTimeoutException`, `SocketTimeoutException`, and a bare
+ * `java.io.IOException` — extend `java.io.IOException`, so the single `is IOException` check
+ * subsumes them all (no per-type branch needed; they'd map to the same message anyway).
+ *
+ * supabase-kt rethrows `HttpRequestTimeoutException` unwrapped, but wraps *other* transport
+ * failures (connect/socket timeout, DNS, refused) in `HttpRequestException` and drops the
+ * cause — so the IOException type is lost. We match `HttpRequestException` explicitly to keep
+ * those covered. GoTrue auth errors (wrong password, already-registered) come back as parsed
+ * HTTP responses, not `HttpRequestException`, so they keep their own friendly mapping.
+ *
+ * We walk the whole cause chain rather than checking only the top frame, for the paths that do
+ * preserve the cause.
+ */
+internal fun isNetworkError(error: Throwable): Boolean {
+    var t: Throwable? = error
+    while (t != null) {
+        if (t is IOException || t is HttpRequestException) return true
+        t = t.cause
+    }
+    return false
 }
