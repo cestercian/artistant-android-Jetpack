@@ -18,11 +18,14 @@ sealed interface ClientRoute {
     @Serializable data class ArtistProfile(val artistId: String) : ClientRoute
     @Serializable data class Chat(val threadId: String) : ClientRoute
     @Serializable data object Search : ClientRoute
-    // Stubbed M2b targets — real screens land later (Booking = M3, Chat = M4,
-    // ScoreExplainer = its own surface). They push a Placeholder for now so the
-    // ArtistProfile CTAs have somewhere to go.
+    // M3 booking funnel. Chat (M4) + ScoreExplainer stay stubs.
     @Serializable data class Booking(val artistId: String) : ClientRoute
     @Serializable data class RequestQuote(val artistId: String) : ClientRoute
+    // The draft lives in BookingStore, so Checkout takes no args; Confirmed +
+    // BookingDetail carry the persisted booking id.
+    @Serializable data object Checkout : ClientRoute
+    @Serializable data class Confirmed(val bookingId: String) : ClientRoute
+    @Serializable data class BookingDetail(val bookingId: String) : ClientRoute
     @Serializable data object ScoreExplainer : ClientRoute
 }
 
