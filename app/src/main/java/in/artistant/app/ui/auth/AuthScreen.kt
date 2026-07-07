@@ -2,12 +2,8 @@ package `in`.artistant.app.ui.auth
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -19,104 +15,37 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
- * Functional auth entry (the iOS `AuthScreen` port, minus the animated hero — M1b polishes
- * it). Three sign-in buttons wired to [AuthViewModel]; Email opens [EmailAuthSheet]. Uses
- * design tokens throughout (no raw hex/dp/sp beyond layout spacing constants).
- */
-@Composable
-fun AuthScreen(viewModel: AuthViewModel = hiltViewModel()) {
-    val context = LocalContext.current
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    var showEmailSheet by remember { mutableStateOf(false) }
-    val colors = AppTheme.colors
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-    ) {
-        Text("Artistant", style = AppTheme.type.displayHero, color = colors.ink)
-        Text(
-            "Book live artists across India.",
-            style = AppTheme.type.callout,
-            color = colors.ink2,
-        )
-        Spacer(Modifier.height(8.dp))
-
-        // Apple = solid button; Google/Email = ghost (hairline) — one signal at a time.
-        PrimaryButton(
-            text = "Continue with Apple",
-            onClick = viewModel::signInWithApple,
-            fullWidth = true,
-            enabled = !state.isAuthenticating,
-        )
-        PrimaryButton(
-            text = "Continue with Google",
-            onClick = { viewModel.signInWithGoogle(context) },
-            variant = ButtonVariant.Ghost,
-            fullWidth = true,
-            enabled = !state.isAuthenticating,
-        )
-        PrimaryButton(
-            text = "Continue with email",
-            onClick = { showEmailSheet = true },
-            variant = ButtonVariant.Ghost,
-            fullWidth = true,
-            enabled = !state.isAuthenticating,
-        )
-
-        if (state.isAuthenticating) {
-            CircularProgressIndicator(color = colors.brand)
-        }
-        state.error?.let { err ->
-            Text(err, style = AppTheme.type.footnote, color = colors.hot)
-        }
-    }
-
-    if (showEmailSheet) {
-        EmailAuthSheet(
-            state = state,
-            onSignIn = viewModel::signInWithEmail,
-            onSignUp = { email, pw, name -> viewModel.signUpWithEmail(email, pw, name) },
-            onDismiss = {
-                showEmailSheet = false
-                viewModel.clearError()
-            },
-        )
-    }
-}
-
-/**
- * Email/password sheet — sign-in and sign-up in one, toggled by [signUpMode]. Client-side
- * validation lives in [AuthViewModel]; this only collects fields and shows outcomes. On a
- * confirmation-required sign-up it shows the "check your inbox" note rather than dismissing.
+ * Email/password sheet — sign-in and sign-up in one, toggled by [signUpMode] (seeded from
+ * [startInSignUp]: signup flow opens in sign-up, login opens in sign-in). Client-side validation
+ * lives in [AuthViewModel]; this only collects fields and shows outcomes. On a confirmation-
+ * required sign-up it shows the "check your inbox" note rather than dismissing.
+ *
+ * Made a top-level public composable in M1b so the polished `SignupAuthScreen` reuses it verbatim
+ * (was a private helper of the M1a AuthScreen, whose plain three-button entry the signup flow's
+ * `SignupAuthScreen` replaced).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EmailAuthSheet(
+fun EmailAuthSheet(
     state: AuthUiState,
     onSignIn: (email: String, password: String) -> Unit,
     onSignUp: (email: String, password: String, fullName: String?) -> Unit,
     onDismiss: () -> Unit,
+    startInSignUp: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val colors = AppTheme.colors
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
-    var signUpMode by remember { mutableStateOf(false) }
+    var signUpMode by remember { mutableStateOf(startInSignUp) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(

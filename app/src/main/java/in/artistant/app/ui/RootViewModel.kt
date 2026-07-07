@@ -35,6 +35,18 @@ class RootViewModel @Inject constructor(
     private val _gate = MutableStateFlow<RootGate>(RootGate.Loading)
     val gate: StateFlow<RootGate> = _gate
 
+    /** The last successfully-fetched profile, so the signup flow (Onboarding tier) can prefill a
+     *  returning user's name/city/handle for a personalized Done screen. Null before the first
+     *  successful fetch or when the row is genuinely absent. */
+    private val _profile = MutableStateFlow<SelfProfile?>(null)
+    val profile: StateFlow<SelfProfile?> = _profile
+
+    /** Non-null when the routing fetch FAILED (network/RLS) — surfaced by the signup flow as a
+     *  Retry banner. A failed fetch degrades to Onboarding rather than re-onboarding, but the
+     *  cost (an artist possibly mis-routed) must be visible, not silent (iOS audit P1). */
+    private val _profileHydrationError = MutableStateFlow<String?>(null)
+    val profileHydrationError: StateFlow<String?> = _profileHydrationError
+
     // Tracks the (uuid, generation) we last routed for so we don't re-fetch on every
     // recomposition — the iOS `.task(id: authAdvanceKey)` equivalent.
     private var lastRoutedKey: String? = null
@@ -77,11 +89,31 @@ class RootViewModel @Inject constructor(
         // distinction returningLoginRoute needs (a failed fetch must NOT re-onboard).
         val result = fetchWithRetry()
         val profile = result.getOrNull()
+        _profile.value = profile
+        // Surface a failed fetch as a Retry banner (cleared on success); a null row is NOT an
+        // error (genuinely-new user), so don't flag it.
+        _profileHydrationError.value = if (result.isFailure)
+            "Couldn't load your profile. Check your connection and try again." else null
         val route = returningLoginRoute(profile, fetchFailed = result.isFailure)
         // RouteIn(Artist) also hydrates the role gate before we pick the tier; do it here since
         // gateFor is pure and can't touch prefs.
         if (route is ReturningLoginRoute.RouteIn) prefs.setRole(route.role)
         _gate.value = gateFor(route, profile)
+    }
+
+    /** Re-run the routing fetch (the signup flow's hydration-error Retry). */
+    fun retryRouting() {
+        viewModelScope.launch { routeSignedIn() }
+    }
+
+    /**
+     * The signup flow just wrote a complete profile (Done → "Start exploring"). Re-run routing so
+     * the now-complete profile re-fetches and the gate moves Onboarding → Tabs. The session is
+     * already live, so `combine` won't re-fire on its own (no generation bump) — this is the
+     * explicit nudge. Idempotent: a re-fetch of a complete profile just lands on Tabs again.
+     */
+    fun markSignupComplete() {
+        viewModelScope.launch { routeSignedIn() }
     }
 
     private suspend fun fetchWithRetry(attempts: Int = 3): Result<SelfProfile?> {
