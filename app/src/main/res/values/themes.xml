@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark, no action bar. Compose draws the UI; this only styles the
+         pre-Compose launch window (status bar + background). Parent is the
+         framework dark theme (no dependency on the material XML theme lib —
+         we use Compose Material3, which ships no XML themes). -->
+    <style name="Theme.Artistant" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+</resources>

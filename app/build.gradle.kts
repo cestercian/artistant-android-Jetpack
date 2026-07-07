@@ -1,0 +1,116 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt)
+}
+
+android {
+    namespace = "in.artistant.app"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "in.artistant.app"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Product flavors carry the per-environment Supabase creds as BuildConfig
+    // fields. M0 uses PLACEHOLDER values — no real secrets in the tree. The
+    // prod tier guard (SupabaseClientFactory) only asserts the real host when
+    // the URL isn't a placeholder, so these compile-and-run fine.
+    flavorDimensions += "env"
+    productFlavors {
+        create("dev") {
+            dimension = "env"
+            buildConfigField("String", "SUPABASE_URL", "\"https://REPLACE.supabase.co\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"REPLACE\"")
+        }
+        create("staging") {
+            dimension = "env"
+            buildConfigField("String", "SUPABASE_URL", "\"https://REPLACE.supabase.co\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"REPLACE\"")
+        }
+        create("prod") {
+            dimension = "env"
+            buildConfigField("String", "SUPABASE_URL", "\"https://REPLACE.supabase.co\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"REPLACE\"")
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+}
+
+// Product flavors mean there is no bare `testDebugUnitTest` task — only the
+// per-flavor `test{Dev,Staging,Prod}DebugUnitTest`. Register the plain name as a
+// lifecycle alias so `./gradlew :app:testDebugUnitTest` runs the debug unit tests
+// (dev flavor — all flavors compile the same test sources).
+tasks.register("testDebugUnitTest") {
+    group = "verification"
+    description = "Runs the dev-flavor debug unit tests (alias for testDevDebugUnitTest)."
+    dependsOn("testDevDebugUnitTest")
+}
+
+dependencies {
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
+
+    // Compose via BOM — keeps all androidx.compose.* artifacts version-aligned.
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.datastore.preferences)
+
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
+
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+
+    // supabase-kt — BOM pins the module versions; add the Ktor engine it needs.
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.supabase.realtime)
+    implementation(libs.supabase.storage)
+    implementation(libs.supabase.functions)
+    implementation(libs.ktor.client.okhttp)
+
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
+    implementation(libs.timber)
+
+    testImplementation(libs.junit)
+}
