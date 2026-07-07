@@ -140,13 +140,21 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0 foundation merged — Gradle/Compose skeleton builds green
-(`assembleDebug` + unit tests: booking math, score bands, redaction, INR). Stack
-resolved (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle 8.13, Kotlin 2.1.0,
-Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1. Auth gate + DI +
-supabase client + theme + nav shell are real but stubbed at the seams. **M1 (auth)
-next.** Open follow-ups: drop brand `.ttf` into `res/font/`, set real Supabase
-creds, real launcher icon. Backend unchanged (shared with iOS).
+**Current state:** M0 + **M1 (auth & onboarding) complete** — merged, green,
+adversarially reviewed. Stack (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle
+8.13, Kotlin 2.1.0, Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1.
+Shipped: full design system, DI + supabase client (tier guard) + DataStore, nav
+shell + real auth gate (session + returning-login router), SessionManager (Google/
+Apple/email), UsersRepository (users slice), and the 8-screen signup/login flow.
+**61 unit tests, 0 failures** (`assembleDebug` + `testDebugUnitTest` green). Dev
+Supabase creds wired (gitignored). **M2 (Browse) next** — data layer (models +
+repositories + Fake twins) then Discover/Search/Artist-profile.
+
+Open tracked issues: #12 (Apple-OAuth deep-link error handling — blocks Apple
+go-live), #15 (signup design-token polish + brand assets). Operator: no emulator
+here (compile + unit-test only); Google needs `GOOGLE_WEB_CLIENT_ID` + SHA-1;
+Supabase dashboard needs the Android redirect + Apple provider; drop brand `.ttf`
+into `res/font/`; real launcher icon. Backend unchanged (shared with iOS).
 
 ---
 
