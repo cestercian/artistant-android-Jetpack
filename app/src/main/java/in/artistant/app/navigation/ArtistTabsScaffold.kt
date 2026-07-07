@@ -24,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.gigrequest.GigRequestDetailScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -67,11 +68,34 @@ fun ArtistTabsScaffold() {
             modifier = Modifier.padding(inner),
         ) {
             ArtistTab.entries.forEach { tab ->
-                composable(tab.route) { Placeholder(tab.label) }
+                if (tab == ArtistTab.Gigs) {
+                    // Gigs hosts the gig-request detail route (M3). The ArtistHome/
+                    // Gigs entry that seeds RequestStore + navigates here is M5;
+                    // ponytail: registered now so M5 only wires the navigate call.
+                    composable(tab.route) { GigsTab() }
+                } else {
+                    composable(tab.route) { Placeholder(tab.label) }
+                }
             }
         }
     }
 }
+
+/** Artist Gigs tab — placeholder root + the gig-request detail route (M5 wires the entry). */
+@Composable
+private fun GigsTab() {
+    val nav = rememberNavController()
+    NavHost(navController = nav, startDestination = GigsRoot) {
+        composable<GigsRoot> { Placeholder(ArtistTab.Gigs.label) }
+        composable<ArtistRoute.GigRequest> {
+            GigRequestDetailScreen(onBack = { nav.popBackStack() })
+        }
+    }
+}
+
+/** Nested-graph root marker for the artist Gigs tab. */
+@kotlinx.serialization.Serializable
+private data object GigsRoot
 
 /**
  * Shared bottom-nav click behaviour: single-top, restore state, and pop to the

@@ -24,6 +24,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.artist.ArtistRouteLoader
+import `in`.artistant.app.feature.booking.BookingScreen
+import `in`.artistant.app.feature.booking.CheckoutScreen
+import `in`.artistant.app.feature.booking.ConfirmedScreen
+import `in`.artistant.app.feature.booking.RequestQuoteScreen
+import `in`.artistant.app.feature.bookings.BookingDetailScreen
+import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.ui.Placeholder
@@ -86,8 +92,8 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Search.route) {
                 BrowseTab { onArtist -> SearchScreen(onArtist = onArtist) }
             }
-            // The remaining tabs stay placeholders (M3/M4/M6).
-            composable(ClientTab.Bookings.route) { Placeholder(ClientTab.Bookings.label) }
+            // Bookings is a real tab now (M3); Messages/Profile stay placeholders (M4+).
+            composable(ClientTab.Bookings.route) { BookingsTab() }
             composable(ClientTab.Messages.route) { Placeholder(ClientTab.Messages.label) }
             composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
         }
@@ -116,13 +122,66 @@ private fun BrowseTab(root: @Composable (onArtist: (String) -> Unit) -> Unit) {
                 onMessage = { nav.navigate(ClientRoute.Chat(threadId = "pending")) },
             )
         }
-        composable<ClientRoute.Booking> { Placeholder("Booking — coming in M3") }
-        composable<ClientRoute.RequestQuote> { Placeholder("Request a quote — coming in M3") }
+        // M3 booking funnel: Book → Checkout → Confirmed → (View booking) Detail.
+        composable<ClientRoute.Booking> {
+            BookingScreen(
+                onBack = { nav.popBackStack() },
+                onCheckout = { nav.navigate(ClientRoute.Checkout) },
+            )
+        }
+        composable<ClientRoute.Checkout> {
+            CheckoutScreen(
+                onBack = { nav.popBackStack() },
+                onConfirmed = { id -> nav.navigate(ClientRoute.Confirmed(id)) },
+            )
+        }
+        composable<ClientRoute.Confirmed> {
+            ConfirmedScreen(
+                onViewBooking = { id -> nav.navigate(ClientRoute.BookingDetail(id)) },
+                // Unwind the whole funnel back to the browse root.
+                onBackToDiscover = { nav.popBackStack(BrowseRoot, inclusive = false) },
+            )
+        }
+        composable<ClientRoute.BookingDetail> {
+            BookingDetailScreen(
+                onBack = { nav.popBackStack() },
+                // Chat is M4 — push the stub.
+                onMessage = { nav.navigate(ClientRoute.Chat(threadId = "pending")) },
+            )
+        }
+        composable<ClientRoute.RequestQuote> {
+            RequestQuoteScreen(onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
+        }
         composable<ClientRoute.Chat> { Placeholder("Chat — coming in M4") }
         composable<ClientRoute.ScoreExplainer> { Placeholder("Bookability Score") }
+    }
+}
+
+/**
+ * The client Bookings tab — a month calendar of the user's bookings with its own
+ * nested stack so tapping a day's booking pushes its detail (M3).
+ */
+@Composable
+private fun BookingsTab() {
+    val nav = rememberNavController()
+    NavHost(navController = nav, startDestination = BookingsRoot) {
+        composable<BookingsRoot> {
+            BookingsScreen(onOpenBooking = { nav.navigate(ClientRoute.BookingDetail(it)) })
+        }
+        composable<ClientRoute.BookingDetail> {
+            BookingDetailScreen(
+                onBack = { nav.popBackStack() },
+                onMessage = { nav.navigate(ClientRoute.Chat(threadId = "pending")) },
+            )
+        }
+        composable<ClientRoute.Chat> { Placeholder("Chat — coming in M4") }
     }
 }
 
 /** The nested-graph root marker for a Browse tab (Discover / Search content). */
 @kotlinx.serialization.Serializable
 private data object BrowseRoot
+
+/** The nested-graph root marker for the Bookings tab. */
+@kotlinx.serialization.Serializable
+private data object BookingsRoot
