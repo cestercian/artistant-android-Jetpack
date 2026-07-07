@@ -2,8 +2,8 @@ package `in`.artistant.app.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -31,7 +31,7 @@ import `in`.artistant.app.ui.Placeholder
 private enum class ClientTab(val route: String, val label: String, val icon: ImageVector) {
     Discover("discover", "Discover", Icons.Filled.Explore),
     Bookings("bookings", "Bookings", Icons.Filled.CalendarMonth),
-    Messages("messages", "Messages", Icons.Filled.Chat),
+    Messages("messages", "Messages", Icons.AutoMirrored.Filled.Chat),
     Profile("profile", "Profile", Icons.Filled.Person),
     Search("search", "Search", Icons.Filled.Search),
 }

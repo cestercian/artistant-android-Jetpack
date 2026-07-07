@@ -2,7 +2,7 @@ package `in`.artistant.app.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.WorkOutline
@@ -30,7 +30,7 @@ import `in`.artistant.app.ui.Placeholder
 private enum class ArtistTab(val route: String, val label: String, val icon: ImageVector) {
     Home("home", "Home", Icons.Filled.Dashboard),
     Gigs("gigs", "Gigs", Icons.Filled.WorkOutline),
-    Messages("messages", "Messages", Icons.Filled.Chat),
+    Messages("messages", "Messages", Icons.AutoMirrored.Filled.Chat),
     Epk("epk", "EPK", Icons.Filled.LibraryMusic),
 }
 
