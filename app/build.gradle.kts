@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +8,16 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
 }
+
+// Supabase creds are read from a gitignored `secrets.properties` at the repo root
+// and baked into BuildConfig per flavor. Anon/publishable keys are safe in the
+// shipped app (RLS-protected) but never live in source/history. A missing file or
+// key falls back to a REPLACE placeholder, which the tier guard treats as "unset".
+val secretsFile = rootProject.file("secrets.properties")
+val secretsProps = Properties().apply {
+    if (secretsFile.exists()) secretsFile.inputStream().use { load(it) }
+}
+fun secret(key: String, default: String): String = secretsProps.getProperty(key) ?: default
 
 android {
     namespace = "in.artistant.app"
@@ -28,18 +40,18 @@ android {
     productFlavors {
         create("dev") {
             dimension = "env"
-            buildConfigField("String", "SUPABASE_URL", "\"https://REPLACE.supabase.co\"")
-            buildConfigField("String", "SUPABASE_ANON_KEY", "\"REPLACE\"")
+            buildConfigField("String", "SUPABASE_URL", "\"${secret("DEV_SUPABASE_URL", "https://REPLACE.supabase.co")}\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"${secret("DEV_SUPABASE_ANON_KEY", "REPLACE")}\"")
         }
         create("staging") {
             dimension = "env"
-            buildConfigField("String", "SUPABASE_URL", "\"https://REPLACE.supabase.co\"")
-            buildConfigField("String", "SUPABASE_ANON_KEY", "\"REPLACE\"")
+            buildConfigField("String", "SUPABASE_URL", "\"${secret("STAGING_SUPABASE_URL", "https://REPLACE.supabase.co")}\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"${secret("STAGING_SUPABASE_ANON_KEY", "REPLACE")}\"")
         }
         create("prod") {
             dimension = "env"
-            buildConfigField("String", "SUPABASE_URL", "\"https://REPLACE.supabase.co\"")
-            buildConfigField("String", "SUPABASE_ANON_KEY", "\"REPLACE\"")
+            buildConfigField("String", "SUPABASE_URL", "\"${secret("PROD_SUPABASE_URL", "https://REPLACE.supabase.co")}\"")
+            buildConfigField("String", "SUPABASE_ANON_KEY", "\"${secret("PROD_SUPABASE_ANON_KEY", "REPLACE")}\"")
         }
     }
 
