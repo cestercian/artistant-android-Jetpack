@@ -14,4 +14,12 @@ object AppEnvironment {
     /** Flavor name: "dev" / "staging" / "prod". */
     val flavor: String get() = BuildConfig.FLAVOR
     val isProd: Boolean get() = flavor == "prod"
+
+    /**
+     * Realtime chat kill-switch (the iOS `realtimeEnabled` flag). Default ON;
+     * flip off to fall back to poll-on-send if a Realtime transport issue shows
+     * up in the field. A compile-time constant for now — no BuildConfig field
+     * until it needs to differ per flavor.
+     */
+    val realtimeEnabled: Boolean get() = true
 }
