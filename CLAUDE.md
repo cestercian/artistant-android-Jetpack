@@ -140,21 +140,28 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0 + **M1 (auth & onboarding) complete** — merged, green,
-adversarially reviewed. Stack (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle
-8.13, Kotlin 2.1.0, Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1.
-Shipped: full design system, DI + supabase client (tier guard) + DataStore, nav
-shell + real auth gate (session + returning-login router), SessionManager (Google/
-Apple/email), UsersRepository (users slice), and the 8-screen signup/login flow.
-**61 unit tests, 0 failures** (`assembleDebug` + `testDebugUnitTest` green). Dev
-Supabase creds wired (gitignored). **M2 (Browse) next** — data layer (models +
-repositories + Fake twins) then Discover/Search/Artist-profile.
+**Current state:** M0 + M1 + **M2 (Browse) complete** — all merged, green,
+adversarially reviewed; the app builds + RUNS on an emulator (signup → tabs →
+Discover/Search/Artist-profile over live `artistant-dev`). Stack (see
+`gradle/libs.versions.toml`): AGP 8.9.1, Gradle 8.13, Kotlin 2.1.0, Compose BOM
+2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1. Shipped: design system, DI +
+supabase client (tier guard) + DataStore, real auth gate + SessionManager (Google/
+Apple/email) + signup flow (M1); the Browse data layer (Artists/Search/Reviews/
+Score/Saved repos + Fakes) and Discover/Search/Artist-profile screens (M2). **94
+unit tests, 0 failures.** Dev creds wired (gitignored). **M3 (Booking funnel) next**
+— Booking/Messaging models + repos, then Booking/Checkout/Confirmed/RequestQuote +
+Bookings calendar + BookingDetail + ReviewSheet.
+
+Canonical checkout is **`~/AndroidStudioProjects/artistant-android`** (the old
+`~/Desktop/artistant-android` is abandoned — macOS blocked tool access to Desktop).
 
 Open tracked issues: #12 (Apple-OAuth deep-link error handling — blocks Apple
-go-live), #15 (signup design-token polish + brand assets). Operator: no emulator
-here (compile + unit-test only); Google needs `GOOGLE_WEB_CLIENT_ID` + SHA-1;
-Supabase dashboard needs the Android redirect + Apple provider; drop brand `.ttf`
-into `res/font/`; real launcher icon. Backend unchanged (shared with iOS).
+go-live), #15 (signup design-token polish + brand assets), #18 (M2/M5 follow-up:
+gallery strip, Spotify embed, audio playback). Operator: no emulator in the agent
+env (compile + unit-test only — but the user CAN run it); Google needs
+`GOOGLE_WEB_CLIENT_ID` + SHA-1; Supabase dashboard needs the Android redirect +
+Apple provider; drop brand `.ttf` into `res/font/`; real launcher icon. Backend
+unchanged (shared with iOS).
 
 ---
 
