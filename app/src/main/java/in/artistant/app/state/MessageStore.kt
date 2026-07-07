@@ -152,34 +152,43 @@ class MessageStore @Inject constructor(
      * No-op if the thread isn't local yet (a refresh will pick it up).
      */
     fun receiveRealtimeMessage(threadId: String, message: Message) {
-        val t = thread(threadId) ?: return
-        // Already landed via the send() echo OR a prior realtime callback.
-        if (t.messages.any { it.id == message.id }) return
-
-        // Realtime-beats-send race: this can be the echo of our OWN optimistic send
-        // whose id hasn't been swapped to the server id yet. Collapse it INTO the
-        // in-flight placeholder instead of appending a duplicate the send() reconcile
-        // would only clear a beat later. SCOPE TIGHTLY (iOS realtime-chat-audit P1):
-        //   - `.Sending` ONLY, never `.Failed` — a `.Failed` bubble has no server row,
-        //     so overwriting it would destroy the user's message + its retry chip.
-        //   - recency-bounded so an unrelated older in-flight bubble can't be swallowed.
-        // (Server redaction may make the echoed body differ from the raw optimistic
-        // body — then this falls through to append and deliver()'s id check dedups.)
-        if (message.sender == MessageSender.Me) {
-            val match = t.messages.firstOrNull {
-                it.sender == MessageSender.Me &&
-                    it.delivery == MessageDelivery.Sending &&
-                    it.body == message.body &&
-                    abs(it.sentAt.toEpochMilli() - message.sentAt.toEpochMilli()) < CONTENT_MATCH_WINDOW_MS
-            }
-            if (match != null) {
-                updateThread(threadId) { th ->
-                    th.copy(messages = th.messages.map { if (it.id == match.id) message else it })
+        // The dedup guard + the append MUST be atomic. The store mutates from several
+        // coroutines on Dispatchers.Default (this realtime callback + deliver()'s
+        // reconcile + refresh), so a check-then-append with the id guard OUTSIDE the
+        // write is a TOCTOU: a concurrent write can land `message.id` between the guard
+        // and the append, and BOTH append it — a duplicate the ChatScreen's keyed
+        // LazyColumn would CRASH on (Compose rejects duplicate keys). Doing the whole
+        // decision inside `_threads.update` (a compare-and-set retry loop) makes it
+        // atomic: if another coroutine lands the id first, the CAS fails and the
+        // transform re-runs against the new list, re-sees the id, and no-ops.
+        _threads.update { list ->
+            list.map { t ->
+                if (t.id != threadId) return@map t
+                // Already landed via the send() echo OR a prior realtime callback.
+                if (t.messages.any { it.id == message.id }) return@map t
+                // Realtime-beats-send race: the echo of our OWN optimistic send whose id
+                // hasn't been swapped to the server id yet. Collapse it INTO the in-flight
+                // placeholder instead of appending a duplicate deliver() would only clear a
+                // beat later. SCOPE TIGHTLY (iOS realtime-chat-audit P1):
+                //   - `.Sending` ONLY, never `.Failed` (a `.Failed` bubble has no server
+                //     row; overwriting it would destroy the user's message + retry chip).
+                //   - recency-bounded so an unrelated older in-flight bubble isn't swallowed.
+                // (Server redaction may change the echoed body → falls through to append,
+                // and deliver()'s id check dedups.)
+                if (message.sender == MessageSender.Me) {
+                    val match = t.messages.firstOrNull {
+                        it.sender == MessageSender.Me &&
+                            it.delivery == MessageDelivery.Sending &&
+                            it.body == message.body &&
+                            abs(it.sentAt.toEpochMilli() - message.sentAt.toEpochMilli()) < CONTENT_MATCH_WINDOW_MS
+                    }
+                    if (match != null) {
+                        return@map t.copy(messages = t.messages.map { if (it.id == match.id) message else it })
+                    }
                 }
-                return
+                t.copy(messages = t.messages + message)
             }
         }
-        updateThread(threadId) { it.copy(messages = it.messages + message) }
     }
 
     // ---- Read / refresh ----

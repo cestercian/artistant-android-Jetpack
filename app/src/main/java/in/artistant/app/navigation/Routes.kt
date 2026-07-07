@@ -32,5 +32,6 @@ sealed interface ClientRoute {
 /** Artist-side pushed routes. */
 sealed interface ArtistRoute {
     @Serializable data class GigRequest(val id: String) : ArtistRoute
+    @Serializable data class Chat(val threadId: String) : ArtistRoute
     @Serializable data object ScoreExplainer : ArtistRoute
 }

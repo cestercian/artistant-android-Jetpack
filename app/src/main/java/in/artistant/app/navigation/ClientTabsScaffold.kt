@@ -1,5 +1,8 @@
 package `in`.artistant.app.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -7,6 +10,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -15,13 +19,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.NavHostController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.artist.ArtistRouteLoader
 import `in`.artistant.app.feature.booking.BookingScreen
@@ -31,12 +42,15 @@ import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingDetailScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.messages.ChatOpenViewModel
+import `in`.artistant.app.feature.messages.ChatScreen
+import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Client bottom nav: Discover · Bookings · Messages · Profile · Search.
 // (Search is a normal 5th destination — Android has no iOS-26 search-circle.)
-private enum class ClientTab(val route: String, val label: String, val icon: ImageVector) {
+private enum class ClientTab(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Discover("discover", "Discover", Icons.Filled.Explore),
     Bookings("bookings", "Bookings", Icons.Filled.CalendarMonth),
     Messages("messages", "Messages", Icons.AutoMirrored.Filled.Chat),
@@ -79,9 +93,6 @@ fun ClientTabsScaffold() {
             // Discover + Search are real Browse tabs, each with its own nested
             // stack so a tapped tile pushes ArtistProfile within that tab.
             composable(ClientTab.Discover.route) {
-                // `nav` is the OUTER (bottom-nav) controller, so the masthead's
-                // profile chip switches the selected tab — not a push inside the
-                // Discover stack.
                 BrowseTab { onArtist ->
                     DiscoverScreen(
                         onArtist = onArtist,
@@ -92,20 +103,101 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Search.route) {
                 BrowseTab { onArtist -> SearchScreen(onArtist = onArtist) }
             }
-            // Bookings is a real tab now (M3); Messages/Profile stay placeholders (M4+).
             composable(ClientTab.Bookings.route) { BookingsTab() }
-            composable(ClientTab.Messages.route) { Placeholder(ClientTab.Messages.label) }
+            // M4: Messages is a real tab now; Profile stays a placeholder (M5+).
+            composable(ClientTab.Messages.route) { MessagesTab() }
             composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
         }
     }
 }
 
 /**
- * A Browse tab shell — a nested [NavHost] whose root is [root] (Discover or
- * Search), able to push [ClientRoute.ArtistProfile] and the stubbed booking /
- * quote / chat targets. [root] receives an `onArtist` that navigates into the
- * profile. Each tab keeps its own back stack.
+ * The client artist + booking-funnel + chat destinations, registered ONCE and reused
+ * by every client tab that can reach them (Browse, Bookings, Messages). Extracting it
+ * kills the per-tab copy-paste and puts the real Chat wiring + the find-or-create
+ * "Message" entry point (was a `threadId = "pending"` stub) in a single place. [nav]
+ * is the tab's own nested controller — pushes stay inside that tab's back stack.
  */
+private fun NavGraphBuilder.clientArtistFunnel(nav: NavHostController) {
+    composable<ClientRoute.ArtistProfile> {
+        // Find-or-create the real thread on "Message", then push its chat.
+        val chatOpen: ChatOpenViewModel = hiltViewModel()
+        ArtistRouteLoader(
+            onBack = { nav.popBackStack() },
+            onBooking = { nav.navigate(ClientRoute.Booking(it)) },
+            onRequestQuote = { nav.navigate(ClientRoute.RequestQuote(it)) },
+            onMessage = { artistId ->
+                chatOpen.open(artistId, bookingId = null) { tid ->
+                    nav.navigate(ClientRoute.Chat(threadId = tid))
+                }
+            },
+        )
+        ChatOpeningOverlay(chatOpen)
+    }
+    composable<ClientRoute.Booking> {
+        BookingScreen(
+            onBack = { nav.popBackStack() },
+            onCheckout = { nav.navigate(ClientRoute.Checkout) },
+        )
+    }
+    composable<ClientRoute.Checkout> {
+        CheckoutScreen(
+            onBack = { nav.popBackStack() },
+            onConfirmed = { id -> nav.navigate(ClientRoute.Confirmed(id)) },
+        )
+    }
+    composable<ClientRoute.Confirmed> {
+        ConfirmedScreen(
+            onViewBooking = { id -> nav.navigate(ClientRoute.BookingDetail(id)) },
+            // Unwind the funnel back to whatever this tab's root is.
+            onBackToDiscover = { nav.popBackStack(nav.graph.findStartDestination().id, inclusive = false) },
+        )
+    }
+    composable<ClientRoute.BookingDetail> { entry ->
+        val bookingId = entry.toRoute<ClientRoute.BookingDetail>().bookingId
+        val chatOpen: ChatOpenViewModel = hiltViewModel()
+        BookingDetailScreen(
+            onBack = { nav.popBackStack() },
+            // Message from a booking carries the booking id so the thread is the
+            // booking's thread (not the bookingless inquiry).
+            onMessage = { artistId ->
+                chatOpen.open(artistId, bookingId = bookingId) { tid ->
+                    nav.navigate(ClientRoute.Chat(threadId = tid))
+                }
+            },
+        )
+        ChatOpeningOverlay(chatOpen)
+    }
+    composable<ClientRoute.RequestQuote> {
+        RequestQuoteScreen(onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
+    }
+    composable<ClientRoute.Chat> { entry ->
+        val threadId = entry.toRoute<ClientRoute.Chat>().threadId
+        ChatScreen(
+            role = AppRole.Client,
+            onBack = { nav.popBackStack() },
+            // Client viewer: the chat's avatar opens the artist profile in-tab.
+            onArtist = { artistId -> nav.navigate(ClientRoute.ArtistProfile(artistId)) },
+        )
+    }
+    composable<ClientRoute.ScoreExplainer> { Placeholder("Bookability Score") }
+}
+
+/** Full-screen blocking spinner while find-or-create resolves the chat thread. */
+@Composable
+private fun ChatOpeningOverlay(chatOpen: ChatOpenViewModel) {
+    val opening by chatOpen.opening.collectAsStateWithLifecycle()
+    if (opening) {
+        Box(
+            Modifier.fillMaxSize().background(AppTheme.colors.bg.copy(alpha = 0.6f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = AppTheme.colors.brand)
+        }
+    }
+}
+
+/** A Browse tab shell — a nested [NavHost] whose root is [root] (Discover or Search). */
 @Composable
 private fun BrowseTab(root: @Composable (onArtist: (String) -> Unit) -> Unit) {
     val nav = rememberNavController()
@@ -113,54 +205,11 @@ private fun BrowseTab(root: @Composable (onArtist: (String) -> Unit) -> Unit) {
         composable<BrowseRoot> {
             root { id -> nav.navigate(ClientRoute.ArtistProfile(id)) }
         }
-        composable<ClientRoute.ArtistProfile> {
-            ArtistRouteLoader(
-                onBack = { nav.popBackStack() },
-                onBooking = { nav.navigate(ClientRoute.Booking(it)) },
-                onRequestQuote = { nav.navigate(ClientRoute.RequestQuote(it)) },
-                // Chat find-or-create is M4 — push the stub for now.
-                onMessage = { nav.navigate(ClientRoute.Chat(threadId = "pending")) },
-            )
-        }
-        // M3 booking funnel: Book → Checkout → Confirmed → (View booking) Detail.
-        composable<ClientRoute.Booking> {
-            BookingScreen(
-                onBack = { nav.popBackStack() },
-                onCheckout = { nav.navigate(ClientRoute.Checkout) },
-            )
-        }
-        composable<ClientRoute.Checkout> {
-            CheckoutScreen(
-                onBack = { nav.popBackStack() },
-                onConfirmed = { id -> nav.navigate(ClientRoute.Confirmed(id)) },
-            )
-        }
-        composable<ClientRoute.Confirmed> {
-            ConfirmedScreen(
-                onViewBooking = { id -> nav.navigate(ClientRoute.BookingDetail(id)) },
-                // Unwind the whole funnel back to the browse root.
-                onBackToDiscover = { nav.popBackStack(BrowseRoot, inclusive = false) },
-            )
-        }
-        composable<ClientRoute.BookingDetail> {
-            BookingDetailScreen(
-                onBack = { nav.popBackStack() },
-                // Chat is M4 — push the stub.
-                onMessage = { nav.navigate(ClientRoute.Chat(threadId = "pending")) },
-            )
-        }
-        composable<ClientRoute.RequestQuote> {
-            RequestQuoteScreen(onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() })
-        }
-        composable<ClientRoute.Chat> { Placeholder("Chat — coming in M4") }
-        composable<ClientRoute.ScoreExplainer> { Placeholder("Bookability Score") }
+        clientArtistFunnel(nav)
     }
 }
 
-/**
- * The client Bookings tab — a month calendar of the user's bookings with its own
- * nested stack so tapping a day's booking pushes its detail (M3).
- */
+/** Client Bookings tab — month calendar; tapping a day's booking pushes its detail. */
 @Composable
 private fun BookingsTab() {
     val nav = rememberNavController()
@@ -168,13 +217,22 @@ private fun BookingsTab() {
         composable<BookingsRoot> {
             BookingsScreen(onOpenBooking = { nav.navigate(ClientRoute.BookingDetail(it)) })
         }
-        composable<ClientRoute.BookingDetail> {
-            BookingDetailScreen(
-                onBack = { nav.popBackStack() },
-                onMessage = { nav.navigate(ClientRoute.Chat(threadId = "pending")) },
+        clientArtistFunnel(nav)
+    }
+}
+
+/** Client Messages tab — thread list; tapping a thread pushes its chat. */
+@Composable
+private fun MessagesTab() {
+    val nav = rememberNavController()
+    NavHost(navController = nav, startDestination = MessagesRoot) {
+        composable<MessagesRoot> {
+            MessagesScreen(
+                role = AppRole.Client,
+                onOpenThread = { nav.navigate(ClientRoute.Chat(threadId = it)) },
             )
         }
-        composable<ClientRoute.Chat> { Placeholder("Chat — coming in M4") }
+        clientArtistFunnel(nav)
     }
 }
 
@@ -185,3 +243,7 @@ private data object BrowseRoot
 /** The nested-graph root marker for the Bookings tab. */
 @kotlinx.serialization.Serializable
 private data object BookingsRoot
+
+/** The nested-graph root marker for the Messages tab. */
+@kotlinx.serialization.Serializable
+private data object MessagesRoot
