@@ -30,6 +30,13 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Google sign-in web-client id (the OAuth "server" client, NOT the Android
+        // client). Read from gitignored secrets.properties; a REPLACE placeholder
+        // ships in the tree so the app compiles + runs. Google sign-in is a no-op
+        // (clear TODO) until the operator drops the real id. Shared across flavors —
+        // the same GCP OAuth client backs every Supabase project.
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${secret("GOOGLE_WEB_CLIENT_ID", "REPLACE")}\"")
     }
 
     // Product flavors carry the per-environment Supabase creds as BuildConfig
@@ -124,5 +131,11 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.timber)
 
+    // Google sign-in: Credential Manager + Google Identity ID-token option.
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

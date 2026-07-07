@@ -4,8 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -15,51 +13,40 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
- * Auth gate — the ArtistantRoot analogue. Decides the top-level surface:
+ * Auth gate — the ArtistantRoot / iOS `authGatedContent` analogue. Three tiers, decided
+ * by [RootViewModel] from the session status + the fetched server profile:
  *
- *   not signed in .......... Signup placeholder
- *   signed in + client ..... ClientTabs
- *   signed in + artist ..... ArtistTabs
+ *   NotSignedIn ......... AuthScreen (Apple / Google / Email)
+ *   Onboarding .......... onboarding placeholder (full 8-screen flow lands in M1b)
+ *   Tabs(role) .......... role tabs
  *
- * The gate STRUCTURE is real (a sealed decision the NavHost switches on); the
- * inputs are hardcoded for M0. Real session/role state (SessionManager +
- * AppPreferences) wires in at M1. ponytail: no ViewModel yet — a hardcoded
- * gate value is enough to prove the branch; add the store when auth exists.
+ * The Onboarding tier stands in for the iOS signup flow past `.auth` (role/profile/notif).
+ * ponytail: no per-screen onboarding UX yet — M1b owns that; a placeholder proves the gate.
  */
 sealed interface RootGate {
-    data object Signup : RootGate
+    /** Still restoring the persisted session — show nothing (avoids an auth-screen flash). */
+    data object Loading : RootGate
+    data object NotSignedIn : RootGate
+    data object Onboarding : RootGate
     data class Tabs(val role: AppRole) : RootGate
 }
 
-/** M0 default: signed-out → Signup. Flip here to eyeball the other branches. */
-fun m0Gate(): RootGate = RootGate.Signup
-
 /**
- * The signup placeholder — a labelled screen with a note that auth lands in M1.
- * Buttons exist so the gate's two tab branches are reachable to a reviewer
- * without a debugger, but they don't fake a real sign-in.
+ * Placeholder for the post-auth onboarding flow (role → profile → notif → done). Real
+ * screens land in M1b; this proves the "signed-in but incomplete profile" gate tier.
  */
 @Composable
-fun SignupPlaceholder(onEnter: (AppRole) -> Unit) {
+fun OnboardingPlaceholder() {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
-        Text("Artistant", style = AppTheme.type.displayHero, color = AppTheme.colors.ink)
+        Text("Almost there", style = AppTheme.type.displayHero, color = AppTheme.colors.ink)
         Text(
-            "Signup — auth lands in M1",
+            "Signed in — the profile/role onboarding flow lands in M1b.",
             style = AppTheme.type.callout,
             color = AppTheme.colors.ink2,
         )
-        Button(
-            onClick = { onEnter(AppRole.Client) },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = AppRole.Client.let { AppTheme.colors.brand },
-            ),
-        ) { Text("Preview client tabs", color = AppTheme.colors.brandInk) }
-        Button(onClick = { onEnter(AppRole.Artist) }) { Text("Preview artist tabs") }
     }
 }
