@@ -140,8 +140,13 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** repo bootstrapped; planning docs imported under `docs/`. M0 in
-progress. Backend unchanged (shared with iOS). No app code merged yet.
+**Current state:** M0 foundation merged — Gradle/Compose skeleton builds green
+(`assembleDebug` + unit tests: booking math, score bands, redaction, INR). Stack
+resolved (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle 8.13, Kotlin 2.1.0,
+Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1. Auth gate + DI +
+supabase client + theme + nav shell are real but stubbed at the seams. **M1 (auth)
+next.** Open follow-ups: drop brand `.ttf` into `res/font/`, set real Supabase
+creds, real launcher icon. Backend unchanged (shared with iOS).
 
 ---
 

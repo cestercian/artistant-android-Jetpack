@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder mark: a lime "A" glyph on the adaptive foreground layer.
+     ponytail: swap for the real brand asset when design ships it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#C8FF00"
+        android:pathData="M54,30 L70,78 L61,78 L57.5,66 L50.5,66 L47,78 L38,78 Z M54,46 L52,59 L56,59 Z" />
+</vector>

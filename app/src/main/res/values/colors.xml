@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launch/splash background = Color.bg (#0A0A0A). Compose owns the rest. -->
+    <color name="bg">#0A0A0A</color>
+    <color name="ic_launcher_background">#0A0A0A</color>
+    <color name="brand_lime">#C8FF00</color>
+</resources>
