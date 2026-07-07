@@ -18,6 +18,12 @@ sealed interface ClientRoute {
     @Serializable data class ArtistProfile(val artistId: String) : ClientRoute
     @Serializable data class Chat(val threadId: String) : ClientRoute
     @Serializable data object Search : ClientRoute
+    // Stubbed M2b targets — real screens land later (Booking = M3, Chat = M4,
+    // ScoreExplainer = its own surface). They push a Placeholder for now so the
+    // ArtistProfile CTAs have somewhere to go.
+    @Serializable data class Booking(val artistId: String) : ClientRoute
+    @Serializable data class RequestQuote(val artistId: String) : ClientRoute
+    @Serializable data object ScoreExplainer : ClientRoute
 }
 
 /** Artist-side pushed routes. */

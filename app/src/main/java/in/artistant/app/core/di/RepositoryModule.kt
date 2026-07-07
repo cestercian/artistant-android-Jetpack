@@ -16,6 +16,8 @@ import `in`.artistant.app.data.repository.SupabaseScoreRepository
 import `in`.artistant.app.data.repository.SupabaseSearchRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.search.DataStoreSearchRecents
+import `in`.artistant.app.feature.search.SearchRecents
 
 /**
  * Binds each repository interface → its Supabase impl. Repositories land here as their
@@ -42,4 +44,8 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindSavedArtists(impl: SupabaseSavedArtistsRepository): SavedArtistsRepository
+
+    // M2b Browse — Search recents persistence seam.
+    @Binds
+    abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents
 }
