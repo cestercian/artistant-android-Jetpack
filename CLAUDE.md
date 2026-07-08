@@ -162,11 +162,11 @@ the operator flags (subscriptions, PostHog/Sentry keys, real brand fonts).
 Canonical checkout is **`~/AndroidStudioProjects/artistant-android`** (the old
 `~/Desktop/artistant-android` is abandoned — macOS blocked tool access to Desktop).
 
-Open tracked issues: #12 (Apple-OAuth deep-link error handling — blocks Apple
-go-live), #15 (signup design-token polish + brand assets), #18 (gallery strip /
-Spotify embed / audio playback — operator assets/SDK), #24 (Push/FCM activation —
-operator + backend), #26 (wizard draft persistence). (#28 ArtistHome cosmetic parity
-closed in M7b.) Operator: no emulator in the agent
+Open tracked issues: #15 (signup design-token polish + brand assets), #18 (gallery
+strip / Spotify embed / audio playback — operator assets/SDK), #24 (Push/FCM
+activation — operator + backend), #26 (wizard draft persistence). (#28 ArtistHome
+cosmetic parity closed in M7b; #12 OAuth deep-link error surfacing closed — the
+failed-exchange wedge now surfaces via SessionManager.deepLinkError.) Operator: no emulator in the agent
 env (compile + unit-test only — but the user CAN run it); Google needs
 `GOOGLE_WEB_CLIENT_ID` + SHA-1; Supabase dashboard needs the Android redirect +
 Apple provider; drop brand `.ttf` into `res/font/`; real launcher icon. Backend
