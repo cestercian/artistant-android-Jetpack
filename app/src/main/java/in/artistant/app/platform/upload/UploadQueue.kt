@@ -6,6 +6,7 @@ import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -14,6 +15,8 @@ import `in`.artistant.app.platform.media.PendingAudioRef
 import `in`.artistant.app.platform.media.PendingMediaRef
 import `in`.artistant.app.platform.media.WizardMediaCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -36,7 +39,7 @@ import javax.inject.Singleton
 class UploadQueue @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cache: WizardMediaCache,
-) : MediaUploadEnqueuer {
+) : MediaUploadEnqueuer, UploadBannerSource {
     private val wm: WorkManager get() = WorkManager.getInstance(context)
 
     // `override`d from MediaUploadEnqueuer (no default on `position` — an interface method's
@@ -106,6 +109,45 @@ class UploadQueue @Inject constructor(
         }
     }
 
+    /**
+     * Live banner state for [UploadProgressBanner], derived from the WorkManager
+     * queue (the iOS `UploadQueue.batchTotal/batchCompleted/failedTasks` analogue).
+     * We don't hold our own snapshot the way iOS does — WorkManager owns the queue —
+     * so the "batch" is APPROXIMATED from the current WorkInfos:
+     *   total     = still-running/enqueued + already-succeeded (the visible batch),
+     *   completed = succeeded,
+     *   failed    = failed.
+     * ponytail: WorkManager prunes finished WorkInfos on its own schedule, so an
+     * old succeeded task can briefly inflate `total`/`completed` across batches.
+     * Good enough for a progress banner; a per-batch id tag would tighten it if the
+     * count ever misleads.
+     */
+    override fun bannerStateFlow(): Flow<UploadBannerState> =
+        wm.getWorkInfosByTagFlow(ARTIST_UPLOAD_TAG).map { infos ->
+            var inFlight = 0
+            var succeeded = 0
+            var failed = 0
+            for (i in infos) when (i.state) {
+                WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING, WorkInfo.State.BLOCKED -> inFlight++
+                WorkInfo.State.SUCCEEDED -> succeeded++
+                WorkInfo.State.FAILED -> failed++
+                WorkInfo.State.CANCELLED -> {} // dropped from the batch
+            }
+            UploadBannerState(total = inFlight + succeeded, completed = succeeded, failed = failed)
+        }
+
+    /**
+     * Clear the failed banner. True re-enqueue isn't possible here: WorkInfo doesn't
+     * retain a task's input Data, so the media ref needed to replay a permanently-
+     * failed upload lives with the wizard/EPK that still holds it — not this queue.
+     * The most we can honestly do from the banner is prune the finished WorkInfos so
+     * a stalled row stops nagging; the EPK re-add flow is the real retry surface.
+     * ponytail: prune-not-replay; wire a real retry when the EPK holds the refs (part 2).
+     */
+    override fun clearFinished() {
+        wm.pruneWork()
+    }
+
     /** Cancel a single task (banner "give up"). */
     fun cancel(taskId: UUID) = wm.cancelWorkById(taskId)
 
@@ -145,10 +187,24 @@ class UploadQueue @Inject constructor(
 
     companion object {
         const val ARTIST_UPLOAD_TAG = "artist-upload"
+
         const val ARTIST_TAG_PREFIX = "artist:"
         const val KIND_TAG_PREFIX = "kind:"
         const val FILE_TAG_PREFIX = "file:"
 
         fun artistTag(artistId: String): String = ARTIST_TAG_PREFIX + artistId.lowercaseUuid()
     }
+}
+
+/**
+ * Snapshot of the upload queue for the banner. [isIdle] = nothing to show (queue
+ * empty, no failures); [isUploading] = an in-flight batch; else a failed batch.
+ */
+data class UploadBannerState(
+    val total: Int = 0,
+    val completed: Int = 0,
+    val failed: Int = 0,
+) {
+    val isIdle: Boolean get() = total == 0 && failed == 0
+    val isUploading: Boolean get() = failed == 0 && total > 0
 }

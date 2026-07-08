@@ -49,6 +49,14 @@ interface SamplesRepository {
 
     /** Atomic replace-all + orphan storage prune (EPK bulk editor). */
     suspend fun replaceAll(artistId: String, samples: List<SampleInput>)
+
+    /**
+     * Targeted single-row delete for the EPK editor (iOS `SamplesRepository.delete`).
+     * A targeted delete — NOT replaceAll(remaining) — so removing one clip can't prune
+     * another device's newer sample the local list hasn't seen yet. Also best-effort
+     * prunes this clip's own bucket object so the quota doesn't leak.
+     */
+    suspend fun delete(row: SampleRow, artistId: String)
 }
 
 @Singleton
@@ -136,6 +144,15 @@ class SupabaseSamplesRepository @Inject constructor(
         val newPaths = samples.mapNotNull { storagePathFromPublicUrl(BUCKET, it.audioUrl) }.toSet()
         val orphans = (existingPaths - newPaths).toList()
         if (orphans.isNotEmpty()) runCatching { client.storage.from(BUCKET).delete(orphans) }
+    }
+
+    override suspend fun delete(row: SampleRow, artistId: String) {
+        // Row first so no live pointer references a file mid-delete; if the storage
+        // delete then fails the object is a cleanable orphan, not a broken row.
+        client.postgrest.from("samples")
+            .delete { filter { eq("id", row.id.lowercaseUuid()) } }
+        val path = row.audioUrl?.let { storagePathFromPublicUrl(BUCKET, it) }
+        if (path != null) runCatching { client.storage.from(BUCKET).delete(path) }
     }
 
     private suspend fun nextPosition(artistId: String): Int {
@@ -259,6 +276,10 @@ class FakeSamplesRepository(
         )
         list.add(row)
         return row
+    }
+
+    override suspend fun delete(row: SampleRow, artistId: String) {
+        store[artistId]?.removeAll { it.id == row.id }
     }
 
     override suspend fun replaceAll(artistId: String, samples: List<SampleInput>) {

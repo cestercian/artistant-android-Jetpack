@@ -15,3 +15,15 @@ interface MediaUploadEnqueuer {
     fun enqueueVideo(ref: PendingMediaRef, artistId: String): UUID
     fun enqueueAudioSample(ref: PendingAudioRef, artistId: String): UUID
 }
+
+/**
+ * The read seam ArtistHome's banner observes (implemented by [UploadQueue]). Same
+ * single reason as [MediaUploadEnqueuer]: [UploadQueue] can't be constructed
+ * off-device (Context + WorkManager), so the ArtistHome ViewModel depends on this
+ * interface and the unit test injects a fake emitting a canned [UploadBannerState].
+ */
+interface UploadBannerSource {
+    fun bannerStateFlow(): kotlinx.coroutines.flow.Flow<UploadBannerState>
+    /** Clear the stalled/finished batch (the banner's "Retry all"). */
+    fun clearFinished()
+}

@@ -102,6 +102,18 @@ abstract class RepositoryModule {
     @Binds
     abstract fun bindMediaUploadEnqueuer(impl: UploadQueue): MediaUploadEnqueuer
 
+    // M5c ArtistHome banner — read seam over the same UploadQueue, faked in the
+    // ArtistHome ViewModel test for the same Context-can't-be-constructed reason.
+    @Binds
+    abstract fun bindUploadBannerSource(impl: UploadQueue): `in`.artistant.app.platform.upload.UploadBannerSource
+
+    // M5c EPK editor — media-staging seam over WizardMediaCache (needs a Context),
+    // faked in the EpkViewModel test so the ViewModel stays plain-JVM constructible.
+    @Binds
+    abstract fun bindEpkMediaStager(
+        impl: `in`.artistant.app.platform.media.WizardMediaCache,
+    ): `in`.artistant.app.platform.media.EpkMediaStager
+
     // Payments seam — dormant mock in v1 (real provider is M7).
     @Binds
     abstract fun bindPayments(impl: MockPaymentsService): PaymentsService

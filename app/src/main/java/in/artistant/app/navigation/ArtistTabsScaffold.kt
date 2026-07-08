@@ -25,9 +25,13 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
+import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
+import `in`.artistant.app.feature.epk.EpkScreen
 import `in`.artistant.app.feature.gigrequest.GigRequestDetailScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -72,13 +76,48 @@ fun ArtistTabsScaffold() {
         ) {
             ArtistTab.entries.forEach { tab ->
                 when (tab) {
+                    // M5c: Home is a real tab now — dashboard + score/availability/gig-request pushes.
+                    ArtistTab.Home -> composable(tab.route) { HomeTab() }
                     ArtistTab.Gigs -> composable(tab.route) { GigsTab() }
-                    // M4: Messages is a real tab for the artist too. Home/EPK stay stubs (M5+).
+                    // M4: Messages is a real tab for the artist too.
                     ArtistTab.Messages -> composable(tab.route) { MessagesTab() }
-                    else -> composable(tab.route) { Placeholder(tab.label) }
+                    // M5c part 2: EPK is now the real profile editor.
+                    ArtistTab.Epk -> composable(tab.route) { EpkScreen() }
                 }
             }
         }
+    }
+}
+
+/**
+ * Artist Home tab — the dashboard plus its pushed routes: Score Explainer, the
+ * availability editor, and the gig-request detail. The gig-request list on Home and
+ * the detail screen both read the shared @Singleton RequestStore, so tapping a row
+ * and navigating is all it takes — the store is already seeded by the dashboard load.
+ * The subscribe banner's Paywall is M7 → a stub for now (and gated off by default).
+ */
+@Composable
+private fun HomeTab() {
+    val nav = rememberNavController()
+    NavHost(navController = nav, startDestination = HomeRoot) {
+        composable<HomeRoot> {
+            ArtistHomeScreen(
+                onOpenScoreExplainer = { nav.navigate(ArtistRoute.ScoreExplainer) },
+                onManageAvailability = { nav.navigate(ArtistRoute.ManageAvailability) },
+                onOpenGigRequest = { nav.navigate(ArtistRoute.GigRequest(id = it)) },
+                onSubscribe = { nav.navigate(PaywallStub) },
+            )
+        }
+        composable<ArtistRoute.ScoreExplainer> {
+            ScoreExplainerScreen(onBack = { nav.popBackStack() })
+        }
+        composable<ArtistRoute.ManageAvailability> {
+            ManageAvailabilityScreen(onDone = { nav.popBackStack() })
+        }
+        composable<ArtistRoute.GigRequest> {
+            GigRequestDetailScreen(onBack = { nav.popBackStack() })
+        }
+        composable<PaywallStub> { Placeholder("Paywall (M7)") }
     }
 }
 
@@ -118,6 +157,14 @@ private fun MessagesTab() {
         }
     }
 }
+
+/** Nested-graph root marker for the artist Home tab. */
+@kotlinx.serialization.Serializable
+private data object HomeRoot
+
+/** Placeholder destination for the M7 Paywall (subscribe banner target). */
+@kotlinx.serialization.Serializable
+private data object PaywallStub
 
 /** Nested-graph root marker for the artist Gigs tab. */
 @kotlinx.serialization.Serializable

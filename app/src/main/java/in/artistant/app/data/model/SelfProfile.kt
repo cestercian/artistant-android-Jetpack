@@ -38,6 +38,12 @@ data class SelfProfile(
  * `fetchArtist` path — the editor must seed even before (re)publish.
  */
 data class SelfArtistRow(
+    // The artist's own id (== auth user id / `artists.id`). The EPK editor needs it
+    // to scope its child reads/writes (packages/samples/links/media) without a second
+    // round-trip to the auth session. Defaulted so the older read sites that never
+    // selected `id` still compile; the real decode + fakes set it, and the EPK guards
+    // a blank id (never saves to "").
+    val id: String = "",
     val stageName: String,
     val handle: String,
     val category: String,

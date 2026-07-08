@@ -136,6 +136,7 @@ private class RecordingArtists(private val log: MutableList<String>) : ArtistsRe
     override suspend fun fetchSelfAvailability(): SelfAvailability = SelfAvailability(emptyList(), emptyList())
     override suspend fun updateAvailability(days: List<String>, times: List<String>) {}
     override suspend fun updateCoverGradient(index: Int) {}
+    override suspend fun updateSocials(instagram: String?, spotify: String?, youtube: String?) {}
     override fun invalidate(id: String) {}
 }
 
