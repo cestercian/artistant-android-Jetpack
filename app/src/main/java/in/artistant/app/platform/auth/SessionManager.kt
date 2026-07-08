@@ -10,12 +10,14 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.FlowType
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.auth.handleDeeplinks
+import io.github.jan.supabase.auth.parseSessionFromFragment
 import io.github.jan.supabase.auth.providers.Apple
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.status.SessionSource
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import `in`.artistant.app.BuildConfig
@@ -69,6 +71,21 @@ class SessionManager @Inject constructor(
      */
     private val _signInGeneration = MutableStateFlow(0)
     val signInGeneration: StateFlow<Int> = _signInGeneration
+
+    /**
+     * One-shot error channel for a FAILED OAuth deep-link completion. The Apple/Google browser
+     * return lands here (via [handleDeepLink] from MainActivity), OUTSIDE any ViewModel's
+     * sign-in call — so a failed exchange can't surface through their try/catch. Non-null when
+     * the completion failed; the auth UI ([AuthViewModel]) observes it, folds it into its
+     * `state.error`, and calls [consumeDeepLinkError] to clear it. Being a StateFlow, its
+     * retained value also covers the cold-launch race (set before the VM exists, read on first
+     * collect). Ports the intent of iOS `AuthService.lastError`.
+     */
+    private val _deepLinkError = MutableStateFlow<String?>(null)
+    val deepLinkError: StateFlow<String?> = _deepLinkError
+
+    /** The auth UI calls this once it has shown [deepLinkError], so it never re-surfaces. */
+    fun consumeDeepLinkError() { _deepLinkError.value = null }
 
     /**
      * Sign-in state as a Flow (the iOS `isSignedIn` @Published analogue). Maps the raw
@@ -234,16 +251,75 @@ class SessionManager @Inject constructor(
     // MARK: - Deep link
 
     /**
-     * Finish an OAuth flow that returned via `in.artistant.app://login-callback`. supabase-kt's
-     * [handleDeeplinks] parses the intent, imports the session, and fires the callback — where
-     * we bump the generation so a same-user Google/Apple return still advances the router.
+     * Finish an OAuth flow that returned via `in.artistant.app://login-callback`.
+     *
+     * WHY NOT supabase-kt's `handleDeeplinks`: in 3.0.3 it runs the PKCE `exchangeCodeForSession`
+     * (or the implicit session import) on its own internal auth scope with NO try/catch and no
+     * error callback. On a failed completion (flaky network / expired-or-invalid code / provider
+     * error) `onSessionSuccess` never fires, [signInGeneration] never bumps, and the router stays
+     * WEDGED on the auth screen with no feedback. So we replicate its two-flow logic here on OUR
+     * scope, wrapped, and surface any failure to [deepLinkError] — the Android port of iOS
+     * `AuthService.handleDeepLink`'s do/catch → `lastError` (whose doc names this exact
+     * "server logged a success but the app is stuck on auth" symptom).
      */
     fun handleDeepLink(intent: Intent) {
-        // handleDeeplinks is a SupabaseClient extension (Android-only). It parses the intent,
-        // imports the session, and fires the callback — where we bump the generation so a
-        // same-user return still advances the router.
-        client.handleDeeplinks(intent) { _ ->
-            completedSignIn()
+        val data = intent.data ?: return
+        // Only OUR OAuth callback — ignore any unrelated intent that reaches the activity (the
+        // same scheme/host guard supabase-kt's handleDeeplinks applies before touching auth).
+        if (data.scheme != client.auth.config.scheme || data.host != client.auth.config.host) return
+
+        // (1) The provider can return an explicit denial instead of a token/code — the user backed
+        // out of the consent screen, or the provider rejected the request. Supabase puts it in the
+        // query (?error=…) or the URL fragment (#error=…). We MUST catch it here: the PKCE branch
+        // below does `getQueryParameter("code") ?: return` and would silently wedge on a null code.
+        val error = data.getQueryParameter("error") ?: fragmentParam(data.fragment, "error")
+        if (error != null) {
+            // A BARE access_denied (no error_code) == the user dismissed the consent screen — a
+            // silent cancel, like a dismissed Google picker, no banner. But GoTrue REUSES
+            // access_denied for real server-side denials that DO carry an error_code
+            // (signup_disabled, a banned/blocked account, a provider-policy rejection). Silencing
+            // those would reintroduce the very wedge this method exists to kill — so only the
+            // code-less access_denied is treated as a cancel; everything else is surfaced.
+            val errorCode = data.getQueryParameter("error_code") ?: fragmentParam(data.fragment, "error_code")
+            if (error == "access_denied" && errorCode == null) return
+            val desc = data.getQueryParameter("error_description")
+                ?: fragmentParam(data.fragment, "error_description")
+            _deepLinkError.value = desc?.takeIf { it.isNotBlank() }
+                ?: "Couldn't complete sign-in. Try again."
+            return
+        }
+
+        // (2) The happy path AND the failure the library was silently swallowing. Run the
+        // flow-appropriate completion on OUR scope inside try/catch. Branching on the configured
+        // flowType (not assuming one) keeps this correct if the operator later switches to PKCE.
+        scope.launch {
+            try {
+                when (client.auth.config.flowType) {
+                    FlowType.PKCE -> {
+                        val code = data.getQueryParameter("code")
+                            ?: throw AuthException("Sign-in link was malformed.")
+                        client.auth.exchangeCodeForSession(code) // persists the session on success
+                    }
+                    FlowType.IMPLICIT -> {
+                        val fragment = data.fragment
+                            ?: throw AuthException("Sign-in link was malformed.")
+                        // parseSessionFromFragment leaves user=null (per its doc) — fetch the user
+                        // and import the complete session, exactly as the library's implicit path.
+                        val parsed = client.auth.parseSessionFromFragment(fragment)
+                        val user = client.auth.retrieveUser(parsed.accessToken)
+                        client.auth.importSession(parsed.copy(user = user), source = SessionSource.External)
+                    }
+                }
+                _deepLinkError.value = null
+                completedSignIn()
+            } catch (t: Throwable) {
+                // The wedge symptom, now surfaced: log for triage, record to crash, and hand the
+                // auth UI a friendly message so the user can retry instead of a dead screen.
+                Timber.e(t, "OAuth deep-link completion failed")
+                crash.record(t)
+                _deepLinkError.value = (t as? AuthException)?.message
+                    ?: "Couldn't complete sign-in. Check your connection and try again."
+            }
         }
     }
 
@@ -258,6 +334,19 @@ class SessionManager @Inject constructor(
      *  stray capital/space doesn't produce a spurious "invalid credentials". */
     private fun normalizeEmail(email: String): String = email.trim().lowercase()
 }
+
+/**
+ * Read a key from an OAuth callback URL fragment (`a=1&b=2`, the part after `#`), percent-decoded.
+ * Used for the implicit-flow `#error=…&error_description=…` return. Kept a pure top-level fn (no
+ * Android `Uri`) so it's JVM-unit-testable — `URLDecoder` over `Uri.decode` for the same reason.
+ * A malformed percent-escape falls back to the raw value rather than throwing.
+ */
+internal fun fragmentParam(fragment: String?, key: String): String? =
+    fragment?.split("&")
+        ?.firstOrNull { it.substringBefore("=") == key }
+        ?.substringAfter("=", "")
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { raw -> runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw) }
 
 /** Result of an email sign-in / sign-up (port of iOS `EmailAuthOutcome`). */
 sealed interface EmailAuthOutcome {

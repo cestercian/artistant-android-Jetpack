@@ -41,6 +41,23 @@ class AuthViewModel @Inject constructor(
     private val _state = MutableStateFlow(AuthUiState())
     val state: StateFlow<AuthUiState> = _state
 
+    init {
+        // The OAuth (Apple/Google-browser) return lands in SessionManager via MainActivity —
+        // OUTSIDE this VM's sign-in calls, so a failed exchange can't surface through their
+        // try/catch. Observe SessionManager's one-shot deep-link error channel and fold it into
+        // the same state.error the screen already renders (below the OAuth buttons). StateFlow
+        // retention covers the cold-launch race: the error may be set before this VM exists, and
+        // we still get it on the first collect. Consume it so it never re-surfaces.
+        viewModelScope.launch {
+            session.deepLinkError.collect { msg ->
+                if (msg != null) {
+                    _state.update { it.copy(error = msg, isAuthenticating = false) }
+                    session.consumeDeepLinkError()
+                }
+            }
+        }
+    }
+
     fun signInWithGoogle(activityContext: Context) {
         _state.update { it.copy(isAuthenticating = true, error = null) }
         viewModelScope.launch {
