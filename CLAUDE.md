@@ -140,8 +140,8 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** **M0–M5 complete — the app is FUNCTIONALLY COMPLETE for both
-roles**, all merged, green, adversarially reviewed, runs on an emulator. A client
+**Current state:** **M0–M8 COMPLETE — feature-complete for both roles and
+release-buildable**, all merged to `main`, green, adversarially reviewed. A client
 signs up → browses → books → realtime-chats; an artist onboards (11-step wizard) →
 publishes → manages the ArtistHome dashboard + EPK editor. Over the live shared
 `artistant-dev` backend. Stack (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle
@@ -149,19 +149,24 @@ publishes → manages the ArtistHome dashboard + EPK editor. Over the live share
 Shipped: M1 auth+signup · M2 browse · M3 booking funnel+calendar · M4 messaging
 (realtime chat + redaction; push is operator-gated, runbook in `docs/PUSH_SETUP.md`)
 · M5 artist authoring (write repos + media pipeline on WorkManager/Media3, wizard,
-dashboard, EPK). **188 unit tests, 0 failures**, warning-free. Dev creds wired
-(gitignored). **M6 (Platform, settings & DPDP) next** — Profile/settings, data-export,
-delete-account, CalendarSync (CalendarContract), analytics/crash. Then M7 (payments
-seam + polish) · M8 (hardening + release).
+dashboard, EPK) · M6 platform+DPDP (Profile/settings, data-export, delete-account,
+CalendarSync, observability) · M7 dormant Play-Billing subscription seam + editorial
+polish (kerning/haptics/ArtistHome parity/a11y) · M8 hardening (R8 on — minify +
+resource-shrink + keep rules; `assembleProdRelease` green, serializers verified kept;
+release runbook `docs/RELEASE.md`). **210 unit tests, 0 failures**, warning-free.
+**What's left is device/operator-gated, not code** — see `docs/RELEASE.md` §0:
+signing, Play Console, per-flavor `google-services.json`, on-device smoke test,
+instrumented/Compose-UI tests + baseline profile (need an AVD/device), and flipping
+the operator flags (subscriptions, PostHog/Sentry keys, real brand fonts).
 
 Canonical checkout is **`~/AndroidStudioProjects/artistant-android`** (the old
 `~/Desktop/artistant-android` is abandoned — macOS blocked tool access to Desktop).
 
 Open tracked issues: #12 (Apple-OAuth deep-link error handling — blocks Apple
 go-live), #15 (signup design-token polish + brand assets), #18 (gallery strip /
-Spotify embed / audio playback — M5/M7), #24 (Push/FCM activation — operator +
-backend), #26 (wizard draft persistence), #28 (M5c ArtistHome/EPK cosmetic parity).
-Batch the cosmetic/token/font ones into the M7 polish pass. Operator: no emulator in the agent
+Spotify embed / audio playback — operator assets/SDK), #24 (Push/FCM activation —
+operator + backend), #26 (wizard draft persistence). (#28 ArtistHome cosmetic parity
+closed in M7b.) Operator: no emulator in the agent
 env (compile + unit-test only — but the user CAN run it); Google needs
 `GOOGLE_WEB_CLIENT_ID` + SHA-1; Supabase dashboard needs the Android redirect +
 Apple provider; drop brand `.ttf` into `res/font/`; real launcher icon. Backend
