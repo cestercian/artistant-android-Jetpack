@@ -22,4 +22,12 @@ object AppEnvironment {
      * until it needs to differ per flavor.
      */
     val realtimeEnabled: Boolean get() = true
+
+    /**
+     * v1 monetization gate (the iOS `subscriptionsEnabled` flag). Default OFF — v1
+     * ships with zero payment code, so the artist "stay listed" subscribe banner
+     * stays hidden until the operator flips this and the Play Billing paywall (M7)
+     * lands. A compile-time constant until it needs to differ per flavor.
+     */
+    val subscriptionsEnabled: Boolean get() = false
 }

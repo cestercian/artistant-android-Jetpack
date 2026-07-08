@@ -54,7 +54,7 @@ class FakeArtistsRepository(
         coverGradientIndex: Int,
     ): String = "self".also {
         selfRow = SelfArtistRow(
-            stageName = stageName, handle = handle, category = category, baseCity = baseCity,
+            id = "self", stageName = stageName, handle = handle, category = category, baseCity = baseCity,
             genre = genre, bio = bio, coverGradientIndex = coverGradientIndex,
             published = false, setupComplete = false,
             instagramHandle = null, spotifyArtistUrl = null, youtubeChannelUrl = null,
@@ -78,7 +78,7 @@ class FakeArtistsRepository(
     ): String = "self".also {
         availability = SelfAvailability(daysAvailable, timeSlots)
         selfRow = SelfArtistRow(
-            stageName = stageName, handle = handle, category = category, baseCity = baseCity,
+            id = "self", stageName = stageName, handle = handle, category = category, baseCity = baseCity,
             genre = genre, bio = bio, coverGradientIndex = coverGradientIndex,
             published = false, setupComplete = true,
             instagramHandle = instagramHandle, spotifyArtistUrl = spotifyArtistUrl,
@@ -96,6 +96,12 @@ class FakeArtistsRepository(
 
     override suspend fun updateCoverGradient(index: Int) {
         selfRow = selfRow?.copy(coverGradientIndex = index)
+    }
+
+    override suspend fun updateSocials(instagram: String?, spotify: String?, youtube: String?) {
+        selfRow = selfRow?.copy(
+            instagramHandle = instagram, spotifyArtistUrl = spotify, youtubeChannelUrl = youtube,
+        )
     }
 
     override suspend fun publish(artistId: String) {

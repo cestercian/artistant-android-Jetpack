@@ -105,6 +105,10 @@ interface ArtistsRepository {
     /** PATCH only `cover_gradient_index` (EPK gradient picker). */
     suspend fun updateCoverGradient(index: Int)
 
+    /** PATCH only the three social handle/URL columns (EPK socials editor). Null
+     *  clears a link. */
+    suspend fun updateSocials(instagram: String?, spotify: String?, youtube: String?)
+
     /** Flip `published=true` — the LAST step of Publish, after media lands. */
     suspend fun publish(artistId: String)
 
@@ -289,6 +293,13 @@ class SupabaseArtistsRepository @Inject constructor(
         invalidate(userId)
     }
 
+    override suspend fun updateSocials(instagram: String?, spotify: String?, youtube: String?) {
+        val userId = requireUserId()
+        client.postgrest.from("artists")
+            .update(SocialsUpdate(instagram, spotify, youtube)) { filter { eq("id", userId) } }
+        invalidate(userId)
+    }
+
     override suspend fun publish(artistId: String) {
         client.postgrest.from("artists")
             .update(PublishUpdate(true)) { filter { eq("id", artistId.lowercaseUuid()) } }
@@ -336,11 +347,17 @@ class SupabaseArtistsRepository @Inject constructor(
 
     @Serializable private data class AvailUpdate(val days_available: List<String>, val default_time_slots: List<String>)
     @Serializable private data class GradientUpdate(val cover_gradient_index: Int)
+    @Serializable private data class SocialsUpdate(
+        val instagram_handle: String?,
+        val spotify_artist_url: String?,
+        val youtube_channel_url: String?,
+    )
     @Serializable private data class PublishUpdate(val published: Boolean)
     @Serializable private data class AvailRow(val days_available: List<String>? = null, val default_time_slots: List<String>? = null)
 
     @Serializable
     private data class SelfRow(
+        val id: String,
         val stage_name: String,
         val handle: String,
         val category: String,
@@ -355,6 +372,7 @@ class SupabaseArtistsRepository @Inject constructor(
         val youtube_channel_url: String? = null,
     ) {
         fun toDomain() = SelfArtistRow(
+            id = id,
             stageName = stage_name,
             handle = handle,
             category = category,
@@ -475,7 +493,7 @@ class SupabaseArtistsRepository @Inject constructor(
         )
         private val COVER_COLUMNS = Columns.list("artist_id", "storage_path", "position")
         private val SELF_COLUMNS = Columns.list(
-            "stage_name", "handle", "category", "base_city", "genre", "bio",
+            "id", "stage_name", "handle", "category", "base_city", "genre", "bio",
             "cover_gradient_index", "published", "setup_complete",
             "instagram_handle", "spotify_artist_url", "youtube_channel_url",
         )

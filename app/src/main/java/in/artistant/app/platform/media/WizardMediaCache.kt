@@ -24,10 +24,25 @@ import javax.inject.Singleton
  * that read a ref must tolerate a missing file (the queue surfaces that as a
  * re-pick). [deleteAll] runs on publish + sign-out so the next user starts clean.
  */
+/**
+ * The narrow media-staging seam the EPK editor's ViewModel depends on (implemented by
+ * [WizardMediaCache]). Extracted for the SAME single reason as [MediaUploadEnqueuer]:
+ * [WizardMediaCache] needs a Context so it can't be constructed in a plain-JVM unit
+ * test, and the EpkViewModel must be. Only the four methods the EPK add/remove paths
+ * touch are on it.
+ */
+interface EpkMediaStager {
+    fun writePhoto(source: Uri): PendingMediaRef
+    fun adoptAudio(source: Uri, displayName: String?): PendingAudioRef
+    /** Raw bytes of a staged file — the EPK sample add reads them for the immediate upload. */
+    fun bytesOf(cacheFilename: String): ByteArray
+    fun delete(cacheFilename: String)
+}
+
 @Singleton
 class WizardMediaCache @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : EpkMediaStager {
     private val dir: File
         get() = File(context.cacheDir, "artist-wizard").apply { mkdirs() }
 
@@ -39,7 +54,7 @@ class WizardMediaCache @Inject constructor(
      * re-encodes JPEG (q=85), writes it, and returns a photo ref. Throws
      * [WizardMediaError.EncodingFailed] if the pick can't be decoded/encoded.
      */
-    fun writePhoto(source: Uri): PendingMediaRef {
+    override fun writePhoto(source: Uri): PendingMediaRef {
         val bitmap = context.contentResolver.openInputStream(source).use { input ->
             BitmapFactory.decodeStream(input)
         } ?: throw WizardMediaError.EncodingFailed
@@ -98,7 +113,7 @@ class WizardMediaCache @Inject constructor(
      * [MediaMetadataRetriever]. Throws [WizardMediaError.AudioProbeFailed] on an
      * unreadable/zero-length clip (the copied bytes are cleaned up first).
      */
-    fun adoptAudio(source: Uri, displayName: String?): PendingAudioRef {
+    override fun adoptAudio(source: Uri, displayName: String?): PendingAudioRef {
         val srcExt = (displayName ?: source.lastPathSegment ?: "").substringAfterLast('.', "")
         val ext = WizardMediaFormats.normalizedAudioExt(srcExt)
         val mime = WizardMediaFormats.audioMime(srcExt)
@@ -139,7 +154,9 @@ class WizardMediaCache @Inject constructor(
         )
     }
 
-    fun delete(cacheFilename: String) {
+    override fun bytesOf(cacheFilename: String): ByteArray = File(dir, cacheFilename).readBytes()
+
+    override fun delete(cacheFilename: String) {
         runCatching { File(dir, cacheFilename).delete() }
     }
 

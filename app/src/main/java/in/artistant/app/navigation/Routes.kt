@@ -34,4 +34,6 @@ sealed interface ArtistRoute {
     @Serializable data class GigRequest(val id: String) : ArtistRoute
     @Serializable data class Chat(val threadId: String) : ArtistRoute
     @Serializable data object ScoreExplainer : ArtistRoute
+    // M5c — the post-onboarding availability editor, pushed from ArtistHome.
+    @Serializable data object ManageAvailability : ArtistRoute
 }
