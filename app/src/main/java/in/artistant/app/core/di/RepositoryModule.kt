@@ -4,8 +4,18 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import `in`.artistant.app.data.repository.ArtistLinksRepository
+import `in`.artistant.app.data.repository.ArtistMediaRepository
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.data.repository.PackagesRepository
+import `in`.artistant.app.data.repository.SamplesRepository
+import `in`.artistant.app.data.repository.SupabaseArtistLinksRepository
+import `in`.artistant.app.data.repository.SupabaseArtistMediaRepository
+import `in`.artistant.app.data.repository.SupabasePackagesRepository
+import `in`.artistant.app.data.repository.SupabaseSamplesRepository
+import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
+import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
@@ -67,6 +77,22 @@ abstract class RepositoryModule {
     // M4 Messaging — realtime chat + redaction.
     @Binds
     abstract fun bindMessages(impl: SupabaseMessagesRepository): MessagesRepository
+
+    // M5a Artist-authoring write layer + media pipeline.
+    @Binds
+    abstract fun bindPackages(impl: SupabasePackagesRepository): PackagesRepository
+
+    @Binds
+    abstract fun bindTechRider(impl: SupabaseTechRiderRepository): TechRiderRepository
+
+    @Binds
+    abstract fun bindSamples(impl: SupabaseSamplesRepository): SamplesRepository
+
+    @Binds
+    abstract fun bindArtistMedia(impl: SupabaseArtistMediaRepository): ArtistMediaRepository
+
+    @Binds
+    abstract fun bindArtistLinks(impl: SupabaseArtistLinksRepository): ArtistLinksRepository
 
     // Payments seam — dormant mock in v1 (real provider is M7).
     @Binds

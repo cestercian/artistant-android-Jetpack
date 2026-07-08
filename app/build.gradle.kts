@@ -115,6 +115,17 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
+    // WorkManager + Hilt-Work: persistent, retrying upload queue for wizard media.
+    // hilt-compiler (androidx.hilt) generates the HiltWorkerFactory glue via KSP.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
+    // Media3 Transformer — on-device video trim + MP4 re-encode.
+    implementation(libs.androidx.media3.transformer)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.effect)
+
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 

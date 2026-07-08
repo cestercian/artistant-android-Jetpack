@@ -21,6 +21,22 @@ enum class MediaAspect(val db: String) {
 
     companion object {
         fun fromDb(raw: String): MediaAspect? = entries.firstOrNull { it.db == raw }
+
+        /**
+         * Auto-classify a WxH into one of the three buckets (iOS
+         * `ArtistMediaAspect.classify`): >1.2 landscape, <0.85 portrait, else
+         * square (so a 4:5 feed photo is portrait, 16:9 is landscape). Zero/short
+         * height falls back to square.
+         */
+        fun classify(width: Int, height: Int): MediaAspect {
+            if (height <= 0) return Square
+            val ratio = width.toDouble() / height.toDouble()
+            return when {
+                ratio > 1.2 -> Landscape
+                ratio < 0.85 -> Portrait
+                else -> Square
+            }
+        }
     }
 }
 
