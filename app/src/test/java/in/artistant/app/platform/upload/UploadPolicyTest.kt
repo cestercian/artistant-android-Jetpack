@@ -48,4 +48,21 @@ class UploadPolicyTest {
             UploadPolicy.canPublish(listOf(MediaTaskState.SUCCEEDED, MediaTaskState.FAILED)),
         )
     }
+
+    @Test
+    fun `banner is idle once nothing is in flight, even with lingering succeeded infos`() {
+        // Regression: a SUCCEEDED WorkInfo lingers (total>0) after the batch drained.
+        // Keying idle on `total` left the banner spinning forever; it must key on inFlight.
+        val drained = UploadBannerState(inFlight = 0, total = 1, completed = 1, failed = 0)
+        assertTrue(drained.isIdle)
+        assertFalse(drained.isUploading)
+
+        val uploading = UploadBannerState(inFlight = 1, total = 2, completed = 1, failed = 0)
+        assertFalse(uploading.isIdle)
+        assertTrue(uploading.isUploading)
+
+        val failedBatch = UploadBannerState(inFlight = 0, total = 1, completed = 0, failed = 1)
+        assertFalse(failedBatch.isIdle)
+        assertFalse(failedBatch.isUploading)
+    }
 }
