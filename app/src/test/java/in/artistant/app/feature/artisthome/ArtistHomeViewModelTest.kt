@@ -190,4 +190,35 @@ class ArtistHomeViewModelTest {
         val upcoming = ArtistHomeViewModel.upcomingConfirmed(bookings)
         assertEquals(listOf("soon", "late"), upcoming.map { it.id })
     }
+
+    @Test
+    fun `upcoming copy reads today, N-days, and empty from the soonest gig`() {
+        val today = LocalDate.of(2026, 7, 8)
+        assertEquals("No upcoming gigs", ArtistHomeViewModel.upcomingCopy(emptyList(), today))
+        // Single gig today → "Next gig today".
+        assertEquals(
+            "Next gig today",
+            ArtistHomeViewModel.upcomingCopy(
+                listOf(booking("t", dateLabel = today.format(labelFmt))), today,
+            ),
+        )
+        // Single gig in 3 days → "Next gig in 3 days".
+        assertEquals(
+            "Next gig in 3 days",
+            ArtistHomeViewModel.upcomingCopy(
+                listOf(booking("s", dateLabel = today.plusDays(3).format(labelFmt))), today,
+            ),
+        )
+        // Two gigs on different days → "Spread over N days" (latest).
+        assertEquals(
+            "Spread over 5 days",
+            ArtistHomeViewModel.upcomingCopy(
+                listOf(
+                    booking("a", dateLabel = today.plusDays(2).format(labelFmt)),
+                    booking("b", dateLabel = today.plusDays(5).format(labelFmt)),
+                ),
+                today,
+            ),
+        )
+    }
 }

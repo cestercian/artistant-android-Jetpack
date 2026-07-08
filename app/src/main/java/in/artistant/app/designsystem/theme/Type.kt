@@ -27,7 +27,11 @@ data class AppType(
     val body: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 16.sp),
     val callout: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 15.sp, fontWeight = FontWeight.Medium),
     val footnote: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 13.sp, fontWeight = FontWeight.Medium),
-    val caption: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+    // caption is the small-caps/section-label style (BOOKINGS, UPCOMING, NEXT 14 DAYS…).
+    // iOS kerns these ~0.8 (Typography.swift `sectionLabel()`); the letterSpacing lives on
+    // the token so every SectionLabel / WizardSectionLabel call site inherits the editorial
+    // kerning without per-site changes.
+    val caption: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp),
     val monoLarge: TextStyle = TextStyle(fontFamily = MonoFamily, fontSize = 24.sp, fontWeight = FontWeight.Bold),
     val monoMedium: TextStyle = TextStyle(fontFamily = MonoFamily, fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
     val monoSmall: TextStyle = TextStyle(fontFamily = MonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Medium),

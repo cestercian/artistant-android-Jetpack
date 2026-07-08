@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.artisthome
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -250,16 +251,38 @@ private fun EarningsHero(
         if (hasChart) {
             Spacer(Modifier.height(space.lg))
             Sparkline(series, modifier = Modifier.fillMaxWidth().height(88.dp))
+            // Date axis — 3 mono labels at the window's start / midpoint / today,
+            // driven by the bucket count so the middle label tracks the actual
+            // chart midpoint (iOS ArtistHomeView windowLabel: last / last/2 / 0).
+            val lastBucket = bucketCount(range) - 1
+            val axisStyle = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 10.sp)
+            Spacer(Modifier.height(space.sm))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(windowLabel(lastBucket, today), style = axisStyle, color = colors.ink3)
+                Text(windowLabel(lastBucket / 2, today), style = axisStyle, color = colors.ink3)
+                Text(windowLabel(0, today), style = axisStyle, color = colors.ink3)
+            }
         } else {
             Spacer(Modifier.height(space.lg))
             Text(
-                "Your bookings chart appears here as they come in.",
+                // Truthful empty state: an ALL-time artist whose only bookings predate
+                // the 90-day chart window gets a different framing than a brand-new one
+                // (iOS branches on hasAnyEarnings && range == .all).
+                if (range == EarningsRange.All && bookings.isNotEmpty())
+                    "All bookings landed before the 90-day chart window."
+                else
+                    "Your bookings chart appears here as they come in.",
                 style = AppTheme.type.caption,
                 color = colors.ink3,
             )
         }
     }
 }
+
+/** ALL-CAPS "MMM d" label `daysAgo` days back from [today] — the sparkline date axis. */
+private val WINDOW_LABEL_FMT = DateTimeFormatter.ofPattern("MMM d", Locale.US)
+private fun windowLabel(daysAgo: Int, today: LocalDate): String =
+    today.minusDays(daysAgo.toLong()).format(WINDOW_LABEL_FMT).uppercase(Locale.US)
 
 @Composable
 private fun RangePicker(range: EarningsRange, onRange: (EarningsRange) -> Unit) {
@@ -319,7 +342,9 @@ private fun StatRow(bookings: List<Booking>) {
                 Text("gig${if (upcoming.size == 1) "" else "s"}", style = AppTheme.type.caption, color = colors.ink3)
             }
             Text(
-                if (upcoming.isEmpty()) "No upcoming gigs" else "Confirmed and on the calendar",
+                // Dynamic gig-date copy from the soonest upcoming booking ("Next gig today" /
+                // "Next gig in N days"), falling back to the empty/generic copy — iOS parity.
+                remember(bookings) { ArtistHomeViewModel.upcomingCopy(bookings, today) },
                 style = AppTheme.type.caption,
                 color = colors.ink3,
             )
@@ -465,7 +490,10 @@ private fun DayCell(date: LocalDate, isBooked: Boolean) {
             Modifier
                 .size(width = 42.dp, height = 50.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (isBooked) colors.brand else Color.Transparent),
+                .background(if (isBooked) colors.brand else Color.Transparent)
+                // Open (unbooked) cells get a neutral hairline instead of reading as a
+                // blank gap — matches iOS dayCell's `avail == .open ? Color.line` border.
+                .then(if (isBooked) Modifier else Modifier.border(1.dp, colors.line, RoundedCornerShape(10.dp))),
             contentAlignment = Alignment.Center,
         ) {
             Text(

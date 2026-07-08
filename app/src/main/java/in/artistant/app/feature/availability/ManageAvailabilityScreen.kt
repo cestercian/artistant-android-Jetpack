@@ -33,6 +33,7 @@ import `in`.artistant.app.common.util.availabilityKicker
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.wizard.WizardConstants
+import `in`.artistant.app.ui.rememberHaptics
 
 /**
  * Post-onboarding availability editor (port of iOS `ManageAvailabilityView`). Two
@@ -146,6 +147,7 @@ private fun ChipSection(title: String, content: @Composable androidx.compose.fou
 private fun Chip(label: String, on: Boolean, mono: Boolean = false, onClick: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val haptics = rememberHaptics() // iOS-parity: light tick on toggling a day/time
     Text(
         label,
         style = (if (mono) AppTheme.type.monoSmall else AppTheme.type.footnote).copy(fontWeight = FontWeight.SemiBold),
@@ -154,7 +156,7 @@ private fun Chip(label: String, on: Boolean, mono: Boolean = false, onClick: () 
             .clip(CircleShape)
             .background(if (on) colors.ink else androidx.compose.ui.graphics.Color.Transparent)
             .border(1.dp, if (on) androidx.compose.ui.graphics.Color.Transparent else colors.line, CircleShape)
-            .clickable { onClick() }
+            .clickable { haptics.selection(); onClick() }
             .padding(horizontal = space.md, vertical = space.sm),
     )
 }

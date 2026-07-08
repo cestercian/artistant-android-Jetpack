@@ -50,6 +50,7 @@ import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.signup.EditorialHeadline
 import `in`.artistant.app.state.BookingStore
+import `in`.artistant.app.ui.rememberHaptics
 import javax.inject.Inject
 
 /** Resolves the just-confirmed booking + its artist from the shared store. */
@@ -83,8 +84,10 @@ fun ConfirmedScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
 
+    val haptics = rememberHaptics()
     var appeared by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { appeared = true }
+    // iOS-parity: fire a success buzz as the celebration springs in (iOS .success).
+    LaunchedEffect(Unit) { appeared = true; haptics.success() }
     val scale by animateFloatAsState(
         if (appeared) 1f else 0.6f,
         spring(dampingRatio = Spring.DampingRatioMediumBouncy),
