@@ -12,6 +12,7 @@ import `in`.artistant.app.domain.auth.authAdvanceKey
 import `in`.artistant.app.domain.auth.returningLoginRoute
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.platform.upload.UploadQueue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +31,12 @@ class RootViewModel @Inject constructor(
     private val session: SessionManager,
     private val users: UsersRepository,
     private val prefs: AppPreferences,
+    private val uploadQueue: UploadQueue,
 ) : ViewModel() {
+
+    // One-shot guard so the cross-account upload purge runs once per launch, not on every
+    // token refresh / re-auth that re-fires the session collector.
+    private var uploadsResumed = false
 
     private val _gate = MutableStateFlow<RootGate>(RootGate.Loading)
     val gate: StateFlow<RootGate> = _gate
@@ -60,6 +66,13 @@ class RootViewModel @Inject constructor(
                     when (status) {
                         is SessionStatus.Authenticated -> {
                             val uid = status.session.user?.id?.lowercase()
+                            // Drain any wizard uploads stranded by a prior kill + purge tasks
+                            // belonging to a different account (iOS `resumeAfterLaunch`). Once
+                            // per launch, off the main thread inside the queue.
+                            if (!uploadsResumed) {
+                                uploadsResumed = true
+                                viewModelScope.launch { uploadQueue.resumeAfterLaunch(uid) }
+                            }
                             val key = authAdvanceKey(uid, gen)
                             if (key != lastRoutedKey) {
                                 lastRoutedKey = key
@@ -136,16 +149,17 @@ class RootViewModel @Inject constructor(
  * without a coroutine/StateFlow.
  *
  * parity: iOS gates an incomplete-EPK artist into the wizard (RootView), not the tabs —
- * `role == .artist && !setupComplete → ArtistWizardView`. Since M1a has no wizard tier yet,
- * an incomplete artist lands on [RootGate.Onboarding] (the placeholder that becomes the wizard
- * in a later phase), NOT on artist tabs where their booking dashboard would render half-built.
+ * `role == .artist && !setupComplete → ArtistWizardView`. M5b makes that literal: a
+ * base-profile-complete artist whose EPK wizard isn't done lands on [RootGate.ArtistWizard]
+ * (the real wizard), NOT on artist tabs where their booking dashboard would render half-built.
+ * A user who hasn't even finished the base profile is a different case → [RootGate.Onboarding].
  */
 fun gateFor(route: ReturningLoginRoute, profile: SelfProfile?): RootGate = when (route) {
     is ReturningLoginRoute.RouteIn ->
         // An artist whose EPK wizard isn't done (setup_complete false/null) is NOT ready for the
-        // artist tabs — route to onboarding/wizard. Clients and complete artists go straight in.
+        // artist tabs — route into the wizard. Clients and complete artists go straight in.
         if (route.role == AppRole.Artist && profile?.artistSetupComplete != true) {
-            RootGate.Onboarding
+            RootGate.ArtistWizard
         } else {
             RootGate.Tabs(route.role)
         }

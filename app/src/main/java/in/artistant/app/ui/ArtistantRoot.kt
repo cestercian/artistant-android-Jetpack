@@ -18,5 +18,12 @@ sealed interface RootGate {
     data object Loading : RootGate
     data object NotSignedIn : RootGate
     data object Onboarding : RootGate
+
+    /** Signed-in artist whose base profile is done but whose EPK wizard isn't (`artists`
+     *  row missing / `setup_complete=false`) → the M5b onboarding wizard, NOT the profile
+     *  step (which they've already finished) and NOT the artist tabs (half-built dashboard).
+     *  iOS parity: `role == .artist && !setupComplete → ArtistWizardView`. */
+    data object ArtistWizard : RootGate
+
     data class Tabs(val role: AppRole) : RootGate
 }
