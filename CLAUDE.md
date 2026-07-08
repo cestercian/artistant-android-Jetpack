@@ -140,24 +140,28 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0 + M1 + **M2 (Browse) complete** — all merged, green,
-adversarially reviewed; the app builds + RUNS on an emulator (signup → tabs →
-Discover/Search/Artist-profile over live `artistant-dev`). Stack (see
-`gradle/libs.versions.toml`): AGP 8.9.1, Gradle 8.13, Kotlin 2.1.0, Compose BOM
-2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1. Shipped: design system, DI +
-supabase client (tier guard) + DataStore, real auth gate + SessionManager (Google/
-Apple/email) + signup flow (M1); the Browse data layer (Artists/Search/Reviews/
-Score/Saved repos + Fakes) and Discover/Search/Artist-profile screens (M2). **94
-unit tests, 0 failures.** Dev creds wired (gitignored). **M3 (Booking funnel) next**
-— Booking/Messaging models + repos, then Booking/Checkout/Confirmed/RequestQuote +
-Bookings calendar + BookingDetail + ReviewSheet.
+**Current state:** **M0–M5 complete — the app is FUNCTIONALLY COMPLETE for both
+roles**, all merged, green, adversarially reviewed, runs on an emulator. A client
+signs up → browses → books → realtime-chats; an artist onboards (11-step wizard) →
+publishes → manages the ArtistHome dashboard + EPK editor. Over the live shared
+`artistant-dev` backend. Stack (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle
+8.13, Kotlin 2.1.0, Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1.
+Shipped: M1 auth+signup · M2 browse · M3 booking funnel+calendar · M4 messaging
+(realtime chat + redaction; push is operator-gated, runbook in `docs/PUSH_SETUP.md`)
+· M5 artist authoring (write repos + media pipeline on WorkManager/Media3, wizard,
+dashboard, EPK). **188 unit tests, 0 failures**, warning-free. Dev creds wired
+(gitignored). **M6 (Platform, settings & DPDP) next** — Profile/settings, data-export,
+delete-account, CalendarSync (CalendarContract), analytics/crash. Then M7 (payments
+seam + polish) · M8 (hardening + release).
 
 Canonical checkout is **`~/AndroidStudioProjects/artistant-android`** (the old
 `~/Desktop/artistant-android` is abandoned — macOS blocked tool access to Desktop).
 
 Open tracked issues: #12 (Apple-OAuth deep-link error handling — blocks Apple
-go-live), #15 (signup design-token polish + brand assets), #18 (M2/M5 follow-up:
-gallery strip, Spotify embed, audio playback). Operator: no emulator in the agent
+go-live), #15 (signup design-token polish + brand assets), #18 (gallery strip /
+Spotify embed / audio playback — M5/M7), #24 (Push/FCM activation — operator +
+backend), #26 (wizard draft persistence), #28 (M5c ArtistHome/EPK cosmetic parity).
+Batch the cosmetic/token/font ones into the M7 polish pass. Operator: no emulator in the agent
 env (compile + unit-test only — but the user CAN run it); Google needs
 `GOOGLE_WEB_CLIENT_ID` + SHA-1; Supabase dashboard needs the Android redirect +
 Apple provider; drop brand `.ttf` into `res/font/`; real launcher icon. Backend
