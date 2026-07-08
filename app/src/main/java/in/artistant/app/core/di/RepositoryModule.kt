@@ -117,4 +117,16 @@ abstract class RepositoryModule {
     // Payments seam — dormant mock in v1 (real provider is M7).
     @Binds
     abstract fun bindPayments(impl: MockPaymentsService): PaymentsService
+
+    // M6 DPDP §11 — data-export + delete-account Edge Function wrapper.
+    @Binds
+    abstract fun bindAccountService(
+        impl: `in`.artistant.app.platform.account.SupabaseAccountService,
+    ): `in`.artistant.app.platform.account.AccountService
+
+    // M6 calendar-sync seam — inert Noop until PART 2 lands the real Calendar-Provider impl.
+    @Binds
+    abstract fun bindCalendarSync(
+        impl: `in`.artistant.app.platform.calendar.NoopCalendarSync,
+    ): `in`.artistant.app.platform.calendar.CalendarSync
 }
