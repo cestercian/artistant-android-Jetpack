@@ -19,6 +19,7 @@ import `in`.artistant.app.data.model.dto.DBBookingInsert
 import `in`.artistant.app.data.model.dto.DBBookingWithClient
 import `in`.artistant.app.domain.booking.BookingCharges
 import `in`.artistant.app.domain.booking.BookingMath
+import `in`.artistant.app.platform.calendar.CalendarSync
 import `in`.artistant.app.platform.payments.PaymentResult
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -36,8 +37,9 @@ import javax.inject.Singleton
  * escrow `held`, honouring the DB guards (self-booking CHECK, no-overlap, insert
  * status ∈ {pending_confirm, confirmed}, escrow clamped to held — API_MAPPING §3).
  * [cancel] must route through the `cancel-booking` Edge Function (a direct
- * escrow_status PATCH is rejected by the guard trigger). Calendar sync (M6) is
- * deliberately NOT wired here yet.
+ * escrow_status PATCH is rejected by the guard trigger). Every fetch/create/cancel
+ * feeds [CalendarSync.ingest] — the single seam both roles route through, so the
+ * calendar mirror sees client + artist gigs without any per-screen wiring (iOS parity).
  */
 interface BookingsRepository {
     /** Insert a booking from [draft] + the (mock) [paymentResult]. Returns the row. */
@@ -60,6 +62,8 @@ class SupabaseBookingsRepository @Inject constructor(
     // Injected to resolve the draft's fee + package snapshot (iOS reads the shared
     // ArtistsRepository singleton). find() hits the by-id cache the funnel warmed.
     private val artists: ArtistsRepository,
+    // The calendar mirror's ingest seam — fed after every create/fetch/cancel below.
+    private val calendar: CalendarSync,
 ) : BookingsRepository {
 
     override suspend fun create(draft: BookingDraft, paymentResult: PaymentResult): Booking {
@@ -104,6 +108,7 @@ class SupabaseBookingsRepository @Inject constructor(
             .insert(row) { select(BOOKING_COLUMNS) }
             .decodeSingle<DBBooking>()
             .toBooking()
+            .also { calendar.ingest(listOf(it)) }
     }
 
     override suspend fun listForClient(): List<Booking> {
@@ -115,6 +120,7 @@ class SupabaseBookingsRepository @Inject constructor(
             }
             .decodeList<DBBooking>()
             .map { it.toBooking() }
+            .also { calendar.ingest(it) }
     }
 
     override suspend fun listForArtist(): List<Booking> {
@@ -126,6 +132,7 @@ class SupabaseBookingsRepository @Inject constructor(
             }
             .decodeList<DBBookingWithClient>()
             .map { it.toBooking() }
+            .also { calendar.ingest(it) }
     }
 
     override suspend fun cancel(id: String): Booking {
@@ -148,6 +155,7 @@ class SupabaseBookingsRepository @Inject constructor(
             }
             .decodeSingle<DBBooking>()
             .toBooking()
+            .also { calendar.ingest(listOf(it)) } // cancelled → the reconcile removes its event
     }
 
     // --- helpers ---------------------------------------------------------
