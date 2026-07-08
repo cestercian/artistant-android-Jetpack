@@ -4,6 +4,10 @@ import androidx.compose.ui.graphics.Color
 import `in`.artistant.app.designsystem.theme.AppColors
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Booking-funnel domain models — ports of iOS `Models/Booking.swift`. Plain data
@@ -91,6 +95,37 @@ data class Booking(
     val createdAt: Instant?,
     val clientFullName: String? = null,
 )
+
+// --- Resolved show window (calendar sync) --------------------------------
+// Port of iOS `Booking.resolvedStart/resolvedEnd`. Every server row carries
+// start_datetime/end_datetime; the label-parse fallback exists only for a rare
+// pre-datetime local snapshot. The calendar mirror keys its fingerprint + the
+// "can this become an event?" guard off these.
+
+/** Best-effort concrete start: the machine timestamp when present, else a parse of
+ *  the display labels. Null when neither resolves (the mirror then skips the row). */
+val Booking.resolvedStart: Instant?
+    get() = startDatetime ?: parseBookingLabels(dateLabel, timeLabel)
+
+/** End of the show window; falls back to start + 2h — the same placeholder duration
+ *  `SupabaseBookingsRepository.startEnd` writes on create, so both paths agree. */
+val Booking.resolvedEnd: Instant?
+    get() = endDatetime ?: resolvedStart?.plusSeconds(2 * 3600)
+
+// "EEE, MMM d, yyyy" (the load-bearing date-label contract) + the same 12h/24h time
+// pair the repo's startEnd accepts. Locale.US because the tokens are English name
+// words; device zone to match iOS `Calendar.current` / the repo's startEnd.
+private val LABEL_FORMATS = listOf("EEE, MMM d, yyyy h:mm a", "EEE, MMM d, yyyy HH:mm")
+    .map { DateTimeFormatter.ofPattern(it, Locale.US) }
+
+private fun parseBookingLabels(date: String, time: String): Instant? {
+    val text = "${date.trim()} ${time.trim()}"
+    for (fmt in LABEL_FORMATS) {
+        val parsed = runCatching { LocalDateTime.parse(text, fmt) }.getOrNull()
+        if (parsed != null) return parsed.atZone(ZoneId.systemDefault()).toInstant()
+    }
+    return null
+}
 
 /**
  * In-flight booking being composed (iOS `BookingDraft`). Holds only inputs; the

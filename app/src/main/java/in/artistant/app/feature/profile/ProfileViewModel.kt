@@ -11,6 +11,7 @@ import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.platform.account.AccountService
 import `in`.artistant.app.platform.auth.SessionManager
+import `in`.artistant.app.platform.calendar.CalendarSync
 import `in`.artistant.app.state.BookingStore
 import `in`.artistant.app.state.MessageStore
 import `in`.artistant.app.state.RequestStore
@@ -64,6 +65,7 @@ class ProfileViewModel @Inject constructor(
     private val savedStore: SavedStore,
     private val messageStore: MessageStore,
     private val requestStore: RequestStore,
+    private val calendarSync: CalendarSync,
 ) : ViewModel() {
 
     /** A hydrated saved-artist tile for the carousel (id + name + resolved gradient). */
@@ -170,6 +172,11 @@ class ProfileViewModel @Inject constructor(
                     "Couldn't delete your account: ${t.message ?: "please try again"}."
                 return@launch
             }
+            // Remove the mirrored calendar events + wipe the sync state BEFORE the session
+            // clears — sign-out deliberately keeps calendar state, so delete-account is the
+            // only path that erases it (else the user's gigs would orphan on their calendar
+            // with no handle to clean them up). iOS parity: setEnabled(false) before wipeAll.
+            calendarSync.wipeForAccountDeletion()
             // Clear the cached session too — the server bans the user, but the local token
             // stays valid (~1h) and would keep authorizing calls: a DPDP-erasure gap.
             session.signOut()

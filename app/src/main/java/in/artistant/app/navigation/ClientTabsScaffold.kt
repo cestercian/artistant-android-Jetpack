@@ -45,6 +45,7 @@ import `in`.artistant.app.feature.discover.DiscoverScreen
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.ui.Placeholder
 
@@ -104,9 +105,10 @@ fun ClientTabsScaffold() {
                 BrowseTab { onArtist -> SearchScreen(onArtist = onArtist) }
             }
             composable(ClientTab.Bookings.route) { BookingsTab() }
-            // M4: Messages is a real tab now; Profile stays a placeholder (M5+).
+            // M4: Messages is a real tab now.
             composable(ClientTab.Messages.route) { MessagesTab() }
-            composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
+            // M6: Profile hosts the calendar-sync toggle (full header/stats/actions M5+).
+            composable(ClientTab.Profile.route) { ProfileScreen() }
         }
     }
 }

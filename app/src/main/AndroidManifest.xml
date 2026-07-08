@@ -11,6 +11,11 @@
          camera-less device (it falls back to the photo/video library pickers). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- Calendar mirror (CalendarSyncService): mirror confirmed gigs into the device
+         calendar + read busy/clash days. Both requested just-in-time from the Profile
+         calendar-sync toggle; the zero-permission AddToCalendarButton needs neither. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <application
         android:name=".ArtistantApplication"

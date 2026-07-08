@@ -124,9 +124,9 @@ abstract class RepositoryModule {
         impl: `in`.artistant.app.platform.account.SupabaseAccountService,
     ): `in`.artistant.app.platform.account.AccountService
 
-    // M6 calendar-sync seam — inert Noop until PART 2 lands the real Calendar-Provider impl.
+    // M6 calendar-sync seam — real Calendar-Provider (CalendarContract) mirror.
     @Binds
     abstract fun bindCalendarSync(
-        impl: `in`.artistant.app.platform.calendar.NoopCalendarSync,
+        impl: `in`.artistant.app.platform.calendar.CalendarSyncService,
     ): `in`.artistant.app.platform.calendar.CalendarSync
 }
