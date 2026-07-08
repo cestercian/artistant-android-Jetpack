@@ -117,10 +117,9 @@ class UploadQueue @Inject constructor(
      *   total     = still-running/enqueued + already-succeeded (the visible batch),
      *   completed = succeeded,
      *   failed    = failed.
-     * ponytail: WorkManager prunes finished WorkInfos on its own schedule, so an
-     * old succeeded task can briefly inflate `total`/`completed` across batches.
-     * Good enough for a progress banner; a per-batch id tag would tighten it if the
-     * count ever misleads.
+     * Idle/uploading are decided from IN-FLIGHT work; once a batch fully drains we
+     * prune the finished infos (iOS resets its batch counters on drain) so a lingering
+     * SUCCEEDED row can't keep the banner spinning or inflate the next batch's count.
      */
     override fun bannerStateFlow(): Flow<UploadBannerState> =
         wm.getWorkInfosByTagFlow(ARTIST_UPLOAD_TAG).map { infos ->
@@ -133,7 +132,12 @@ class UploadQueue @Inject constructor(
                 WorkInfo.State.FAILED -> failed++
                 WorkInfo.State.CANCELLED -> {} // dropped from the batch
             }
-            UploadBannerState(total = inFlight + succeeded, completed = succeeded, failed = failed)
+            // Batch fully drained (nothing running, nothing failed) → prune the leftover
+            // SUCCEEDED infos so `total` returns to 0. Idempotent: the next emission has
+            // succeeded=0 and stays idle. Gated on failed==0 so a failed batch's banner
+            // (which the user must dismiss) is never pruned out from under them.
+            if (inFlight == 0 && failed == 0 && succeeded > 0) wm.pruneWork()
+            UploadBannerState(inFlight = inFlight, total = inFlight + succeeded, completed = succeeded, failed = failed)
         }
 
     /**
@@ -201,10 +205,15 @@ class UploadQueue @Inject constructor(
  * empty, no failures); [isUploading] = an in-flight batch; else a failed batch.
  */
 data class UploadBannerState(
+    val inFlight: Int = 0,
     val total: Int = 0,
     val completed: Int = 0,
     val failed: Int = 0,
 ) {
-    val isIdle: Boolean get() = total == 0 && failed == 0
-    val isUploading: Boolean get() = failed == 0 && total > 0
+    // Idle/uploading key on IN-FLIGHT work, NOT `total` — `total` includes SUCCEEDED
+    // WorkInfos WorkManager keeps until pruned, so keying idle on `total` left the
+    // banner stuck on a "Saving 1 of 1…" spinner forever after a successful upload.
+    // inFlight is 0 the instant nothing is enqueued/running.
+    val isIdle: Boolean get() = inFlight == 0 && failed == 0
+    val isUploading: Boolean get() = inFlight > 0
 }
