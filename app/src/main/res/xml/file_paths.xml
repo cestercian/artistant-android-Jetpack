@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths for wizard camera capture. Only cacheDir/wizard-capture is shared
+     with the system camera app (the captured file is adopted into the wizard cache and the
+     capture temp is short-lived). -->
+<paths>
+    <cache-path name="wizard-capture" path="wizard-capture/" />
+</paths>

@@ -22,6 +22,7 @@ import `in`.artistant.app.BuildConfig
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.platform.upload.UploadQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
@@ -51,6 +52,7 @@ class SessionManager @Inject constructor(
     private val analytics: Analytics,
     private val crash: Crash,
     private val prefs: AppPreferences,
+    private val uploadQueue: UploadQueue,
 ) {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
@@ -224,6 +226,9 @@ class SessionManager @Inject constructor(
         analytics.reset()
         crash.setUser(null)
         prefs.wipeAll()
+        // Cancel any in-flight wizard uploads + wipe the staged media so the next account
+        // that signs in on this device inherits nothing (iOS `UploadQueue.cancelAll`).
+        uploadQueue.cancelAll()
     }
 
     // MARK: - Deep link

@@ -36,10 +36,12 @@ import javax.inject.Singleton
 class UploadQueue @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cache: WizardMediaCache,
-) {
+) : MediaUploadEnqueuer {
     private val wm: WorkManager get() = WorkManager.getInstance(context)
 
-    fun enqueuePhoto(ref: PendingMediaRef, artistId: String, position: Int? = null): UUID {
+    // `override`d from MediaUploadEnqueuer (no default on `position` — an interface method's
+    // override can't redeclare defaults; every caller passes it explicitly).
+    override fun enqueuePhoto(ref: PendingMediaRef, artistId: String, position: Int?): UUID {
         val data = baseData(UploadKind.PHOTO, artistId)
             .putString(MediaUploadWorker.KEY_FILENAME, ref.cacheFilename)
             .putInt(MediaUploadWorker.KEY_POSITION, position ?: -1)
@@ -49,7 +51,7 @@ class UploadQueue @Inject constructor(
         return enqueue(UploadKind.PHOTO, artistId, data, ref.cacheFilename)
     }
 
-    fun enqueueVideo(ref: PendingMediaRef, artistId: String): UUID {
+    override fun enqueueVideo(ref: PendingMediaRef, artistId: String): UUID {
         val data = baseData(UploadKind.VIDEO, artistId)
             .putString(MediaUploadWorker.KEY_FILENAME, ref.cacheFilename)
             .putDouble(MediaUploadWorker.KEY_DURATION, ref.durationSeconds ?: 0.0)
@@ -59,7 +61,7 @@ class UploadQueue @Inject constructor(
         return enqueue(UploadKind.VIDEO, artistId, data, ref.cacheFilename)
     }
 
-    fun enqueueAudioSample(ref: PendingAudioRef, artistId: String): UUID {
+    override fun enqueueAudioSample(ref: PendingAudioRef, artistId: String): UUID {
         val data = baseData(UploadKind.AUDIO, artistId)
             .putString(MediaUploadWorker.KEY_FILENAME, ref.cacheFilename)
             .putString(MediaUploadWorker.KEY_TITLE, ref.title)

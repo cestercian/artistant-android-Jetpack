@@ -36,6 +36,8 @@ import `in`.artistant.app.feature.search.DataStoreSearchRecents
 import `in`.artistant.app.feature.search.SearchRecents
 import `in`.artistant.app.platform.payments.MockPaymentsService
 import `in`.artistant.app.platform.payments.PaymentsService
+import `in`.artistant.app.platform.upload.MediaUploadEnqueuer
+import `in`.artistant.app.platform.upload.UploadQueue
 
 /**
  * Binds each repository interface → its Supabase impl. Repositories land here as their
@@ -93,6 +95,12 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindArtistLinks(impl: SupabaseArtistLinksRepository): ArtistLinksRepository
+
+    // M5b wizard Publish — the enqueue seam over the (WorkManager-backed) UploadQueue. The
+    // interface exists purely so the publish-ordering test can fake it (UploadQueue needs a
+    // Context); the concrete @Singleton is still injectable directly for cancelAll/resume.
+    @Binds
+    abstract fun bindMediaUploadEnqueuer(impl: UploadQueue): MediaUploadEnqueuer
 
     // Payments seam — dormant mock in v1 (real provider is M7).
     @Binds

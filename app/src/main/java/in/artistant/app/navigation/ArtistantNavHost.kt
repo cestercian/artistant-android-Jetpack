@@ -12,6 +12,7 @@ import `in`.artistant.app.feature.signup.SignupFlow
 import `in`.artistant.app.feature.signup.SignupMode
 import `in`.artistant.app.feature.signup.SignupStep
 import `in`.artistant.app.feature.signup.SignupViewModel
+import `in`.artistant.app.feature.wizard.ArtistWizardScreen
 import `in`.artistant.app.ui.RootGate
 import `in`.artistant.app.ui.RootViewModel
 
@@ -72,6 +73,14 @@ fun ArtistantNavHost() {
                     reduceMotion = reduceMotion,
                     viewModel = signupVm,
                 )
+            }
+
+        RootGate.ArtistWizard ->
+            // Signed-in artist, base profile done, EPK wizard not — the M5b onboarding wizard.
+            // Always the artist accent. On "Open dashboard" (setup_complete is now true server-
+            // side) re-run routing so the gate re-fetches and moves ArtistWizard → Tabs(Artist).
+            ArtistantTheme(role = AppRole.Artist) {
+                ArtistWizardScreen(onDone = viewModel::markSignupComplete)
             }
 
         is RootGate.Tabs ->
