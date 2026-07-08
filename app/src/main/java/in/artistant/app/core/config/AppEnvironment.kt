@@ -30,4 +30,15 @@ object AppEnvironment {
      * lands. A compile-time constant until it needs to differ per flavor.
      */
     val subscriptionsEnabled: Boolean get() = false
+
+    /**
+     * Observability keys — DARK-UNTIL-KEY. Blank (the default) means the PostHog /
+     * Sentry wrappers stay a silent no-op and never init the SDK. iOS parity: the
+     * value being nil/empty is the enable switch, not a code change.
+     */
+    val posthogApiKey: String get() = BuildConfig.POSTHOG_API_KEY
+    val sentryDsn: String get() = BuildConfig.SENTRY_DSN
+
+    /** Support inbox for the Profile → Help mailto (iOS `AppEnvironment.supportEmail`). */
+    const val SUPPORT_EMAIL: String = "support@artistant.in"
 }

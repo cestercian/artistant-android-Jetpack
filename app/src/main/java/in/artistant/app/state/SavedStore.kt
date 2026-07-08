@@ -60,4 +60,14 @@ class SavedStore @Inject constructor(
         runCatching { repository.list() }
             .onSuccess { remote -> _ids.value = remote.map { it.lowercaseUuid() }.toSet() }
     }
+
+    /**
+     * Sign-out / delete wipe so a new account never sees the prior user's saved ids.
+     * Mirrors the other stores' `reset()` (BookingStore/MessageStore/RequestStore) —
+     * these singletons are process-lived, so without this the prior user's set leaks
+     * into the next account signed in on this device (the iOS wipeLocalUserState invariant).
+     */
+    fun reset() {
+        _ids.value = emptySet()
+    }
 }
