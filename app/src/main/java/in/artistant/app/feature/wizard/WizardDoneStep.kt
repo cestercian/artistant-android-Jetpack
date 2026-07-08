@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.ui.rememberHaptics
 
 /** Step 11 — celebration after publish; single CTA into the artist dashboard (iOS
  *  `ArtistWizardDoneStep`). [onOpenDashboard] re-runs routing so the gate lands on artist tabs. */
@@ -39,13 +40,15 @@ fun WizardDoneStep(handle: String, onOpenDashboard: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
 
+    val haptics = rememberHaptics()
     var popped by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (popped) 1f else 0.6f,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow),
         label = "wizardDonePop",
     )
-    LaunchedEffect(Unit) { popped = true }
+    // iOS-parity: success buzz as the "You're live" checkmark pops in.
+    LaunchedEffect(Unit) { popped = true; haptics.success() }
 
     Column(
         modifier = Modifier.fillMaxSize().background(colors.bg).padding(horizontal = space.xl).padding(bottom = space.xxl),

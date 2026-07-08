@@ -53,6 +53,7 @@ import `in`.artistant.app.feature.booking.FunnelHeader
 import `in`.artistant.app.feature.booking.InitialAvatar
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.state.RequestStore
+import `in`.artistant.app.ui.rememberHaptics
 import javax.inject.Inject
 
 /**
@@ -97,6 +98,7 @@ fun GigRequestDetailScreen(
     val stored = viewModel.find()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val haptics = rememberHaptics()
 
     var confirmingDecline by remember { mutableStateOf(false) }
     var showCounter by remember { mutableStateOf(false) }
@@ -197,7 +199,7 @@ fun GigRequestDetailScreen(
                         )
                         PrimaryButton(
                             text = "Accept",
-                            onClick = { viewModel.accept() },
+                            onClick = { haptics.success(); viewModel.accept() },
                             modifier = Modifier.weight(1f),
                         )
                     }

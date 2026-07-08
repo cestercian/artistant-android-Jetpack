@@ -206,5 +206,29 @@ class ArtistHomeViewModel @Inject constructor(
         fun upcomingConfirmed(bookings: List<Booking>): List<Booking> =
             bookings.filter { it.status == BookingStatus.Confirmed }
                 .sortedBy { BookingsViewModel.parseDay(it.dateLabel) ?: LocalDate.MAX }
+
+        /**
+         * Dynamic UPCOMING sub-copy for the stat card, mirroring iOS `escrowSnapshot.daysCopy`:
+         *   none → "No upcoming gigs";  today → "Next gig today";
+         *   single / same-day cluster → "Next gig in N days";  spread → "Spread over N days".
+         * Derives from the soonest/latest confirmed gig date; unparseable dates fall back to a
+         * generic "Upcoming gig" rather than inventing a day count.
+         */
+        fun upcomingCopy(bookings: List<Booking>, today: LocalDate): String {
+            val gigs = upcomingConfirmed(bookings)
+            if (gigs.isEmpty()) return "No upcoming gigs"
+            val dates = gigs.mapNotNull { BookingsViewModel.parseDay(it.dateLabel) }
+            val earliest = dates.minOrNull() ?: return "Upcoming gig"
+            val latest = dates.maxOrNull() ?: earliest
+            val earliestDays = maxOf(0, java.time.temporal.ChronoUnit.DAYS.between(today, earliest).toInt())
+            val latestDays = maxOf(0, java.time.temporal.ChronoUnit.DAYS.between(today, latest).toInt())
+            fun days(n: Int) = "Next gig in $n day${if (n == 1) "" else "s"}"
+            return when {
+                earliestDays == 0 && latestDays == 0 -> "Next gig today"
+                gigs.size == 1 -> days(earliestDays)
+                earliestDays == latestDays -> days(earliestDays)
+                else -> "Spread over $latestDays days"
+            }
+        }
     }
 }

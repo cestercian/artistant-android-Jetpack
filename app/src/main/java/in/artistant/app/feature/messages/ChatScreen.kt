@@ -54,6 +54,7 @@ import `in`.artistant.app.data.model.MessageSender
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.booking.InitialAvatar
+import `in`.artistant.app.ui.rememberHaptics
 
 /**
  * Shared chat (port of iOS `ChatView`), both roles. A reverse [LazyColumn] pins the
@@ -74,6 +75,7 @@ fun ChatScreen(
     val thread by viewModel.thread.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
+    val feedback = rememberHaptics() // richer CONFIRM/REJECT layer for the failed-send error buzz
     val colors = AppTheme.colors
 
     // Counterpart title: artist viewer → the client (denormalized name); client
@@ -122,7 +124,7 @@ fun ChatScreen(
     var lastFailed by remember { mutableIntStateOf(0) }
     val failedNow = messages.count { it.delivery == MessageDelivery.Failed }
     LaunchedEffect(failedNow) {
-        if (failedNow > lastFailed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (failedNow > lastFailed) feedback.error() // iOS .error — a distinct rejection buzz
         lastFailed = failedNow
     }
 
@@ -187,7 +189,9 @@ private fun ChatTopBar(title: String, onBack: () -> Unit, onAvatar: (() -> Unit)
             modifier = Modifier.weight(1f),
         )
         if (onAvatar != null) {
-            Box(Modifier.clip(CircleShape).clickable(onClick = onAvatar)) {
+            // Icon-only (avatar) tap that pushes the artist profile — label the action
+            // so TalkBack announces it rather than just the initials.
+            Box(Modifier.clip(CircleShape).clickable(onClickLabel = "View artist profile", onClick = onAvatar)) {
                 InitialAvatar(title, size = 28)
             }
         }

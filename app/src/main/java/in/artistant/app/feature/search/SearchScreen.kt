@@ -60,6 +60,7 @@ import `in`.artistant.app.data.model.SearchSort
 import `in`.artistant.app.designsystem.component.ArtistTile
 import `in`.artistant.app.designsystem.component.ArtistTileSkeleton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.ui.rememberHaptics
 
 /**
  * Search — hairline search bar over facet-chip browse (empty) or a 2-col
@@ -212,6 +213,7 @@ private fun ChipSection(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun HollowChip(label: String, onClick: () -> Unit) {
     val colors = AppTheme.colors
+    val haptics = rememberHaptics() // iOS-parity: light tick on a discrete chip pick
     Text(
         label,
         style = AppTheme.type.footnote,
@@ -219,7 +221,7 @@ private fun HollowChip(label: String, onClick: () -> Unit) {
         modifier = Modifier
             .clip(CircleShape)
             .border(1.dp, colors.line, CircleShape)
-            .clickable { onClick() }
+            .clickable { haptics.selection(); onClick() }
             .padding(horizontal = AppTheme.dimens.space.md, vertical = 7.dp),
     )
 }
@@ -227,6 +229,7 @@ private fun HollowChip(label: String, onClick: () -> Unit) {
 @Composable
 private fun FilledChip(label: String, onClick: () -> Unit) {
     val colors = AppTheme.colors
+    val haptics = rememberHaptics()
     Text(
         label,
         style = AppTheme.type.footnote,
@@ -234,7 +237,7 @@ private fun FilledChip(label: String, onClick: () -> Unit) {
         modifier = Modifier
             .clip(CircleShape)
             .background(colors.bgCard)
-            .clickable { onClick() }
+            .clickable { haptics.selection(); onClick() }
             .padding(horizontal = AppTheme.dimens.space.md, vertical = AppTheme.dimens.space.sm),
     )
 }
