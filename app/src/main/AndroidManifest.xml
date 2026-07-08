@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Push notifications (API 33+ runtime permission; requested at the notif step / before
@@ -36,5 +37,19 @@
                 <data android:scheme="in.artistant.app" android:host="login-callback" />
             </intent-filter>
         </activity>
+
+        <!-- Remove WorkManager's default startup initializer so the app's
+             Configuration.Provider (with the HiltWorkerFactory) is used on the
+             first WorkManager.getInstance(...). Required for @HiltWorker. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>

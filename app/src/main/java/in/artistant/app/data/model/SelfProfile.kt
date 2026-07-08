@@ -33,6 +33,32 @@ data class SelfProfile(
 }
 
 /**
+ * Lightweight self-read of the signed-in artist's OWN `public.artists` row for the
+ * Profile / EPK editor (iOS `SelfArtistRow`). Deliberately not the published-gated
+ * `fetchArtist` path — the editor must seed even before (re)publish.
+ */
+data class SelfArtistRow(
+    val stageName: String,
+    val handle: String,
+    val category: String,
+    val baseCity: String,
+    val genre: String?,
+    val bio: String?,
+    val coverGradientIndex: Int,
+    val published: Boolean,
+    val setupComplete: Boolean,
+    val instagramHandle: String?,
+    val spotifyArtistUrl: String?,
+    val youtubeChannelUrl: String?,
+)
+
+/** The signed-in artist's own availability (weekday prefs + preferred start times). */
+data class SelfAvailability(
+    val days: List<String>,
+    val times: List<String>,
+)
+
+/**
  * DB rawValue for an [AppRole] — the `public.users.role` text column stores
  * lowercase "client"/"artist" (iOS `AppRole.rawValue`). Kept next to the model
  * so both the repository (write) and the row-decoder (read) share one mapping.

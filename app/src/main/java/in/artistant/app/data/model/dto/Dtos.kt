@@ -122,6 +122,24 @@ data class DBSample(
     fun toSample() = Sample(title = title, duration = duration_label)
 }
 
+/** `public.artist_links` row (iOS `DBArtistLink`). */
+@Serializable
+data class DBArtistLink(
+    val id: String,
+    val artist_id: String,
+    val label: String,
+    val url: String,
+    val position: Int,
+) {
+    fun toDomain() = `in`.artistant.app.data.model.ArtistLink(
+        id = id,
+        artistId = artist_id,
+        label = label,
+        url = url,
+        position = position,
+    )
+}
+
 /** Slimmed `artist_media` projection used to resolve each artist's cover photo. */
 @Serializable
 data class DBArtistCover(

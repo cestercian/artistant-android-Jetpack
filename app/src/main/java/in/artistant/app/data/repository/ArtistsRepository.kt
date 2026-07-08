@@ -1,12 +1,17 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import `in`.artistant.app.common.util.artistMediaPublicUrl
 import `in`.artistant.app.common.util.lowercaseUuid
+import `in`.artistant.app.core.result.AppError
+import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.SelfArtistRow
+import `in`.artistant.app.data.model.SelfAvailability
 import `in`.artistant.app.data.model.dto.DBArtist
 import `in`.artistant.app.data.model.dto.DBArtistCover
 import `in`.artistant.app.data.model.dto.DBPackage
@@ -14,6 +19,7 @@ import `in`.artistant.app.data.model.dto.DBSample
 import `in`.artistant.app.data.model.dto.DBTechItem
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.Serializable
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -51,6 +57,59 @@ interface ArtistsRepository {
 
     /** Full refresh — all published artists + children; rebuilds the cache. */
     suspend fun refresh(): List<Artist>
+
+    // --- M5a artist-authoring writes (signed-in artist's own row) -----------
+
+    /**
+     * Minimal upsert run on the wizard's cover step (`onConflict=id`) so the
+     * `artists` row exists BEFORE any media upload — artist_media/samples RLS
+     * requires `owns_artist(id)`, which needs the row present. Returns the id.
+     * Throws [AppError.UniqueViolation] if the handle is taken.
+     */
+    suspend fun upsertSelfArtist(
+        handle: String,
+        stageName: String,
+        category: String,
+        baseCity: String,
+        genre: String? = null,
+        bio: String? = null,
+        coverGradientIndex: Int = 0,
+    ): String
+
+    /** Full Publish-time upsert of every wizard field + `setup_complete=true`. */
+    suspend fun savePublishedProfile(
+        handle: String,
+        stageName: String,
+        category: String,
+        baseCity: String,
+        genre: String?,
+        bio: String?,
+        coverGradientIndex: Int,
+        daysAvailable: List<String>,
+        timeSlots: List<String>,
+        eventTypes: List<String>,
+        instagramHandle: String?,
+        spotifyArtistUrl: String?,
+        youtubeChannelUrl: String?,
+    ): String
+
+    /** The signed-in artist's own row for the Profile/EPK editor; null if none. */
+    suspend fun fetchSelfArtistRow(): SelfArtistRow?
+
+    /** Own availability (weekday prefs, preferred start times); empties if no row. */
+    suspend fun fetchSelfAvailability(): SelfAvailability
+
+    /** PATCH only availability (post-onboarding editor); invalidates the cache. */
+    suspend fun updateAvailability(days: List<String>, times: List<String>)
+
+    /** PATCH only `cover_gradient_index` (EPK gradient picker). */
+    suspend fun updateCoverGradient(index: Int)
+
+    /** Flip `published=true` — the LAST step of Publish, after media lands. */
+    suspend fun publish(artistId: String)
+
+    /** Drop [id] from the id-keyed cache so the next read re-hydrates. */
+    fun invalidate(id: String)
 
     companion object {
         /** Public CDN URL for an `artist-media` object path, or null if empty. */
@@ -121,6 +180,194 @@ class SupabaseArtistsRepository @Inject constructor(
         val fetched = fetchAll()
         indexFull(fetched)
         return fetched
+    }
+
+    // --- Writes ----------------------------------------------------------
+
+    override suspend fun upsertSelfArtist(
+        handle: String,
+        stageName: String,
+        category: String,
+        baseCity: String,
+        genre: String?,
+        bio: String?,
+        coverGradientIndex: Int,
+    ): String {
+        val userId = requireUserId()
+        val row = MinimalUpsert(
+            id = userId,
+            handle = handle.lowercaseUuid().trim(),
+            stage_name = stageName,
+            category = category,
+            base_city = baseCity,
+            genre = genre,
+            bio = bio,
+            cover_gradient_index = coverGradientIndex,
+        )
+        runCatching {
+            client.postgrest.from("artists").upsert(row) { onConflict = "id" }
+        }.onFailure { throw mapPostgrest(it) } // 23505 on artists_handle_key → UniqueViolation
+        return userId
+    }
+
+    override suspend fun savePublishedProfile(
+        handle: String,
+        stageName: String,
+        category: String,
+        baseCity: String,
+        genre: String?,
+        bio: String?,
+        coverGradientIndex: Int,
+        daysAvailable: List<String>,
+        timeSlots: List<String>,
+        eventTypes: List<String>,
+        instagramHandle: String?,
+        spotifyArtistUrl: String?,
+        youtubeChannelUrl: String?,
+    ): String {
+        val userId = requireUserId()
+        val row = FullUpsert(
+            id = userId,
+            handle = handle.lowercaseUuid().trim(),
+            stage_name = stageName,
+            category = category,
+            base_city = baseCity,
+            genre = genre,
+            bio = bio,
+            cover_gradient_index = coverGradientIndex,
+            days_available = daysAvailable,
+            default_time_slots = timeSlots,
+            event_types = eventTypes,
+            instagram_handle = instagramHandle,
+            spotify_artist_url = spotifyArtistUrl,
+            youtube_channel_url = youtubeChannelUrl,
+            setup_complete = true,
+        )
+        runCatching {
+            client.postgrest.from("artists").upsert(row) { onConflict = "id" }
+        }.onFailure { throw mapPostgrest(it) }
+        invalidate(userId)
+        return userId
+    }
+
+    override suspend fun fetchSelfArtistRow(): SelfArtistRow? {
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid() ?: return null
+        return client.postgrest.from("artists")
+            .select(SELF_COLUMNS) {
+                filter { eq("id", userId) }
+                limit(1)
+            }
+            .decodeList<SelfRow>()
+            .firstOrNull()
+            ?.toDomain()
+    }
+
+    override suspend fun fetchSelfAvailability(): SelfAvailability {
+        val userId = requireUserId()
+        // List select (not single) so a missing row is `[]` not a thrown no-rows.
+        val row = client.postgrest.from("artists")
+            .select(Columns.list("days_available", "default_time_slots")) {
+                filter { eq("id", userId) }
+                limit(1)
+            }
+            .decodeList<AvailRow>()
+            .firstOrNull()
+        return SelfAvailability(row?.days_available ?: emptyList(), row?.default_time_slots ?: emptyList())
+    }
+
+    override suspend fun updateAvailability(days: List<String>, times: List<String>) {
+        val userId = requireUserId()
+        client.postgrest.from("artists")
+            .update(AvailUpdate(days, times)) { filter { eq("id", userId) } }
+        invalidate(userId)
+    }
+
+    override suspend fun updateCoverGradient(index: Int) {
+        val userId = requireUserId()
+        client.postgrest.from("artists")
+            .update(GradientUpdate(index)) { filter { eq("id", userId) } }
+        invalidate(userId)
+    }
+
+    override suspend fun publish(artistId: String) {
+        client.postgrest.from("artists")
+            .update(PublishUpdate(true)) { filter { eq("id", artistId.lowercaseUuid()) } }
+        invalidate(artistId)
+    }
+
+    override fun invalidate(id: String) {
+        entries.remove(id.lowercaseUuid())
+    }
+
+    private fun requireUserId(): String =
+        client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
+            ?: throw AppError.NotFoundOrUnauthorized
+
+    @Serializable
+    private data class MinimalUpsert(
+        val id: String,
+        val handle: String,
+        val stage_name: String,
+        val category: String,
+        val base_city: String,
+        val genre: String?,
+        val bio: String?,
+        val cover_gradient_index: Int,
+    )
+
+    @Serializable
+    private data class FullUpsert(
+        val id: String,
+        val handle: String,
+        val stage_name: String,
+        val category: String,
+        val base_city: String,
+        val genre: String?,
+        val bio: String?,
+        val cover_gradient_index: Int,
+        val days_available: List<String>,
+        val default_time_slots: List<String>,
+        val event_types: List<String>,
+        val instagram_handle: String?,
+        val spotify_artist_url: String?,
+        val youtube_channel_url: String?,
+        val setup_complete: Boolean,
+    )
+
+    @Serializable private data class AvailUpdate(val days_available: List<String>, val default_time_slots: List<String>)
+    @Serializable private data class GradientUpdate(val cover_gradient_index: Int)
+    @Serializable private data class PublishUpdate(val published: Boolean)
+    @Serializable private data class AvailRow(val days_available: List<String>? = null, val default_time_slots: List<String>? = null)
+
+    @Serializable
+    private data class SelfRow(
+        val stage_name: String,
+        val handle: String,
+        val category: String,
+        val base_city: String,
+        val genre: String? = null,
+        val bio: String? = null,
+        val cover_gradient_index: Int = 0,
+        val published: Boolean = false,
+        val setup_complete: Boolean = false,
+        val instagram_handle: String? = null,
+        val spotify_artist_url: String? = null,
+        val youtube_channel_url: String? = null,
+    ) {
+        fun toDomain() = SelfArtistRow(
+            stageName = stage_name,
+            handle = handle,
+            category = category,
+            baseCity = base_city,
+            genre = genre,
+            bio = bio,
+            coverGradientIndex = cover_gradient_index,
+            published = published,
+            setupComplete = setup_complete,
+            instagramHandle = instagram_handle,
+            spotifyArtistUrl = spotify_artist_url,
+            youtubeChannelUrl = youtube_channel_url,
+        )
     }
 
     // --- Internals -------------------------------------------------------
@@ -227,6 +474,11 @@ class SupabaseArtistsRepository @Inject constructor(
             "artist_id", "title", "duration_label", "spotify_track_url", "cover_art_url",
         )
         private val COVER_COLUMNS = Columns.list("artist_id", "storage_path", "position")
+        private val SELF_COLUMNS = Columns.list(
+            "stage_name", "handle", "category", "base_city", "genre", "bio",
+            "cover_gradient_index", "published", "setup_complete",
+            "instagram_handle", "spotify_artist_url", "youtube_channel_url",
+        )
 
         /**
          * Shared child-row grouping + domain mapping. Groups children by artist,

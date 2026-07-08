@@ -12,6 +12,11 @@ composeBom = "2024.12.01"
 navigation = "2.8.5"
 datastore = "1.1.1"
 hiltNavigationCompose = "1.2.0"
+# M5a artist-authoring media pipeline: WorkManager (persistent upload queue) +
+# Hilt-Work (inject repos into workers) + Media3 Transformer (device video trim).
+work = "2.9.1"
+androidxHilt = "1.2.0"               # androidx.hilt hilt-work + its ksp compiler
+media3 = "1.4.1"
 # 3rd-party
 supabase = "3.0.3"                   # supabase-kt BOM (io.github.jan-tennert.supabase:bom)
 ktor = "3.0.1"                       # must match the Ktor supabase-kt 3.0.3 compiles against
@@ -48,6 +53,14 @@ androidx-datastore-preferences = { module = "androidx.datastore:datastore-prefer
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
+# WorkManager + Hilt-Work (M5a upload pipeline)
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "androidxHilt" }
+androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "androidxHilt" }
+# Media3 Transformer — trim + re-encode picked video to a short MP4 on-device.
+androidx-media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
+androidx-media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
+androidx-media3-effect = { module = "androidx.media3:media3-effect", version.ref = "media3" }
 # Kotlin ecosystem
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
