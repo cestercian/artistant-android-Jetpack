@@ -7,8 +7,12 @@ import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
+import `in`.artistant.app.platform.billing.MockSubscriptionService
 import `in`.artistant.app.platform.payments.MockPaymentsService
 import `in`.artistant.app.state.BookingStore
+import `in`.artistant.app.state.EntitlementStore
+import `in`.artistant.app.state.InMemoryAccountTokenStore
+import `in`.artistant.app.state.RecordingTokenWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -65,8 +69,12 @@ class BookingViewModelTest {
         booking.setVenue("Blue Frog")
         booking.setGuests(240)
 
-        // Confirm through the checkout path (mock payment, instant).
-        val checkout = CheckoutViewModel(store, MockPaymentsService().apply { simulatedLatencyMillis = 0 }, artists)
+        // Confirm through the checkout path (mock payment, instant). The M7 entitlement gate is
+        // dormant (enabled = false), so confirm goes straight through — no paywall.
+        val entitlements = EntitlementStore(
+            MockSubscriptionService(), InMemoryAccountTokenStore(), RecordingTokenWriter(), enabled = false,
+        )
+        val checkout = CheckoutViewModel(store, MockPaymentsService().apply { simulatedLatencyMillis = 0 }, artists, entitlements)
         checkout.confirm()
         advanceUntilIdle()
 

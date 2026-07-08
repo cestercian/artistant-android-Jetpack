@@ -31,7 +31,9 @@ import `in`.artistant.app.feature.epk.EpkScreen
 import `in`.artistant.app.feature.gigrequest.GigRequestDetailScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
+import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -94,7 +96,8 @@ fun ArtistTabsScaffold() {
  * availability editor, and the gig-request detail. The gig-request list on Home and
  * the detail screen both read the shared @Singleton RequestStore, so tapping a row
  * and navigating is all it takes — the store is already seeded by the dashboard load.
- * The subscribe banner's Paywall is M7 → a stub for now (and gated off by default).
+ * The subscribe banner's Paywall is the real M7 [PaywallScreen] (dormant: the banner only
+ * appears when subscriptionsEnabled).
  */
 @Composable
 private fun HomeTab() {
@@ -117,7 +120,15 @@ private fun HomeTab() {
         composable<ArtistRoute.GigRequest> {
             GigRequestDetailScreen(onBack = { nav.popBackStack() })
         }
-        composable<PaywallStub> { Placeholder("Paywall (M7)") }
+        // M7 — the real paywall (dormant: only reachable when subscriptionsEnabled gates the
+        // banner on). Sells the artist product; onComplete/onClose both pop back to Home.
+        composable<PaywallStub> {
+            PaywallScreen(
+                productId = AppEnvironment.ARTIST_MONTHLY_PRODUCT_ID,
+                onClose = { nav.popBackStack() },
+                onComplete = { nav.popBackStack() },
+            )
+        }
     }
 }
 
@@ -162,7 +173,7 @@ private fun MessagesTab() {
 @kotlinx.serialization.Serializable
 private data object HomeRoot
 
-/** Placeholder destination for the M7 Paywall (subscribe banner target). */
+/** Nested-graph destination for the M7 Paywall (subscribe-banner target; sells the artist product). */
 @kotlinx.serialization.Serializable
 private data object PaywallStub
 

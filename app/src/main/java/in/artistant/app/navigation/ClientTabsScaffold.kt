@@ -45,8 +45,10 @@ import `in`.artistant.app.feature.discover.DiscoverScreen
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.search.SearchScreen
+import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.ui.Placeholder
 
 // Client bottom nav: Discover · Bookings · Messages · Profile · Search.
@@ -146,6 +148,17 @@ private fun NavGraphBuilder.clientArtistFunnel(nav: NavHostController) {
         CheckoutScreen(
             onBack = { nav.popBackStack() },
             onConfirmed = { id -> nav.navigate(ClientRoute.Confirmed(id)) },
+            // M7 dormant gate: routes to the paywall when subscriptionsEnabled + not entitled.
+            onPaywall = { nav.navigate(ClientRoute.Paywall) },
+        )
+    }
+    // M7 — the real paywall (dormant: only reachable via the flag-gated checkout gate). Sells
+    // the client product; onComplete pops back to Checkout so the resumed Confirm now passes.
+    composable<ClientRoute.Paywall> {
+        PaywallScreen(
+            productId = AppEnvironment.CLIENT_MONTHLY_PRODUCT_ID,
+            onClose = { nav.popBackStack() },
+            onComplete = { nav.popBackStack() },
         )
     }
     composable<ClientRoute.Confirmed> {

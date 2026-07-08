@@ -43,6 +43,14 @@ android {
         // into gitignored secrets.properties post-plan and nothing else changes.
         buildConfigField("String", "POSTHOG_API_KEY", "\"${secret("POSTHOG_API_KEY", "")}\"")
         buildConfigField("String", "SENTRY_DSN", "\"${secret("SENTRY_DSN", "")}\"")
+
+        // v1 monetization gate (iOS `subscriptionsEnabled`). DEFAULT OFF — v1 is a
+        // no-payments matchmaker, so the whole M7 Play-Billing seam ships DORMANT: the
+        // Mock service runs, the paywall is unreachable, and PlayBilling never touches
+        // BillingClient. The operator flips this to `true` (secrets.properties) once the
+        // Play Console products + RTDN backend are live. Single source, read via
+        // AppEnvironment.subscriptionsEnabled — never BuildConfig.* directly.
+        buildConfigField("boolean", "SUBSCRIPTIONS_ENABLED", secret("SUBSCRIPTIONS_ENABLED", "false"))
     }
 
     // Product flavors carry the per-environment Supabase creds as BuildConfig
@@ -152,6 +160,9 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    // Play Billing — M7 dormant subscription seam (guarded behind subscriptionsEnabled).
+    implementation(libs.billing.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

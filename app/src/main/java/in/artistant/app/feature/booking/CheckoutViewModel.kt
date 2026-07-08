@@ -3,11 +3,13 @@ package `in`.artistant.app.feature.booking
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.platform.payments.PaymentException
 import `in`.artistant.app.platform.payments.PaymentsService
 import `in`.artistant.app.state.BookingStore
+import `in`.artistant.app.state.EntitlementStore
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -24,14 +26,15 @@ import javax.inject.Inject
  * one-shot [confirmed] event carrying the new booking id. A payment throw OR a
  * post-payment write failure surfaces on [state].error with a retry.
  *
- * ponytail: the v1 booking-quota paywall gate is deferred to M7 (subscriptions are
- * dormant); there's nothing to gate on yet, so confirm goes straight through.
+ * M7 subscription gate: [confirm] checks the dormant client paywall gate first — but it's
+ * behind `subscriptionsEnabled`, so in v1 it's always false and confirm goes straight through.
  */
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
     private val store: BookingStore,
     private val payments: PaymentsService,
     private val artists: ArtistsRepository,
+    private val entitlements: EntitlementStore,
 ) : ViewModel() {
 
     data class UiState(val confirming: Boolean = false, val error: String? = null)
@@ -44,12 +47,27 @@ class CheckoutViewModel @Inject constructor(
     private val _confirmed = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val confirmed: SharedFlow<String> = _confirmed.asSharedFlow()
 
+    /** Emitted when the dormant M7 gate trips — the screen pushes the paywall instead of confirming. */
+    private val _needsPaywall = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val needsPaywall: SharedFlow<Unit> = _needsPaywall.asSharedFlow()
+
     /** The artist behind the current draft (cache hit — the funnel warmed it). */
     fun artist(): Artist? = store.draft.value?.let { artists.find(it.artistId) }
 
     fun confirm() {
         val current = store.draft.value ?: return
         if (_state.value.confirming) return
+        // M7 DORMANT gate: with subscriptionsEnabled off this is always false, so confirm behaves
+        // exactly as before. When the operator flips the flag (+ wires Play), a non-entitled
+        // client is routed to the paywall instead of confirming.
+        // ponytail: the free-intro quota (5 bookings before the gate bites, per iOS) is a go-live
+        // refinement — today the whole gate is behind the flag, so there's nothing to count yet.
+        if (AppEnvironment.subscriptionsEnabled &&
+            !entitlements.isEntitled(AppEnvironment.CLIENT_MONTHLY_PRODUCT_ID)
+        ) {
+            _needsPaywall.tryEmit(Unit)
+            return
+        }
         _state.update { it.copy(confirming = true, error = null) }
         viewModelScope.launch {
             try {
