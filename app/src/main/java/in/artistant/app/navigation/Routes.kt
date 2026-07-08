@@ -27,6 +27,9 @@ sealed interface ClientRoute {
     @Serializable data class Confirmed(val bookingId: String) : ClientRoute
     @Serializable data class BookingDetail(val bookingId: String) : ClientRoute
     @Serializable data object ScoreExplainer : ClientRoute
+    // M7 — the ₹99/mo paywall, pushed from the (dormant) checkout quota gate. Sells the
+    // client product; the artist product is sold from ArtistHome's banner (ArtistTabsScaffold).
+    @Serializable data object Paywall : ClientRoute
 }
 
 /** Artist-side pushed routes. */

@@ -45,6 +45,9 @@ fun CheckoutScreen(
     onBack: () -> Unit,
     onConfirmed: (String) -> Unit,
     viewModel: CheckoutViewModel = hiltViewModel(),
+    // M7: pushed when the dormant subscription gate trips. Defaulted to a no-op so callers that
+    // don't wire subscriptions (and every v1 caller — the flag is off) need no change.
+    onPaywall: () -> Unit = {},
 ) {
     val draft by viewModel.draft.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -55,6 +58,10 @@ fun CheckoutScreen(
     // One-shot confirmed → navigate forward.
     LaunchedEffect(Unit) {
         viewModel.confirmed.collect(onConfirmed)
+    }
+    // One-shot paywall gate (dormant in v1) → push the paywall instead of confirming.
+    LaunchedEffect(Unit) {
+        viewModel.needsPaywall.collect { onPaywall() }
     }
 
     Column(Modifier.fillMaxSize().background(colors.bg)) {

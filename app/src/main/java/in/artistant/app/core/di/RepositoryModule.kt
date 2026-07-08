@@ -129,4 +129,17 @@ abstract class RepositoryModule {
     abstract fun bindCalendarSync(
         impl: `in`.artistant.app.platform.calendar.CalendarSyncService,
     ): `in`.artistant.app.platform.calendar.CalendarSync
+
+    // M7 subscription seam — dormant in v1. The SubscriptionService + EntitlementStore
+    // themselves are picked/built in BillingModule (flag-gated); these two are the plain
+    // @Inject-constructed token seams (Supabase binding-row write + DataStore token persist).
+    @Binds
+    abstract fun bindSubscriptionTokenWriter(
+        impl: `in`.artistant.app.platform.billing.SupabaseSubscriptionTokenWriter,
+    ): `in`.artistant.app.platform.billing.SubscriptionTokenWriter
+
+    @Binds
+    abstract fun bindAccountTokenStore(
+        impl: `in`.artistant.app.platform.billing.DataStoreAccountTokenStore,
+    ): `in`.artistant.app.platform.billing.AccountTokenStore
 }

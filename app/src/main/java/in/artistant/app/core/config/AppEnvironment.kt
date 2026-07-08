@@ -24,12 +24,25 @@ object AppEnvironment {
     val realtimeEnabled: Boolean get() = true
 
     /**
-     * v1 monetization gate (the iOS `subscriptionsEnabled` flag). Default OFF — v1
-     * ships with zero payment code, so the artist "stay listed" subscribe banner
-     * stays hidden until the operator flips this and the Play Billing paywall (M7)
-     * lands. A compile-time constant until it needs to differ per flavor.
+     * v1 monetization gate (the iOS `subscriptionsEnabled` flag). DEFAULT OFF — v1 ships
+     * with zero payment code, so the whole M7 Play-Billing seam stays DORMANT: the artist
+     * "stay listed" banner is hidden, the paywall is unreachable, and PlayBilling never
+     * touches BillingClient. The operator flips `SUBSCRIPTIONS_ENABLED` (secrets.properties)
+     * once the Play Console products + RTDN backend are live — a config change, no code.
      */
-    val subscriptionsEnabled: Boolean get() = false
+    val subscriptionsEnabled: Boolean get() = BuildConfig.SUBSCRIPTIONS_ENABLED
+
+    /**
+     * The two Play subscription product ids (iOS `AppEnvironment.{artist,client}MonthlyProductID`).
+     * Role is derived from the `.artist.monthly` / `.client.monthly` suffix. Constants, not
+     * BuildConfig — the same ids back every flavor's Play Console entry.
+     */
+    const val ARTIST_MONTHLY_PRODUCT_ID: String = "in.artistant.subscription.artist.monthly"
+    const val CLIENT_MONTHLY_PRODUCT_ID: String = "in.artistant.subscription.client.monthly"
+
+    /** Both product ids, the set the paywall queries (iOS `subscriptionProductIDs`). */
+    val subscriptionProductIds: List<String>
+        get() = listOf(ARTIST_MONTHLY_PRODUCT_ID, CLIENT_MONTHLY_PRODUCT_ID)
 
     /**
      * Observability keys — DARK-UNTIL-KEY. Blank (the default) means the PostHog /
@@ -41,4 +54,8 @@ object AppEnvironment {
 
     /** Support inbox for the Profile → Help mailto (iOS `AppEnvironment.supportEmail`). */
     const val SUPPORT_EMAIL: String = "support@artistant.in"
+
+    /** Hosted legal pages (iOS `AppEnvironment.{terms,privacy}PolicyURL`) — shown on the paywall. */
+    const val TERMS_URL: String = "https://www.artistant.in/legal/terms"
+    const val PRIVACY_URL: String = "https://www.artistant.in/legal/privacy"
 }
