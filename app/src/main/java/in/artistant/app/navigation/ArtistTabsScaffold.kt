@@ -13,9 +13,12 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -47,6 +50,20 @@ private enum class ArtistTab(val route: String, val label: String, val icon: Ima
 @Composable
 fun ArtistTabsScaffold() {
     val nav = rememberNavController()
+
+    // Push deep-link: a parked tab selection for the ARTIST side switches the bottom tab before
+    // the inner screen consumes its id (e.g. gig_request → Home, then ArtistHomeScreen pushes the
+    // request detail). Targets for the other role are ignored + left parked (defensive — the
+    // client scaffold isn't composed here). Consume after switching so it can't re-switch.
+    val tabDeepLink: TabDeepLinkViewModel = hiltViewModel()
+    val pendingTab by tabDeepLink.pendingTab.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingTab) {
+        pendingTab?.takeIf { it.role == AppRole.Artist }?.let { target ->
+            navigateToTab(nav, target.route)
+            tabDeepLink.consumePendingTab()
+        }
+    }
+
     Scaffold(
         containerColor = AppTheme.colors.bg,
         bottomBar = {

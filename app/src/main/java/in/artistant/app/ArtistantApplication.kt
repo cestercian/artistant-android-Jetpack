@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
+import `in`.artistant.app.platform.push.NotificationChannels
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -29,5 +30,7 @@ class ArtistantApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
+        // Declare the push channels up front (idempotent) so P2b's NotificationCompat has a target.
+        NotificationChannels.register(this)
     }
 }

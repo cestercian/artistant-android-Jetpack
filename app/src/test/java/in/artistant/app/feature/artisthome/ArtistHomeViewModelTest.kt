@@ -18,6 +18,7 @@ import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.platform.upload.UploadBannerSource
 import `in`.artistant.app.platform.upload.UploadBannerState
+import `in`.artistant.app.state.DeepLinkRouter
 import `in`.artistant.app.state.RequestStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -96,7 +97,7 @@ class ArtistHomeViewModelTest {
             self = ScoreBreakdown.from(92, 96, 98, 90, 2, 80, 40),
         )
         val store = RequestStore(FakeRequestsRepository(seed = listOf(request("r1"))))
-        val vm = ArtistHomeViewModel(artists, bookings, score, store, idleBanner)
+        val vm = ArtistHomeViewModel(artists, bookings, score, store, idleBanner, DeepLinkRouter())
         advanceUntilIdle()
 
         val s = vm.state.value
@@ -118,7 +119,7 @@ class ArtistHomeViewModelTest {
             override suspend fun historyForSelf(): List<ScoreHistoryPoint> = emptyList()
         }
         val store = RequestStore(FakeRequestsRepository())
-        val vm = ArtistHomeViewModel(artists, bookings, throwingScore, store, idleBanner)
+        val vm = ArtistHomeViewModel(artists, bookings, throwingScore, store, idleBanner, DeepLinkRouter())
         advanceUntilIdle()
 
         assertNotNull(vm.state.value.error)

@@ -80,6 +80,13 @@ abstract class RepositoryModule {
     @Binds
     abstract fun bindMessages(impl: SupabaseMessagesRepository): MessagesRepository
 
+    // Push P2a — device-token registration seam (inert until P1 adds the fcm_token column + P2b
+    // produces the token; see DeviceTokenRepository).
+    @Binds
+    abstract fun bindDeviceToken(
+        impl: `in`.artistant.app.platform.push.SupabaseDeviceTokenRepository,
+    ): `in`.artistant.app.platform.push.DeviceTokenRepository
+
     // M5a Artist-authoring write layer + media pipeline.
     @Binds
     abstract fun bindPackages(impl: SupabasePackagesRepository): PackagesRepository

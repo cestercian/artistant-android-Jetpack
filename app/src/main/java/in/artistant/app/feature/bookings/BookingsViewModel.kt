@@ -7,6 +7,7 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.state.BookingStore
+import `in`.artistant.app.state.DeepLinkRouter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,9 +27,15 @@ import javax.inject.Inject
 class BookingsViewModel @Inject constructor(
     private val store: BookingStore,
     private val artists: ArtistsRepository,
+    private val deepLink: DeepLinkRouter,
 ) : ViewModel() {
 
     val bookings: StateFlow<List<Booking>> = store.bookingsFlow
+
+    /** A parked booking push id → the screen pushes its detail then [consumePendingBooking]. */
+    val pendingBookingId: StateFlow<String?> = deepLink.pendingBookingId
+
+    fun consumePendingBooking() = deepLink.consumePendingBooking()
 
     // A last-refresh error surfaces a banner (kept honest — a silent failure would
     // read as "no bookings"). Set/cleared around refresh.
