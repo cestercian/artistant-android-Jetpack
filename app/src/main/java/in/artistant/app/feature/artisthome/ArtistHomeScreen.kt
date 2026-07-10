@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -76,8 +77,18 @@ fun ArtistHomeScreen(
     val range by viewModel.range.collectAsStateWithLifecycle()
     val requests by viewModel.requests.collectAsStateWithLifecycle()
     val uploadBanner by viewModel.uploadBanner.collectAsStateWithLifecycle()
+    val pendingRequest by viewModel.pendingRequestId.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+
+    // Push deep-link consumer (gig_request) — clear BEFORE navigating so a re-composition can't
+    // re-push the same request detail (mirrors MessagesScreen's pendingThreadId handling).
+    LaunchedEffect(pendingRequest) {
+        pendingRequest?.let {
+            viewModel.consumePendingRequest()
+            onOpenGigRequest(it)
+        }
+    }
 
     PullToRefreshBox(
         isRefreshing = state.refreshing,

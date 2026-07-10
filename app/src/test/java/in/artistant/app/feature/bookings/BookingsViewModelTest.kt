@@ -7,6 +7,7 @@ import `in`.artistant.app.data.model.PaymentMethod
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.state.BookingStore
+import `in`.artistant.app.state.DeepLinkRouter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -52,7 +53,7 @@ class BookingsViewModelTest {
         )
         val artists = FakeArtistsRepository()
         val store = BookingStore(FakeBookingsRepository(artists, seed = seed), artists)
-        val vm = BookingsViewModel(store, artists)
+        val vm = BookingsViewModel(store, artists, DeepLinkRouter())
         advanceUntilIdle() // init refresh pulls the seed into the store
 
         val byDay = vm.bookingsByDay()

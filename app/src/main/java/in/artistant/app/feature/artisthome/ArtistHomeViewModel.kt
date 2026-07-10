@@ -13,6 +13,7 @@ import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.feature.bookings.BookingsViewModel
 import `in`.artistant.app.platform.upload.UploadBannerSource
 import `in`.artistant.app.platform.upload.UploadBannerState
+import `in`.artistant.app.state.DeepLinkRouter
 import `in`.artistant.app.state.RequestStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -65,7 +66,13 @@ class ArtistHomeViewModel @Inject constructor(
     private val scoreRepo: ScoreRepository,
     private val requestStore: RequestStore,
     private val uploadBannerSource: UploadBannerSource,
+    private val deepLink: DeepLinkRouter,
 ) : ViewModel() {
+
+    /** A parked `gig_request` push id → the screen pushes its detail then [consumePendingRequest]. */
+    val pendingRequestId: StateFlow<String?> = deepLink.pendingRequestId
+
+    fun consumePendingRequest() = deepLink.consumePendingRequest()
 
     private val _state = MutableStateFlow(ArtistHomeUiState())
     val state: StateFlow<ArtistHomeUiState> = _state.asStateFlow()

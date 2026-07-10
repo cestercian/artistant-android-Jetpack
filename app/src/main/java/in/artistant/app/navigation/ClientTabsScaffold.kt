@@ -18,6 +18,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +65,20 @@ private enum class ClientTab(val route: String, val label: String, val icon: and
 @Composable
 fun ClientTabsScaffold() {
     val nav = rememberNavController()
+
+    // Push deep-link: a parked tab selection for the CLIENT side switches the bottom tab before
+    // the inner screen consumes its id. Ignore (and don't consume) a target for the other role —
+    // the artist scaffold isn't even composed here, so this is defensive. Consume after switching
+    // so a re-composition can't re-switch.
+    val tabDeepLink: TabDeepLinkViewModel = hiltViewModel()
+    val pendingTab by tabDeepLink.pendingTab.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingTab) {
+        pendingTab?.takeIf { it.role == AppRole.Client }?.let { target ->
+            navigateToTab(nav, target.route)
+            tabDeepLink.consumePendingTab()
+        }
+    }
+
     Scaffold(
         containerColor = AppTheme.colors.bg,
         bottomBar = {

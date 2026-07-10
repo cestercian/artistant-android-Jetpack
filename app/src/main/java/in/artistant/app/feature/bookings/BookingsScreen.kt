@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -42,8 +43,18 @@ fun BookingsScreen(
     val bookings by viewModel.bookings.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val refreshError by viewModel.refreshError.collectAsStateWithLifecycle()
+    val pendingBooking by viewModel.pendingBookingId.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+
+    // Push deep-link consumer (booking_confirmed / reminder / review) — clear BEFORE navigating so
+    // a re-composition can't re-push the same booking detail (mirrors MessagesScreen).
+    LaunchedEffect(pendingBooking) {
+        pendingBooking?.let {
+            viewModel.consumePendingBooking()
+            onOpenBooking(it)
+        }
+    }
 
     // Recompute grouping whenever the list changes (bookings is the collect key).
     val byDay = remember(bookings) { viewModel.bookingsByDay() }
