@@ -243,6 +243,11 @@ private fun BrowseTab(root: @Composable (onArtist: (String) -> Unit) -> Unit) {
 @Composable
 private fun BookingsTab() {
     val nav = rememberNavController()
+    // Deep-stack push fix: force to root while a booking id is parked so BookingsScreen's consumer
+    // runs even if a saved deep BookingDetail was restored (see DeepLinkRouter).
+    val deepLink: TabDeepLinkViewModel = hiltViewModel()
+    val pendingBooking by deepLink.pendingBookingId.collectAsStateWithLifecycle()
+    ForceRootForDeepLink(nav, pendingBooking)
     NavHost(navController = nav, startDestination = BookingsRoot) {
         composable<BookingsRoot> {
             BookingsScreen(onOpenBooking = { nav.navigate(ClientRoute.BookingDetail(it)) })
@@ -255,6 +260,11 @@ private fun BookingsTab() {
 @Composable
 private fun MessagesTab() {
     val nav = rememberNavController()
+    // Deep-stack push fix: force to root while a message thread id is parked so MessagesScreen's
+    // consumer runs even if a saved deep Chat was restored (see DeepLinkRouter).
+    val deepLink: TabDeepLinkViewModel = hiltViewModel()
+    val pendingThread by deepLink.pendingThreadId.collectAsStateWithLifecycle()
+    ForceRootForDeepLink(nav, pendingThread)
     NavHost(navController = nav, startDestination = MessagesRoot) {
         composable<MessagesRoot> {
             MessagesScreen(

@@ -48,6 +48,22 @@
             </intent-filter>
         </activity>
 
+        <!-- FCM receiver (push P2b): Firebase routes new tokens + incoming data-only messages
+             here. The intent-filter is the required FCM binding. -->
+        <service
+            android:name=".platform.push.ArtistantMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- Fallback channel FCM would use only if a system-composed `notification`-block message
+             ever arrived. We send data-only + compose ourselves, so this is just to silence FCM's
+             "no default channel" runtime warning; it points at an already-declared channel. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="messages" />
+
         <!-- Remove WorkManager's default startup initializer so the app's
              Configuration.Provider (with the HiltWorkerFactory) is used on the
              first WorkManager.getInstance(...). Required for @HiltWorker. -->

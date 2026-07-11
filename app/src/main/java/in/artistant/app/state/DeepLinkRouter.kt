@@ -21,20 +21,22 @@ import javax.inject.Singleton
  *  2. [pendingThreadId] / [pendingRequestId] / [pendingBookingId] — a transient id the INNER
  *     screen (Messages / ArtistHome / Bookings) consumes to push a detail within that tab.
  *
- * SEAM STATUS (issue #38, phase P2a): this is INERT until P1 (backend push triggers) + P2b
- * (Firebase FCM receiver) land. The only PRODUCER today is [routeFromExtras], called from
- * MainActivity for a notification-launch intent — which carries no `artistant_*` extras until
- * P2b sends real pushes, so it's a no-op. No Firebase dependency is needed to build/test this.
+ * SEAM STATUS: LIVE as of P2b (issue #39). The PRODUCER is [routeFromExtras], called from
+ * MainActivity for a notification-launch intent (cold launch) or a warm tap — both carry the
+ * `artistant_*` extras the FCM receiver (`ArtistantMessagingService`) attaches to its tap
+ * PendingIntent. The CONSUMERS are the tab-root screens (Messages / Bookings / ArtistHome).
  *
- * KNOWN LIMITATION — deferred to P2b/P4 (issue #39), where a real push lets us device-verify it:
- * the id-consumers ([pendingBookingId] etc.) live on each tab's ROOT screen, but the scaffold's
- * `navigateToTab` uses `restoreState = true` (the standard multi-back-stack pattern). If the target
- * tab already holds a SAVED DEEP stack (the user drilled into a detail, then switched tabs), a push
- * into it restores that deep destination instead of the root — so the root's `LaunchedEffect`
- * doesn't run and the parked id isn't consumed (the user lands on the stale detail, not the pushed
- * one). Cold launch + shallow-tab both work. The fix (consume the id at the tab-CONTAINER level, or
- * force-root the deep-link tab switch) touches `restoreState` semantics that only a device can
- * verify, so it's intentionally NOT done blind here — it's an explicit acceptance item on #39.
+ * DEEP-STACK FIX (was a KNOWN LIMITATION in P2a): the id-consumers live on each tab's ROOT screen,
+ * but the scaffold's `navigateToTab` uses `restoreState = true` (the standard multi-back-stack
+ * pattern). If the target tab already holds a SAVED DEEP stack (the user drilled into a detail,
+ * then switched tabs), a push into it would restore that deep destination instead of the root — so
+ * the root's `LaunchedEffect` never ran and the parked id was never consumed (the user landed on
+ * the stale detail, not the pushed one). Fixed by FORCE-ROOTING at the tab-container level: each
+ * container (MessagesTab / BookingsTab / HomeTab) observes its pending-id channel and, while an id
+ * is parked, pops its nested nav back to the tab root — which recomposes the root screen so its
+ * existing consumer runs and navigates to the pushed detail. The container only pops; it never
+ * consumes the id, so there's no double-handling with the root consumer. Cold launch + shallow-tab
+ * are unaffected (the pop is a no-op when already at root).
  */
 @Singleton
 class DeepLinkRouter @Inject constructor() {
