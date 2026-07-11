@@ -7,6 +7,8 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    // FCM push (P2b): processes app/google-services.json into the FCM config resources.
+    alias(libs.plugins.google.services)
 }
 
 // Supabase creds are read from a gitignored `secrets.properties` at the repo root
@@ -169,6 +171,12 @@ dependencies {
 
     // Play Billing — M7 dormant subscription seam (guarded behind subscriptionsEnabled).
     implementation(libs.billing.ktx)
+
+    // Firebase Cloud Messaging — the P2b push RECEIVER + token lifecycle. The BOM keeps
+    // firebase-messaging's transitive deps aligned; the google-services plugin (above)
+    // supplies the config from app/google-services.json.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

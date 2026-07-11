@@ -20,9 +20,11 @@ import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.status.SessionSource
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
+import com.google.firebase.messaging.FirebaseMessaging
 import `in`.artistant.app.BuildConfig
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
+import `in`.artistant.app.platform.push.DeviceTokenRepository
 import `in`.artistant.app.platform.storage.AppPreferences
 import `in`.artistant.app.platform.upload.UploadQueue
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +34,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import timber.log.Timber
@@ -55,6 +59,7 @@ class SessionManager @Inject constructor(
     private val crash: Crash,
     private val prefs: AppPreferences,
     private val uploadQueue: UploadQueue,
+    private val deviceTokens: DeviceTokenRepository,
 ) {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
@@ -239,6 +244,17 @@ class SessionManager @Inject constructor(
     /** Sign out + drop the analytics identity + wipe local prefs (DPDP §11 parity). The
      *  status observer also resets analytics, but wiping prefs is this method's job. */
     suspend fun signOut() {
+        // Push cleanup FIRST, and SYNCHRONOUSLY, while STILL AUTHENTICATED. The device_tokens
+        // DELETE is RLS-gated (`auth.uid() = user_id`), so it MUST complete before signOut() drops
+        // the session — a fire-and-forget unregister could race the teardown, match zero rows, and
+        // orphan this device's row (the signed-out user would then keep getting pushes here after
+        // an account switch). Await the token + the unregister, THEN invalidate the token so the
+        // next user on this device gets a fresh one mapped to THEM. Best-effort — a push-cleanup
+        // failure must never block sign-out.
+        runCatching {
+            awaitFcmToken()?.let { deviceTokens.unregister(it) }
+            FirebaseMessaging.getInstance().deleteToken()
+        }
         client.auth.signOut()
         analytics.reset()
         crash.setUser(null)
@@ -246,6 +262,15 @@ class SessionManager @Inject constructor(
         // Cancel any in-flight wizard uploads + wipe the staged media so the next account
         // that signs in on this device inherits nothing (iOS `UploadQueue.cancelAll`).
         uploadQueue.cancelAll()
+    }
+
+    /** Await FCM's current token (its Play-services Task, bridged to a suspend without the
+     *  kotlinx-coroutines-play-services dep); null on any failure so sign-out cleanup degrades
+     *  gracefully rather than throwing. */
+    private suspend fun awaitFcmToken(): String? = suspendCancellableCoroutine { cont ->
+        FirebaseMessaging.getInstance().token
+            .addOnSuccessListener { cont.resume(it) }
+            .addOnFailureListener { cont.resume(null) }
     }
 
     // MARK: - Deep link

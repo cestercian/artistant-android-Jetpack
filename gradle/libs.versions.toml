@@ -30,6 +30,11 @@ googleid = "1.1.1"
 # Play Billing — the M7 subscription seam. DORMANT in v1 (guarded behind
 # AppEnvironment.subscriptionsEnabled); linked only so the skeleton compiles.
 billing = "7.1.1"
+# Firebase Cloud Messaging (push P2b). BOM pins firebase-messaging; the
+# google-services plugin reads app/google-services.json (gitignored) at build
+# time. 33.7.0 / 4.4.2 are both compatible with AGP 8.9.1 + Kotlin 2.1.0.
+firebaseBom = "33.7.0"
+googleServices = "4.4.2"
 # Test
 junit = "4.13.2"
 coroutinesTest = "1.9.0"
@@ -86,6 +91,9 @@ androidx-credentials-play-services-auth = { module = "androidx.credentials:crede
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 # Play Billing (KTX suspend helpers) — M7 dormant subscription seam.
 billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = "billing" }
+# Firebase Cloud Messaging — the BOM aligns firebase-messaging's transitive versions.
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutinesTest" }
@@ -97,3 +105,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

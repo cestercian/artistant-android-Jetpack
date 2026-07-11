@@ -10,7 +10,9 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.domain.auth.ReturningLoginRoute
 import `in`.artistant.app.domain.auth.authAdvanceKey
 import `in`.artistant.app.domain.auth.returningLoginRoute
+import com.google.firebase.messaging.FirebaseMessaging
 import `in`.artistant.app.platform.auth.SessionManager
+import `in`.artistant.app.platform.push.DeviceTokenRepository
 import `in`.artistant.app.platform.storage.AppPreferences
 import `in`.artistant.app.platform.upload.UploadQueue
 import kotlinx.coroutines.delay
@@ -32,6 +34,7 @@ class RootViewModel @Inject constructor(
     private val users: UsersRepository,
     private val prefs: AppPreferences,
     private val uploadQueue: UploadQueue,
+    private val deviceTokens: DeviceTokenRepository,
 ) : ViewModel() {
 
     // One-shot guard so the cross-account upload purge runs once per launch, not on every
@@ -76,6 +79,11 @@ class RootViewModel @Inject constructor(
                             val key = authAdvanceKey(uid, gen)
                             if (key != lastRoutedKey) {
                                 lastRoutedKey = key
+                                // Register this device's FCM token on a genuine sign-in AND on
+                                // cold launch with a restored session (both land here; a bare
+                                // background token refresh does NOT bump the generation, so it
+                                // won't re-fire). The service's onNewToken covers a later rotation.
+                                registerPushToken()
                                 routeSignedIn()
                             }
                         }
@@ -112,6 +120,22 @@ class RootViewModel @Inject constructor(
         // gateFor is pure and can't touch prefs.
         if (route is ReturningLoginRoute.RouteIn) prefs.setRole(route.role)
         _gate.value = gateFor(route, profile)
+    }
+
+    /**
+     * Fetch the current FCM token and upsert it for the signed-in user. All best-effort:
+     * `getInstance()` can throw when Firebase isn't configured (no google-services.json in a
+     * dev build), the token fetch can fail offline, and the upsert can 4xx — none of which may
+     * disturb the launch/sign-in flow, so the whole thing is runCatching-guarded. Uses the
+     * Play-services `Task` callback rather than pulling in a coroutines-play-services `await()`
+     * dependency for one call.
+     */
+    private fun registerPushToken() {
+        runCatching {
+            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                viewModelScope.launch { runCatching { deviceTokens.register(token) } }
+            }
+        }
     }
 
     /** Re-run the routing fetch (the signup flow's hydration-error Retry). */

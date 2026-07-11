@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import androidx.navigation.NavHostController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -119,6 +120,11 @@ fun ArtistTabsScaffold() {
 @Composable
 private fun HomeTab() {
     val nav = rememberNavController()
+    // Deep-stack push fix: force the nested nav to root while a gig_request id is parked, so
+    // ArtistHomeScreen's consumer runs even if a saved deep stack restored a stale detail.
+    val deepLink: TabDeepLinkViewModel = hiltViewModel()
+    val pendingRequest by deepLink.pendingRequestId.collectAsStateWithLifecycle()
+    ForceRootForDeepLink(nav, pendingRequest)
     NavHost(navController = nav, startDestination = HomeRoot) {
         composable<HomeRoot> {
             ArtistHomeScreen(
@@ -169,6 +175,11 @@ private fun GigsTab() {
 @Composable
 private fun MessagesTab() {
     val nav = rememberNavController()
+    // Deep-stack push fix: force to root while a message thread id is parked so MessagesScreen's
+    // consumer runs even if a saved deep Chat was restored.
+    val deepLink: TabDeepLinkViewModel = hiltViewModel()
+    val pendingThread by deepLink.pendingThreadId.collectAsStateWithLifecycle()
+    ForceRootForDeepLink(nav, pendingThread)
     NavHost(navController = nav, startDestination = ArtistMessagesRoot) {
         composable<ArtistMessagesRoot> {
             MessagesScreen(
@@ -211,5 +222,22 @@ internal fun navigateToTab(nav: NavController, route: String) {
         popUpTo(nav.graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+/**
+ * Deep-stack push fix (see [in.artistant.app.state.DeepLinkRouter]). Hosted by a tab CONTAINER,
+ * this pops the tab's nested nav back to its root WHILE a push id is parked for that tab — so the
+ * root screen recomposes and its existing LaunchedEffect consumer runs even if `restoreState` had
+ * restored a stale deep detail. It only pops; the root screen consumes (clears) the id, so there's
+ * no double-handling. A no-op when already at root (cold launch / shallow tab), because
+ * popBackStack to the current start destination pops nothing.
+ */
+@Composable
+internal fun ForceRootForDeepLink(nav: NavHostController, pendingId: String?) {
+    LaunchedEffect(pendingId) {
+        if (pendingId != null) {
+            nav.popBackStack(nav.graph.findStartDestination().id, inclusive = false)
+        }
     }
 }
