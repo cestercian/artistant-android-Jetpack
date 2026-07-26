@@ -18,12 +18,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.discover.DiscoverScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Client bottom nav: Discover · Bookings · Messages · Profile · Search.
@@ -36,13 +38,19 @@ private enum class ClientTab(val route: String, val label: String, val icon: Ima
     Search("search", "Search", Icons.Filled.Search),
 }
 
+private const val ARTIST_PROFILE_ROUTE = "artist/{artistId}"
+
 @Composable
 fun ClientTabsScaffold() {
     val nav = rememberNavController()
+    val current by nav.currentBackStackEntryAsState()
+    val route = current?.destination?.route
+    val showBottomBar = ClientTab.entries.any { it.route == route }
+
     Scaffold(
         containerColor = AppTheme.colors.bg,
         bottomBar = {
-            val current by nav.currentBackStackEntryAsState()
+            if (!showBottomBar) return@Scaffold
             NavigationBar(containerColor = AppTheme.colors.bgElev) {
                 ClientTab.entries.forEach { tab ->
                     val selected = current?.destination?.hierarchy?.any { it.route == tab.route } == true
@@ -68,8 +76,24 @@ fun ClientTabsScaffold() {
             startDestination = ClientTab.Discover.route,
             modifier = Modifier.padding(inner),
         ) {
-            ClientTab.entries.forEach { tab ->
-                composable(tab.route) { Placeholder(tab.label) }
+            composable(ClientTab.Discover.route) {
+                DiscoverScreen(
+                    onArtistClick = { id ->
+                        nav.navigate("artist/$id")
+                    },
+                )
+            }
+            composable(ClientTab.Bookings.route) { Placeholder(ClientTab.Bookings.label) }
+            composable(ClientTab.Messages.route) { Placeholder(ClientTab.Messages.label) }
+            composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
+            composable(ClientTab.Search.route) { Placeholder(ClientTab.Search.label) }
+            // Stub until M2 artist-profile screen lands in the next commit.
+            composable(
+                route = ARTIST_PROFILE_ROUTE,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) { entry ->
+                val id = entry.arguments?.getString("artistId").orEmpty()
+                Placeholder("Artist · $id")
             }
         }
     }
