@@ -29,13 +29,13 @@ import androidx.compose.ui.semantics.testTag
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.navigation.rememberPushService
 import `in`.artistant.app.platform.permissions.rememberNotificationPermissionRequest
 
 /**
  * Notification permission ask (iOS `SignupNotifPermissionView`): bell, headline, subtitle, and
- * Allow / Maybe-later — both advance (no nag). "Allow" requests POST_NOTIFICATIONS via the M1a
- * permission helper (API 33+; a no-op grant on older devices). FCM token registration itself is
- * M4 — this only secures the permission.
+ * Allow / Maybe-later — both advance (no nag). "Allow" requests POST_NOTIFICATIONS then
+ * registers the FCM token via [PushService] (soft-fails without google-services.json).
  */
 @Composable
 fun NotifPermissionScreen(
@@ -46,10 +46,12 @@ fun NotifPermissionScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     var requesting by remember { mutableStateOf(false) }
+    val pushService = rememberPushService()
     // Whatever the user chooses (grant or deny), advance — the permission result doesn't gate
     // the flow, it only decides whether push works later.
-    val requestPermission = rememberNotificationPermissionRequest { _ ->
+    val requestPermission = rememberNotificationPermissionRequest { granted ->
         requesting = false
+        if (granted) pushService.registerAfterPermission()
         onAdvance()
     }
 

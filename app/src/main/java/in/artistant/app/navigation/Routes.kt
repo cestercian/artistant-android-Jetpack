@@ -55,9 +55,11 @@ sealed interface ArtistRoute {
 object ArtistNavRoutes {
     const val BOOKING_DETAIL = "booking_detail/{bookingId}"
     const val GIG_REQUEST = "gig_request/{requestId}"
+    const val CHAT = "chat/{threadId}"
 
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun gigRequest(requestId: String) = "gig_request/$requestId"
+    fun chat(threadId: String) = "chat/$threadId"
     const val PROFILE = "profile"
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"

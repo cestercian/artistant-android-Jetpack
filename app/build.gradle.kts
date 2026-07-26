@@ -136,6 +136,16 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
 
+    // FCM — soft-fail at runtime when google-services.json is absent (gitignored).
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+}
+
+// google-services.json is gitignored (operator drops per-flavor copies). Apply the
+// plugin only when present so CI / green-tree builds stay green without secrets.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }

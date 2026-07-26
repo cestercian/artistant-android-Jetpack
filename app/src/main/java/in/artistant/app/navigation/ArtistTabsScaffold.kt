@@ -13,9 +13,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -32,9 +34,10 @@ import `in`.artistant.app.feature.epk.EpkScreen
 import `in`.artistant.app.feature.wizard.WizardScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.messages.ChatScreen
+import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
-import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
 private enum class ArtistTab(val route: String, val label: String, val icon: ImageVector) {
@@ -50,6 +53,30 @@ fun ArtistTabsScaffold() {
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ArtistTab.entries.any { it.route == route }
+    val tabRouter = rememberTabRouter()
+    val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
+    val pendingGig by tabRouter.pendingGigRequestId.collectAsStateWithLifecycle()
+    val artistTab by tabRouter.artistTab.collectAsStateWithLifecycle()
+
+    LaunchedEffect(artistTab) {
+        val tabRoute = when (artistTab) {
+            ArtistDeepTab.Home -> ArtistTab.Home.route
+            ArtistDeepTab.Gigs -> ArtistTab.Gigs.route
+            ArtistDeepTab.Messages -> ArtistTab.Messages.route
+            ArtistDeepTab.Epk -> ArtistTab.Epk.route
+        }
+        navigateToTab(nav, tabRoute)
+    }
+    LaunchedEffect(pendingThread) {
+        val id = tabRouter.consumePendingThread() ?: return@LaunchedEffect
+        navigateToTab(nav, ArtistTab.Messages.route)
+        nav.navigate(ArtistNavRoutes.chat(id))
+    }
+    LaunchedEffect(pendingGig) {
+        val id = tabRouter.consumePendingGigRequest() ?: return@LaunchedEffect
+        navigateToTab(nav, ArtistTab.Home.route)
+        nav.navigate(ArtistNavRoutes.gigRequest(id))
+    }
 
     Scaffold(
         containerColor = AppTheme.colors.bg,
@@ -104,12 +131,23 @@ fun ArtistTabsScaffold() {
                     onClose = { nav.popBackStack() },
                 )
             }
-            composable(ArtistTab.Messages.route) { Placeholder(ArtistTab.Messages.label) }
+            composable(ArtistTab.Messages.route) {
+                MessagesScreen(onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) })
+            }
             composable(ArtistTab.Epk.route) {
                 EpkScreen(onEditInWizard = { nav.navigate(ArtistNavRoutes.WIZARD) })
             }
             composable(ArtistNavRoutes.WIZARD) {
                 WizardScreen(onFinished = { nav.popBackStack() })
+            }
+            composable(
+                route = ArtistNavRoutes.CHAT,
+                arguments = listOf(navArgument("threadId") { type = NavType.StringType }),
+            ) {
+                ChatScreen(
+                    onBack = { nav.popBackStack() },
+                    onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                )
             }
             composable(
                 route = ArtistNavRoutes.BOOKING_DETAIL,

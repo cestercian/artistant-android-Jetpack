@@ -14,9 +14,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -59,6 +61,32 @@ fun ClientTabsScaffold() {
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ClientTab.entries.any { it.route == route }
+    val tabRouter = rememberTabRouter()
+    val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
+    val pendingBooking by tabRouter.pendingBookingDetail.collectAsStateWithLifecycle()
+    val clientTab by tabRouter.clientTab.collectAsStateWithLifecycle()
+
+    // Push deep links: flip tab then push the detail/chat route.
+    LaunchedEffect(clientTab) {
+        val tabRoute = when (clientTab) {
+            ClientDeepTab.Discover -> ClientTab.Discover.route
+            ClientDeepTab.Bookings -> ClientTab.Bookings.route
+            ClientDeepTab.Messages -> ClientTab.Messages.route
+            ClientDeepTab.Profile -> ClientTab.Profile.route
+            ClientDeepTab.Search -> ClientTab.Search.route
+        }
+        navigateToTab(nav, tabRoute)
+    }
+    LaunchedEffect(pendingThread) {
+        val id = tabRouter.consumePendingThread() ?: return@LaunchedEffect
+        navigateToTab(nav, ClientTab.Messages.route)
+        nav.navigate(ClientNavRoutes.chat(id))
+    }
+    LaunchedEffect(pendingBooking) {
+        val id = tabRouter.consumePendingBookingDetail() ?: return@LaunchedEffect
+        navigateToTab(nav, ClientTab.Bookings.route)
+        nav.navigate(ClientNavRoutes.bookingDetail(id))
+    }
 
     Scaffold(
         containerColor = AppTheme.colors.bg,

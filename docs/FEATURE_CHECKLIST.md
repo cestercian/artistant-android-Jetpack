@@ -71,7 +71,7 @@ SessionManager.*
   screen's tap-commit + appear-debounce; Auth screen's animated lineup background
   (motion-gated).
 - [x] **Notif permission** wiring → `POST_NOTIFICATIONS` + FCM register. **S.** → F9.
-  *(Permission UI shipped; FCM token register still M4.)*
+  *(Permission UI shipped; FCM token register via PushService — soft without google-services.json.)*
 
 ---
 
@@ -149,17 +149,18 @@ socials/bio) can be built before F8 lands.*
 
 ## F9 — Push notifications  *(needs a backend change)*
 
-- [ ] **FirebaseMessagingService** — `onNewToken` (upsert token), `onMessageReceived`
-  (foreground), tap `PendingIntent` → `DeepLinkRouter` (map `artistant_*` keys). **M.**
+- [x] **FirebaseMessagingService** — `onNewToken` → `claim_device_token` (p_fcm),
+  `onMessageReceived` + notification-tap Intent → TabRouter (`artistant_*` keys).
+  Soft-fails without `google-services.json`. **M.**
 - [ ] **FCM token table + `send-push` FCM path** (backend). **M.** Risk: **server
-  work**; FCM HTTP v1 + service-account auth; operator secrets. Blocks real
-  delivery (client can be built ahead).
-- [ ] **POST_NOTIFICATIONS** permission (API 33+). **S.**
+  work**; FCM HTTP v1 + service-account auth; operator secrets. Schema `0069`/`0075`
+  already shared; Android client claims tokens. Blocks real delivery.
+- [x] **POST_NOTIFICATIONS** permission (API 33+) + register-on-allow. **S.**
 
 ## F10 — Messages + chat  *(SHARED)*
 
 - [x] **MessagesViewModel** — thread list, verbatim preview, real pair-scoped
-  `findOrCreateThread`. **partial:** artist counterpart names + push deep links deferred.
+  `findOrCreateThread`. Push `pendingThreadId` deep link wired in both role scaffolds.
 - [x] **ChatViewModel** — paged load, optimistic send + Realtime INSERT reconcile,
   mark-read + best-effort 0072 receipts, tap-to-retry. **M.**
   *(report/details sheet still deferred.)*

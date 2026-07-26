@@ -26,7 +26,7 @@ moat.
 | `Screens/Signup/SignupAuthView.swift` | `feature/signup/SignupAuthScreen.kt` | done | M1 |
 | `Screens/Signup/EmailAuthView.swift` | `ui/auth/AuthScreen.kt` (email branch) | done | M1 |
 | `Screens/Signup/SignupProfileView.swift` | `feature/signup/ProfileScreen.kt` | done | M1 |
-| `Screens/Signup/SignupNotifPermissionView.swift` | `feature/signup/NotifPermissionScreen.kt` | done | M1; FCM register deferred M4 |
+| `Screens/Signup/SignupNotifPermissionView.swift` | `feature/signup/NotifPermissionScreen.kt` | done | M1; FCM register via PushService (soft without google-services.json) |
 | `Screens/Signup/SignupDoneView.swift` | `feature/signup/DoneScreen.kt` | done | M1 |
 | `Screens/Signup/LegalView.swift` | `feature/signup/LegalScreen.kt` | done | M1 |
 | `Screens/Signup/SignupFlowView.swift` | `feature/signup/SignupFlow.kt` + `SignupViewModel` | done | M1 |
@@ -63,7 +63,7 @@ moat.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | partial | Server inbox, verbatim previews, pair-scoped open; filters/deep links deferred |
+| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | partial | Server inbox + push pendingThread deep link; filters deferred |
 | `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | partial | Realtime + optimistic send/retry; system rows + trust banner; report/details deferred |
 | `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | missing | |
 
@@ -108,7 +108,7 @@ moat.
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
 | Root / role tabs | `ArtistantRoot` + `ClientTabsScaffold` / `ArtistTabsScaffold` | partial | Discover + Search + Artist profile wired; other tabs still Placeholder |
-| `State/TabRouter.swift` | nav + deep-link pending channels | partial | Routes declared in `Routes.kt`; profile/search registered in tab NavHost |
+| `State/TabRouter.swift` | nav + deep-link pending channels | done | `TabRouter` singleton + client/artist scaffold consumers |
 | `ClientRoute.ArtistProfile` / `Search` | `Routes.kt` + NavHost | partial | Wired as string routes in ClientTabsScaffold |
 
 ---
@@ -150,7 +150,7 @@ moat.
 | `State/EPKStore.swift` | `EpkViewModel` | partial | M5 scaffold — fetch-only shell |
 | `State/ArtistOnboardingStore.swift` | `WizardViewModel` | partial | M5 scaffold — no persistence/media |
 | `State/EntitlementStore.swift` | `feature/paywall/EntitlementStore.kt` | partial | M7 inert — always not-subscribed when flag off |
-| `State/TabRouter.swift` | deep-link pending in Root / nav | missing | M4 |
+| `State/TabRouter.swift` | `navigation/TabRouter.kt` | done | pendingThread/booking/gigRequest + role tabs |
 | `State/Persistence.swift` | `AppPreferences` (DataStore) | done | M0 |
 | `State/WizardMediaCache.swift` | `WizardMediaCache` | missing | M5 |
 

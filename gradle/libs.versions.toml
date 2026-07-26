@@ -22,6 +22,9 @@ timber = "5.0.1"
 # Google sign-in — Credential Manager + Google Identity ID-token helper.
 credentials = "1.3.0"
 googleid = "1.1.1"
+# FCM — BoM pins messaging; google-services plugin applied only when json present.
+firebaseBom = "33.7.0"
+googleServices = "4.4.2"
 # Test
 junit = "4.13.2"
 coroutinesTest = "1.9.0"
@@ -68,6 +71,9 @@ timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+# FCM
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutinesTest" }
@@ -79,3 +85,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
