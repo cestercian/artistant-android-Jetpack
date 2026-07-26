@@ -206,7 +206,8 @@ thread report). PR #44.
 | `Components/EmptyStateView.swift` | `designsystem/component/EmptyState.kt` | done | M2 |
 | `Components/Avatar.swift` | `designsystem/component/Avatar.kt` | missing | M2 |
 | `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | missing | M2 |
-| `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | missing | M2 |
+| `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
+| `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
 | `Components/HeaderBar.swift` | — | missing | |
 | Theme tokens | `designsystem/theme/*` | done | Brand fonts TTF drop still operator (#15) |
 
