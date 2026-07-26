@@ -12,8 +12,10 @@ Airbnb-style trust (safety banner + “always communicate through Artistant” +
 report). Schema through ~0085. Android must not rebuild the retired redaction
 moat.
 
-**Android current:** M0 + M1 complete; **M2 Browse landed** on `feature/m2-browse`
-(Discover + Search + Artist profile). Next: M3 booking request→accept.
+**Android current:** M0–M1 complete; **M2–M7 substantially on `feature/m2-browse`**
+(Discover/Search/profile, booking request→accept, Realtime chat, FCM claim,
+wizard publish + EPK edit, ManageAvailability, CalendarSync, score sheets,
+thread report). PR #44.
 
 ---
 
@@ -42,9 +44,9 @@ moat.
 | `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | done | Query + facets + sort + filter sheet badge |
 | `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | done | Accordion + histogram + 0073 dims |
 | `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | done | Debounce + pagination + filter/histogram |
-| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | partial | Hero/bio/packages/reviews/dock + saved heart; score sheets deferred |
-| `Screens/ScoreExplainerView.swift` | `feature/artist/ScoreExplainerScreen.kt` | missing | M2/M5 |
-| `Screens/ScoreBreakdownSheet.swift` | `feature/artist/ScoreBreakdownSheet.kt` | missing | M2/M5 |
+| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | Hero/bio/packages/reviews/dock + saved heart + score breakdown sheet |
+| `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | Self metrics + history; Home → Score |
+| `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | Client real-world rows from profile chip |
 | `Screens/ArtistListView.swift` | (unused / list helper) | obsolete | Discover/Search replaced roster lists |
 
 ## Screens — Booking (M3)
@@ -64,8 +66,8 @@ moat.
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
 | `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | partial | Server inbox + push pendingThread deep link; filters deferred |
-| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | partial | Realtime + optimistic send/retry; system rows + trust banner; report/details deferred |
-| `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | missing | |
+| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | done | Realtime + optimistic send/retry; system rows + trust banner + details/report |
+| `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | done | Gig summary + report reasons → `reports` |
 
 ## Screens — Artist home / gigs (M3/M5)
 
@@ -79,28 +81,28 @@ moat.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | partial | M5 scaffold — inline steps, no CameraX |
-| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardScreen.kt` (Identity) | partial | Inline form in host |
-| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardScreen.kt` (Location) | partial | |
-| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardScreen.kt` (Pricing) | partial | packages table write deferred |
-| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | partial | tech_rider write deferred |
-| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | partial | |
-| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | partial | CameraX placeholder + gradient |
-| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardScreen.kt` (Socials) | partial | |
-| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardScreen.kt` (Bio) | partial | |
-| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | partial | SAF/upload placeholder |
-| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | partial | |
-| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | partial | |
-| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | partial | Read-only shell + Edit in wizard CTA |
+| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | done | Publish: upsert + packages/tech RPCs + published; gallery/SAF + UploadQueue |
+| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardScreen.kt` (Identity) | done | Inline form in host |
+| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardScreen.kt` (Location) | done | |
+| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardScreen.kt` (Pricing) | done | `replace_packages` on publish |
+| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | done | `replace_tech_rider` on publish |
+| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | done | |
+| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | partial | Gallery pick + gradient; CameraX deferred |
+| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardScreen.kt` (Socials) | done | |
+| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardScreen.kt` (Bio) | done | |
+| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | done | SAF + UploadQueue after go-live |
+| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | done | |
+| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | done | |
+| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples edit + wizard CTA |
 
 ## Screens — Profile / Settings / Paywall (M6/M7)
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | partial | Identity + settings rows; stats/saved/calendar sync deferred |
+| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | partial | Identity + settings + calendar sync toggle; stats carousel deferred |
 | `Screens/Settings/DataExportView.swift` | `feature/profile/ProfileScreen.kt` (export row) | partial | Inline JSON share + signed URL open; no dedicated sheet |
-| `Screens/Settings/ManageAvailabilityView.swift` | `feature/profile/ProfileScreen.kt` (stub) | partial | Placeholder toast only |
-| `Screens/Settings/ScoreHistorySheet.swift` | `feature/settings/ScoreHistorySheet.kt` | missing | |
+| `Screens/Settings/ManageAvailabilityView.swift` | `feature/availability/ManageAvailabilityScreen.kt` | done | Days/times chips + seed-failure Save guard |
+| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreExplainerScreen.kt` (history) | partial | Compact history list on explainer; dedicated sheet deferred |
 | `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | partial | Inert behind `subscriptionsEnabled=false` |
 
 ## Navigation / shells
@@ -123,15 +125,15 @@ moat.
 | `Repositories/SearchTypes.swift` | `data/model/SearchTypes.kt` | done | M2 |
 | `Repositories/SavedArtistsRepository.swift` | `data/repository/SavedArtistsRepository.kt` + Fake | done | saved_artists upsert/delete/list + SavedStore |
 | `Repositories/ReviewsRepository.swift` | `data/repository/ReviewsRepository.kt` + Fake | done | M2 profile (listForArtist) |
-| `Repositories/PackagesRepository.swift` | `data/repository/PackagesRepository.kt` + Fake | missing | M2/M5 |
-| `Repositories/ArtistMediaRepository.swift` | `data/repository/ArtistMediaRepository.kt` | missing | M2 covers / M5 upload |
-| `Repositories/ScoreRepository.swift` | `data/repository/ScoreRepository.kt` + Fake | missing | M2/M5 |
-| `Repositories/BookingsRepository.swift` | `data/repository/BookingsRepository.kt` + Fake | missing | M3 — request→accept |
-| `Repositories/RequestsRepository.swift` | `data/repository/RequestsRepository.kt` + Fake | missing | M3 |
-| `Repositories/MessagesRepository.swift` | `data/repository/MessagesRepository.kt` + Fake | partial | Explicit projections, 0072 fallback, receipts; Realtime INSERT subscribe wired |
-| `Repositories/SamplesRepository.swift` | `data/repository/SamplesRepository.kt` | missing | M5 |
-| `Repositories/TechRiderRepository.swift` | `data/repository/TechRiderRepository.kt` | missing | M5 |
-| `Repositories/ArtistLinksRepository.swift` | `data/repository/ArtistLinksRepository.kt` | missing | M5 |
+| `Repositories/PackagesRepository.swift` | `data/repository/PackagesRepository.kt` + Fake | done | `replace_packages` |
+| `Repositories/ArtistMediaRepository.swift` | `data/repository/ArtistMediaRepository.kt` | done | Photo upload + reorder RPC |
+| `Repositories/ScoreRepository.swift` | `data/repository/ScoreRepository.kt` + Fake | done | metric_* + score_history |
+| `Repositories/BookingsRepository.swift` | `data/repository/BookingsRepository.kt` + Fake | done | M3 — request→accept + calendar ingest |
+| `Repositories/RequestsRepository.swift` | `data/repository/RequestsRepository.kt` + Fake | done | M3 |
+| `Repositories/MessagesRepository.swift` | `data/repository/MessagesRepository.kt` + Fake | done | Explicit projections, Realtime, receipts |
+| `Repositories/SamplesRepository.swift` | `data/repository/SamplesRepository.kt` | done | Append upload + targeted delete |
+| `Repositories/TechRiderRepository.swift` | `data/repository/TechRiderRepository.kt` | done | `replace_tech_rider` |
+| `Repositories/ArtistLinksRepository.swift` | `data/repository/ArtistLinksRepository.kt` | done | CRUD |
 
 ---
 
@@ -147,12 +149,12 @@ moat.
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
 | `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | Inbox + Chat with Realtime/optimistic reconcile; no global MessageStore yet |
-| `State/EPKStore.swift` | `EpkViewModel` | partial | M5 scaffold — fetch-only shell |
-| `State/ArtistOnboardingStore.swift` | `WizardViewModel` | partial | M5 scaffold — no persistence/media |
+| `State/EPKStore.swift` | `EpkViewModel` | done | Packages/tech/links/samples writes |
+| `State/ArtistOnboardingStore.swift` | `WizardViewModel` | done | Publish orchestration + pending media |
 | `State/EntitlementStore.swift` | `feature/paywall/EntitlementStore.kt` | partial | M7 inert — always not-subscribed when flag off |
 | `State/TabRouter.swift` | `navigation/TabRouter.kt` | done | pendingThread/booking/gigRequest + role tabs |
 | `State/Persistence.swift` | `AppPreferences` (DataStore) | done | M0 |
-| `State/WizardMediaCache.swift` | `WizardMediaCache` | missing | M5 |
+| `State/WizardMediaCache.swift` | `platform/media/WizardMediaCache.kt` | done | cacheDir staging |
 
 ---
 
@@ -165,10 +167,10 @@ moat.
 | `Services/AuthService.swift` | `platform/auth/SessionManager.kt` | done | M1 |
 | `Services/AccountService.swift` | `data/repository/AccountRepository.kt` + Fake | done | M6 — delete-account + data-export EFs |
 | `Services/PushService.swift` | `platform/push/PushService.kt` + MessagingService | partial | claim_device_token FCM register + payload→TabRouter; needs operator google-services.json + send-push FCM |
-| `Services/CalendarSyncService.swift` | CalendarContract mirror | missing | M6 |
-| `Services/PermissionsService.swift` | `NotificationPermission` etc. | partial | Notif permission UI M1 |
-| `Services/UploadQueue.swift` | WorkManager upload | missing | M5 |
-| `Services/VideoTrimmer.swift` | Media3 Transformer | missing | M5 |
+| `Services/CalendarSyncService.swift` | `platform/calendar/CalendarSyncService.kt` | done | CalendarContract mirror + planner |
+| `Services/PermissionsService.swift` | `NotificationPermission` etc. | partial | Notif permission UI M1; calendar runtime grant |
+| `Services/UploadQueue.swift` | `platform/media/UploadQueue.kt` | partial | Serial coroutine queue + retry; WorkManager persistence deferred |
+| `Services/VideoTrimmer.swift` | Media3 Transformer | missing | M5 — gallery pick skips trim for now |
 | `Services/Payments/*` | Play Billing seam | missing | M7 dormant |
 | `Services/Observability/*` | `Analytics` / `Crash` | partial | Dark-until-key stubs M0 |
 

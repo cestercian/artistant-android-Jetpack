@@ -77,13 +77,12 @@ SessionManager.*
 
 ## F3 — Artist wizard  *(ARTIST)*
 
-- [ ] **WizardViewModel** — `flowOrder`, per-step validation, pending-media handoff.
+- [x] **WizardViewModel** — `flowOrder`, per-step validation, pending-media handoff.
   **L** (the 585-line store port). → Foundation, `WizardMediaCache`, `UploadQueue`.
-- [ ] **11 step screens** (identity/location/pricing/tech/availability/cover/
-  socials/bio/samples/preview/done). **XL** total. Deps: F8 media (cover/samples
-  steps), F0 chips (`FlowRow`). Risk: the cover step (camera + trim + gallery) and
-  preview/publish (multi-write + upload enqueue).
-- [ ] **Publish flow** — upsert artist, parallel packages/tech write, flip
+- [x] **11 step screens** (identity/location/pricing/tech/availability/cover/
+  socials/bio/samples/preview/done). **XL** total. Cover uses gallery pick (CameraX
+  deferred); samples via SAF.
+- [x] **Publish flow** — upsert artist, parallel packages/tech write, flip
   published, enqueue media. **M.** → F8, `replace_*` RPCs.
 
 *Independent: steps with no media (identity/location/pricing/tech/availability/
@@ -134,14 +133,13 @@ socials/bio) can be built before F8 lands.*
 
 ## F8 — Media pipeline  *(cross-cutting; unblocks wizard + EPK)*
 
-- [ ] **Photo Picker + CameraX** integration. **M.** Risk: CameraX config.
-- [ ] **SAF audio picker** (`OpenDocument`). **S.**
+- [x] **Photo Picker** (gallery `GetContent`) — CameraX still deferred. **M.**
+- [x] **SAF audio picker** (`OpenDocument`). **S.**
 - [ ] **VideoTrimmer** (Media3 Transformer, ≤10s, first-frame). **L.** Risk:
   transcode reliability across devices/codecs — the single biggest media risk.
-- [ ] **WizardMediaCache** (cacheDir staging, bitmap normalize, duration probe). **M.**
-- [ ] **UploadQueue → WorkManager** — per-task workers, backoff, foreground info,
-  foreign-user purge, publish gate. **L.** → SessionManager.
-- [ ] **ArtistMedia/Samples repos** — storage upload + insert + rollback + retry. **M.**
+- [x] **WizardMediaCache** (cacheDir staging, JPEG normalize on upload). **M.**
+- [x] **UploadQueue** — serial coroutine drain + retry (WorkManager persistence deferred). **M.**
+- [x] **ArtistMedia/Samples repos** — storage upload + insert + rollback + retry. **M.**
 - [ ] **AutoplayVideo (ExoPlayer)**, **SamplePlayer (ExoPlayer)**, **SpotifyEmbed
   (WebView)**, **MediaContainer**. **M** total.
 
@@ -162,10 +160,9 @@ socials/bio) can be built before F8 lands.*
 - [x] **MessagesViewModel** — thread list, verbatim preview, real pair-scoped
   `findOrCreateThread`. Push `pendingThreadId` deep link wired in both role scaffolds.
 - [x] **ChatViewModel** — paged load, optimistic send + Realtime INSERT reconcile,
-  mark-read + best-effort 0072 receipts, tap-to-retry. **M.**
-  *(report/details sheet still deferred.)*
+  mark-read + best-effort 0072 receipts, tap-to-retry, details/report. **M.**
 - [x] **ChatScreen** — bubbles, system rows/action route, Airbnb trust banner + composer,
-  retry chip. **partial:** reverse auto-scroll, report/details, glass polish deferred.
+  retry chip + ThreadDetailsSheet. **partial:** reverse auto-scroll, glass polish deferred.
 - [x] ~~**Redaction** (`Redaction.kt`)~~ — **obsolete.** Scrapped Jul 2026 (mig
   `0071`); deleted from Android. Do not rebuild.
 
@@ -185,40 +182,36 @@ socials/bio) can be built before F8 lands.*
 
 - [ ] **ArtistHomeViewModel + Screen** — earnings `Sparkline`, bookability card,
   14-day availability strip, requests, upcoming, upload banner, subscribe banner.
-  **L** (~1300-line screen). → Score/Bookings/Artists repos, RequestStore,
-  CalendarSync busy-days, EntitlementStore.
-- [ ] **EpkViewModel + EpkScreen** — cover, photos grid, samples, socials, bio,
-  pricing (debounced replaceAll), tech, links CRUD, share-link. **L.** → F8.
-- [ ] **ManageAvailabilityScreen** — days/times chips + save. **S.**
+  **partial:** New requests rail + Score CTA shipped; sparkline/busy strip deferred.
+- [x] **EpkViewModel + EpkScreen** — packages replace, tech, links CRUD, samples
+  add/delete. **partial:** photo grid reorder / share-link deferred.
+- [x] **ManageAvailabilityScreen** — days/times chips + save. **S.**
 
 ## F13 — Bookability score  *(mostly ARTIST)*
 
-- [ ] **ScoreExplainerScreen** — hero ring, tiers, weighted metric bars. **M.**
-- [ ] **ScoreBreakdownSheet** (CLIENT, on ArtistProfile) — metrics + reply-speed
+- [x] **ScoreExplainerScreen** — hero ring, tiers, weighted metric bars. **M.**
+- [x] **ScoreBreakdownSheet** (CLIENT, on ArtistProfile) — metrics + reply-speed
   inversion. **S.**
-- [ ] **ScoreHistorySheet** — `Sparkline` + delta. **S.**
+- [ ] **ScoreHistorySheet** — `Sparkline` + delta. **partial:** compact list on explainer.
 - [ ] **ScoreRing + Sparkline** components. **M.** → Canvas.
-- [ ] **ScoreBands** (`ScoreBands.kt`) — tier bands + <5-gig rule (pure, tested). **S.**
+- [x] **ScoreBands** (`ScoreBands.kt`) — tier bands + <5-gig rule (pure, tested). **S.**
 
 ## F14 — Reviews  *(CLIENT write)*
 
-- [ ] **ReviewSheet** — stars + text; `ReviewsRepository.insert` (gate: completed
+- [x] **ReviewSheet** — stars + text; `ReviewsRepository.insert` (gate: completed
   booking; `23505`→alreadyReviewed). **S.**
 
 ---
 
 ## F15 — Profile, settings, DPDP, calendar sync
 
-- [x] **ProfileScreen** — identity header + settings rows (sign out, delete, export, privacy/help). **M.** Stats/saved carousel deferred.
+- [x] **ProfileScreen** — identity header + settings rows (sign out, delete, export, privacy/help) + calendar sync toggle. **M.** Stats/saved carousel deferred.
 - [x] **Sign out** — `SessionManager.signOut` + prefs wipe; RootViewModel routes to auth. **S.**
 - [x] **Data export** — `data-export` EF → share sheet (inline) or browser (signed URL). **S.**
-- [x] **Delete account** — confirm dialog → `delete-account` EF → signOut on success. **S.**
-- [ ] **CalendarSyncService** — CalendarContract mirror (create/update/delete
-  events + reminders), `event.url` marker, pure **SyncPlanner** (desired-vs-persisted
-  diff), clash/busy reads. **L.** Risk: **big EventKit→Provider port**;
-  `READ/WRITE_CALENDAR` perms; can't create a calendar under a Google account (offer
-  existing ones, like iOS). → `AddToCalendar` intent (permission-free path).
-- [ ] **ManageAvailabilityScreen** — full open-date editor. **M.** Stub row on Profile only.
+- [x] **Delete account** — confirm dialog → `delete-account` EF → calendar wipe + signOut. **S.**
+- [x] **CalendarSyncService** — CalendarContract mirror + pure SyncPlanner + owner gate.
+  **partial:** clash/busy reads + calendar picker deferred.
+- [x] **ManageAvailabilityScreen** — full open-date editor. **M.**
 
 ---
 
