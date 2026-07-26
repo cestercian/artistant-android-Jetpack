@@ -37,12 +37,12 @@ moat.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/DiscoverView.swift` | `feature/discover/DiscoverScreen.kt` | missing | M2 — rails via concurrent `search_artists` |
-| `State/DiscoverFeedStore.swift` | `feature/discover/DiscoverViewModel.kt` | missing | M2 |
-| `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | missing | M2 |
-| `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | missing | M2; accordion + histogram |
-| `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | missing | M2 |
-| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | missing | M2; Book/Message CTAs stub until M3/M4 |
+| `Screens/DiscoverView.swift` | `feature/discover/DiscoverScreen.kt` | done | M2 — rails via concurrent `search_artists` |
+| `State/DiscoverFeedStore.swift` | `feature/discover/DiscoverViewModel.kt` | done | M2 |
+| `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | partial | M2 — query + facets + sort; filter sheet/histogram deferred |
+| `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | missing | M2 follow-up; accordion + histogram |
+| `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | partial | M2 — debounce + pagination; 0073 dims deferred |
+| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | partial | M2 — hero/bio/packages/reviews/dock; Book/Message stubbed |
 | `Screens/ScoreExplainerView.swift` | `feature/artist/ScoreExplainerScreen.kt` | missing | M2/M5 |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/artist/ScoreBreakdownSheet.kt` | missing | M2/M5 |
 | `Screens/ArtistListView.swift` | (unused / list helper) | obsolete | Discover/Search replaced roster lists |
