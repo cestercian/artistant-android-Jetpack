@@ -55,6 +55,7 @@ interface BookingsRepository {
 @Singleton
 class SupabaseBookingsRepository @Inject constructor(
     private val client: SupabaseClient,
+    private val calendarSync: `in`.artistant.app.platform.calendar.CalendarSyncService,
 ) : BookingsRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -109,6 +110,7 @@ class SupabaseBookingsRepository @Inject constructor(
                     // Pre-0072 column missing — booking already landed; drop notes.
                 }
             }
+            calendarSync.ingest(listOf(booking))
             booking
         } catch (t: Throwable) {
             throw BookingRepositoryError.Underlying(t)
@@ -125,6 +127,7 @@ class SupabaseBookingsRepository @Inject constructor(
                 }
                 .decodeList<DbBooking>()
                 .map { it.toDomain() }
+                .also { calendarSync.ingest(it) }
         } catch (t: Throwable) {
             throw BookingRepositoryError.Underlying(t)
         }
@@ -141,6 +144,7 @@ class SupabaseBookingsRepository @Inject constructor(
                 }
                 .decodeList<DbBookingWithClient>()
                 .map { it.toDomain() }
+                .also { calendarSync.ingest(it) }
         } catch (t: Throwable) {
             throw BookingRepositoryError.Underlying(t)
         }
@@ -174,6 +178,7 @@ class SupabaseBookingsRepository @Inject constructor(
                 }
                 .decodeSingle<DbBooking>()
                 .toDomain()
+                .also { calendarSync.ingest(listOf(it)) }
         } catch (t: Throwable) {
             throw BookingRepositoryError.Underlying(t)
         }
@@ -211,6 +216,7 @@ class SupabaseBookingsRepository @Inject constructor(
                 }
                 .decodeSingle<DbBooking>()
                 .toDomain()
+                .also { calendarSync.ingest(listOf(it)) }
         } catch (e: BookingRepositoryError) {
             throw e
         } catch (t: Throwable) {

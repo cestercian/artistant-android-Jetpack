@@ -63,4 +63,5 @@ object ArtistNavRoutes {
     const val PROFILE = "profile"
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"
+    const val MANAGE_AVAILABILITY = "manage_availability"
 }

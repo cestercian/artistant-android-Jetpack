@@ -11,6 +11,7 @@ import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.platform.auth.SessionManager
+import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,8 @@ data class ProfileUiState(
     val pendingExport: ExportResult? = null,
     val showSignOutConfirm: Boolean = false,
     val showDeleteConfirm: Boolean = false,
+    val calendarSyncEnabled: Boolean = false,
+    val calendarHasPermission: Boolean = false,
 ) {
     val displayName: String
         get() = profile?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
@@ -58,12 +61,25 @@ class ProfileViewModel @Inject constructor(
     private val account: AccountRepository,
     private val session: SessionManager,
     private val prefs: AppPreferences,
+    private val calendarSync: CalendarSyncService,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ProfileUiState())
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
 
-    init { refresh() }
+    init {
+        refresh()
+        viewModelScope.launch {
+            calendarSync.ui.collect { cal ->
+                _state.update {
+                    it.copy(
+                        calendarSyncEnabled = cal.enabled,
+                        calendarHasPermission = cal.hasPermission,
+                    )
+                }
+            }
+        }
+    }
 
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }
@@ -90,6 +106,7 @@ class ProfileViewModel @Inject constructor(
 
     fun signOut() = viewModelScope.launch {
         _state.update { it.copy(showSignOutConfirm = false) }
+        calendarSync.clearSessionState()
         runCatching { session.signOut() }
             .onFailure { e ->
                 _state.update { it.copy(actionError = e.message ?: "Sign out failed") }
@@ -104,6 +121,7 @@ class ProfileViewModel @Inject constructor(
         _state.update { it.copy(isDeleting = true, actionError = null) }
         runCatching { account.deleteAccount() }
             .onSuccess {
+                calendarSync.wipeForAccountDelete()
                 _state.update { it.copy(isDeleting = false, showDeleteConfirm = false) }
                 session.signOut()
             }
@@ -134,9 +152,28 @@ class ProfileViewModel @Inject constructor(
 
     fun clearActionFeedback() = _state.update { it.copy(actionMessage = null, actionError = null) }
 
-    fun manageAvailabilityStub() {
+    fun manageAvailabilityMissingNav() {
         _state.update {
-            it.copy(actionMessage = "Availability editor coming soon — manage open dates from your calendar for now.")
+            it.copy(actionMessage = "Open Profile from the artist Home tab to manage availability.")
+        }
+    }
+
+    fun setCalendarSyncEnabled(on: Boolean) = viewModelScope.launch {
+        val ok = calendarSync.setEnabled(on)
+        if (!ok) {
+            _state.update {
+                it.copy(actionMessage = "Calendar permission is required to sync gigs.")
+            }
+        }
+    }
+
+    fun onCalendarPermissionResult(granted: Boolean) = viewModelScope.launch {
+        if (granted) {
+            calendarSync.setEnabled(true)
+        } else {
+            _state.update {
+                it.copy(actionMessage = "Calendar permission denied — enable it in system Settings.")
+            }
         }
     }
 }

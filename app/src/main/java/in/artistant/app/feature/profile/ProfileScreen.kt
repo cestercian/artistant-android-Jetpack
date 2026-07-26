@@ -1,5 +1,8 @@
 package `in`.artistant.app.feature.profile
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,12 +51,12 @@ import `in`.artistant.app.designsystem.theme.AppTheme
  * Signed-in account hub — port of iOS `ProfileView` (M6 slice).
  *
  * Identity header + settings rows: sign out, delete account, data export,
- * privacy/help links, and artist availability stub. Stats carousel and
- * calendar sync are deferred.
+ * privacy/help links, artist availability, and calendar sync toggle.
  */
 @Composable
 fun ProfileScreen(
     onNavigateToPaywall: () -> Unit = {},
+    onManageAvailability: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
@@ -62,6 +66,14 @@ fun ProfileScreen(
     val space = AppTheme.dimens.space
     val size = AppTheme.dimens.size
     val context = LocalContext.current
+
+    val calendarPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val ok = grants[Manifest.permission.READ_CALENDAR] == true &&
+            grants[Manifest.permission.WRITE_CALENDAR] == true
+        viewModel.onCalendarPermissionResult(ok)
+    }
 
     LaunchedEffect(state.pendingExport) {
         val export = state.pendingExport ?: return@LaunchedEffect
@@ -173,9 +185,31 @@ fun ProfileScreen(
                                 HRule()
                             }
                             if (state.role == AppRole.Artist) {
-                                SettingsRow("Manage availability", onClick = viewModel::manageAvailabilityStub)
+                                SettingsRow(
+                                    "Manage availability",
+                                    onClick = {
+                                        onManageAvailability?.invoke()
+                                            ?: viewModel.manageAvailabilityMissingNav()
+                                    },
+                                )
                                 HRule()
                             }
+                            CalendarSyncRow(
+                                enabled = state.calendarSyncEnabled,
+                                onToggle = { on ->
+                                    if (on && !state.calendarHasPermission) {
+                                        calendarPermission.launch(
+                                            arrayOf(
+                                                Manifest.permission.READ_CALENDAR,
+                                                Manifest.permission.WRITE_CALENDAR,
+                                            ),
+                                        )
+                                    } else {
+                                        viewModel.setCalendarSyncEnabled(on)
+                                    }
+                                },
+                            )
+                            HRule()
                             SettingsRow("Notifications") {
                                 context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                                     putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -284,6 +318,32 @@ fun ProfileScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun CalendarSyncRow(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    val space = AppTheme.dimens.space
+    val colors = AppTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = space.md),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Sync gigs to calendar", style = AppTheme.type.callout, color = colors.ink)
+            Text(
+                "Mirrors confirmed bookings onto this device.",
+                style = AppTheme.type.footnote,
+                color = colors.ink3,
+            )
+        }
+        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 

@@ -36,6 +36,7 @@ import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
@@ -123,7 +124,11 @@ fun ArtistTabsScaffold() {
                 ProfileScreen(
                     onBack = { nav.popBackStack() },
                     onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
+                    onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
                 )
+            }
+            composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {
+                ManageAvailabilityScreen(onBack = { nav.popBackStack() })
             }
             composable(ArtistNavRoutes.PAYWALL) {
                 PaywallScreen(

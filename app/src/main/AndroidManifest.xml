@@ -5,6 +5,9 @@
     <!-- Push notifications (API 33+ runtime permission; requested at the notif step / before
          push registration). Pre-33 devices grant it at install. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- CalendarContract mirror of confirmed gigs (Profile → Sync gigs to calendar). -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <application
         android:name=".ArtistantApplication"
