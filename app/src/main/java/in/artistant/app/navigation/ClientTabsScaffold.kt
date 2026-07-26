@@ -38,7 +38,9 @@ import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.messages.MessagesViewModel
 import `in`.artistant.app.feature.search.SearchScreen
-import `in`.artistant.app.ui.Placeholder
+import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.paywall.PaywallScreen
 
 // Client bottom nav: Discover · Bookings · Messages · Profile · Search.
 private enum class ClientTab(val route: String, val label: String, val icon: ImageVector) {
@@ -98,7 +100,15 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Messages.route) {
                 MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
             }
-            composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
+            composable(ClientTab.Profile.route) {
+                ProfileScreen(onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) })
+            }
+            composable(ClientNavRoutes.PAYWALL) {
+                PaywallScreen(
+                    role = AppRole.Client,
+                    onClose = { nav.popBackStack() },
+                )
+            }
             composable(ClientTab.Search.route) {
                 SearchScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
             }

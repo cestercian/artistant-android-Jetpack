@@ -40,6 +40,7 @@ object ClientNavRoutes {
     fun confirmed(bookingId: String) = "confirmed/$bookingId"
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
+    const val PAYWALL = "paywall"
 }
 
 /** Artist-side pushed routes. */
@@ -47,6 +48,7 @@ sealed interface ArtistRoute {
     @Serializable data class GigRequest(val id: String) : ArtistRoute
     @Serializable data class BookingDetail(val bookingId: String) : ArtistRoute
     @Serializable data object ScoreExplainer : ArtistRoute
+    @Serializable data object Wizard : ArtistRoute
 }
 
 /** String routes for the artist NavHost (mirrors [ArtistRoute] until typed nav lands). */
@@ -56,4 +58,7 @@ object ArtistNavRoutes {
 
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun gigRequest(requestId: String) = "gig_request/$requestId"
+    const val PROFILE = "profile"
+    const val PAYWALL = "paywall"
+    const val WIZARD = "wizard"
 }

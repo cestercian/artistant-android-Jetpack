@@ -15,6 +15,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
@@ -29,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -39,6 +44,8 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 @Composable
 fun ArtistHomeScreen(
     onBookingClick: (bookingId: String) -> Unit,
+    onProfileClick: () -> Unit = {},
+    onOpenWizard: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ArtistHomeViewModel = hiltViewModel(),
 ) {
@@ -72,12 +79,18 @@ fun ArtistHomeScreen(
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    Text(
-                        "Home",
-                        style = AppTheme.type.displaySub,
-                        color = colors.ink,
-                        modifier = Modifier.padding(space.lg),
-                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = space.lg, vertical = space.lg),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Home", style = AppTheme.type.displaySub, color = colors.ink)
+                        IconButton(onClick = onProfileClick) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Profile & settings", tint = colors.ink2)
+                        }
+                    }
                     state.error?.let { msg ->
                         Text(
                             msg,
@@ -86,6 +99,22 @@ fun ArtistHomeScreen(
                             modifier = Modifier.padding(horizontal = space.lg),
                         )
                         Spacer(Modifier.height(space.md))
+                    }
+                    if (state.showFinishProfileCta) {
+                        Column(Modifier.padding(horizontal = space.lg)) {
+                            Text(
+                                "Finish your profile so clients can find you.",
+                                style = AppTheme.type.footnote,
+                                color = colors.warm,
+                            )
+                            Spacer(Modifier.height(space.sm))
+                            PrimaryButton(
+                                text = "Finish your profile",
+                                onClick = onOpenWizard,
+                                fullWidth = true,
+                            )
+                        }
+                        Spacer(Modifier.height(space.lg))
                     }
                     if (state.pendingRequests.isNotEmpty()) {
                         NewRequestsSection(

@@ -6,12 +6,14 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import `in`.artistant.app.data.payments.MockPaymentsService
 import `in`.artistant.app.data.payments.PaymentsService
+import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.data.repository.SearchRepository
+import `in`.artistant.app.data.repository.SupabaseAccountRepository
 import `in`.artistant.app.data.repository.SupabaseArtistsRepository
 import `in`.artistant.app.data.repository.SupabaseBookingsRepository
 import `in`.artistant.app.data.repository.SupabaseMessagesRepository
@@ -28,6 +30,9 @@ import `in`.artistant.app.data.repository.UsersRepository
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
+    @Binds
+    abstract fun bindAccount(impl: SupabaseAccountRepository): AccountRepository
+
     @Binds
     abstract fun bindUsers(impl: SupabaseUsersRepository): UsersRepository
 

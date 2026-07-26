@@ -28,7 +28,12 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
+import `in`.artistant.app.feature.epk.EpkScreen
+import `in`.artistant.app.feature.wizard.WizardScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
+import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -78,6 +83,8 @@ fun ArtistTabsScaffold() {
             composable(ArtistTab.Home.route) {
                 ArtistHomeScreen(
                     onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                    onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
                 )
             }
             composable(ArtistTab.Gigs.route) {
@@ -85,8 +92,25 @@ fun ArtistTabsScaffold() {
                     onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
                 )
             }
+            composable(ArtistNavRoutes.PROFILE) {
+                ProfileScreen(
+                    onBack = { nav.popBackStack() },
+                    onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
+                )
+            }
+            composable(ArtistNavRoutes.PAYWALL) {
+                PaywallScreen(
+                    role = AppRole.Artist,
+                    onClose = { nav.popBackStack() },
+                )
+            }
             composable(ArtistTab.Messages.route) { Placeholder(ArtistTab.Messages.label) }
-            composable(ArtistTab.Epk.route) { Placeholder(ArtistTab.Epk.label) }
+            composable(ArtistTab.Epk.route) {
+                EpkScreen(onEditInWizard = { nav.navigate(ArtistNavRoutes.WIZARD) })
+            }
+            composable(ArtistNavRoutes.WIZARD) {
+                WizardScreen(onFinished = { nav.popBackStack() })
+            }
             composable(
                 route = ArtistNavRoutes.BOOKING_DETAIL,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
