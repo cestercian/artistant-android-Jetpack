@@ -142,21 +142,24 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0 + **M1 (auth & onboarding) complete** — merged, green,
-adversarially reviewed. Stack (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle
-8.13, Kotlin 2.1.0, Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1.
-Shipped: full design system, DI + supabase client (tier guard) + DataStore, nav
-shell + real auth gate (session + returning-login router), SessionManager (Google/
-Apple/email), UsersRepository (users slice), and the 8-screen signup/login flow.
-**61 unit tests, 0 failures** (`assembleDebug` + `testDebugUnitTest` green). Dev
-Supabase creds wired (gitignored). **M2 (Browse) next** — data layer (models +
-repositories + Fake twins) then Discover/Search/Artist-profile.
+**Current state:** M0–M1 merged; **M2–M7 substantially landed on
+`feature/m2-browse`** (PR open → `main`). Product truth aligned with Jul-2026 iOS:
+redaction retired, booking = request→accept (`pending_confirm` / “Request sent.”),
+Airbnb chat trust. Shipped on the branch: Discover/Search/Artist profile; Bookings
++ Requests repos; client Booking→Checkout→Confirmed + Bookings tab; artist Home
+New requests / Gigs / GigRequest detail Accept/Decline; Messages inbox + Chat
+(verbatim, system rows, trust banner — Realtime/FCM deferred); Wizard scaffold +
+EPK shell; Profile (sign-out / delete-account / data-export); inert Paywall behind
+`subscriptionsEnabled=false`. **~81 unit tests, 0 failures** (`assembleDebug` +
+`testDebugUnitTest` green). Stack unchanged (AGP 8.9.1 / Kotlin 2.1.0 / Hilt 2.54 /
+supabase-kt 3.0.3).
 
-Open tracked issues: #12 (Apple-OAuth deep-link error handling — blocks Apple
-go-live), #15 (signup design-token polish + brand assets). Operator: no emulator
-here (compile + unit-test only); Google needs `GOOGLE_WEB_CLIENT_ID` + SHA-1;
-Supabase dashboard needs the Android redirect + Apple provider; drop brand `.ttf`
-into `res/font/`; real launcher icon. Backend unchanged (shared with iOS).
+**Still missing / deferred:** live Realtime chat subscribe, FCM token register +
+deep links, CameraX wizard media + packages/samples table writes, ManageAvailability
+editor, CalendarSync, Search filter sheet/histogram, Score explainer sheets,
+ThreadDetails/report, Play Billing live path, M8 hardening. Operator: no emulator
+here; Google `GOOGLE_WEB_CLIENT_ID` + SHA-1; Apple OAuth (#12); brand `.ttf` (#15);
+backend unchanged (shared with iOS).
 
 ---
 
