@@ -79,29 +79,29 @@ moat.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | missing | |
-| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/IdentityStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/LocationStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/PricingStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/TechStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/AvailabilityStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/CoverStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/SocialsStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/BioStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/SamplesStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/PreviewStep.kt` | missing | |
-| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/DoneStep.kt` | missing | |
-| `Screens/EPKView.swift` | `feature/epk/EPKScreen.kt` | missing | |
+| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | partial | M5 scaffold — inline steps, no CameraX |
+| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardScreen.kt` (Identity) | partial | Inline form in host |
+| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardScreen.kt` (Location) | partial | |
+| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardScreen.kt` (Pricing) | partial | packages table write deferred |
+| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | partial | tech_rider write deferred |
+| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | partial | |
+| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | partial | CameraX placeholder + gradient |
+| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardScreen.kt` (Socials) | partial | |
+| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardScreen.kt` (Bio) | partial | |
+| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | partial | SAF/upload placeholder |
+| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | partial | |
+| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | partial | |
+| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | partial | Read-only shell + Edit in wizard CTA |
 
 ## Screens — Profile / Settings / Paywall (M6/M7)
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | missing | |
-| `Screens/Settings/DataExportView.swift` | `feature/settings/DataExportScreen.kt` | missing | |
-| `Screens/Settings/ManageAvailabilityView.swift` | `feature/settings/ManageAvailabilityScreen.kt` | missing | |
+| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | partial | Identity + settings rows; stats/saved/calendar sync deferred |
+| `Screens/Settings/DataExportView.swift` | `feature/profile/ProfileScreen.kt` (export row) | partial | Inline JSON share + signed URL open; no dedicated sheet |
+| `Screens/Settings/ManageAvailabilityView.swift` | `feature/profile/ProfileScreen.kt` (stub) | partial | Placeholder toast only |
 | `Screens/Settings/ScoreHistorySheet.swift` | `feature/settings/ScoreHistorySheet.kt` | missing | |
-| `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | missing | Inert behind flag |
+| `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | partial | Inert behind `subscriptionsEnabled=false` |
 
 ## Navigation / shells
 
@@ -147,9 +147,9 @@ moat.
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
 | `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | M4 repository-backed inbox/chat; no persistent store or Realtime yet |
-| `State/EPKStore.swift` | `EPKViewModel` | missing | M5 |
-| `State/ArtistOnboardingStore.swift` | `WizardViewModel` | missing | M5 |
-| `State/EntitlementStore.swift` | `EntitlementViewModel` | missing | M7 inert |
+| `State/EPKStore.swift` | `EpkViewModel` | partial | M5 scaffold — fetch-only shell |
+| `State/ArtistOnboardingStore.swift` | `WizardViewModel` | partial | M5 scaffold — no persistence/media |
+| `State/EntitlementStore.swift` | `feature/paywall/EntitlementStore.kt` | partial | M7 inert — always not-subscribed when flag off |
 | `State/TabRouter.swift` | deep-link pending in Root / nav | missing | M4 |
 | `State/Persistence.swift` | `AppPreferences` (DataStore) | done | M0 |
 | `State/WizardMediaCache.swift` | `WizardMediaCache` | missing | M5 |
@@ -161,9 +161,9 @@ moat.
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
 | `Services/SupabaseClient.swift` | `SupabaseClientFactory` + `SupabaseModule` | done | M0; tier guard |
-| `Services/AppEnvironment.swift` | `core/config/AppEnvironment.kt` | done | M0 |
+| `Services/AppEnvironment.swift` | `core/config/AppEnvironment.kt` | partial | M0 + subscriptionsEnabled/legal URLs (flag default off) |
 | `Services/AuthService.swift` | `platform/auth/SessionManager.kt` | done | M1 |
-| `Services/AccountService.swift` | (delete / anonymize) | missing | M6 |
+| `Services/AccountService.swift` | `data/repository/AccountRepository.kt` + Fake | done | M6 — delete-account + data-export EFs |
 | `Services/PushService.swift` | FCM service | missing | M4 + backend FCM path |
 | `Services/CalendarSyncService.swift` | CalendarContract mirror | missing | M6 |
 | `Services/PermissionsService.swift` | `NotificationPermission` etc. | partial | Notif permission UI M1 |

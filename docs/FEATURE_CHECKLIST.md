@@ -207,28 +207,23 @@ socials/bio) can be built before F8 lands.*
 
 ## F15 — Profile, settings, DPDP, calendar sync
 
-- [ ] **ProfileScreen** — header, stats, saved carousel, settings rows. **M.**
-- [ ] **Sign out** — `signOut` + wipe prefs + reset all stores + role→client. **S.**
-  Risk: the store-reset leakage invariant (a new account must see zero prior data)
-  — the iOS unit tests exist specifically for this; replicate.
-- [ ] **DataExportScreen** — `data-export` → temp JSON → Android share sheet. **S.**
-- [ ] **Delete account** — "DELETE" confirm → `delete-account` → wipe + welcome. **S.**
+- [x] **ProfileScreen** — identity header + settings rows (sign out, delete, export, privacy/help). **M.** Stats/saved carousel deferred.
+- [x] **Sign out** — `SessionManager.signOut` + prefs wipe; RootViewModel routes to auth. **S.**
+- [x] **Data export** — `data-export` EF → share sheet (inline) or browser (signed URL). **S.**
+- [x] **Delete account** — confirm dialog → `delete-account` EF → signOut on success. **S.**
 - [ ] **CalendarSyncService** — CalendarContract mirror (create/update/delete
   events + reminders), `event.url` marker, pure **SyncPlanner** (desired-vs-persisted
   diff), clash/busy reads. **L.** Risk: **big EventKit→Provider port**;
   `READ/WRITE_CALENDAR` perms; can't create a calendar under a Google account (offer
   existing ones, like iOS). → `AddToCalendar` intent (permission-free path).
+- [ ] **ManageAvailabilityScreen** — full open-date editor. **M.** Stub row on Profile only.
 
 ---
 
 ## F16 — Payments / subscriptions  *(DORMANT in v1 — build the seam only)*
 
-- [ ] **Play Billing seam** — `SubscriptionService` interface + mock impl (mirrors
-  iOS dormant StoreKit seam); `EntitlementStore` (obfuscatedAccountId binding,
-  entitlement mirror). **M.** Deps: `subscriptionsEnabled=false`. Risk: none while
-  dormant.
-- [ ] **PaywallScreen** — role-aware pitch, price card, subscribe/restore. **M.**
-  Inert until flag flipped.
+- [x] **Play Billing seam** — `EntitlementStore` stub (always not-subscribed when flag off). **M.**
+- [x] **PaywallScreen** — role-aware pitch, price card, subscribe/restore (inert). **M.**
 - [ ] **Google Play RTDN backend** — deferred to IAP go-live (see API_MAPPING §7).
 
 ---
