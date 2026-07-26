@@ -142,23 +142,18 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0–M1 merged; **M2–M7 substantially landed on
-`feature/m2-browse`** (PR #44 → `main`). Product truth aligned with Jul-2026 iOS:
-redaction retired, booking = request→accept (`pending_confirm` / “Request sent.”),
-Airbnb chat trust. Shipped on the branch: Discover/Search (+ filter sheet +
-histogram)/Artist profile (saved heart + score breakdown); Bookings + Requests;
-client Booking→Checkout→Confirmed; artist Home New requests / Gigs / Accept;
-Messages Realtime + ThreadDetails/report; FCM claim + TabRouter deep links;
-Wizard publish (packages/tech RPCs + gallery/SAF UploadQueue); EPK edit;
-ManageAvailability; CalendarContract sync; Score explainer; Profile + inert
-Paywall. **Unit tests green** (`assembleDebug` + `testDebugUnitTest`). Stack
-unchanged (AGP 8.9.1 / Kotlin 2.1.0 / Hilt 2.54 / supabase-kt 3.0.3).
+**Current state:** M0–M1 merged; **M2–M7 + polish wave on `feature/m2-browse`**
+(PR #44 → `main`). Product truth aligned with Jul-2026 iOS: redaction retired,
+booking = request→accept, Airbnb chat trust. Latest polish: ScoreRing/Sparkline/
+ScoreHistorySheet; UploadQueue JSON snapshot + WorkManager drain; wizard camera
+TakePicture + Media3 VideoTrimmer; EPK photo grid + `reorder_artist_media`;
+calendar clash/busy + calendar picker; Play Billing Client (flag-gated).
+**Unit tests green** (`assembleDevDebug` + `testDevDebugUnitTest`).
 
-**Still missing / deferred:** CameraX + VideoTrimmer, UploadQueue→WorkManager
-persistence, media reorder/photo grid on EPK, calendar clash/busy reads + picker,
-ScoreRing/Sparkline polish, Play Billing live path, M8 hardening. Operator: no
-emulator here; Google `GOOGLE_WEB_CLIENT_ID` + SHA-1 + `google-services.json`;
-Apple OAuth (#12); brand `.ttf` (#15); backend `send-push` FCM path.
+**Still operator / follow-ups:** CameraX live preview (still capture works),
+ExoPlayer AutoplayVideo/SamplePlayer, brand `.ttf`, `google-services.json` +
+backend `send-push` FCM path, Google/Apple OAuth dashboard (#12/#15), flip
+`subscriptionsEnabled` for live Play Billing, M8 instrumented UI / Play upload.
 
 ---
 

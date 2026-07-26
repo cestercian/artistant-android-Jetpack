@@ -1,7 +1,7 @@
 package `in`.artistant.app.feature.paywall
 
 import `in`.artistant.app.core.config.AppEnvironment
-import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.platform.billing.PlayBillingService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,12 +10,12 @@ import javax.inject.Singleton
 
 /**
  * Optimistic subscription mirror — port of iOS `EntitlementStore`.
- *
- * INERT when [AppEnvironment.subscriptionsEnabled] is false: no Play Billing
- * work, always reports not-subscribed. Real billing lands in M7 go-live.
+ * Queries Play Billing when [AppEnvironment.subscriptionsEnabled]; otherwise inert.
  */
 @Singleton
-class EntitlementStore @Inject constructor() {
+class EntitlementStore @Inject constructor(
+    private val billing: PlayBillingService,
+) {
     private val _isEntitled = MutableStateFlow(false)
     val isEntitled: StateFlow<Boolean> = _isEntitled.asStateFlow()
 
@@ -24,9 +24,12 @@ class EntitlementStore @Inject constructor() {
     fun isEntitled(productId: String): Boolean =
         subscriptionsActive && _isEntitled.value
 
-    /** No-op stub until Play Billing is wired. */
     suspend fun refresh() {
-        if (!subscriptionsActive) _isEntitled.value = false
+        if (!subscriptionsActive) {
+            _isEntitled.value = false
+            return
+        }
+        _isEntitled.value = runCatching { billing.hasActiveSubscription() }.getOrDefault(false)
     }
 }
 

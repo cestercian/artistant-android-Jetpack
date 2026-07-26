@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -34,12 +35,13 @@ import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 
 /**
  * ₹99/mo subscription paywall — port of iOS `PaywallView`.
- *
- * Compiles and renders for parity; purchase/restore are no-ops until
- * [AppEnvironment.subscriptionsEnabled] is flipped at go-live.
+ * Purchase/restore call Play Billing when [AppEnvironment.subscriptionsEnabled].
  */
 @Composable
 fun PaywallScreen(
@@ -53,6 +55,7 @@ fun PaywallScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     val isArtist = state.isArtist
 
     LaunchedEffect(role) { viewModel.bindRole(role) }
@@ -184,7 +187,7 @@ fun PaywallScreen(
             }
             PrimaryButton(
                 text = if (state.productPrice != null) "Subscribe · ${state.productPrice}/month" else "Subscribe",
-                onClick = { viewModel.subscribe(onComplete) },
+                onClick = { viewModel.subscribe(context.findActivity(), onComplete) },
                 fullWidth = true,
                 enabled = !state.working && AppEnvironment.subscriptionsEnabled,
             )
@@ -197,4 +200,10 @@ fun PaywallScreen(
             }
         }
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

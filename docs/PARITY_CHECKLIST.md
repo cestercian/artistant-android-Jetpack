@@ -87,13 +87,18 @@ thread report). PR #44.
 | `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardScreen.kt` (Pricing) | done | `replace_packages` on publish |
 | `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | done | `replace_tech_rider` on publish |
 | `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | done | |
-| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | partial | Gallery pick + gradient; CameraX deferred |
+| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | done | Gallery + TakePicture camera + gradient |
+| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder |
+| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistorySheet.kt` | done | Sparkline + delta sheet from explainer |
+| `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
+| `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
+| `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
 | `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardScreen.kt` (Socials) | done | |
 | `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardScreen.kt` (Bio) | done | |
 | `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | done | SAF + UploadQueue after go-live |
 | `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | done | |
 | `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | done | |
-| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples edit + wizard CTA |
+| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder + wizard CTA |
 
 ## Screens — Profile / Settings / Paywall (M6/M7)
 
@@ -102,8 +107,8 @@ thread report). PR #44.
 | `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | partial | Identity + settings + calendar sync toggle; stats carousel deferred |
 | `Screens/Settings/DataExportView.swift` | `feature/profile/ProfileScreen.kt` (export row) | partial | Inline JSON share + signed URL open; no dedicated sheet |
 | `Screens/Settings/ManageAvailabilityView.swift` | `feature/availability/ManageAvailabilityScreen.kt` | done | Days/times chips + seed-failure Save guard |
-| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreExplainerScreen.kt` (history) | partial | Compact history list on explainer; dedicated sheet deferred |
-| `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | partial | Inert behind `subscriptionsEnabled=false` |
+| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistorySheet.kt` | done | Sparkline + delta sheet from explainer |
+| `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
 
 ## Navigation / shells
 
@@ -169,9 +174,9 @@ thread report). PR #44.
 | `Services/PushService.swift` | `platform/push/PushService.kt` + MessagingService | partial | claim_device_token FCM register + payload→TabRouter; needs operator google-services.json + send-push FCM |
 | `Services/CalendarSyncService.swift` | `platform/calendar/CalendarSyncService.kt` | done | CalendarContract mirror + planner |
 | `Services/PermissionsService.swift` | `NotificationPermission` etc. | partial | Notif permission UI M1; calendar runtime grant |
-| `Services/UploadQueue.swift` | `platform/media/UploadQueue.kt` | partial | Serial coroutine queue + retry; WorkManager persistence deferred |
-| `Services/VideoTrimmer.swift` | Media3 Transformer | missing | M5 — gallery pick skips trim for now |
-| `Services/Payments/*` | Play Billing seam | missing | M7 dormant |
+| `Services/UploadQueue.swift` | `platform/media/UploadQueue.kt` | done | JSON snapshot + WorkManager drain + resumeAfterLaunch |
+| `Services/VideoTrimmer.swift` | `platform/media/VideoTrimmer.kt` | done | Media3 Transformer ≤10s + copy fallback |
+| `Services/Payments/*` | `platform/billing/PlayBillingService.kt` | done | Wired; inert until subscriptionsEnabled |
 | `Services/Observability/*` | `Analytics` / `Crash` | partial | Dark-until-key stubs M0 |
 
 ---

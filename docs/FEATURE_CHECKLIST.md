@@ -127,19 +127,18 @@ socials/bio) can be built before F8 lands.*
   quota gate → Paywall deferred. **M.** → F16 (billing seam, dormant).
 - [x] **ConfirmedScreen** — celebration + actions (view booking / discover). **S.**
 - [x] **RequestQuoteScreen** — custom quote → `RequestsRepository.create`. **S.**
-- [ ] **GigRequestDetailScreen** (ARTIST) — accept/decline/counter, clash card. **M.**
+- [x] **GigRequestDetailScreen** (ARTIST) — accept/decline/counter, clash card. **M.**
   → CalendarSync clash read.
 - [x] **Booking math** (`BookingMath.kt`) — 5%/18% (pure, unit-tested). **S.**
 
 ## F8 — Media pipeline  *(cross-cutting; unblocks wizard + EPK)*
 
-- [x] **Photo Picker** (gallery `GetContent`) — CameraX still deferred. **M.**
+- [x] **Photo Picker** (gallery `GetContent`) + camera `TakePicture` via FileProvider. **M.**
 - [x] **SAF audio picker** (`OpenDocument`). **S.**
-- [ ] **VideoTrimmer** (Media3 Transformer, ≤10s, first-frame). **L.** Risk:
-  transcode reliability across devices/codecs — the single biggest media risk.
+- [x] **VideoTrimmer** (Media3 Transformer, ≤10s; copy fallback). **L.**
 - [x] **WizardMediaCache** (cacheDir staging, JPEG normalize on upload). **M.**
-- [x] **UploadQueue** — serial coroutine drain + retry (WorkManager persistence deferred). **M.**
-- [x] **ArtistMedia/Samples repos** — storage upload + insert + rollback + retry. **M.**
+- [x] **UploadQueue** — serial drain + retry + JSON snapshot + WorkManager kick. **M.**
+- [x] **ArtistMedia/Samples repos** — storage upload + insert + rollback + reorder RPC. **M.**
 - [ ] **AutoplayVideo (ExoPlayer)**, **SamplePlayer (ExoPlayer)**, **SpotifyEmbed
   (WebView)**, **MediaContainer**. **M** total.
 
@@ -192,8 +191,8 @@ socials/bio) can be built before F8 lands.*
 - [x] **ScoreExplainerScreen** — hero ring, tiers, weighted metric bars. **M.**
 - [x] **ScoreBreakdownSheet** (CLIENT, on ArtistProfile) — metrics + reply-speed
   inversion. **S.**
-- [ ] **ScoreHistorySheet** — `Sparkline` + delta. **partial:** compact list on explainer.
-- [ ] **ScoreRing + Sparkline** components. **M.** → Canvas.
+- [x] **ScoreHistorySheet** — `Sparkline` + delta. **S.**
+- [x] **ScoreRing + Sparkline** components. **M.** → Canvas.
 - [x] **ScoreBands** (`ScoreBands.kt`) — tier bands + <5-gig rule (pure, tested). **S.**
 
 ## F14 — Reviews  *(CLIENT write)*
@@ -209,16 +208,15 @@ socials/bio) can be built before F8 lands.*
 - [x] **Sign out** — `SessionManager.signOut` + prefs wipe; RootViewModel routes to auth. **S.**
 - [x] **Data export** — `data-export` EF → share sheet (inline) or browser (signed URL). **S.**
 - [x] **Delete account** — confirm dialog → `delete-account` EF → calendar wipe + signOut. **S.**
-- [x] **CalendarSyncService** — CalendarContract mirror + pure SyncPlanner + owner gate.
-  **partial:** clash/busy reads + calendar picker deferred.
+- [x] **CalendarSyncService** — CalendarContract mirror + SyncPlanner + clash/busy + calendar picker. **M.**
 - [x] **ManageAvailabilityScreen** — full open-date editor. **M.**
 
 ---
 
 ## F16 — Payments / subscriptions  *(DORMANT in v1 — build the seam only)*
 
-- [x] **Play Billing seam** — `EntitlementStore` stub (always not-subscribed when flag off). **M.**
-- [x] **PaywallScreen** — role-aware pitch, price card, subscribe/restore (inert). **M.**
+- [x] **Play Billing seam** — `PlayBillingService` + `EntitlementStore` (flag-gated). **M.**
+- [x] **PaywallScreen** — role-aware pitch, price card, subscribe/restore (wired; inert when flag off). **M.**
 - [ ] **Google Play RTDN backend** — deferred to IAP go-live (see API_MAPPING §7).
 
 ---
