@@ -101,13 +101,12 @@ analysis with recommended Android improvements.
   Treat the client as untrusted (it is): every guarded write (`score`, `escrow`,
   terminal booking status, `deleted_at`) is server-rejected. Surface those errors;
   never assume a write succeeded.
-- **`messages.body_raw` lockdown.** Un-redacted contact PII is column-revoked;
-  `select("*")` 403s. Use explicit column lists everywhere (enforced by the API,
-  but bake it into the repo from day 1). This is the **anti-leakage moat** — chat
-  contact info stays redacted until a booking is confirmed for the exact
-  (client,artist) pair.
-- **Client-side redaction** mirrors the DB trigger regexes for display safety —
-  keep the two in sync (shared pure module, tested against the same fixtures).
+- **`messages` column discipline.** Never `select("*")` on messages. Prefer
+  explicit columns (`body` is **verbatim** post-mig `0071`). Historical
+  `body_raw` lockdown still teaches the habit — bake explicit selects into the
+  repo from day 1.
+- **Chat trust is Airbnb-style**, not client redaction. Safety banner + report;
+  do not rebuild `Redaction.kt` (scrapped Jul 2026).
 - **Secrets.** The Supabase **anon key is publishable** (safe in `BuildConfig`),
   but keep it out of VCS via `local.properties`/CI. **Never** ship a service-role
   key. Edge-function shared secrets + APNs/FCM keys live server-side only.
@@ -180,7 +179,7 @@ simplifications with a named upgrade path.
 - **D8 WorkManager for uploads** (replaces the hand-rolled queue). *`ponytail:`*
   deletes ~300 lines of manual persistence/retry; port only the policy.
 - **D9 Thin domain layer** — pure logic only where iOS itself isolated it
-  (booking math, score bands, redaction, calendar planner, returning-login route).
+  (booking math, score bands, calendar planner, returning-login route).
   No use-case-per-action ceremony.
 - **D10 Payments dormant in v1** — Play Billing is a built-but-inert seam behind a
   flag, mirroring the iOS StoreKit seam. No payment code path runs.
@@ -216,10 +215,9 @@ Documented per the brief. These are observations from the analysis, not blockers
 - **I5 — Client/artist tab APIs diverge** (iOS-26 `Tab` vs legacy `.tabItem`),
   purely historical. **Android improvement:** both role graphs use the same
   `NavigationBar` pattern.
-- **I6 — Client + server redaction duplicated.** Defense-in-depth, but a drift risk
-  if regexes change on one side. **Android improvement:** keep the client copy in a
-  single pure `Redaction.kt`, unit-tested against the same fixtures as the DB
-  triggers; note the coupling so a backend regex change updates both.
+- **I6 — Chat redaction retired (Jul 2026).** iOS deleted client masking and
+  applied mig `0071` (server trigger gone). **Android:** do **not** port
+  `Redaction.kt`; build Airbnb-style trust UI (banner + report) in M4 instead.
 - **I7 — Denormalized names as an RLS workaround.** `threads.client_name` /
   `reviews.client_name` exist because `users` is self-read-only. This is a sound
   trade; **Android just needs to read the denormalized columns** (never attempt a

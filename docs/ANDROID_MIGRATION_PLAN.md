@@ -13,8 +13,9 @@ companion documents linked below.
 ("Zomato/UrbanCompany for live artists"). Both sides — clients booking artists,
 artists managing bookings — live in one app, gated by a role pick at signup. v1 is
 a **no-payments matchmaker**: match, negotiate in chat, confirm. Hero feature is
-the **Bookability Score™** (0–100). Moat: **anti-leakage chat redaction** (contact
-info stripped until a booking is confirmed). Dark-only, phone-only, India, INR.
+the **Bookability Score™** (0–100). Trust: **Airbnb-style** (safety banner +
+“always communicate through Artistant” + report) — chat redaction was scrapped
+Jul 2026. Booking = **request → accept**. Dark-only, phone-only, India, INR.
 
 The iOS app is **145 Swift files**: 45 screens, 27 reusable components, 12 state
 stores, 14 repositories, 18 services, over a Supabase backend of **~24 tables, 16
@@ -35,7 +36,7 @@ demoable at ~6–7 weeks with a 2–3 dev team.
 
 **In scope (feature parity):** auth (Google/Apple/email) · client onboarding ·
 artist onboarding wizard · Discover · Search + filters · Artist profile · booking
-funnel · gig requests · bookings + calendar · realtime chat with redaction · push ·
+funnel (request→accept) · gig requests · bookings + calendar · realtime chat · push ·
 artist dashboard · EPK editor · Bookability Score · reviews · profile/settings ·
 data export + account deletion (DPDP) · device calendar sync · media
 (camera/photo/audio/video-trim/playback) · observability · payments **seam**
@@ -96,7 +97,7 @@ Supabase):
 Compose UI  ──observes──▶  ViewModel (StateFlow<UiState> + event Channel)
                                 │ calls
                      (thin) Domain — pure logic: booking math, score bands,
-                                │        redaction, calendar planner
+                                │        calendar planner
                      Repository interface ──▶ Supabase* impl  (+ Fake* for tests)
                                 │ calls
               Platform services: Auth, Push(FCM), Calendar, Upload(WorkManager),
@@ -149,7 +150,7 @@ denormalized `client_name` (never embed `users`) · honor booking guards
 | **M1** Auth & onboarding | sign in (3 ways), role routing | real-device sign-in; returning user routes in |
 | **M2** Browse ("home feed") | Discover + Search + Artist profile | browse real artists, open a full profile |
 | **M3** Booking funnel | book end-to-end + calendar + reviews | booking respects guards, shows on calendar |
-| **M4** Messaging & push | realtime chat + redaction + FCM | two accounts chat live; push deep-links |
+| **M4** Messaging & push | realtime chat + FCM (no redaction) | two accounts chat live; push deep-links |
 | **M5** Artist authoring | wizard + dashboard + EPK + gig requests | new artist goes live, handles a request |
 | **M6** Platform & DPDP | settings + export/delete + calendar sync + observability | export/delete work; gigs mirror to calendar |
 | **M7** Payments seam & polish | dormant billing + glass approx + a11y | paywall renders inert; a11y passes |
@@ -178,7 +179,9 @@ Console app + Play App Signing; (later) Play billing products + RTDN.
 
 - Every item in [FEATURE_CHECKLIST.md](FEATURE_CHECKLIST.md) ticked (iOS parity).
 - Sign-in (Google/Apple/email) works on real devices; DPDP export + delete work.
-- Realtime chat with redaction; push deep-links; calendar sync mirrors gigs.
+- Realtime chat (verbatim bodies, system rows, read receipts) + Airbnb-style
+  trust UI; push deep-links; calendar sync mirrors gigs.
+- Booking = request→accept (`pending_confirm`); artist Accept/Decline.
 - Backend reused with only the FCM addition live on prod; no schema regressions.
 - Unit + Compose-UI test suites green (the XCUITest-parity net); a11y audit passes;
   cold-start + scroll perf acceptable (baseline profile in place).
@@ -194,7 +197,7 @@ Console app + Play App Signing; (later) Play billing products + RTDN.
   one signal per screen.** The UI direction is locked; don't drift.
 - **Repository seam is the boundary** — ViewModels never touch supabase-kt directly.
 - **Surface backend guard errors truthfully** — never swallow a rejected write.
-- **Keep the client redaction regexes in sync** with the DB triggers (shared pure
-  module, same test fixtures).
+- **Chat trust is Airbnb-style** — safety banner + report; do **not** rebuild
+  client redaction (scrapped Jul 2026, mig `0071`).
 - **Commit small, keep it buildable** — the Debug build compiling is the green-tree
   gate (mirrors the iOS simulator-Debug rule).

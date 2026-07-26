@@ -11,47 +11,49 @@ Legend for dependencies: → means "needs". "Foundation" = the M0 items below.
 
 ---
 
-## F0 — Foundation & scaffolding  *(blocks everything)*
+## F0 — Foundation & scaffolding  *(blocks everything)* ✅ done (M0)
 
-- [ ] **Gradle project + version catalog** — `:app`, KTS, `libs.versions.toml`,
+- [x] **Gradle project + version catalog** — `:app`, KTS, `libs.versions.toml`,
   Compose plugin, KSP. **S.** Deps: none. Risk: low.
-- [ ] **Product flavors + BuildConfig** — dev/staging/prod, `SUPABASE_URL`/`ANON_KEY`
+- [x] **Product flavors + BuildConfig** — dev/staging/prod, `SUPABASE_URL`/`ANON_KEY`
   from `local.properties`/CI, flags (`REALTIME_ENABLED`, `SUBSCRIPTIONS_ENABLED`),
   product ids. **S.** Risk: secret handling — never commit keys.
-- [ ] **Hilt setup** — `@HiltAndroidApp`, `SupabaseModule`, `DispatcherModule`,
+- [x] **Hilt setup** — `@HiltAndroidApp`, `SupabaseModule`, `DispatcherModule`,
   `RepositoryModule` (empty binds to fill in). **S.** Deps: Gradle.
-- [ ] **supabase-kt client** — `createSupabaseClient` + installs; **tier guard**
+- [x] **supabase-kt client** — `createSupabaseClient` + installs; **tier guard**
   (prod host assertion). **M.** Risk: version/API drift vs supabase-swift.
-- [ ] **AppEnvironment** — `object` reading BuildConfig (port). **S.**
-- [ ] **Design system** — `ArtistantTheme`, `AppColors` (role-reactive),
+- [x] **AppEnvironment** — `object` reading BuildConfig (port). **S.**
+- [x] **Design system** — `ArtistantTheme`, `AppColors` (role-reactive),
   `AppType` (3 `FontFamily`s + ramp), `Dimens`, INR util, `PiiScrub`. **L.**
   Deps: fonts dropped in `res/font/`. Risk: role-accent switching; font metrics.
-- [ ] **Navigation shell** — `NavHost`, typed routes, `ArtistantRoot` auth-gate,
+- [x] **Navigation shell** — `NavHost`, typed routes, `ArtistantRoot` auth-gate,
   Client/Artist tab scaffolds, `DeepLinkRouter`. **M.** Deps: theme.
-- [ ] **Core components (subset needed early)** — `PrimaryButton`, `Pill`,
+- [x] **Core components (subset needed early)** — `PrimaryButton`, `Pill`,
   `CardView`, `HRule`, `KVRow`, `HeaderBar`, `EmptyState`, `Skeleton`, `Avatar`,
   `Toast`. **L.** Independent per-component once theme exists.
-- [ ] **Result/error model** — sealed `AppError` + PostgREST code mapping. **S.**
-- [ ] **DataStore `AppPreferences`** — Persistence port (`artistant.state.*`,
+  *(Some browse components still land with M2 — gallery ships the early set.)*
+- [x] **Result/error model** — sealed `AppError` + PostgREST code mapping. **S.**
+- [x] **DataStore `AppPreferences`** — Persistence port (`artistant.state.*`,
   `wipeAll`). **S.**
 
-*Foundation total ≈ 2 weeks. Design system + components are the long pole and are
-internally parallelizable.*
+*Foundation shipped in M0. Remaining polish (brand `.ttf`, full component set)
+tracked under #15 / M2.*
 
 ---
 
-## F1 — Auth & routing  *(gates the app)*
+## F1 — Auth & routing  *(gates the app)* ✅ done (M1a)
 
-- [ ] **SessionManager** — supabase-kt Auth wrapper; `sessionStatus` Flow;
+- [x] **SessionManager** — supabase-kt Auth wrapper; `sessionStatus` Flow;
   `signInGeneration`; expose `currentUser`, `effectiveUserId`. **M.** → Foundation.
-- [ ] **Google sign-in** — Credential Manager → ID token → supabase. **M.** Risk:
+- [x] **Google sign-in** — Credential Manager → ID token → supabase. **M.** Risk:
   Credential Manager setup, SHA-1 in console, nonce.
-- [ ] **Apple sign-in** — Custom Tabs OAuth web flow + nonce. **M.** Risk: **no
+- [x] **Apple sign-in** — Custom Tabs OAuth web flow + nonce. **M.** Risk: **no
   native SDK**; redirect + deep-link plumbing; test on device.
-- [ ] **Email/password** — sign-in/up + confirmationRequired. **S.**
-- [ ] **Deep-link intent-filter** (`in.artistant.app://login-callback`) + add to
+  *(#12 Apple deep-link error handling still open — blocks Apple go-live.)*
+- [x] **Email/password** — sign-in/up + confirmationRequired. **S.**
+- [x] **Deep-link intent-filter** (`in.artistant.app://login-callback`) + add to
   Supabase dashboard. **S.** Risk: dashboard step is operator-side.
-- [ ] **Returning-login router** — `routeIn/onboard/degrade` (pure, testable);
+- [x] **Returning-login router** — `routeIn/onboard/degrade` (pure, testable);
   fetch self-profile with retry; hydrate role + artist setup. **M.** Risk: the
   edge cases the iOS `RootView` documents (stranded step, same-UUID re-auth).
 
@@ -60,15 +62,16 @@ SessionManager.*
 
 ---
 
-## F2 — Signup onboarding  *(SHARED)*
+## F2 — Signup onboarding  *(SHARED)* ✅ done (M1b)
 
-- [ ] **SignupViewModel** — step machine (signup/login orders), handle-availability
+- [x] **SignupViewModel** — step machine (signup/login orders), handle-availability
   debounce (`handle_is_available`, 350ms), returning-user hydration banners. **M.**
-- [ ] **Welcome / Role / Auth / EmailAuth / Profile / NotifPermission / Done /
+- [x] **Welcome / Role / Auth / EmailAuth / Profile / NotifPermission / Done /
   Legal** screens. **L** total. Deps: F1, components, `ScoreRing`. Risk: Role
   screen's tap-commit + appear-debounce; Auth screen's animated lineup background
   (motion-gated).
-- [ ] **Notif permission** wiring → `POST_NOTIFICATIONS` + FCM register. **S.** → F9.
+- [x] **Notif permission** wiring → `POST_NOTIFICATIONS` + FCM register. **S.** → F9.
+  *(Permission UI shipped; FCM token register still M4.)*
 
 ---
 
@@ -155,14 +158,15 @@ socials/bio) can be built before F8 lands.*
 
 ## F10 — Messages + chat  *(SHARED)*
 
-- [ ] **MessagesViewModel** — thread list, role-resolved names, redacted preview,
+- [ ] **MessagesViewModel** — thread list, role-resolved names, verbatim preview,
   two-stage hydrate, `pendingThreadId` deep link. **M.**
 - [ ] **ChatViewModel** — optimistic send + 3-way reconcile, **realtime subscribe**,
-  redaction gate, retry, markRead, findOrCreateThread. **L.** Risk: the
-  realtime-vs-send dedup race (port the iOS content-match); channel lifecycle.
-- [ ] **ChatScreen** — reverse `LazyColumn` auto-scroll, bubbles, failed-retry chip,
-  glass composer. **M.**
-- [ ] **Redaction** (`Redaction.kt`) — 6 regexes + `shouldRedact` (pure, tested). **S.**
+  system rows + read receipts, retry, markRead, findOrCreateThread. **L.** Risk:
+  the realtime-vs-send dedup race (port the iOS content-match); channel lifecycle.
+- [ ] **ChatScreen** — reverse `LazyColumn` auto-scroll, bubbles, Airbnb trust
+  banner + report, failed-retry chip, glass composer. **M.**
+- [x] ~~**Redaction** (`Redaction.kt`)~~ — **obsolete.** Scrapped Jul 2026 (mig
+  `0071`); deleted from Android. Do not rebuild.
 
 ## F11 — Bookings list + detail  *(SHARED)*
 
@@ -243,7 +247,7 @@ socials/bio) can be built before F8 lands.*
 
 ## F18 — Testing  *(continuous)*
 
-- [ ] **Unit** (JUnit + MockK + Turbine): BookingMath, ScoreBands, Redaction,
+- [ ] **Unit** (JUnit + MockK + Turbine): BookingMath, ScoreBands,
   SyncPlanner, ReturningLoginRoute, ISO8601, INR, store-reset leakage. **M**, grows.
 - [ ] **Repository tests** against `Fake*` impls. **M.**
 - [ ] **ViewModel tests** — assert `StateFlow` emissions. **M.**

@@ -180,7 +180,7 @@ Browse** on `feature/m2-browse`.
 |---|---|---|---|
 | Booking money math | `domain/booking/BookingMath.kt` | done | M0 |
 | Score bands | `domain/score/ScoreBands.kt` | done | M0 |
-| Chat redaction regexes | `domain/chat/Redaction.kt` | obsolete | **Scrapped Jul 22 (0071). Delete — do not port.** |
+| Chat redaction regexes | ~~`domain/chat/Redaction.kt`~~ | obsolete | **Deleted** Jul 2026 wave — do not reintroduce. |
 | Returning-login router | `domain/auth/ReturningLoginRoute.kt` | done | M1 |
 | Auth advance key | `domain/auth/AuthAdvanceKey.kt` | done | M1 |
 

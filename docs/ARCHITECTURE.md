@@ -67,7 +67,7 @@ Supabase).
 │    calls ▼            + one-shot event Channel/SharedFlow     │
 ├──────────────────────────────────────────────────────────────┤
 │  Domain (optional)    models + use-cases where logic is       │  pure Kotlin
-│    calls ▼            non-trivial (money math, score, redact) │
+│    calls ▼            non-trivial (money math, score bands)   │
 ├──────────────────────────────────────────────────────────────┤
 │  Data                 Repository interfaces + Supabase impls  │  interface + impl
 │    calls ▼            (+ Fake* twins for tests)               │
@@ -84,8 +84,9 @@ logic lives in stores and repos. Most of this app is CRUD over Supabase, so a
 full Clean-Architecture use-case-per-action layer would be ceremony. We keep
 domain to **pure Kotlin where the logic is genuinely non-trivial and must be
 unit-tested in isolation**: `Booking.compute` (5% platform + 18% GST), the
-Bookability score bands (`ScoreTier`), the PII **redaction** regexes, and the
-calendar **sync planner**. Everything else: ViewModel → Repository directly.
+Bookability score bands (`ScoreTier`), and the calendar **sync planner**.
+(Chat redaction was retired Jul 2026 — do not reintroduce a `Redaction` domain
+module.) Everything else: ViewModel → Repository directly.
 `// ponytail:` use-cases only where the iOS app itself isolated the logic into a
 pure, separately-tested function.
 
@@ -350,9 +351,10 @@ small `PermissionsController` mirroring the iOS `PermissionsService`.
 ## 12. Testing strategy (summary; full plan in FEATURE_CHECKLIST.md)
 
 - **Unit** (JUnit + MockK + Turbine): the pure logic the iOS app unit-tests —
-  `Booking.compute`, score bands, redaction regexes, calendar planner, ISO8601
+  `Booking.compute`, score bands, calendar planner, ISO8601
   round-trip, INR formatting, returning-login routing. Repositories tested
   against fakes; ViewModels tested by asserting `StateFlow` emissions (Turbine).
+  (Do **not** test client chat redaction — retired Jul 2026.)
 - **UI** (Compose UI Test + semantics): the analogue of the ~76 XCUITests — the
   `Fake*` repositories are swapped via a test Hilt module + launch args, exactly
   like the iOS `-uitest-*` harness.

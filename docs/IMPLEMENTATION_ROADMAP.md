@@ -54,27 +54,28 @@ Artist profile.
 with cover media/samples/reviews/score, tap Message/Book (stubbed nav).
 
 ## M3 — Booking funnel & calendar surfaces *(≈2 weeks)*
-**Goal:** a client books end-to-end (mock payment) and sees it on a calendar; can
-review a completed booking.
+**Goal:** a client **sends a booking request** (`pending_confirm` → “Request sent.”)
+and sees it on a calendar; artist Accept/Decline; review a completed booking.
 **Pulls in:** F7 (booking/checkout/confirmed/request-quote), F11 (bookings list +
 detail + calendar components), F14 reviews, F13 score sheets (breakdown on profile),
 booking math.
 **Tasks:** BookingViewModel + DateScroller/time grid · CheckoutScreen (mock
-payment seam) · ConfirmedScreen · BookingsScreen + `MonthCalendar` ·
-BookingDetail · ReviewSheet.
-**Exit:** create a booking (respecting no-overlap/self-booking guards), see it in
-Bookings calendar + detail, leave a review on a completed one. `MonthCalendar`
-+ `DateScroller` shipped.
+payment seam) · ConfirmedScreen (“Request sent.”) · BookingsScreen + `MonthCalendar` ·
+BookingDetail (role-aware Accept/Decline) · ReviewSheet.
+**Exit:** create a request (respecting no-overlap/self-booking guards), artist
+accepts → confirmed; see it in Bookings calendar + detail; leave a review on a
+completed one. `MonthCalendar` + `DateScroller` shipped.
 
 ## M4 — Messaging & push *(≈2 weeks)*
-**Goal:** the matchmaker core — realtime chat with redaction, plus notifications.
-**Pulls in:** F10 (messages + chat + realtime + redaction), F9 (FCM client +
-backend send-push change), gig-request create (F7) end-to-end.
+**Goal:** the matchmaker core — realtime chat (verbatim bodies) + Airbnb-style
+trust UI, plus notifications.
+**Pulls in:** F10 (messages + chat + realtime — **no** client redaction), F9 (FCM
+client + backend send-push change), gig-request create (F7) end-to-end.
 **Tasks:** MessagesViewModel · ChatViewModel (optimistic send + realtime reconcile
-+ redaction) · ChatScreen · **FCM service + backend FCM path + token table** ·
-deep-link routing.
-**Exit:** two accounts chat in realtime; contact info is redacted pre-confirmation
-and lifts after; a push deep-links to the right thread/request on tap.
++ system rows + read receipts) · ChatScreen (safety banner / report) · **FCM
+service + backend FCM path + token table** · deep-link routing.
+**Exit:** two accounts chat in realtime; messages store verbatim contact info
+(mig `0071`); a push deep-links to the right thread/request on tap.
 **Risk gate:** the realtime-vs-optimistic-send dedup race and the backend FCM
 change both live here.
 

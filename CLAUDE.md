@@ -15,18 +15,20 @@ clean history. If a change doesn't build, it doesn't merge. No exceptions.
 
 Artistant is a two-sided marketplace for booking live performers in India. v1 is a
 **no-payments matchmaker** (match → chat → confirm). Hero: **Bookability Score™**.
-Moat: **anti-leakage chat redaction** (contact info hidden until a booking is
-confirmed). Dark-only, phone-only, portrait, INR.
+Trust: **Airbnb-style** (safety banner + “always communicate through Artistant” +
+report) — chat redaction was **scrapped Jul 2026** (mig `0071`). Booking =
+**request → accept** (`pending_confirm`, “Request sent.”; artist Accept/Decline).
+Dark-only, phone-only, portrait, INR.
 
 - **iOS source of truth:** `~/Desktop/ios-swift` (145 Swift files). Read it when
   porting a screen — match its behaviour and design.
 - **Shared backend:** the same Supabase project the iOS + web clients use. **We do
   not fork the schema.** The only server changes Android forces are an FCM push
   path and (later) Play billing notifications. See `docs/API_MAPPING.md`.
-- **The plan lives in `docs/`** — eight documents. `ANDROID_MIGRATION_PLAN.md` is
-  the index; the others are architecture, screens, API contract, feature
-  checklist, roadmap, structure, risks. **Read the relevant doc before touching a
-  layer.**
+- **The plan lives in `docs/`** — nine documents. `ANDROID_MIGRATION_PLAN.md` is
+  the index; others cover architecture, screens, API, features, roadmap,
+  structure, risks, plus **`PARITY_CHECKLIST.md`** (iOS file → Android status).
+  **Read the relevant doc before touching a layer.**
 
 ---
 
@@ -97,7 +99,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 # compile-check (the green-tree gate — run before every commit/PR)
 ./gradlew :app:assembleDebug
 
-# fast unit tests (pure logic: money math, score bands, redaction, planner)
+# fast unit tests (pure logic: money math, score bands, planner)
 ./gradlew :app:testDebugUnitTest
 
 # lint (run before a PR; don't let it rot)

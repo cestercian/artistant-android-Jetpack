@@ -78,7 +78,7 @@ in/artistant/app/
 │   ├── result/Result.kt              # thin Result helpers if not using kotlin.Result
 │   └── logging/
 │       ├── Timber.kt
-│       └── PiiScrub.kt                # pure redaction regex (shared w/ Sentry BeforeSend)
+│       └── PiiScrub.kt                # telemetry scrub (Sentry BeforeSend) — not chat redaction
 │
 ├── common/                            # tiny shared utilities, no Android-framework deps
 │   └── util/
@@ -138,9 +138,9 @@ in/artistant/app/
 ├── domain/                            # pure logic isolated for unit tests (thin — see ARCH §2)
 │   ├── booking/BookingMath.kt         # 5% platform + 18% GST (port of Booking.compute)
 │   ├── score/ScoreBands.kt            # ScoreTier bands + <5-gig "New" rule
-│   ├── chat/Redaction.kt              # PII redaction regexes + shouldRedact()
 │   ├── calendar/SyncPlanner.kt        # pure desired-vs-persisted diff (port of plan())
 │   └── auth/ReturningLoginRoute.kt    # routeIn/onboard/degrade decision (pure, testable)
+│   # (chat/Redaction.kt RETIRED — Jul 2026; do not reintroduce)
 │
 ├── platform/                          # the Services/ port — OS + third-party integrations
 │   ├── auth/

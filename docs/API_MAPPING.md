@@ -117,22 +117,22 @@ The DB enforces these; inserts/updates **throw** — catch and surface:
 
 ---
 
-## 4. `messages` — the column lockdown (critical)
+## 4. `messages` — explicit columns + post-redaction contract
 
-Migration **0061** column-scopes the anon/authenticated SELECT grant. **You may
-select only** `id, thread_id, sender_id, sender_role, body, redacted, sent_at`.
-Selecting `body_raw` — or `select("*")` — **returns 403**.
+Migration **0061** column-scopes the anon/authenticated SELECT grant; migration
+**0071** retired the server redaction trigger (Jul 2026). **You may select only**
+explicit columns — never `select("*")` (historically `body_raw` 403'd; keep the
+discipline). Prefer: `id, thread_id, sender_id, sender_role, body, kind,
+action_route, sent_at` (plus receipt fields as needed).
 
-- list → `from("messages").select("id,thread_id,sender_id,body,sent_at")
+- list → `from("messages").select(<explicit columns>)
   .eq("thread_id",tid).order("sent_at")`
-- send → `from("messages").insert({thread_id, sender_id, body})
-  .select("id,thread_id,sender_id,body,sent_at").single()` — triggers fill
-  `body_raw`/`sender_role` and **redact `body` inline**; read back the redacted row.
+- send → `from("messages").insert({thread_id, sender_id, body, …})
+  .select(<explicit>).single()` — `body` stores **verbatim**; no client redactor.
 - Messages are immutable (no UPDATE/DELETE).
-- **Redaction lift:** `body` un-redacts only when the thread's booking is
-  confirmed/completed **and** belongs to the thread's exact (client_id, artist_id)
-  pair. The client also runs its **own** redaction for display safety (same
-  regexes) — port them (`domain/chat/Redaction.kt`).
+- **Trust UI (not redaction):** safety-analysis banner in-thread + “always
+  communicate through Artistant” copy + report flows (Airbnb-style). Do **not**
+  port a `Redaction.kt` client module.
 
 ---
 
