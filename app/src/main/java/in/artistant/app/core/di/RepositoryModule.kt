@@ -8,11 +8,13 @@ import `in`.artistant.app.data.payments.MockPaymentsService
 import `in`.artistant.app.data.payments.PaymentsService
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.data.repository.SearchRepository
 import `in`.artistant.app.data.repository.SupabaseArtistsRepository
 import `in`.artistant.app.data.repository.SupabaseBookingsRepository
+import `in`.artistant.app.data.repository.SupabaseMessagesRepository
 import `in`.artistant.app.data.repository.SupabaseRequestsRepository
 import `in`.artistant.app.data.repository.SupabaseReviewsRepository
 import `in`.artistant.app.data.repository.SupabaseSearchRepository
@@ -43,6 +45,9 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindRequests(impl: SupabaseRequestsRepository): RequestsRepository
+
+    @Binds
+    abstract fun bindMessages(impl: SupabaseMessagesRepository): MessagesRepository
 
     /** Dormant mock payments — real Razorpay is a later one-line swap. */
     @Binds

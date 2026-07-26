@@ -158,13 +158,12 @@ socials/bio) can be built before F8 lands.*
 
 ## F10 — Messages + chat  *(SHARED)*
 
-- [ ] **MessagesViewModel** — thread list, role-resolved names, verbatim preview,
-  two-stage hydrate, `pendingThreadId` deep link. **M.**
-- [ ] **ChatViewModel** — optimistic send + 3-way reconcile, **realtime subscribe**,
-  system rows + read receipts, retry, markRead, findOrCreateThread. **L.** Risk:
-  the realtime-vs-send dedup race (port the iOS content-match); channel lifecycle.
-- [ ] **ChatScreen** — reverse `LazyColumn` auto-scroll, bubbles, Airbnb trust
-  banner + report, failed-retry chip, glass composer. **M.**
+- [x] **MessagesViewModel** — thread list, verbatim preview, real pair-scoped
+  `findOrCreateThread`. **partial:** artist counterpart names + push deep links deferred.
+- [x] **ChatViewModel** — paged load, send, mark-read + best-effort 0072 receipts.
+  **partial:** realtime subscription and optimistic retry/reconciliation deferred.
+- [x] **ChatScreen** — bubbles, system rows/action route, Airbnb trust banner + composer.
+  **partial:** reverse auto-scroll, report/details, retry chip, and glass polish deferred.
 - [x] ~~**Redaction** (`Redaction.kt`)~~ — **obsolete.** Scrapped Jul 2026 (mig
   `0071`); deleted from Android. Do not rebuild.
 
