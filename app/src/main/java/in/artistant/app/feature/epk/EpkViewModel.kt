@@ -27,6 +27,7 @@ import javax.inject.Inject
 data class EpkUiState(
     val artist: Artist? = null,
     val links: List<ArtistLink> = emptyList(),
+    val photos: List<`in`.artistant.app.data.repository.ArtistMediaItem> = emptyList(),
     val setupComplete: Boolean = true,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
@@ -50,6 +51,7 @@ class EpkViewModel @Inject constructor(
     private val techRider: TechRiderRepository,
     private val samples: SamplesRepository,
     private val links: ArtistLinksRepository,
+    private val media: `in`.artistant.app.data.repository.ArtistMediaRepository,
     private val mediaCache: WizardMediaCache,
     private val uploadQueue: UploadQueue,
 ) : ViewModel() {
@@ -73,10 +75,16 @@ class EpkViewModel @Inject constructor(
             val setupComplete = profile?.artistSetupComplete == true
             val artist = runCatching { artists.fetchArtist(userId) }.getOrNull()
             val linkRows = runCatching { links.list(userId) }.getOrDefault(emptyList())
+            val photos = runCatching {
+                media.list(userId).filter {
+                    it.kind == `in`.artistant.app.data.repository.ArtistMediaKind.photo
+                }
+            }.getOrDefault(emptyList())
             _state.update {
                 it.copy(
                     artist = artist,
                     links = linkRows,
+                    photos = photos,
                     setupComplete = setupComplete,
                     isLoading = false,
                     error = if (artist == null && setupComplete) "Couldn't load your EPK." else null,
@@ -196,6 +204,50 @@ class EpkViewModel @Inject constructor(
             }.onFailure { e ->
                 _state.update { it.copy(error = e.message ?: "Couldn't import sample.") }
             }
+        }
+    }
+
+    fun onPhotoPicked(uri: android.net.Uri) {
+        val userId = session.currentUserId ?: return
+        viewModelScope.launch {
+            runCatching {
+                val pending = mediaCache.adoptPhoto(uri)
+                uploadQueue.enqueueCoverPhoto(userId, pending.file(mediaCache))
+            }.onSuccess {
+                _state.update { it.copy(message = "Photo queued — pull to refresh when done.") }
+            }.onFailure { e ->
+                _state.update { it.copy(error = e.message ?: "Couldn't import photo.") }
+            }
+        }
+    }
+
+    fun deletePhoto(item: `in`.artistant.app.data.repository.ArtistMediaItem) {
+        viewModelScope.launch {
+            runCatching { media.delete(item) }
+                .onSuccess {
+                    _state.update { it.copy(message = "Photo removed.") }
+                    refresh()
+                }
+                .onFailure { e ->
+                    _state.update { it.copy(error = e.message ?: "Couldn't delete photo.") }
+                }
+        }
+    }
+
+    /** Move photo at [from] toward cover (index 0) or later; persists via reorder_artist_media. */
+    fun movePhoto(from: Int, to: Int) {
+        val photos = _state.value.photos.toMutableList()
+        if (from !in photos.indices || to !in photos.indices || from == to) return
+        val item = photos.removeAt(from)
+        photos.add(to, item)
+        _state.update { it.copy(photos = photos) }
+        viewModelScope.launch {
+            runCatching { media.reorder(photos.map { it.id }) }
+                .onSuccess { _state.update { it.copy(message = "Photo order saved.") } }
+                .onFailure { e ->
+                    _state.update { it.copy(error = e.message ?: "Couldn't reorder photos.") }
+                    refresh()
+                }
         }
     }
 

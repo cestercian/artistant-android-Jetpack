@@ -72,6 +72,47 @@ object CalendarSyncPlanner {
     fun eventNotes(bookingId: String): String =
         "Booked on Artistant.\nin.artistant.app://booking/${bookingId.lowercase()}"
 
+    data class Clash(
+        val bookingId: String,
+        val title: String,
+        val startEpochMs: Long,
+        val endEpochMs: Long,
+    )
+
+    /** Confirmed (or completed) bookings that overlap [dayStartMs, dayEndMs). */
+    fun clashesOnDay(
+        bookings: Collection<Booking>,
+        dayStartMs: Long,
+        dayEndMs: Long,
+    ): List<Clash> {
+        return bookings.mapNotNull { b ->
+            when (b.status) {
+                BookingStatus.Confirmed, BookingStatus.Completed, BookingStatus.Disputed -> {
+                    val start = resolvedStartEpochMs(b) ?: return@mapNotNull null
+                    val end = resolvedEndEpochMs(b) ?: (start + 2 * 60 * 60 * 1000L)
+                    if (start < dayEndMs && end > dayStartMs) {
+                        Clash(b.id.lowercase(), eventTitle(b), start, end)
+                    } else null
+                }
+                else -> null
+            }
+        }
+    }
+
+    /** Local-calendar day keys (yyyy-MM-dd Asia/Kolkata) with ≥1 confirmed gig. */
+    fun busyDays(bookings: Collection<Booking>): Set<String> {
+        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+        }
+        return bookings.mapNotNull { b ->
+            when (b.status) {
+                BookingStatus.Confirmed, BookingStatus.Completed, BookingStatus.Disputed ->
+                    resolvedStartEpochMs(b)?.let { fmt.format(it) }
+                else -> null
+            }
+        }.toSet()
+    }
+
     private fun parseIso(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null
         val formats = listOf(

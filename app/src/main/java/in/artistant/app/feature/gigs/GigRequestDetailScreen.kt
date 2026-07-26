@@ -46,7 +46,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
  * Gig quote detail — Accept / Decline / Counter via [RequestsRepository].
- * Port of iOS `GigRequestDetailView` (simplified M3 slice; no calendar clash card).
+ * Port of iOS `GigRequestDetailView` — Accept / Decline / Counter + clash card.
  */
 @Composable
 fun GigRequestDetailScreen(
@@ -100,6 +100,21 @@ fun GigRequestDetailScreen(
                     Text(request.raw.client, style = AppTheme.type.displaySmall, color = colors.ink)
                     Text(request.raw.date, style = AppTheme.type.footnote, color = colors.ink3)
                     Pill(request.raw.packageLabel, tone = PillTone.Brand)
+                    if (state.clashes.isNotEmpty()) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
+                                .background(colors.bgSoft)
+                                .padding(space.md),
+                            verticalArrangement = Arrangement.spacedBy(space.xs),
+                        ) {
+                            Text("Calendar clash", style = AppTheme.type.caption, color = colors.warm)
+                            state.clashes.forEach { clash ->
+                                Text(clash.title, style = AppTheme.type.callout, color = colors.ink)
+                            }
+                        }
+                    }
                     state.actionError?.let {
                         Text(it, style = AppTheme.type.footnote, color = colors.hot)
                     }

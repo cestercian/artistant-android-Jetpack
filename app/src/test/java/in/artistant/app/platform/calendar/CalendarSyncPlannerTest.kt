@@ -40,6 +40,35 @@ class CalendarSyncPlannerTest {
         assertEquals("Gig — Asha", CalendarSyncPlanner.eventTitle(b))
     }
 
+    @Test
+    fun clashesOnDay_findsOverlap() {
+        val a = sample(id = "b1", status = BookingStatus.Confirmed)
+        val pending = sample(id = "b2", status = BookingStatus.PendingConfirm)
+        // 2026-07-10 UTC day window covering the sample start
+        val dayStart = 1_752_134_400_000L // approx — use start of sample day via planner start
+        val start = CalendarSyncPlanner.resolvedStartEpochMs(a)!!
+        val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Kolkata")).apply {
+            timeInMillis = start
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val from = cal.timeInMillis
+        cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        val clashes = CalendarSyncPlanner.clashesOnDay(listOf(a, pending), from, cal.timeInMillis)
+        assertEquals(1, clashes.size)
+        assertEquals("b1", clashes.first().bookingId)
+    }
+
+    @Test
+    fun busyDays_returnsIstKeys() {
+        val a = sample(id = "b1", status = BookingStatus.Confirmed)
+        val days = CalendarSyncPlanner.busyDays(listOf(a))
+        assertTrue(days.isNotEmpty())
+        assertTrue(days.first().matches(Regex("""\d{4}-\d{2}-\d{2}""")))
+    }
+
     private fun sample(
         id: String,
         status: BookingStatus,

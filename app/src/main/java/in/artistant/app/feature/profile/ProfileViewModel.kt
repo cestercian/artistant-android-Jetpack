@@ -36,6 +36,8 @@ data class ProfileUiState(
     val showDeleteConfirm: Boolean = false,
     val calendarSyncEnabled: Boolean = false,
     val calendarHasPermission: Boolean = false,
+    val calendarTitle: String = "Artistant",
+    val calendars: List<CalendarSyncService.CalendarOption> = emptyList(),
 ) {
     val displayName: String
         get() = profile?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
@@ -75,6 +77,8 @@ class ProfileViewModel @Inject constructor(
                     it.copy(
                         calendarSyncEnabled = cal.enabled,
                         calendarHasPermission = cal.hasPermission,
+                        calendarTitle = cal.calendarTitle,
+                        calendars = cal.calendars,
                     )
                 }
             }
@@ -165,6 +169,10 @@ class ProfileViewModel @Inject constructor(
                 it.copy(actionMessage = "Calendar permission is required to sync gigs.")
             }
         }
+    }
+
+    fun selectCalendar(id: Long) = viewModelScope.launch {
+        calendarSync.selectCalendar(id)
     }
 
     fun onCalendarPermissionResult(granted: Boolean) = viewModelScope.launch {

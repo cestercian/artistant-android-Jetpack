@@ -17,6 +17,7 @@ import javax.inject.Inject
 
 data class GigRequestDetailUiState(
     val request: StoredRequest? = null,
+    val clashes: List<`in`.artistant.app.platform.calendar.CalendarSyncPlanner.Clash> = emptyList(),
     val isLoading: Boolean = true,
     val loadError: String? = null,
     val isActing: Boolean = false,
@@ -29,6 +30,8 @@ data class GigRequestDetailUiState(
 class GigRequestDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val requestsRepository: RequestsRepository,
+    private val calendarSync: `in`.artistant.app.platform.calendar.CalendarSyncService,
+    private val bookingsRepository: `in`.artistant.app.data.repository.BookingsRepository,
 ) : ViewModel() {
 
     private val requestId: String = checkNotNull(savedStateHandle["requestId"])
@@ -44,11 +47,16 @@ class GigRequestDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, loadError = null) }
             try {
+                // Seed calendar clash reads from the artist's confirmed bookings.
+                runCatching { bookingsRepository.listForArtist() }
+                    .onSuccess { calendarSync.ingest(it) }
                 val found = requestsRepository.listForArtist()
                     .firstOrNull { it.id.equals(requestId, ignoreCase = true) }
+                val clashes = found?.let { resolveClashes(it) }.orEmpty()
                 _state.update {
                     it.copy(
                         request = found,
+                        clashes = clashes,
                         isLoading = false,
                         loadError = if (found == null) "Request not found." else null,
                         counterAmount = found?.raw?.amount?.toString().orEmpty(),
@@ -60,6 +68,21 @@ class GigRequestDetailViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, loadError = e.message) }
             }
         }
+    }
+
+    private fun resolveClashes(
+        request: StoredRequest,
+    ): List<`in`.artistant.app.platform.calendar.CalendarSyncPlanner.Clash> {
+        val epoch = parseGigDateLabel(request.raw.date) ?: return emptyList()
+        return calendarSync.clashes(onDayOfEpochMs = epoch)
+    }
+
+    /** Best-effort parse of the display date label ("EEE, MMM d, yyyy"). */
+    private fun parseGigDateLabel(label: String): Long? {
+        if (label.isBlank()) return null
+        val f = java.text.SimpleDateFormat("EEE, MMM d, yyyy", java.util.Locale.US)
+        f.timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        return runCatching { f.parse(label)?.time }.getOrNull()
     }
 
     fun showCounterSheet() {

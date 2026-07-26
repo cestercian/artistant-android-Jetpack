@@ -62,7 +62,11 @@ class CalendarSyncService @Inject constructor(
         val enabled: Boolean = false,
         val hasPermission: Boolean = false,
         val calendarTitle: String = "Artistant",
+        val calendars: List<CalendarOption> = emptyList(),
+        val selectedCalendarId: Long? = null,
     )
+
+    data class CalendarOption(val id: Long, val title: String)
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -73,6 +77,54 @@ class CalendarSyncService @Inject constructor(
 
     init {
         scope.launch { load() }
+    }
+
+    /** Busy day keys (yyyy-MM-dd IST) from ingested confirmed bookings. */
+    fun busyDays(): Set<String> = CalendarSyncPlanner.busyDays(lastSeen.values)
+
+    /** Clashes on the local calendar day containing [epochMs]. */
+    fun clashes(onDayOfEpochMs: Long): List<CalendarSyncPlanner.Clash> {
+        val cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata")).apply {
+            timeInMillis = onDayOfEpochMs
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        val start = cal.timeInMillis
+        cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        return CalendarSyncPlanner.clashesOnDay(lastSeen.values, start, cal.timeInMillis)
+    }
+
+    suspend fun listWritableCalendars(): List<CalendarOption> = withContext(Dispatchers.IO) {
+        if (!hasWritePermission()) return@withContext emptyList()
+        val out = mutableListOf<CalendarOption>()
+        context.contentResolver.query(
+            CalendarContract.Calendars.CONTENT_URI,
+            arrayOf(
+                CalendarContract.Calendars._ID,
+                CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+            ),
+            "${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL} >= ?",
+            arrayOf(CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR.toString()),
+            null,
+        )?.use { cursor ->
+            val idIdx = cursor.getColumnIndex(CalendarContract.Calendars._ID)
+            val nameIdx = cursor.getColumnIndex(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+            while (cursor.moveToNext()) {
+                out += CalendarOption(cursor.getLong(idIdx), cursor.getString(nameIdx) ?: "Calendar")
+            }
+        }
+        out
+    }
+
+    suspend fun selectCalendar(id: Long): Boolean {
+        if (!hasWritePermission()) return false
+        persisted = persisted.copy(calendarId = id, enabled = true, ownerUserId = session.currentUserId)
+        save()
+        refreshUi()
+        reconcileNow()
+        return true
     }
 
     suspend fun load() {
@@ -199,11 +251,19 @@ class CalendarSyncService @Inject constructor(
     }
 
     private fun refreshUi() {
-        _ui.value = UiState(
-            enabled = persisted.enabled && hasWritePermission(),
-            hasPermission = hasWritePermission(),
-            calendarTitle = "Artistant",
-        )
+        scope.launch {
+            val calendars = if (hasWritePermission()) listWritableCalendars() else emptyList()
+            val title = calendars.firstOrNull { it.id == persisted.calendarId }?.title
+                ?: calendars.firstOrNull()?.title
+                ?: "Artistant"
+            _ui.value = UiState(
+                enabled = persisted.enabled && hasWritePermission(),
+                hasPermission = hasWritePermission(),
+                calendarTitle = title,
+                calendars = calendars,
+                selectedCalendarId = persisted.calendarId,
+            )
+        }
     }
 
     private fun resolveOrCreateCalendarId(): Long? {

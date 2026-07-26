@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -196,6 +197,8 @@ fun ProfileScreen(
                             }
                             CalendarSyncRow(
                                 enabled = state.calendarSyncEnabled,
+                                calendarTitle = state.calendarTitle,
+                                calendars = state.calendars,
                                 onToggle = { on ->
                                     if (on && !state.calendarHasPermission) {
                                         calendarPermission.launch(
@@ -208,6 +211,7 @@ fun ProfileScreen(
                                         viewModel.setCalendarSyncEnabled(on)
                                     }
                                 },
+                                onSelectCalendar = viewModel::selectCalendar,
                             )
                             HRule()
                             SettingsRow("Notifications") {
@@ -324,26 +328,43 @@ fun ProfileScreen(
 @Composable
 private fun CalendarSyncRow(
     enabled: Boolean,
+    calendarTitle: String = "Artistant",
+    calendars: List<`in`.artistant.app.platform.calendar.CalendarSyncService.CalendarOption> = emptyList(),
     onToggle: (Boolean) -> Unit,
+    onSelectCalendar: (Long) -> Unit = {},
 ) {
     val space = AppTheme.dimens.space
     val colors = AppTheme.colors
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = space.md),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Sync gigs to calendar", style = AppTheme.type.callout, color = colors.ink)
-            Text(
-                "Mirrors confirmed bookings onto this device.",
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
-            )
+    Column(Modifier.fillMaxWidth().padding(vertical = space.md)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Sync gigs to calendar", style = AppTheme.type.callout, color = colors.ink)
+                Text(
+                    if (enabled) "Writing to $calendarTitle" else "Mirrors confirmed bookings onto this device.",
+                    style = AppTheme.type.footnote,
+                    color = colors.ink3,
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onToggle)
         }
-        Switch(checked = enabled, onCheckedChange = onToggle)
+        if (enabled && calendars.size > 1) {
+            Spacer(Modifier.height(space.sm))
+            calendars.forEach { option ->
+                Text(
+                    option.title,
+                    style = AppTheme.type.footnote,
+                    color = if (option.title == calendarTitle) colors.brand else colors.ink2,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectCalendar(option.id) }
+                        .padding(vertical = space.xs),
+                )
+            }
+        }
     }
 }
 

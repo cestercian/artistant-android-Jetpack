@@ -27,8 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.repository.ArtistMediaItem
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
@@ -39,8 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
- * EPK editor — packages / tech / links / samples writable (iOS EPKView parity).
- * Cover reorder stays wizard-side; gallery pick for samples via SAF.
+ * EPK editor — packages / tech / links / samples / photo grid + reorder.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +55,9 @@ fun EpkScreen(
     val space = AppTheme.dimens.space
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.onSamplePicked(uri, uri.lastPathSegment)
+    }
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) viewModel.onPhotoPicked(uri)
     }
 
     PullToRefreshBox(
@@ -107,6 +111,17 @@ fun EpkScreen(
                     if (artist != null) {
                         EpkHero(artist)
                         Spacer(Modifier.height(space.lg))
+                        EpkSection(title = "Photos") {
+                            EpkPhotoGrid(
+                                photos = state.photos,
+                                onAdd = { pickPhoto.launch("image/*") },
+                                onDelete = viewModel::deletePhoto,
+                                onMoveEarlier = { idx -> if (idx > 0) viewModel.movePhoto(idx, idx - 1) },
+                                onMoveLater = { idx ->
+                                    if (idx < state.photos.lastIndex) viewModel.movePhoto(idx, idx + 1)
+                                },
+                            )
+                        }
                         EpkSection(title = "Bio") {
                             Text(
                                 artist.bio.ifBlank { "No bio yet — edit in wizard." },
@@ -252,6 +267,74 @@ fun EpkScreen(
             }
         }
     }
+}
+
+@Composable
+private fun EpkPhotoGrid(
+    photos: List<ArtistMediaItem>,
+    onAdd: () -> Unit,
+    onDelete: (ArtistMediaItem) -> Unit,
+    onMoveEarlier: (Int) -> Unit,
+    onMoveLater: (Int) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    if (photos.isEmpty()) {
+        Text("No photos yet — first photo is your cover.", style = AppTheme.type.footnote, color = colors.ink3)
+    } else {
+        photos.forEachIndexed { index, item ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(space.sm),
+            ) {
+                AsyncImage(
+                    model = item.publicUrl,
+                    contentDescription = if (index == 0) "Cover photo" else "Photo ${index + 1}",
+                    modifier = Modifier
+                        .height(56.dp)
+                        .fillMaxWidth(0.28f)
+                        .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                        .background(colors.bgSoft),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (index == 0) "Cover" else "Photo ${index + 1}",
+                        style = AppTheme.type.callout,
+                        color = colors.ink,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(space.md)) {
+                        if (index > 0) {
+                            Text(
+                                "Earlier",
+                                style = AppTheme.type.footnote,
+                                color = colors.brand,
+                                modifier = Modifier.clickable { onMoveEarlier(index) },
+                            )
+                        }
+                        if (index < photos.lastIndex) {
+                            Text(
+                                "Later",
+                                style = AppTheme.type.footnote,
+                                color = colors.brand,
+                                modifier = Modifier.clickable { onMoveLater(index) },
+                            )
+                        }
+                        Text(
+                            "Delete",
+                            style = AppTheme.type.footnote,
+                            color = colors.hot,
+                            modifier = Modifier.clickable { onDelete(item) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    Spacer(Modifier.height(space.sm))
+    PrimaryButton(text = "Add photo", onClick = onAdd, variant = ButtonVariant.Ghost, fullWidth = true)
 }
 
 @Composable
