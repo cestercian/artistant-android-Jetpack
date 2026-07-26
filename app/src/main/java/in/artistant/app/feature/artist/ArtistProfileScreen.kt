@@ -47,6 +47,7 @@ import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
+import `in`.artistant.app.feature.score.ScoreBreakdownSheet
 
 /**
  * Artist profile — M2 slice of iOS `ArtistView`: hero, score chip, bio,
@@ -99,7 +100,11 @@ fun ArtistProfileScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                             Pill(artist.category, tone = PillTone.Neutral)
                             Pill(artist.city, tone = PillTone.Neutral)
-                            ScoreChip(score = artist.score, gigs = artist.gigs)
+                            ScoreChip(
+                                score = artist.score,
+                                gigs = artist.gigs,
+                                onClick = viewModel::openScoreSheet,
+                            )
                         }
                         if (artist.bio.isNotBlank()) {
                             Spacer(Modifier.height(space.lg))
@@ -156,6 +161,15 @@ fun ArtistProfileScreen(
                         variant = ButtonVariant.Ghost,
                     )
                 }
+            }
+            if (state.showScoreSheet) {
+                ScoreBreakdownSheet(
+                    artist = artist,
+                    breakdown = state.scoreBreakdown,
+                    reviews = state.reviews,
+                    reviewsFailed = state.reviewsFailed,
+                    onDismiss = viewModel::dismissScoreSheet,
+                )
             }
         }
     }
@@ -217,10 +231,10 @@ private fun Hero(
 }
 
 @Composable
-private fun ScoreChip(score: Int, gigs: Int) {
+private fun ScoreChip(score: Int, gigs: Int, onClick: () -> Unit = {}) {
     val tier = ScoreBands.tier(score, gigs)
     val label = if (tier == ScoreTier.New) "New" else "Score $score"
-    Pill(text = label, tone = PillTone.Brand)
+    Pill(text = label, tone = PillTone.Brand, modifier = Modifier.clickable(onClick = onClick))
 }
 
 @Composable

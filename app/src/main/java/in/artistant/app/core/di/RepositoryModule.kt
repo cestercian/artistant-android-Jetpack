@@ -17,6 +17,7 @@ import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.data.repository.SavedArtistsRepository
 import `in`.artistant.app.data.repository.SamplesRepository
+import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.data.repository.SearchRepository
 import `in`.artistant.app.data.repository.SupabaseAccountRepository
 import `in`.artistant.app.data.repository.SupabaseArtistLinksRepository
@@ -29,6 +30,7 @@ import `in`.artistant.app.data.repository.SupabaseRequestsRepository
 import `in`.artistant.app.data.repository.SupabaseReviewsRepository
 import `in`.artistant.app.data.repository.SupabaseSavedArtistsRepository
 import `in`.artistant.app.data.repository.SupabaseSamplesRepository
+import `in`.artistant.app.data.repository.SupabaseScoreRepository
 import `in`.artistant.app.data.repository.SupabaseSearchRepository
 import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
@@ -74,6 +76,9 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindArtistLinks(impl: SupabaseArtistLinksRepository): ArtistLinksRepository
+
+    @Binds
+    abstract fun bindScore(impl: SupabaseScoreRepository): ScoreRepository
 
     @Binds
     abstract fun bindBookings(impl: SupabaseBookingsRepository): BookingsRepository

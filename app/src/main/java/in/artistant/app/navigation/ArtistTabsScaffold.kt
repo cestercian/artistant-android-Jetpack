@@ -38,6 +38,7 @@ import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -113,6 +114,7 @@ fun ArtistTabsScaffold() {
                     onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
                     onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
                     onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
+                    onScoreExplainer = { nav.navigate(ArtistNavRoutes.SCORE_EXPLAINER) },
                 )
             }
             composable(ArtistTab.Gigs.route) {
@@ -129,6 +131,9 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {
                 ManageAvailabilityScreen(onBack = { nav.popBackStack() })
+            }
+            composable(ArtistNavRoutes.SCORE_EXPLAINER) {
+                ScoreExplainerScreen(onBack = { nav.popBackStack() })
             }
             composable(ArtistNavRoutes.PAYWALL) {
                 PaywallScreen(

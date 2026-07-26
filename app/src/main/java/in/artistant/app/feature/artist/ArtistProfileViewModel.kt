@@ -8,6 +8,8 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
+import `in`.artistant.app.data.repository.ScoreBreakdown
+import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.feature.saved.SavedStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +21,9 @@ import javax.inject.Inject
 data class ArtistProfileUiState(
     val artist: Artist? = null,
     val reviews: List<Review> = emptyList(),
+    val reviewsFailed: Boolean = false,
+    val scoreBreakdown: ScoreBreakdown? = null,
+    val showScoreSheet: Boolean = false,
     val isLoading: Boolean = true,
     val loadError: String? = null,
     val selectedPackageIndex: Int = 0,
@@ -30,6 +35,7 @@ class ArtistProfileViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val artistsRepository: ArtistsRepository,
     private val reviewsRepository: ReviewsRepository,
+    private val scoreRepository: ScoreRepository,
     private val savedStore: SavedStore,
 ) : ViewModel() {
 
@@ -65,11 +71,17 @@ class ArtistProfileViewModel @Inject constructor(
                 return@launch
             }
             val popularIdx = full.packages.indexOfFirst { it.popular }.takeIf { it >= 0 } ?: 0
-            val reviews = runCatching { reviewsRepository.listForArtist(artistId) }.getOrDefault(emptyList())
+            var reviewsFailed = false
+            val reviews = runCatching { reviewsRepository.listForArtist(artistId) }
+                .onFailure { reviewsFailed = true }
+                .getOrDefault(emptyList())
+            val breakdown = runCatching { scoreRepository.breakdown(artistId) }.getOrNull()
             _state.update {
                 it.copy(
                     artist = full,
                     reviews = reviews,
+                    reviewsFailed = reviewsFailed,
+                    scoreBreakdown = breakdown,
                     selectedPackageIndex = popularIdx,
                     isLoading = false,
                     loadError = null,
@@ -78,6 +90,9 @@ class ArtistProfileViewModel @Inject constructor(
             }
         }
     }
+
+    fun openScoreSheet() = _state.update { it.copy(showScoreSheet = true) }
+    fun dismissScoreSheet() = _state.update { it.copy(showScoreSheet = false) }
 
     fun selectPackage(index: Int) {
         _state.update { it.copy(selectedPackageIndex = index) }

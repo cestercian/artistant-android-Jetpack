@@ -46,6 +46,7 @@ fun ArtistHomeScreen(
     onBookingClick: (bookingId: String) -> Unit,
     onProfileClick: () -> Unit = {},
     onOpenWizard: () -> Unit = {},
+    onScoreExplainer: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ArtistHomeViewModel = hiltViewModel(),
 ) {
@@ -87,8 +88,18 @@ fun ArtistHomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("Home", style = AppTheme.type.displaySub, color = colors.ink)
-                        IconButton(onClick = onProfileClick) {
-                            Icon(Icons.Filled.Settings, contentDescription = "Profile & settings", tint = colors.ink2)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Score",
+                                style = AppTheme.type.callout,
+                                color = colors.brand,
+                                modifier = Modifier
+                                    .clickable(onClick = onScoreExplainer)
+                                    .padding(horizontal = space.sm),
+                            )
+                            IconButton(onClick = onProfileClick) {
+                                Icon(Icons.Filled.Settings, contentDescription = "Profile & settings", tint = colors.ink2)
+                            }
                         }
                     }
                     state.error?.let { msg ->
