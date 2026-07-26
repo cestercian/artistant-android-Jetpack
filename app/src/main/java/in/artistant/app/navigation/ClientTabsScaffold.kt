@@ -26,6 +26,12 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.artist.ArtistProfileScreen
+import `in`.artistant.app.feature.booking.BookingDetailScreen
+import `in`.artistant.app.feature.booking.BookingScreen
+import `in`.artistant.app.feature.booking.CheckoutScreen
+import `in`.artistant.app.feature.booking.ConfirmedScreen
+import `in`.artistant.app.feature.booking.RequestQuoteScreen
+import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.ui.Placeholder
@@ -80,7 +86,11 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Discover.route) {
                 DiscoverScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
             }
-            composable(ClientTab.Bookings.route) { Placeholder(ClientTab.Bookings.label) }
+            composable(ClientTab.Bookings.route) {
+                BookingsScreen(
+                    onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                )
+            }
             composable(ClientTab.Messages.route) { Placeholder(ClientTab.Messages.label) }
             composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
             composable(ClientTab.Search.route) {
@@ -92,9 +102,62 @@ fun ClientTabsScaffold() {
             ) {
                 ArtistProfileScreen(
                     onBack = { nav.popBackStack() },
-                    // M3/M4: wire booking funnel + find-or-create thread.
-                    onBook = { /* deferred M3 */ },
+                    onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
                     onMessage = { /* deferred M4 */ },
+                )
+            }
+            composable(
+                route = ClientNavRoutes.BOOKING,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) {
+                BookingScreen(
+                    onBack = { nav.popBackStack() },
+                    onContinue = { nav.navigate(ClientNavRoutes.CHECKOUT) },
+                )
+            }
+            composable(ClientNavRoutes.CHECKOUT) {
+                CheckoutScreen(
+                    onBack = { nav.popBackStack() },
+                    onConfirmed = { bookingId ->
+                        nav.navigate(ClientNavRoutes.confirmed(bookingId)) {
+                            popUpTo(ClientNavRoutes.CHECKOUT) { inclusive = true }
+                        }
+                    },
+                )
+            }
+            composable(
+                route = ClientNavRoutes.CONFIRMED,
+                arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
+            ) { entry ->
+                val bookingId = entry.arguments?.getString("bookingId").orEmpty()
+                ConfirmedScreen(
+                    bookingId = bookingId,
+                    onViewBooking = { id ->
+                        nav.navigate(ClientNavRoutes.bookingDetail(id)) {
+                            popUpTo(ClientTab.Discover.route) { inclusive = false }
+                        }
+                    },
+                    onBackToDiscover = {
+                        nav.popBackStack(ClientTab.Discover.route, inclusive = false)
+                    },
+                )
+            }
+            composable(
+                route = ClientNavRoutes.BOOKING_DETAIL,
+                arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
+            ) {
+                BookingDetailScreen(
+                    isArtistViewer = false,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(
+                route = ClientNavRoutes.REQUEST_QUOTE,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) {
+                RequestQuoteScreen(
+                    onBack = { nav.popBackStack() },
+                    onSuccess = { nav.popBackStack() },
                 )
             }
         }

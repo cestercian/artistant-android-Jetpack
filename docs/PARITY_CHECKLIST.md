@@ -51,13 +51,13 @@ moat.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/BookingView.swift` | `feature/booking/BookingScreen.kt` | missing | Request funnel → `pending_confirm` |
-| `Screens/CheckoutView.swift` | `feature/booking/CheckoutScreen.kt` | missing | Matchmaker; mock payment dormant |
-| `Screens/ConfirmedView.swift` | `feature/booking/ConfirmedScreen.kt` | missing | Copy: “Request sent.” |
-| `Screens/RequestQuoteView.swift` | `feature/booking/RequestQuoteScreen.kt` | missing | Gig-request create |
-| `Screens/BookingDetailView.swift` | `feature/booking/BookingDetailScreen.kt` | missing | Role-aware; artist Accept/Decline |
-| `Screens/BookingsView.swift` | `feature/bookings/BookingsScreen.kt` | missing | Client calendar |
-| `Screens/ReviewSheet.swift` | `feature/booking/ReviewSheet.kt` | missing | |
+| `Screens/BookingView.swift` | `feature/booking/BookingScreen.kt` | done | Request funnel → `pending_confirm` |
+| `Screens/CheckoutView.swift` | `feature/booking/CheckoutScreen.kt` | done | Matchmaker; mock payment dormant |
+| `Screens/ConfirmedView.swift` | `feature/booking/ConfirmedScreen.kt` | done | Copy: “Request sent.” |
+| `Screens/RequestQuoteView.swift` | `feature/booking/RequestQuoteScreen.kt` | done | Gig-request create |
+| `Screens/BookingDetailView.swift` | `feature/booking/BookingDetailScreen.kt` | partial | Role-aware; artist Accept/Decline; simplified vs iOS glass sheet |
+| `Screens/BookingsView.swift` | `feature/bookings/BookingsScreen.kt` | done | Client calendar list |
+| `Screens/ReviewSheet.swift` | `feature/booking/ReviewSheet.kt` | done | Minimal insert sheet |
 
 ## Screens — Messages (M4)
 
@@ -144,7 +144,7 @@ moat.
 | `State/DiscoverFeedStore.swift` | `DiscoverViewModel` | done | M2 |
 | `State/SearchStore.swift` | `SearchViewModel` | partial | M2 |
 | `State/SavedStore.swift` | `SavedViewModel` / prefs | missing | M2/M6 |
-| `State/BookingStore.swift` | `BookingViewModel` | missing | M3 |
+| `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
 | `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | missing | M4 |
 | `State/EPKStore.swift` | `EPKViewModel` | missing | M5 |

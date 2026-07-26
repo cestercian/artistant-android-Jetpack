@@ -122,15 +122,15 @@ socials/bio) can be built before F8 lands.*
 
 ## F7 — Booking funnel + gig requests
 
-- [ ] **BookingViewModel + BookingScreen** — draft, `DateScroller`, time grid,
+- [x] **BookingViewModel + BookingScreen** — draft, date chips, time grid,
   venue/guests, summary. **M.** → BookingStore draft, ArtistsRepository.
-- [ ] **CheckoutScreen** — confirm → payment seam → `confirmDraftAsBooking` →
-  Confirmed; quota gate → Paywall. **M.** → F16 (billing seam, dormant).
-- [ ] **ConfirmedScreen** — celebration + actions (AddToCalendar, view booking). **S.**
-- [ ] **RequestQuoteScreen** — custom quote → `RequestsRepository.create`. **S.**
+- [x] **CheckoutScreen** — confirm → payment seam → create → Confirmed;
+  quota gate → Paywall deferred. **M.** → F16 (billing seam, dormant).
+- [x] **ConfirmedScreen** — celebration + actions (view booking / discover). **S.**
+- [x] **RequestQuoteScreen** — custom quote → `RequestsRepository.create`. **S.**
 - [ ] **GigRequestDetailScreen** (ARTIST) — accept/decline/counter, clash card. **M.**
   → CalendarSync clash read.
-- [ ] **Booking math** (`BookingMath.kt`) — 5%/18% (pure, unit-tested). **S.**
+- [x] **Booking math** (`BookingMath.kt`) — 5%/18% (pure, unit-tested). **S.**
 
 ## F8 — Media pipeline  *(cross-cutting; unblocks wizard + EPK)*
 
@@ -170,13 +170,13 @@ socials/bio) can be built before F8 lands.*
 
 ## F11 — Bookings list + detail  *(SHARED)*
 
-- [ ] **BookingsViewModel + BookingsScreen** (CLIENT) — `MonthCalendar` + schedule;
-  `pendingBookingDetail` deep link. **M.** → `MonthCalendar` component.
+- [x] **BookingsViewModel + BookingsScreen** (CLIENT) — `MonthCalendar` header + schedule;
+  `pendingBookingDetail` deep link deferred. **M.** → `MonthCalendar` component.
 - [ ] **ArtistGigsScreen** (ARTIST) — `MonthCalendar` of gigs. **S.**
-- [ ] **BookingDetailScreen** (SHARED) — timeline, KV, actions (message/cancel/
-  review/calendar); `pendingReviewSheet`. **M.**
-- [ ] **MonthCalendar / MiniMonthCalendar / DateScroller** components. **L.** Risk:
-  custom calendar layout + status dots.
+- [x] **BookingDetailScreen** (SHARED) — timeline, KV, actions (cancel/accept/decline);
+  message/review/calendar deferred. **M.**
+- [ ] **MonthCalendar / MiniMonthCalendar / DateScroller** components. **partial** —
+  `MonthCalendarHeader` + date chips shipped; full grid deferred. **L.**
 
 ---
 
