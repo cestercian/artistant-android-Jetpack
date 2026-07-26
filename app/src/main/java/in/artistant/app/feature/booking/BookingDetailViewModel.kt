@@ -9,6 +9,7 @@ import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.data.repository.ReviewsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +31,8 @@ class BookingDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val bookingsRepository: BookingsRepository,
     private val artistsRepository: ArtistsRepository,
+    /** Handed to [ReviewSheet] so the detail screen doesn't need a second VM. */
+    val reviewsRepository: ReviewsRepository,
 ) : ViewModel() {
 
     private val bookingId: String = checkNotNull(savedStateHandle["bookingId"])

@@ -16,6 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -23,7 +26,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
+import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.theme.AppTheme
+import java.util.Calendar
 
 /**
  * Artist gigs tab — calendar-style list of bookings from `listForArtist()`.
@@ -39,6 +45,11 @@ fun ArtistGigsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    var selectedDay by remember { mutableStateOf<Int?>(null) }
+    val cal = remember { Calendar.getInstance() }
+    val busyDays = remember(state.items) {
+        state.items.mapNotNull { dayOfMonthFromLabel(it.booking.date) }.toSet()
+    }
 
     PullToRefreshBox(
         isRefreshing = state.isLoading && state.items.isNotEmpty(),
@@ -79,6 +90,17 @@ fun ArtistGigsScreen(
                         color = colors.ink,
                         modifier = Modifier.padding(space.lg),
                     )
+                    MonthCalendarHeader(monthLabel = monthLabelFromEpoch(cal.timeInMillis))
+                    MonthDayGrid(
+                        year = cal.get(Calendar.YEAR),
+                        month = cal.get(Calendar.MONTH),
+                        busyDays = busyDays,
+                        selectedDay = selectedDay,
+                        onDayClick = { day ->
+                            selectedDay = if (selectedDay == day) null else day
+                        },
+                    )
+                    Spacer(Modifier.height(space.lg))
                     state.error?.let { msg ->
                         Text(
                             msg,
@@ -88,9 +110,18 @@ fun ArtistGigsScreen(
                         )
                         Spacer(Modifier.height(space.md))
                     }
-                    viewModel.groupedByMonth().forEach { (month, rows) ->
-                        MonthCalendarHeader(monthLabel = month)
-                        rows.forEach { item ->
+                    val rows = if (selectedDay == null) {
+                        viewModel.groupedByMonth()
+                    } else {
+                        listOf(
+                            "Selected" to state.items.filter {
+                                dayOfMonthFromLabel(it.booking.date) == selectedDay
+                            },
+                        )
+                    }
+                    rows.forEach { (month, group) ->
+                        if (selectedDay == null) MonthCalendarHeader(monthLabel = month)
+                        group.forEach { item ->
                             val b = item.booking
                             Column(
                                 Modifier
@@ -114,4 +145,16 @@ fun ArtistGigsScreen(
             }
         }
     }
+}
+
+private fun dayOfMonthFromLabel(dateLabel: String): Int? {
+    val formats = listOf("EEE, MMM d, yyyy", "MMM d, yyyy", "yyyy-MM-dd")
+    for (p in formats) {
+        val d = runCatching {
+            java.text.SimpleDateFormat(p, java.util.Locale.US).parse(dateLabel)
+        }.getOrNull() ?: continue
+        val c = Calendar.getInstance().apply { time = d }
+        return c.get(Calendar.DAY_OF_MONTH)
+    }
+    return null
 }

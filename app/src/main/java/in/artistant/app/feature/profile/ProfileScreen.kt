@@ -228,11 +228,7 @@ fun ProfileScreen(
                             HRule()
                             SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
                             HRule()
-                            SettingsRow("Get help") {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, "mailto:${AppEnvironment.supportEmail}".toUri()),
-                                )
-                            }
+                            SettingsRow("Get help", onClick = viewModel::showHelp)
                             HRule()
                             SettingsRow("Sign out", tint = colors.warm, onClick = viewModel::showSignOutConfirm)
                             HRule()
@@ -322,6 +318,21 @@ fun ProfileScreen(
                 }
             },
         )
+    }
+
+    if (state.showHelp) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(colors.bg.copy(alpha = 0.72f))
+                .clickable(onClick = viewModel::dismissHelp),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            HelpFeedbackSheet(
+                bookingsRepository = viewModel.bookingsRepository,
+                onDismiss = viewModel::dismissHelp,
+            )
+        }
     }
 }
 

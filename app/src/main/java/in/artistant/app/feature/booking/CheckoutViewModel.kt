@@ -8,6 +8,7 @@ import `in`.artistant.app.data.payments.PaymentsService
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.feature.paywall.EntitlementStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,8 @@ data class CheckoutUiState(
     val isSubmitting: Boolean = false,
     val lastCreateErrorMessage: String? = null,
     val confirmedBookingId: String? = null,
+    /** When subscriptions are on and the client isn't entitled — navigate to paywall. */
+    val needsPaywall: Boolean = false,
 )
 
 @HiltViewModel
@@ -29,6 +32,7 @@ class CheckoutViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val bookingsRepository: BookingsRepository,
     private val paymentsService: PaymentsService,
+    private val entitlements: EntitlementStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(CheckoutUiState())
@@ -51,6 +55,11 @@ class CheckoutViewModel @Inject constructor(
     fun sendRequest() {
         val draft = _state.value.draft ?: return
         if (_state.value.isSubmitting) return
+        // Mirror iOS CheckoutView quota gate — inert until subscriptionsEnabled flips.
+        if (entitlements.subscriptionsActive && !entitlements.isEntitled.value) {
+            _state.update { it.copy(needsPaywall = true) }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isSubmitting = true, lastCreateErrorMessage = null) }
             try {
@@ -76,6 +85,10 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun clearNavigation() {
-        _state.update { it.copy(confirmedBookingId = null) }
+        _state.update { it.copy(confirmedBookingId = null, needsPaywall = false) }
+    }
+
+    fun consumePaywall() {
+        _state.update { it.copy(needsPaywall = false) }
     }
 }

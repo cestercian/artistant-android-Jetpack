@@ -14,6 +14,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,9 +24,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
+import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.theme.AppTheme
+import java.util.Calendar
 
-/** Client bookings tab — upcoming/pending list with month headers. */
+/** Client bookings tab — month day grid + upcoming/pending list. */
 @Composable
 fun BookingsScreen(
     onBookingClick: (bookingId: String) -> Unit,
@@ -33,6 +39,17 @@ fun BookingsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    var selectedDay by remember { mutableStateOf<Int?>(null) }
+    val cal = remember { Calendar.getInstance() }
+    val year = cal.get(Calendar.YEAR)
+    val month = cal.get(Calendar.MONTH)
+    val busyDays = remember(state.items) {
+        state.items.mapNotNull { dayOfMonthFromLabel(it.booking.date) }.toSet()
+    }
+    val filtered = remember(state.items, selectedDay) {
+        if (selectedDay == null) state.items
+        else state.items.filter { dayOfMonthFromLabel(it.booking.date) == selectedDay }
+    }
 
     when {
         state.isLoading && state.items.isEmpty() -> {
@@ -67,8 +84,24 @@ fun BookingsScreen(
                     color = colors.ink,
                     modifier = Modifier.padding(space.lg),
                 )
-                viewModel.groupedByMonth().forEach { (month, rows) ->
-                    MonthCalendarHeader(monthLabel = month)
+                MonthCalendarHeader(monthLabel = monthLabelFromEpoch(cal.timeInMillis))
+                MonthDayGrid(
+                    year = year,
+                    month = month,
+                    busyDays = busyDays,
+                    selectedDay = selectedDay,
+                    onDayClick = { day ->
+                        selectedDay = if (selectedDay == day) null else day
+                    },
+                )
+                Spacer(Modifier.height(space.lg))
+                val groups = if (selectedDay == null) {
+                    viewModel.groupedByMonth()
+                } else {
+                    listOf("Selected" to filtered)
+                }
+                groups.forEach { (monthLabel, rows) ->
+                    if (selectedDay == null) MonthCalendarHeader(monthLabel = monthLabel)
                     rows.forEach { item ->
                         val b = item.booking
                         Column(
@@ -94,4 +127,17 @@ fun BookingsScreen(
             }
         }
     }
+}
+
+/** Parse day-of-month from "EEE, MMM d, yyyy" (Booking.date). */
+private fun dayOfMonthFromLabel(dateLabel: String): Int? {
+    val formats = listOf("EEE, MMM d, yyyy", "MMM d, yyyy", "yyyy-MM-dd")
+    for (p in formats) {
+        val d = runCatching {
+            java.text.SimpleDateFormat(p, java.util.Locale.US).parse(dateLabel)
+        }.getOrNull() ?: continue
+        val c = Calendar.getInstance().apply { time = d }
+        return c.get(Calendar.DAY_OF_MONTH)
+    }
+    return null
 }

@@ -50,6 +50,8 @@ interface BookingsRepository {
     suspend fun cancel(id: String, reason: String?): Booking
     suspend fun accept(id: String): Booking
     suspend fun declineByArtist(id: String, reason: String?): Booking
+    /** ACCT-12 — non-throwing insert into `app_feedback` (mig 0073). */
+    suspend fun submitFeedback(body: String, isBug: Boolean)
 }
 
 @Singleton
@@ -187,6 +189,21 @@ class SupabaseBookingsRepository @Inject constructor(
     override suspend fun declineByArtist(id: String, reason: String?): Booking =
         cancelViaEdgeFunction(id, reason, cancelledBy = "artist")
 
+    /**
+     * ACCT-12 — insert into `app_feedback`. Non-throwing: feedback must never
+     * dead-end the UI (pre-0073 / offline / signed-out → silent no-op).
+     */
+    override suspend fun submitFeedback(body: String, isBug: Boolean) {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) return
+        val userId = currentUserId() ?: return
+        runCatching {
+            client.from("app_feedback").insert(
+                FeedbackInsert(userId = userId, body = trimmed, isBug = isBug),
+            )
+        }
+    }
+
     private suspend fun cancelViaEdgeFunction(
         id: String,
         reason: String?,
@@ -282,6 +299,13 @@ private data class CancelBody(
     @SerialName("booking_id") val bookingId: String,
     @SerialName("cancelled_by") val cancelledBy: String,
     val reason: String?,
+)
+
+@Serializable
+private data class FeedbackInsert(
+    @SerialName("user_id") val userId: String,
+    val body: String,
+    @SerialName("is_bug") val isBug: Boolean,
 )
 
 @Serializable
@@ -474,6 +498,10 @@ class FakeBookingsRepository(
 
     override suspend fun declineByArtist(id: String, reason: String?): Booking =
         cancel(id, reason)
+
+    override suspend fun submitFeedback(body: String, isBug: Boolean) {
+        // Fake: no-op (tests don't assert feedback persistence).
+    }
 
     private fun mutate(id: String, transform: (Booking) -> Booking): Booking {
         if (!signedIn) throw BookingRepositoryError.NotSignedIn

@@ -36,9 +36,9 @@ import `in`.artistant.app.feature.booking.ConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
-import `in`.artistant.app.feature.messages.MessagesViewModel
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ProfileScreen
@@ -144,13 +144,13 @@ fun ClientTabsScaffold() {
                 route = ARTIST_PROFILE_ROUTE,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
-                val messagesViewModel: MessagesViewModel = hiltViewModel()
+                val chatOpen: ChatOpenViewModel = hiltViewModel()
                 ArtistProfileScreen(
                     onBack = { nav.popBackStack() },
                     onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
                     onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
                     onMessage = { artistId ->
-                        messagesViewModel.findOrCreateThread(artistId) { threadId ->
+                        chatOpen.open(artistId, bookingId = null) { threadId ->
                             nav.navigate(ClientNavRoutes.chat(threadId))
                         }
                     },
@@ -182,6 +182,7 @@ fun ClientTabsScaffold() {
                             popUpTo(ClientNavRoutes.CHECKOUT) { inclusive = true }
                         }
                     },
+                    onPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
                 )
             }
             composable(
@@ -208,6 +209,7 @@ fun ClientTabsScaffold() {
                 BookingDetailScreen(
                     isArtistViewer = false,
                     onBack = { nav.popBackStack() },
+                    onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
                 )
             }
             composable(

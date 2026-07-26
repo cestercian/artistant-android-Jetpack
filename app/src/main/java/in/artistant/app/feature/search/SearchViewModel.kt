@@ -45,6 +45,7 @@ data class SearchUiState(
     val histogram: List<PriceBucket> = emptyList(),
     val results: List<Artist> = emptyList(),
     val facets: SearchFacets = SearchFacets.Empty,
+    val recents: List<String> = emptyList(),
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val canLoadMore: Boolean = false,
@@ -71,6 +72,7 @@ data class SearchUiState(
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val searchRepository: SearchRepository,
+    private val searchRecents: SearchRecents,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchUiState())
@@ -88,6 +90,10 @@ class SearchViewModel @Inject constructor(
                 .onSuccess { facets -> _state.update { it.copy(facets = facets) } }
         }
         viewModelScope.launch {
+            runCatching { searchRecents.load() }
+                .onSuccess { terms -> _state.update { it.copy(recents = terms) } }
+        }
+        viewModelScope.launch {
             queryFlow
                 .debounce(280)
                 .distinctUntilChanged()
@@ -97,6 +103,10 @@ class SearchViewModel @Inject constructor(
                 }
         }
         loadHistogram(null)
+    }
+
+    fun applyRecent(term: String) {
+        onQueryChange(term)
     }
 
     fun onQueryChange(text: String) {
@@ -276,6 +286,14 @@ class SearchViewModel @Inject constructor(
                         canLoadMore = page.nextCursor !is SearchCursor.End,
                         loadError = null,
                     )
+                }
+                // Persist successful text queries as recents (iOS SearchStore).
+                val q = live.query.trim()
+                if (reset && q.isNotEmpty()) {
+                    val next = (listOf(q) + live.recents.filter { !it.equals(q, ignoreCase = true) })
+                        .take(8)
+                    searchRecents.save(next)
+                    _state.update { it.copy(recents = next) }
                 }
             } catch (t: Throwable) {
                 if (gen != generation) return@launch

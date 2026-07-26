@@ -11,6 +11,8 @@ import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.observability.PostHogAnalytics
 import `in`.artistant.app.platform.observability.SentryCrash
 import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.feature.search.DataStoreSearchRecents
+import `in`.artistant.app.feature.search.SearchRecents
 import javax.inject.Singleton
 
 /**
@@ -24,6 +26,11 @@ object AppModule {
     @Singleton
     fun provideAppPreferences(@ApplicationContext context: Context): AppPreferences =
         AppPreferences(context)
+
+    @Provides
+    @Singleton
+    fun provideSearchRecents(prefs: AppPreferences): SearchRecents =
+        DataStoreSearchRecents(prefs)
 
     // Real observability wrappers — DARK-UNTIL-KEY: a guarded no-op until the
     // operator sets POSTHOG_API_KEY / SENTRY_DSN (see the wrapper class headers).

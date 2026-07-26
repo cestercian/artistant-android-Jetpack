@@ -7,6 +7,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.AccountRepository
+import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
@@ -34,6 +35,7 @@ data class ProfileUiState(
     val pendingExport: ExportResult? = null,
     val showSignOutConfirm: Boolean = false,
     val showDeleteConfirm: Boolean = false,
+    val showHelp: Boolean = false,
     val calendarSyncEnabled: Boolean = false,
     val calendarHasPermission: Boolean = false,
     val calendarTitle: String = "Artistant",
@@ -64,6 +66,7 @@ class ProfileViewModel @Inject constructor(
     private val session: SessionManager,
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
+    val bookingsRepository: BookingsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ProfileUiState())
@@ -107,6 +110,9 @@ class ProfileViewModel @Inject constructor(
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
     fun dismissSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = false) }
+
+    fun showHelp() = _state.update { it.copy(showHelp = true) }
+    fun dismissHelp() = _state.update { it.copy(showHelp = false) }
 
     fun signOut() = viewModelScope.launch {
         _state.update { it.copy(showSignOutConfirm = false) }
