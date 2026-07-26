@@ -186,7 +186,7 @@ fun ArtistHomeScreen(
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
-                                    .width(44.dp)
+                                    .width(AppTheme.dimens.size.rowMin)
                                     .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
                                     .background(if (busy) colors.brand.copy(alpha = 0.15f) else colors.bgSoft)
                                     .border(

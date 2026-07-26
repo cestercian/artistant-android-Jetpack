@@ -13,13 +13,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -107,21 +104,10 @@ fun MessagesScreen(
                         horizontalArrangement = Arrangement.spacedBy(space.md),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Box(
-                            Modifier
-                                .size(AppTheme.dimens.size.avatarMd)
-                                .background(
-                                    colors.bgElev,
-                                    RoundedCornerShape(AppTheme.dimens.radii.sm),
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.ChatBubbleOutline,
-                                contentDescription = null,
-                                tint = colors.ink3,
-                            )
-                        }
+                        Avatar(
+                            name = item.counterpartName,
+                            size = AppTheme.dimens.size.avatarMd,
+                        )
                         Column(Modifier.weight(1f)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(item.counterpartName, style = AppTheme.type.headline, color = colors.ink)

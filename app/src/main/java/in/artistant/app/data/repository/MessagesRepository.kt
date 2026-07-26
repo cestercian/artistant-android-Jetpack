@@ -137,7 +137,12 @@ class SupabaseMessagesRepository @Inject constructor(
 
         try {
             existing()?.let { return it }
-            require(userId != artist) { "The conversation opens once the booking is confirmed." }
+            // No thread yet. Only the CLIENT may create — artist here means the
+            // booking isn't confirmed (0015 hasn't minted the row). Creating
+            // would mint client_id == artist_id (self-thread / 0081 CHECK).
+            if (userId == artist) {
+                throw IllegalStateException("The conversation opens once the booking is confirmed.")
+            }
             return client.from("threads")
                 .insert(ThreadInsert(userId, artist, booking)) { select(Columns.list("id")) }
                 .decodeSingle<ThreadIdRow>()

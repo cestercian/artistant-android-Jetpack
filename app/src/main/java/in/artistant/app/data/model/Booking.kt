@@ -121,4 +121,47 @@ object BookingDateFormat {
         f.timeZone = TimeZone.getDefault()
         return f.format(Date(epochMs))
     }
+
+    /** Parse a stored date label into a Calendar (local wall clock). */
+    fun parseLabel(dateLabel: String): java.util.Calendar? {
+        val formats = listOf(PATTERN, "MMM d, yyyy", "yyyy-MM-dd")
+        for (p in formats) {
+            val d = runCatching { SimpleDateFormat(p, posix).parse(dateLabel) }.getOrNull() ?: continue
+            return java.util.Calendar.getInstance().apply { time = d }
+        }
+        return null
+    }
+}
+
+/**
+ * Gig start clock — prefer `start_datetime`, else date+time labels (IST),
+ * else start-of-day from the date label. Mirrors iOS `Booking.resolvedStart`.
+ */
+fun Booking.resolvedStartEpochMs(): Long? {
+    startDatetimeIso?.let { raw ->
+        `in`.artistant.app.common.util.SupabaseISO8601.parse(raw)?.toEpochMilli()?.let { return it }
+        val formats = listOf(
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss",
+        )
+        for (pattern in formats) {
+            runCatching {
+                val f = SimpleDateFormat(pattern, Locale.US)
+                f.timeZone = TimeZone.getTimeZone("UTC")
+                f.parse(raw)?.time
+            }.getOrNull()?.let { return it }
+        }
+    }
+    if (date.isNotBlank() && time.isNotBlank()) {
+        val f = SimpleDateFormat("EEE, MMM d, yyyy h:mm a", Locale.US)
+        f.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+        runCatching { f.parse("$date $time")?.time }.getOrNull()?.let { return it }
+    }
+    return BookingDateFormat.parseLabel(date)?.apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }?.timeInMillis
 }

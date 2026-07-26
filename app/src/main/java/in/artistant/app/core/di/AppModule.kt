@@ -11,6 +11,7 @@ import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.observability.PostHogAnalytics
 import `in`.artistant.app.platform.observability.SentryCrash
 import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.platform.storage.CommunityPledgeStore
 import `in`.artistant.app.feature.search.DataStoreSearchRecents
 import `in`.artistant.app.feature.search.SearchRecents
 import javax.inject.Singleton
@@ -26,6 +27,10 @@ object AppModule {
     @Singleton
     fun provideAppPreferences(@ApplicationContext context: Context): AppPreferences =
         AppPreferences(context)
+
+    @Provides
+    @Singleton
+    fun provideCommunityPledgeStore(prefs: AppPreferences): CommunityPledgeStore = prefs
 
     @Provides
     @Singleton

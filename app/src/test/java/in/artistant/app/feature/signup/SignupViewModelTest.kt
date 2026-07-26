@@ -6,8 +6,12 @@ import `in`.artistant.app.data.repository.FakeUsersRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.platform.observability.NoopAnalytics
+import `in`.artistant.app.platform.storage.CommunityPledgeStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -34,8 +38,20 @@ class SignupViewModelTest {
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    private fun vm(users: UsersRepository = FakeUsersRepository()) =
-        SignupViewModel(users, NoopAnalytics())
+    private class FakePledgeStore(
+        agreed: Boolean = false,
+    ) : CommunityPledgeStore {
+        private val _agreed = MutableStateFlow(agreed)
+        override val communityAgreed: StateFlow<Boolean> = _agreed.asStateFlow()
+        override suspend fun setCommunityAgreed(agreed: Boolean) {
+            _agreed.value = agreed
+        }
+    }
+
+    private fun vm(
+        users: UsersRepository = FakeUsersRepository(),
+        pledge: CommunityPledgeStore = FakePledgeStore(),
+    ) = SignupViewModel(users, NoopAnalytics(), pledge)
 
     /** Minimal test double: reports every valid-format handle available, and lets the caller
      *  pick what upsert throws — enough to model the "available-then-raced/lost-session" paths

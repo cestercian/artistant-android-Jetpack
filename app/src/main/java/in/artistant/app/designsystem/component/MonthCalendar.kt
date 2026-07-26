@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -84,7 +86,8 @@ fun MonthDayGrid(
                     Box(
                         Modifier
                             .weight(1f)
-                            .padding(vertical = space.xs)
+                            .aspectRatio(1f)
+                            .padding(space.xs)
                             .then(
                                 if (day != null) {
                                     Modifier
@@ -98,8 +101,7 @@ fun MonthDayGrid(
                                         )
                                         .clickable { onDayClick(day) }
                                 } else Modifier,
-                            )
-                            .padding(vertical = space.sm),
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (day != null) {
@@ -140,6 +142,16 @@ fun monthLabelFromEpoch(epochMs: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = epochMs }
     val f = SimpleDateFormat("MMMM yyyy", Locale.US)
     return f.format(cal.time)
+}
+
+/**
+ * Day-of-month for [dateLabel] only when it falls in [year]/[month]
+ * (Calendar.MONTH 0-based). Prevents cross-month collisions on the grid.
+ */
+fun dayOfMonthInMonth(dateLabel: String, year: Int, month: Int): Int? {
+    val c = BookingDateFormat.parseLabel(dateLabel) ?: return null
+    if (c.get(Calendar.YEAR) != year || c.get(Calendar.MONTH) != month) return null
+    return c.get(Calendar.DAY_OF_MONTH)
 }
 
 @Composable

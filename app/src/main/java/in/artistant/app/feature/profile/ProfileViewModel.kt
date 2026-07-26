@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.config.AppEnvironment
+import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
@@ -40,6 +42,10 @@ data class ProfileUiState(
     val calendarHasPermission: Boolean = false,
     val calendarTitle: String = "Artistant",
     val calendars: List<CalendarSyncService.CalendarOption> = emptyList(),
+    /** Profile stats — Bookings = not-completed, Completed = past (iOS partition). */
+    val bookingsCount: Int = 0,
+    val savedCount: Int = 0,
+    val completedCount: Int = 0,
 ) {
     val displayName: String
         get() = profile?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
@@ -66,6 +72,7 @@ class ProfileViewModel @Inject constructor(
     private val session: SessionManager,
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
+    private val savedStore: SavedStore,
     val bookingsRepository: BookingsRepository,
 ) : ViewModel() {
 
@@ -84,6 +91,11 @@ class ProfileViewModel @Inject constructor(
                         calendars = cal.calendars,
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            savedStore.ids.collect { ids ->
+                _state.update { it.copy(savedCount = ids.size) }
             }
         }
     }
@@ -106,6 +118,18 @@ class ProfileViewModel @Inject constructor(
                     it.copy(isLoading = false, error = e.message ?: "Couldn't load profile")
                 }
             }
+        // Best-effort stats — don't blank the profile if bookings fail.
+        runCatching { bookingsRepository.listForClient() }
+            .onSuccess { bookings ->
+                _state.update {
+                    it.copy(
+                        bookingsCount = bookings.count { b -> b.status != BookingStatus.Completed },
+                        completedCount = bookings.count { b -> b.status == BookingStatus.Completed },
+                        savedCount = savedStore.ids.value.size,
+                    )
+                }
+            }
+        runCatching { savedStore.refreshFromServer() }
     }
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }

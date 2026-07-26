@@ -1,7 +1,9 @@
 package `in`.artistant.app.platform.storage
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import `in`.artistant.app.designsystem.theme.AppRole
@@ -26,16 +28,34 @@ private val Context.calendarStore by preferencesDataStore(name = "artistant.cale
  * Holds the role plus a generic string get/set for small snapshots. `wipeAll()`
  * clears everything on sign-out / delete-account.
  */
+interface CommunityPledgeStore {
+    /** ACCT-05 — one-time community pledge before role pick. */
+    val communityAgreed: Flow<Boolean>
+    suspend fun setCommunityAgreed(agreed: Boolean)
+}
+
 @Singleton
 class AppPreferences @Inject constructor(
     private val context: Context,
-) {
+) : CommunityPledgeStore {
     private val roleKey = stringPreferencesKey("role")
+    private val communityAgreedKey = booleanPreferencesKey("community.agreed")
+    private val communityAgreedDateKey = longPreferencesKey("community.agreedDate")
 
     val role: Flow<AppRole> = context.dataStore.data.map { prefs ->
         when (prefs[roleKey]) {
             AppRole.Artist.name -> AppRole.Artist
             else -> AppRole.Client // default + any unknown value
+        }
+    }
+
+    override val communityAgreed: Flow<Boolean> =
+        context.dataStore.data.map { it[communityAgreedKey] == true }
+
+    override suspend fun setCommunityAgreed(agreed: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[communityAgreedKey] = agreed
+            if (agreed) prefs[communityAgreedDateKey] = System.currentTimeMillis()
         }
     }
 

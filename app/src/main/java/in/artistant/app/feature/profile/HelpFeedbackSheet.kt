@@ -99,7 +99,11 @@ fun HelpFeedbackSheet(
         )
         status?.let {
             Spacer(Modifier.height(space.sm))
-            Text(it, style = AppTheme.type.footnote, color = colors.ink2)
+            Text(
+                it,
+                style = AppTheme.type.footnote,
+                color = if (it.startsWith("Thanks")) colors.ink2 else colors.hot,
+            )
         }
         Spacer(Modifier.height(space.lg))
         PrimaryButton(
@@ -108,9 +112,13 @@ fun HelpFeedbackSheet(
                 if (sending || body.isBlank()) return@PrimaryButton
                 scope.launch {
                     sending = true
-                    bookingsRepository.submitFeedback(body, isBug)
-                    status = "Thanks — we got it."
-                    body = ""
+                    val ok = bookingsRepository.submitFeedback(body, isBug)
+                    status = if (ok) {
+                        body = ""
+                        "Thanks — we got it."
+                    } else {
+                        "Couldn't send — check your connection and try again."
+                    }
                     sending = false
                 }
             },

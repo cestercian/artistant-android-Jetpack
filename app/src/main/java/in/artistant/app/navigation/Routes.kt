@@ -34,12 +34,14 @@ object ClientNavRoutes {
     const val CONFIRMED = "confirmed/{bookingId}"
     const val BOOKING_DETAIL = "booking_detail/{bookingId}"
     const val REQUEST_QUOTE = "request_quote/{artistId}"
+    const val ARTIST_LIST = "artist_list/{kind}"
 
     fun bookingCompose(artistId: String) = "booking/$artistId"
     fun chat(threadId: String) = "chat/$threadId"
     fun confirmed(bookingId: String) = "confirmed/$bookingId"
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
+    fun artistList(kind: String) = "artist_list/$kind"
     const val PAYWALL = "paywall"
 }
 

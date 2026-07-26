@@ -46,7 +46,8 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | Hero/bio/packages/reviews/dock + saved heart + score breakdown sheet |
 | `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | Self metrics + history; Home → Score |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | Client real-world rows from profile chip |
-| `Screens/ArtistListView.swift` | (unused / list helper) | obsolete | Discover/Search replaced roster lists |
+| `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | done | Profile stats destination |
+| `Screens/Signup/CommunityCommitmentView` (in SignupFlowView) | `feature/signup/CommunityCommitmentScreen.kt` | done | ACCT-05 pledge gate |
 
 ## Screens — Booking (M3)
 
@@ -203,7 +204,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Components/ArtistTile.swift` | `designsystem/component/ArtistTile.kt` | done | M2 |
 | `Components/MediaContainer.swift` | `designsystem/component/MediaContainer.kt` | done | |
 | `Components/EmptyStateView.swift` | `designsystem/component/EmptyState.kt` | done | M2 |
-| `Components/Avatar.swift` | `designsystem/component/Avatar.kt` | missing | M2 |
+| `Components/Avatar.swift` | `designsystem/component/Avatar.kt` | done | DJB2 hue + initials |
 | `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | done | |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
@@ -218,8 +219,6 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 - Operator Google/Apple dashboard config + `google-services.json` / FCM server path
 - ExoPlayer sample / Spotify embed playback
 - Artist profile PROF-* Airbnb extras (hero pager, review search/sort)
-- Profile stats carousel → Saved list destination
-- Community pledge gate on signup
 
 ---
 

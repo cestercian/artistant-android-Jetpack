@@ -25,6 +25,7 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
 import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.theme.AppTheme
 import java.util.Calendar
@@ -43,12 +44,12 @@ fun BookingsScreen(
     val cal = remember { Calendar.getInstance() }
     val year = cal.get(Calendar.YEAR)
     val month = cal.get(Calendar.MONTH)
-    val busyDays = remember(state.items) {
-        state.items.mapNotNull { dayOfMonthFromLabel(it.booking.date) }.toSet()
+    val busyDays = remember(state.items, year, month) {
+        state.items.mapNotNull { dayOfMonthInMonth(it.booking.date, year, month) }.toSet()
     }
-    val filtered = remember(state.items, selectedDay) {
+    val filtered = remember(state.items, selectedDay, year, month) {
         if (selectedDay == null) state.items
-        else state.items.filter { dayOfMonthFromLabel(it.booking.date) == selectedDay }
+        else state.items.filter { dayOfMonthInMonth(it.booking.date, year, month) == selectedDay }
     }
 
     when {
@@ -127,17 +128,4 @@ fun BookingsScreen(
             }
         }
     }
-}
-
-/** Parse day-of-month from "EEE, MMM d, yyyy" (Booking.date). */
-private fun dayOfMonthFromLabel(dateLabel: String): Int? {
-    val formats = listOf("EEE, MMM d, yyyy", "MMM d, yyyy", "yyyy-MM-dd")
-    for (p in formats) {
-        val d = runCatching {
-            java.text.SimpleDateFormat(p, java.util.Locale.US).parse(dateLabel)
-        }.getOrNull() ?: continue
-        val c = Calendar.getInstance().apply { time = d }
-        return c.get(Calendar.DAY_OF_MONTH)
-    }
-    return null
 }

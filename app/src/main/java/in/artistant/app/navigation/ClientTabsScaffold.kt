@@ -41,6 +41,7 @@ import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.profile.ArtistListScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
@@ -129,7 +130,20 @@ fun ClientTabsScaffold() {
                 MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
             }
             composable(ClientTab.Profile.route) {
-                ProfileScreen(onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) })
+                ProfileScreen(
+                    onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
+                    onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
+                )
+            }
+            composable(
+                route = ClientNavRoutes.ARTIST_LIST,
+                arguments = listOf(navArgument("kind") { type = NavType.StringType }),
+            ) {
+                ArtistListScreen(
+                    onBack = { nav.popBackStack() },
+                    onArtistClick = { id -> nav.navigate("artist/$id") },
+                    onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                )
             }
             composable(ClientNavRoutes.PAYWALL) {
                 PaywallScreen(
