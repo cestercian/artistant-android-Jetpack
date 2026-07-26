@@ -160,8 +160,9 @@ socials/bio) can be built before F8 lands.*
 
 - [x] **MessagesViewModel** — thread list, verbatim preview, real pair-scoped
   `findOrCreateThread`. **partial:** artist counterpart names + push deep links deferred.
-- [x] **ChatViewModel** — paged load, send, mark-read + best-effort 0072 receipts.
-  **partial:** realtime subscription and optimistic retry/reconciliation deferred.
+- [x] **ChatViewModel** — paged load, optimistic send + Realtime INSERT reconcile,
+  mark-read + best-effort 0072 receipts, tap-to-retry. **M.**
+  *(report/details sheet still deferred.)*
 - [x] **ChatScreen** — bubbles, system rows/action route, Airbnb trust banner + composer.
   **partial:** reverse auto-scroll, report/details, retry chip, and glass polish deferred.
 - [x] ~~**Redaction** (`Redaction.kt`)~~ — **obsolete.** Scrapped Jul 2026 (mig

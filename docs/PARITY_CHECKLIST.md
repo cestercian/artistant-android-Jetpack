@@ -64,7 +64,7 @@ moat.
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
 | `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | partial | Server inbox, verbatim previews, pair-scoped open; filters/deep links deferred |
-| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | partial | System rows, best-effort receipts, Airbnb trust banner; Realtime/report/details deferred |
+| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | partial | Realtime + optimistic send/retry; system rows + trust banner; report/details deferred |
 | `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | missing | |
 
 ## Screens — Artist home / gigs (M3/M5)
@@ -128,7 +128,7 @@ moat.
 | `Repositories/ScoreRepository.swift` | `data/repository/ScoreRepository.kt` + Fake | missing | M2/M5 |
 | `Repositories/BookingsRepository.swift` | `data/repository/BookingsRepository.kt` + Fake | missing | M3 — request→accept |
 | `Repositories/RequestsRepository.swift` | `data/repository/RequestsRepository.kt` + Fake | missing | M3 |
-| `Repositories/MessagesRepository.swift` | `data/repository/MessagesRepository.kt` + Fake | partial | Explicit message projections, 0072 fallback, receipts; Realtime no-op deferred |
+| `Repositories/MessagesRepository.swift` | `data/repository/MessagesRepository.kt` + Fake | partial | Explicit projections, 0072 fallback, receipts; Realtime INSERT subscribe wired |
 | `Repositories/SamplesRepository.swift` | `data/repository/SamplesRepository.kt` | missing | M5 |
 | `Repositories/TechRiderRepository.swift` | `data/repository/TechRiderRepository.kt` | missing | M5 |
 | `Repositories/ArtistLinksRepository.swift` | `data/repository/ArtistLinksRepository.kt` | missing | M5 |
@@ -146,7 +146,7 @@ moat.
 | `State/SavedStore.swift` | `SavedViewModel` / prefs | missing | M2/M6 |
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
-| `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | M4 repository-backed inbox/chat; no persistent store or Realtime yet |
+| `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | Inbox + Chat with Realtime/optimistic reconcile; no global MessageStore yet |
 | `State/EPKStore.swift` | `EpkViewModel` | partial | M5 scaffold — fetch-only shell |
 | `State/ArtistOnboardingStore.swift` | `WizardViewModel` | partial | M5 scaffold — no persistence/media |
 | `State/EntitlementStore.swift` | `feature/paywall/EntitlementStore.kt` | partial | M7 inert — always not-subscribed when flag off |

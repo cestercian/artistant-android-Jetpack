@@ -6,15 +6,28 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.decodeRecordOrNull
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageKind
 import `in`.artistant.app.data.model.Thread
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import timber.log.Timber
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,7 +36,7 @@ sealed class MessagesRepositoryError(message: String, cause: Throwable? = null) 
     class Underlying(cause: Throwable) : MessagesRepositoryError(cause.message ?: "Messages request failed", cause)
 }
 
-/** Cancellation seam for the future Realtime channel. */
+/** Cancellation seam for the Realtime channel — caller MUST cancel on dispose. */
 fun interface MessagesSubscription { fun cancel() }
 
 interface MessagesRepository {
@@ -36,11 +49,12 @@ interface MessagesRepository {
     suspend fun counterpartLastRead(threadId: String): Long?
 
     /**
-     * Realtime is intentionally deferred: polling on open/send is the safe initial
-     * M4 slice. The token keeps the UI lifecycle ready for a later channel wiring.
+     * Realtime INSERT subscribe on `public.messages` for one thread. Echoes include
+     * the caller's own sends — ChatViewModel dedups via [ChatRealtimeLogic].
+     * Returns a no-op subscription when realtime is off, unsigned-in, or join fails
+     * (poll-on-open remains the fallback).
      */
-    suspend fun subscribeMessages(threadId: String, onInsert: (Message) -> Unit): MessagesSubscription =
-        MessagesSubscription {}
+    suspend fun subscribeMessages(threadId: String, onInsert: (Message) -> Unit): MessagesSubscription
 }
 
 @Singleton
@@ -175,9 +189,63 @@ class SupabaseMessagesRepository @Inject constructor(
         }
     }
 
+    override suspend fun subscribeMessages(
+        threadId: String,
+        onInsert: (Message) -> Unit,
+    ): MessagesSubscription {
+        if (!AppEnvironment.realtimeEnabled) return MessagesSubscription {}
+        val userId = currentUserId() ?: return MessagesSubscription {}
+        val tid = threadId.lowercase()
+        // Seed / local-only thread ids aren't on the server — Realtime can't join them.
+        if (!UUID_REGEX.matches(tid)) return MessagesSubscription {}
+
+        // Liveness gate: cancel() flips this synchronously so a callback mid-decode
+        // after teardown never mutates UI (iOS OSAllocatedUnfairLock → AtomicBoolean).
+        val live = AtomicBoolean(true)
+        val channel = client.channel("messages:$tid")
+        val changeFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+            table = "messages"
+            filter("thread_id", FilterOperator.EQ, tid)
+        }
+        // Own scope so collection survives the subscribe await and dies on cancel().
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val collectJob: Job = scope.launch {
+            changeFlow.collect { action ->
+                if (!live.get()) return@collect
+                val row = action.decodeRecordOrNull<DbMessage>() ?: run {
+                    Timber.w("Realtime message decode failed for thread %s", tid)
+                    return@collect
+                }
+                if (!live.get()) return@collect
+                onInsert(row.toDomain(userId))
+            }
+        }
+
+        return try {
+            channel.subscribe(blockUntilSubscribed = true)
+            MessagesSubscription {
+                live.set(false)
+                collectJob.cancel()
+                scope.launch {
+                    runCatching { channel.unsubscribe() }
+                    scope.coroutineContext[Job]?.cancel()
+                }
+            }
+        } catch (t: Throwable) {
+            Timber.w(t, "Realtime subscribe failed for thread %s — polling fallback", tid)
+            live.set(false)
+            collectJob.cancel()
+            scope.coroutineContext[Job]?.cancel()
+            MessagesSubscription {}
+        }
+    }
+
     private fun currentUserId(): String? = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
 
     companion object {
+        private val UUID_REGEX =
+            Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
         /** Never replace these with `*`: `body_raw` is historically forbidden by RLS. */
         val MESSAGE_COLUMNS = Columns.list("id", "thread_id", "sender_id", "body", "sent_at")
         val MESSAGE_COLUMNS_WITH_SYSTEM = Columns.list(
@@ -283,4 +351,10 @@ class FakeMessagesRepository(
     }
     override suspend fun markThreadReadReceipt(threadId: String) = Unit
     override suspend fun counterpartLastRead(threadId: String): Long? = null
+
+    /** Test hook: Fake has no WebSocket; callers get a no-op cancel token. */
+    override suspend fun subscribeMessages(
+        threadId: String,
+        onInsert: (Message) -> Unit,
+    ): MessagesSubscription = MessagesSubscription {}
 }

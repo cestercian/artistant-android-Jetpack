@@ -6,17 +6,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -30,15 +28,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.MessageKind
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
 
-/** M4 chat: verbatim bodies, system notices, and quiet Airbnb-style trust copy. */
+/** M4 chat: Realtime + optimistic send, system notices, Airbnb-style trust copy. */
 @Composable
 fun ChatScreen(
     onBack: () -> Unit,
@@ -73,7 +73,11 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(space.sm),
             ) {
                 items(state.messages, key = { it.id }) { message ->
-                    MessageRow(message, onBookingClick)
+                    MessageRow(
+                        message = message,
+                        onBookingClick = onBookingClick,
+                        onRetry = { viewModel.retryFailedMessage(message.id) },
+                    )
                 }
                 if (state.error != null) {
                     item { Text(state.error.orEmpty(), style = AppTheme.type.caption, color = colors.hot) }
@@ -98,9 +102,9 @@ fun ChatScreen(
                     viewModel.send(draft)
                     draft = ""
                 },
-                enabled = draft.isNotBlank() && !state.isSending,
+                enabled = draft.isNotBlank(),
             ) {
-                Icon(Icons.Filled.Send, contentDescription = "Send", tint = colors.brand)
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = colors.brand)
             }
         }
     }
@@ -124,7 +128,11 @@ private fun SafetyBanner() {
 }
 
 @Composable
-private fun MessageRow(message: Message, onBookingClick: (String) -> Unit) {
+private fun MessageRow(
+    message: Message,
+    onBookingClick: (String) -> Unit,
+    onRetry: () -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     if (message.kind == MessageKind.System) {
@@ -147,20 +155,37 @@ private fun MessageRow(message: Message, onBookingClick: (String) -> Unit) {
         }
         return
     }
-    Box(
+    val alpha = when (message.delivery) {
+        MessageDelivery.Sending -> 0.55f
+        MessageDelivery.Failed -> 0.85f
+        MessageDelivery.Sent -> 1f
+    }
+    Column(
         Modifier.fillMaxWidth().padding(vertical = space.xs),
-        contentAlignment = if (message.isMine) Alignment.CenterEnd else Alignment.CenterStart,
+        horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start,
     ) {
         Text(
             message.body,
             style = AppTheme.type.callout,
             color = if (message.isMine) colors.brandInk else colors.ink,
             modifier = Modifier
+                .alpha(alpha)
                 .background(
                     if (message.isMine) colors.brand else colors.bgElev,
                     RoundedCornerShape(AppTheme.dimens.radii.lg),
                 )
                 .padding(horizontal = space.md, vertical = space.sm),
         )
+        if (message.delivery == MessageDelivery.Failed) {
+            Text(
+                "Tap to retry",
+                style = AppTheme.type.caption,
+                color = colors.hot,
+                modifier = Modifier
+                    .padding(top = space.xs)
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = space.xs, vertical = space.xs),
+            )
+        }
     }
 }

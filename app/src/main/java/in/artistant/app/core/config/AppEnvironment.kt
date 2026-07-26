@@ -22,6 +22,12 @@ object AppEnvironment {
     const val supportEmail: String = "support@artistant.in"
 
     /**
+     * Chat Realtime subscribe. Default ON (matches iOS). When false, Chat falls
+     * back to poll-on-open/send — still correct, just not push-fresh.
+     */
+    val realtimeEnabled: Boolean get() = true
+
+    /**
      * Master flag for the ₹99/mo subscription system. Default OFF — paywall +
      * gates stay inert until the operator flips Play Billing on.
      */
