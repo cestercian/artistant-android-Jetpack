@@ -46,7 +46,21 @@ interface ArtistsRepository {
 
     /** Wizard Done — upsert the signed-in artist row and flip `setup_complete`. */
     suspend fun publishWizardProfile(draft: WizardProfileDraft)
+
+    /** Flip `published` so Discover can see the artist (sync go-live; media is async). */
+    suspend fun setPublished(artistId: String, published: Boolean = true)
+
+    /** Own availability columns — ManageAvailability + wizard seed. */
+    suspend fun fetchSelfAvailability(): AvailabilityDraft?
+
+    suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>)
 }
+
+/** Days + preferred start times on `artists` (not a separate table). */
+data class AvailabilityDraft(
+    val daysAvailable: List<String>,
+    val timeSlots: List<String>,
+)
 
 @Singleton
 class SupabaseArtistsRepository @Inject constructor(
@@ -118,6 +132,60 @@ class SupabaseArtistsRepository @Inject constructor(
         } catch (t: Throwable) {
             throw mapPostgrest(t)
         }
+        invalidate(userId)
+    }
+
+    override suspend fun setPublished(artistId: String, published: Boolean) {
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        require(userId == artistId.lowercase()) { "Can only publish self." }
+        try {
+            client.from("artists").update(PublishedPatch(published)) {
+                filter { eq("id", userId) }
+            }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+        invalidate(userId)
+    }
+
+    override suspend fun fetchSelfAvailability(): AvailabilityDraft? {
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: return null
+        return try {
+            client.from("artists")
+                .select(Columns.list("days_available", "default_time_slots")) {
+                    filter { eq("id", userId) }
+                }
+                .decodeList<AvailabilityRow>()
+                .firstOrNull()
+                ?.let {
+                    AvailabilityDraft(
+                        daysAvailable = it.daysAvailable.orEmpty(),
+                        timeSlots = it.defaultTimeSlots.orEmpty(),
+                    )
+                }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+    }
+
+    override suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>) {
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        try {
+            client.from("artists").update(
+                AvailabilityPatch(daysAvailable = daysAvailable, defaultTimeSlots = timeSlots),
+            ) {
+                filter { eq("id", userId) }
+            }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+        invalidate(userId)
+    }
+
+    private fun invalidate(userId: String) {
         byId.remove(userId)
         hydratedIds.remove(userId)
         _cacheGeneration.value = _cacheGeneration.value + 1
@@ -272,16 +340,16 @@ internal data class DbPackage(
     val id: String,
     @SerialName("artist_id") val artistId: String,
     val name: String,
-    val duration: String,
-    val price: Int,
+    @SerialName("duration_label") val durationLabel: String,
+    @SerialName("price_inr") val priceInr: Int,
     val includes: List<String> = emptyList(),
     val popular: Boolean = false,
 ) {
     fun toPackage() = ArtistPackage(
         id = id,
         name = name,
-        duration = duration,
-        price = price,
+        duration = durationLabel,
+        price = priceInr,
         includes = includes,
         popular = popular,
     )
@@ -298,10 +366,25 @@ internal data class DbSample(
     val id: String,
     @SerialName("artist_id") val artistId: String,
     val title: String,
-    val duration: String = "",
+    @SerialName("duration_label") val durationLabel: String = "",
 ) {
-    fun toSample() = Sample(id = id, title = title, duration = duration)
+    fun toSample() = Sample(id = id, title = title, duration = durationLabel)
 }
+
+@Serializable
+private data class PublishedPatch(val published: Boolean)
+
+@Serializable
+private data class AvailabilityPatch(
+    @SerialName("days_available") val daysAvailable: List<String>,
+    @SerialName("default_time_slots") val defaultTimeSlots: List<String>,
+)
+
+@Serializable
+private data class AvailabilityRow(
+    @SerialName("days_available") val daysAvailable: List<String>? = null,
+    @SerialName("default_time_slots") val defaultTimeSlots: List<String>? = null,
+)
 
 @Serializable
 private data class WizardPublishRow(

@@ -3,7 +3,8 @@ package `in`.artistant.app.data.repository
 /**
  * Payload for the wizard Publish / Done write — mirrors iOS
  * `ArtistsRepository.savePublishedProfile` (artist row upsert + setup_complete).
- * Packages / tech / samples table writes land in a later M5 pass.
+ * Packages / tech go through their RPCs in the same publish orchestration;
+ * cover / samples enqueue on UploadQueue after go-live.
  */
 data class WizardProfileDraft(
     val artistId: String,

@@ -83,6 +83,24 @@ class FakeArtistsRepository(
         _cacheGeneration.value = _cacheGeneration.value + 1
     }
 
+    var published: Boolean = false
+        private set
+    var lastAvailability: AvailabilityDraft? = null
+        private set
+
+    override suspend fun setPublished(artistId: String, published: Boolean) {
+        this.published = published
+    }
+
+    override suspend fun fetchSelfAvailability(): AvailabilityDraft? = lastAvailability
+
+    override suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>) {
+        lastAvailability = AvailabilityDraft(daysAvailable, timeSlots)
+        val id = byId.keys.firstOrNull() ?: return
+        byId[id] = byId[id]!!.copy(daysAvailable = daysAvailable, timeSlots = timeSlots)
+        _cacheGeneration.value = _cacheGeneration.value + 1
+    }
+
     fun seedFull(artists: List<Artist>) {
         for (a in artists) {
             val id = a.id.lowercase()

@@ -6,9 +6,16 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.PackageDraft
+import `in`.artistant.app.data.repository.PackagesRepository
+import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.platform.auth.SessionManager
+import `in`.artistant.app.platform.media.UploadQueue
+import `in`.artistant.app.platform.media.WizardMediaCache
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +39,9 @@ data class WizardUiState(
     val daysAvailable: Set<String> = setOf("Fri", "Sat"),
     val timeSlots: Set<String> = setOf("7:30 PM", "9:00 PM"),
     val coverGradientIndex: Int = 0,
+    /** Pending cover from gallery pick — uploaded after go-live. */
+    val pendingCover: WizardMediaCache.PendingPhoto? = null,
+    val pendingSamples: List<WizardMediaCache.PendingAudio> = emptyList(),
     val instagramHandle: String = "",
     val spotifyArtistUrl: String = "",
     val youtubeChannelUrl: String = "",
@@ -76,6 +86,10 @@ class WizardViewModel @Inject constructor(
     private val session: SessionManager,
     private val users: UsersRepository,
     private val artists: ArtistsRepository,
+    private val packages: PackagesRepository,
+    private val techRider: TechRiderRepository,
+    private val mediaCache: WizardMediaCache,
+    private val uploadQueue: UploadQueue,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(WizardUiState())
@@ -125,6 +139,37 @@ class WizardViewModel @Inject constructor(
     fun onCoverGradientSelected(index: Int) =
         _state.update { it.copy(coverGradientIndex = index.coerceIn(0, 5)) }
 
+    fun onCoverPicked(uri: android.net.Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val pending = mediaCache.adoptPhoto(uri)
+                _state.update { it.copy(pendingCover = pending, publishError = null) }
+            }.onFailure { e ->
+                _state.update { it.copy(publishError = e.message ?: "Couldn't import photo.") }
+            }
+        }
+    }
+
+    fun clearCoverPick() = _state.update { it.copy(pendingCover = null) }
+
+    fun onSamplePicked(uri: android.net.Uri, displayName: String?) {
+        viewModelScope.launch {
+            runCatching {
+                val title = displayName?.substringBeforeLast('.')?.ifBlank { null } ?: "Sample"
+                val pending = mediaCache.adoptAudio(uri, title)
+                _state.update {
+                    if (it.pendingSamples.size >= 6) it
+                    else it.copy(pendingSamples = it.pendingSamples + pending, publishError = null)
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(publishError = e.message ?: "Couldn't import audio.") }
+            }
+        }
+    }
+
+    fun removeSample(fileName: String) =
+        _state.update { it.copy(pendingSamples = it.pendingSamples.filterNot { s -> s.fileName == fileName }) }
+
     fun onInstagramChanged(value: String) = _state.update { it.copy(instagramHandle = value) }
     fun onSpotifyChanged(value: String) = _state.update { it.copy(spotifyArtistUrl = value) }
     fun onYoutubeChanged(value: String) = _state.update { it.copy(youtubeChannelUrl = value) }
@@ -152,6 +197,13 @@ class WizardViewModel @Inject constructor(
         viewModelScope.launch { _events.send(WizardEvent.Finished) }
     }
 
+    /**
+     * iOS ArtistPreviewStep.runPublish order:
+     * 1) artists upsert (setup_complete)
+     * 2) replace_packages + replace_tech_rider (parallel)
+     * 3) published=true (go live — never gated on media)
+     * 4) enqueue cover/samples on UploadQueue
+     */
     private fun publish() {
         val userId = session.currentUserId ?: run {
             _state.update { it.copy(publishError = "Sign in again to publish.") }
@@ -161,9 +213,51 @@ class WizardViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isPublishing = true, publishError = null) }
             try {
-                artists.publishWizardProfile(buildWizardProfileDraft(snap, userId))
+                val draft = buildWizardProfileDraft(snap, userId)
+                artists.publishWizardProfile(draft)
+                coroutineScope {
+                    val pkgs = async {
+                        packages.replaceAll(
+                            userId,
+                            listOf(
+                                PackageDraft(
+                                    name = snap.packageName,
+                                    durationLabel = snap.packageDuration,
+                                    priceInr = snap.packagePrice.toIntOrNull() ?: 0,
+                                    popular = true,
+                                ),
+                            ),
+                        )
+                    }
+                    val tech = async {
+                        techRider.replaceAll(userId, snap.techItems.toList())
+                    }
+                    pkgs.await()
+                    tech.await()
+                }
+                artists.setPublished(userId, published = true)
+
+                // Media backfill — best-effort; artist is already live.
+                snap.pendingCover?.let { cover ->
+                    uploadQueue.enqueueCoverPhoto(userId, cover.file(mediaCache))
+                }
+                snap.pendingSamples.forEach { sample ->
+                    uploadQueue.enqueueAudioSample(
+                        artistId = userId,
+                        file = sample.file(mediaCache),
+                        title = sample.title,
+                        durationSeconds = sample.durationSeconds,
+                    )
+                }
+
                 _state.update {
-                    it.copy(isPublishing = false, step = WizardStep.Done, publishError = null)
+                    it.copy(
+                        isPublishing = false,
+                        step = WizardStep.Done,
+                        publishError = null,
+                        pendingCover = null,
+                        pendingSamples = emptyList(),
+                    )
                 }
             } catch (e: AppError.UniqueViolation) {
                 _state.update {

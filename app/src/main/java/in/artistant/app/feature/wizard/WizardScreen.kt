@@ -1,6 +1,8 @@
 package `in`.artistant.app.feature.wizard
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -117,9 +119,7 @@ fun WizardScreen(
                 WizardStep.Cover -> CoverStepContent(state, viewModel)
                 WizardStep.Socials -> SocialsStepContent(state, viewModel)
                 WizardStep.Bio -> BioStepContent(state, viewModel)
-                WizardStep.Samples -> MediaPlaceholderStep(
-                    "Audio samples upload arrives with SAF + UploadQueue. Skip for now.",
-                )
+                WizardStep.Samples -> SamplesStepContent(state, viewModel)
                 WizardStep.Preview -> PreviewStepContent(state)
                 WizardStep.Done -> DoneStepContent(state.stageName)
             }
@@ -215,7 +215,7 @@ private fun PricingStepContent(state: WizardUiState, vm: WizardViewModel) {
     SignupInputRow("Price (INR)", state.packagePrice, vm::onPackagePriceChanged)
     Spacer(Modifier.height(space.sm))
     Text(
-        "Packages table write deferred — draft saved locally for preview.",
+        "Saved to packages on publish.",
         style = AppTheme.type.footnote,
         color = AppTheme.colors.ink3,
     )
@@ -230,12 +230,13 @@ private fun TechStepContent(state: WizardUiState, vm: WizardViewModel) {
         horizontalArrangement = Arrangement.spacedBy(space.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SignupInputRow(
-            "Add item",
-            state.techDraft,
-            vm::onTechDraftChanged,
-            modifier = Modifier.weight(1f),
-        )
+        Box(Modifier.weight(1f)) {
+            SignupInputRow(
+                "Add item",
+                state.techDraft,
+                vm::onTechDraftChanged,
+            )
+        }
         PrimaryButton(text = "Add", onClick = vm::addTechItem)
     }
     Spacer(Modifier.height(space.md))
@@ -270,20 +271,82 @@ private fun AvailabilityStepContent(state: WizardUiState, vm: WizardViewModel) {
 @Composable
 private fun CoverStepContent(state: WizardUiState, vm: WizardViewModel) {
     val space = AppTheme.dimens.space
+    val pickPhoto = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) vm.onCoverPicked(uri)
+    }
     Text(
-        "Media upload arrives with CameraX. Pick a gradient for now, or skip.",
+        "Pick a cover from your gallery, or choose a gradient fallback. Upload runs after you go live.",
         style = AppTheme.type.body,
         color = AppTheme.colors.ink2,
     )
+    Spacer(Modifier.height(space.md))
+    PrimaryButton(
+        text = if (state.pendingCover != null) "Change cover photo" else "Choose cover photo",
+        onClick = { pickPhoto.launch("image/*") },
+        fullWidth = true,
+    )
+    if (state.pendingCover != null) {
+        Spacer(Modifier.height(space.sm))
+        Text(
+            "Cover ready — uploads after Publish.",
+            style = AppTheme.type.footnote,
+            color = AppTheme.colors.brand,
+            modifier = Modifier.clickable { vm.clearCoverPick() },
+        )
+    }
     Spacer(Modifier.height(space.lg))
+    Text("Gradient fallback", style = AppTheme.type.caption, color = AppTheme.colors.ink3)
+    Spacer(Modifier.height(space.sm))
     GradientPicker(selected = state.coverGradientIndex, onSelect = vm::onCoverGradientSelected)
 }
 
 @Composable
-private fun MediaPlaceholderStep(body: String) {
-    val colors = AppTheme.colors
+private fun SamplesStepContent(state: WizardUiState, vm: WizardViewModel) {
     val space = AppTheme.dimens.space
-    Text(body, style = AppTheme.type.body, color = colors.ink2)
+    val pickAudio = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            vm.onSamplePicked(uri, uri.lastPathSegment)
+        }
+    }
+    Text(
+        "Up to six audio clips via the system document picker. Uploads after Publish.",
+        style = AppTheme.type.body,
+        color = AppTheme.colors.ink2,
+    )
+    Spacer(Modifier.height(space.md))
+    PrimaryButton(
+        text = "Add audio sample",
+        onClick = {
+            if (state.pendingSamples.size < 6) {
+                pickAudio.launch(arrayOf("audio/*"))
+            }
+        },
+        enabled = state.pendingSamples.size < 6,
+        fullWidth = true,
+    )
+    Spacer(Modifier.height(space.md))
+    state.pendingSamples.forEach { sample ->
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = space.xs),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(sample.title, style = AppTheme.type.callout, color = AppTheme.colors.ink)
+            Text(
+                "Remove",
+                style = AppTheme.type.footnote,
+                color = AppTheme.colors.hot,
+                modifier = Modifier.clickable { vm.removeSample(sample.fileName) },
+            )
+        }
+    }
+    if (state.pendingSamples.isEmpty()) {
+        Text("No samples yet — skip is fine.", style = AppTheme.type.footnote, color = AppTheme.colors.ink3)
+    }
 }
 
 @Composable
@@ -366,6 +429,19 @@ private fun PreviewStepContent(state: WizardUiState) {
         Spacer(Modifier.height(space.md))
         Text("Tech", style = AppTheme.type.caption, color = colors.ink3)
         Text(state.techItems.joinToString(", "), style = AppTheme.type.footnote, color = colors.ink2)
+    }
+    if (state.pendingCover != null || state.pendingSamples.isNotEmpty()) {
+        Spacer(Modifier.height(space.md))
+        Text(
+            buildString {
+                if (state.pendingCover != null) append("Cover photo queued. ")
+                if (state.pendingSamples.isNotEmpty()) {
+                    append("${state.pendingSamples.size} sample(s) queued.")
+                }
+            },
+            style = AppTheme.type.footnote,
+            color = colors.brand,
+        )
     }
     if (state.bio.isNotBlank()) {
         Spacer(Modifier.height(space.md))
