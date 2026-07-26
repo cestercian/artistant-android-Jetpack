@@ -107,9 +107,9 @@ Browse** on `feature/m2-browse`.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| Root / role tabs | `ArtistantRoot` + `ClientTabsScaffold` / `ArtistTabsScaffold` | partial | Tabs exist; destinations are `Placeholder` until M2+ |
-| `State/TabRouter.swift` | nav + deep-link pending channels | partial | Routes declared in `Routes.kt`; not all registered |
-| `ClientRoute.ArtistProfile` / `Search` | `Routes.kt` + NavHost | partial | Declared; wire in M2 |
+| Root / role tabs | `ArtistantRoot` + `ClientTabsScaffold` / `ArtistTabsScaffold` | partial | Discover + Search + Artist profile wired; other tabs still Placeholder |
+| `State/TabRouter.swift` | nav + deep-link pending channels | partial | Routes declared in `Routes.kt`; profile/search registered in tab NavHost |
+| `ClientRoute.ArtistProfile` / `Search` | `Routes.kt` + NavHost | partial | Wired as string routes in ClientTabsScaffold |
 
 ---
 
@@ -118,11 +118,11 @@ Browse** on `feature/m2-browse`.
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
 | `Repositories/UsersRepository.swift` | `data/repository/UsersRepository.kt` + Fake | done | M1 |
-| `Repositories/ArtistsRepository.swift` | `data/repository/ArtistsRepository.kt` + Fake | missing | M2 — id-keyed hydrating cache |
-| `Repositories/SearchRepository.swift` | `data/repository/SearchRepository.kt` + Fake | missing | M2 |
-| `Repositories/SearchTypes.swift` | `data/model/SearchTypes.kt` | missing | M2 |
+| `Repositories/ArtistsRepository.swift` | `data/repository/ArtistsRepository.kt` + Fake | done | M2 — id-keyed hydrating cache |
+| `Repositories/SearchRepository.swift` | `data/repository/SearchRepository.kt` + Fake | done | M2 |
+| `Repositories/SearchTypes.swift` | `data/model/SearchTypes.kt` | done | M2 |
 | `Repositories/SavedArtistsRepository.swift` | `data/repository/SavedArtistsRepository.kt` + Fake | missing | M2 profile rails / Saved |
-| `Repositories/ReviewsRepository.swift` | `data/repository/ReviewsRepository.kt` + Fake | missing | M2 profile |
+| `Repositories/ReviewsRepository.swift` | `data/repository/ReviewsRepository.kt` + Fake | done | M2 profile (listForArtist) |
 | `Repositories/PackagesRepository.swift` | `data/repository/PackagesRepository.kt` + Fake | missing | M2/M5 |
 | `Repositories/ArtistMediaRepository.swift` | `data/repository/ArtistMediaRepository.kt` | missing | M2 covers / M5 upload |
 | `Repositories/ScoreRepository.swift` | `data/repository/ScoreRepository.kt` + Fake | missing | M2/M5 |
@@ -141,8 +141,8 @@ Browse** on `feature/m2-browse`.
 |---|---|---|---|
 | `State/OnboardingStore.swift` / signup | `SignupViewModel` | done | M1 |
 | `State/RoleStore.swift` | `AppPreferences` + RootViewModel | partial | Role persisted; store shape differs |
-| `State/DiscoverFeedStore.swift` | `DiscoverViewModel` | missing | M2 |
-| `State/SearchStore.swift` | `SearchViewModel` | missing | M2 |
+| `State/DiscoverFeedStore.swift` | `DiscoverViewModel` | done | M2 |
+| `State/SearchStore.swift` | `SearchViewModel` | partial | M2 |
 | `State/SavedStore.swift` | `SavedViewModel` / prefs | missing | M2/M6 |
 | `State/BookingStore.swift` | `BookingViewModel` | missing | M3 |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
@@ -194,9 +194,9 @@ Browse** on `feature/m2-browse`.
 | `Components/Pill.swift` | `designsystem/component/Pill.kt` | done | |
 | `Components/CardView.swift` | `designsystem/component/CardView.kt` | done | |
 | `Components/HRule` / Section | `HRule.kt` | partial | |
-| `Components/ArtistTile.swift` | `designsystem/component/ArtistTile.kt` | missing | M2 |
+| `Components/ArtistTile.swift` | `designsystem/component/ArtistTile.kt` | done | M2 |
 | `Components/MediaContainer.swift` | `designsystem/component/MediaContainer.kt` | missing | M2 |
-| `Components/EmptyStateView.swift` | `designsystem/component/EmptyState.kt` | missing | M2 |
+| `Components/EmptyStateView.swift` | `designsystem/component/EmptyState.kt` | done | M2 |
 | `Components/Avatar.swift` | `designsystem/component/Avatar.kt` | missing | M2 |
 | `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | missing | M2 |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | missing | M2 |

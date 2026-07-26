@@ -25,11 +25,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.artist.ArtistProfileScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Client bottom nav: Discover · Bookings · Messages · Profile · Search.
-// (Search is a normal 5th destination — Android has no iOS-26 search-circle.)
 private enum class ClientTab(val route: String, val label: String, val icon: ImageVector) {
     Discover("discover", "Discover", Icons.Filled.Explore),
     Bookings("bookings", "Bookings", Icons.Filled.CalendarMonth),
@@ -77,23 +78,24 @@ fun ClientTabsScaffold() {
             modifier = Modifier.padding(inner),
         ) {
             composable(ClientTab.Discover.route) {
-                DiscoverScreen(
-                    onArtistClick = { id ->
-                        nav.navigate("artist/$id")
-                    },
-                )
+                DiscoverScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
             }
             composable(ClientTab.Bookings.route) { Placeholder(ClientTab.Bookings.label) }
             composable(ClientTab.Messages.route) { Placeholder(ClientTab.Messages.label) }
             composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
-            composable(ClientTab.Search.route) { Placeholder(ClientTab.Search.label) }
-            // Stub until M2 artist-profile screen lands in the next commit.
+            composable(ClientTab.Search.route) {
+                SearchScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
+            }
             composable(
                 route = ARTIST_PROFILE_ROUTE,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
-            ) { entry ->
-                val id = entry.arguments?.getString("artistId").orEmpty()
-                Placeholder("Artist · $id")
+            ) {
+                ArtistProfileScreen(
+                    onBack = { nav.popBackStack() },
+                    // M3/M4: wire booking funnel + find-or-create thread.
+                    onBook = { /* deferred M3 */ },
+                    onMessage = { /* deferred M4 */ },
+                )
             }
         }
     }
