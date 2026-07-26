@@ -164,15 +164,15 @@ socials/bio) can be built before F8 lands.*
 - [x] **ChatViewModel** — paged load, optimistic send + Realtime INSERT reconcile,
   mark-read + best-effort 0072 receipts, tap-to-retry. **M.**
   *(report/details sheet still deferred.)*
-- [x] **ChatScreen** — bubbles, system rows/action route, Airbnb trust banner + composer.
-  **partial:** reverse auto-scroll, report/details, retry chip, and glass polish deferred.
+- [x] **ChatScreen** — bubbles, system rows/action route, Airbnb trust banner + composer,
+  retry chip. **partial:** reverse auto-scroll, report/details, glass polish deferred.
 - [x] ~~**Redaction** (`Redaction.kt`)~~ — **obsolete.** Scrapped Jul 2026 (mig
   `0071`); deleted from Android. Do not rebuild.
 
 ## F11 — Bookings list + detail  *(SHARED)*
 
-- [x] **BookingsViewModel + BookingsScreen** (CLIENT) — `MonthCalendar` header + schedule;
-  `pendingBookingDetail` deep link deferred. **M.** → `MonthCalendar` component.
+- [x] **BookingsViewModel + BookingsScreen** (CLIENT) — schedule list;
+  `pendingBookingDetail` deep link via TabRouter. **M.**
 - [ ] **ArtistGigsScreen** (ARTIST) — `MonthCalendar` of gigs. **S.**
 - [x] **BookingDetailScreen** (SHARED) — timeline, KV, actions (cancel/accept/decline);
   message/review/calendar deferred. **M.**

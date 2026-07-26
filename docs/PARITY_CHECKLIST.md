@@ -164,7 +164,7 @@ moat.
 | `Services/AppEnvironment.swift` | `core/config/AppEnvironment.kt` | partial | M0 + subscriptionsEnabled/legal URLs (flag default off) |
 | `Services/AuthService.swift` | `platform/auth/SessionManager.kt` | done | M1 |
 | `Services/AccountService.swift` | `data/repository/AccountRepository.kt` + Fake | done | M6 — delete-account + data-export EFs |
-| `Services/PushService.swift` | FCM service | missing | M4 + backend FCM path |
+| `Services/PushService.swift` | `platform/push/PushService.kt` + MessagingService | partial | claim_device_token FCM register + payload→TabRouter; needs operator google-services.json + send-push FCM |
 | `Services/CalendarSyncService.swift` | CalendarContract mirror | missing | M6 |
 | `Services/PermissionsService.swift` | `NotificationPermission` etc. | partial | Notif permission UI M1 |
 | `Services/UploadQueue.swift` | WorkManager upload | missing | M5 |
