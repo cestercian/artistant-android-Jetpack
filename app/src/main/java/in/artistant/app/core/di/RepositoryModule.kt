@@ -4,6 +4,10 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.SearchRepository
+import `in`.artistant.app.data.repository.SupabaseArtistsRepository
+import `in`.artistant.app.data.repository.SupabaseSearchRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
 import `in`.artistant.app.data.repository.UsersRepository
 
@@ -16,4 +20,10 @@ import `in`.artistant.app.data.repository.UsersRepository
 abstract class RepositoryModule {
     @Binds
     abstract fun bindUsers(impl: SupabaseUsersRepository): UsersRepository
+
+    @Binds
+    abstract fun bindArtists(impl: SupabaseArtistsRepository): ArtistsRepository
+
+    @Binds
+    abstract fun bindSearch(impl: SupabaseSearchRepository): SearchRepository
 }

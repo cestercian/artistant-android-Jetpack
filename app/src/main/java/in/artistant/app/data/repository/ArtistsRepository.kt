@@ -1,0 +1,273 @@
+package `in`.artistant.app.data.repository
+
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
+import `in`.artistant.app.core.config.AppEnvironment
+import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.ArtistGradient
+import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.Sample
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Id-keyed hydrating artist cache — port of iOS `ArtistsRepository`.
+ *
+ * Discover/Search page the server and merge tile projections via [cache];
+ * profile taps call [fetchArtist]/[ensureFull] for a full 5-table stitch.
+ * Never downgrades a hydrated entry to a partial.
+ */
+interface ArtistsRepository {
+    /** Bumped whenever the by-id cache changes — observers re-resolve by id. */
+    val cacheGeneration: StateFlow<Int>
+
+    fun find(id: String): Artist?
+
+    fun cachedArtists(ids: List<String>): List<Artist>
+
+    /** Merge tile projections; never overwrites a fully-hydrated profile. */
+    fun cache(partials: List<Artist>)
+
+    /** Full stitch (packages/bio/stats/availability). null = not found / RLS. */
+    suspend fun fetchArtist(id: String): Artist?
+
+    /** Non-throwing convenience — swallows transport errors as null. */
+    suspend fun ensureFull(id: String): Artist?
+}
+
+@Singleton
+class SupabaseArtistsRepository @Inject constructor(
+    private val client: SupabaseClient,
+) : ArtistsRepository {
+
+    private val byId = mutableMapOf<String, Artist>()
+    private val hydratedIds = mutableSetOf<String>()
+    private val _cacheGeneration = MutableStateFlow(0)
+    override val cacheGeneration: StateFlow<Int> = _cacheGeneration.asStateFlow()
+
+    override fun find(id: String): Artist? = byId[id.lowercase()]
+
+    override fun cachedArtists(ids: List<String>): List<Artist> =
+        ids.mapNotNull { byId[it.lowercase()] }
+
+    override fun cache(partials: List<Artist>) {
+        var changed = false
+        for (a in partials) {
+            val id = a.id.lowercase()
+            if (id in hydratedIds) continue
+            byId[id] = a.copy(id = id)
+            changed = true
+        }
+        if (changed) _cacheGeneration.value = _cacheGeneration.value + 1
+    }
+
+    override suspend fun fetchArtist(id: String): Artist? {
+        val key = id.lowercase()
+        if (key in hydratedIds) return byId[key]
+        val artist = fetchMany(listOf(key)).firstOrNull() ?: return null
+        byId[key] = artist
+        hydratedIds.add(key)
+        _cacheGeneration.value = _cacheGeneration.value + 1
+        return artist
+    }
+
+    override suspend fun ensureFull(id: String): Artist? =
+        try {
+            fetchArtist(id)
+        } catch (_: Throwable) {
+            null
+        }
+
+    private suspend fun fetchMany(ids: List<String>): List<Artist> {
+        if (ids.isEmpty()) return emptyList()
+        val artists = client.from("artists")
+            .select {
+                filter { isIn("id", ids) }
+            }
+            .decodeList<DbArtist>()
+        val packages = client.from("packages")
+            .select {
+                filter { isIn("artist_id", ids) }
+                order("artist_id", Order.ASCENDING)
+                order("position", Order.ASCENDING)
+            }
+            .decodeList<DbPackage>()
+        val tech = client.from("tech_rider")
+            .select {
+                filter { isIn("artist_id", ids) }
+                order("artist_id", Order.ASCENDING)
+                order("position", Order.ASCENDING)
+            }
+            .decodeList<DbTechItem>()
+        val samples = client.from("samples")
+            .select {
+                filter { isIn("artist_id", ids) }
+                order("artist_id", Order.ASCENDING)
+                order("position", Order.ASCENDING)
+            }
+            .decodeList<DbSample>()
+        val covers = client.from("artist_media")
+            .select(Columns.list("artist_id", "storage_path", "position")) {
+                filter {
+                    isIn("artist_id", ids)
+                    eq("kind", "photo")
+                }
+                order("artist_id", Order.ASCENDING)
+                order("position", Order.ASCENDING)
+            }
+            .decodeList<DbArtistCover>()
+        return stitch(artists, packages, tech, samples, covers)
+    }
+
+    companion object {
+        /** Public CDN URL for an `artist-media` storage path. */
+        fun coverUrl(storagePath: String): String? {
+            if (storagePath.isBlank()) return null
+            val base = AppEnvironment.supabaseUrl.trimEnd('/')
+            if (base.isBlank()) return null
+            return "$base/storage/v1/object/public/artist-media/$storagePath"
+        }
+
+        internal fun stitch(
+            artists: List<DbArtist>,
+            packages: List<DbPackage>,
+            tech: List<DbTechItem>,
+            samples: List<DbSample>,
+            covers: List<DbArtistCover>,
+        ): List<Artist> {
+            val packagesBy = packages.groupBy { it.artistId.lowercase() }
+            val techBy = tech.groupBy { it.artistId.lowercase() }
+            val samplesBy = samples.groupBy { it.artistId.lowercase() }
+            val coverBy = covers.groupBy { it.artistId.lowercase() }
+                .mapValues { (_, rows) ->
+                    rows.firstOrNull()?.let { coverUrl(it.storagePath) }
+                }
+            return artists.map { row ->
+                val id = row.id.lowercase()
+                val pkgs = packagesBy[id].orEmpty().map { it.toPackage() }
+                row.toArtist(
+                    packages = pkgs,
+                    tech = techBy[id].orEmpty().map { it.item },
+                    samples = samplesBy[id].orEmpty().map { it.toSample() },
+                    coverUrl = coverBy[id],
+                )
+            }
+        }
+    }
+}
+
+// --- DB row DTOs (explicit columns where we can; artists uses default select
+// matching iOS's full-row decode for the stitch path). ---
+
+@Serializable
+internal data class DbArtist(
+    val id: String,
+    val handle: String,
+    @SerialName("stage_name") val stageName: String,
+    val category: String,
+    val genre: String? = null,
+    @SerialName("base_city") val baseCity: String,
+    val bio: String? = null,
+    @SerialName("cover_gradient_index") val coverGradientIndex: Int = 0,
+    @SerialName("followers_label") val followersLabel: String = "",
+    @SerialName("streams_label") val streamsLabel: String = "",
+    @SerialName("response_label") val responseLabel: String = "",
+    @SerialName("on_time_rate") val onTimeRate: Int = 0,
+    @SerialName("total_gigs") val totalGigs: Int = 0,
+    val rating: Double = 0.0,
+    val score: Int = 0,
+    @SerialName("spotify_artist_url") val spotifyArtistUrl: String? = null,
+    @SerialName("instagram_handle") val instagramHandle: String? = null,
+    @SerialName("youtube_channel_url") val youtubeChannelUrl: String? = null,
+    @SerialName("days_available") val daysAvailable: List<String>? = null,
+    @SerialName("default_time_slots") val defaultTimeSlots: List<String>? = null,
+    @SerialName("new_artist_discount_pct") val newArtistDiscountPct: Int? = null,
+) {
+    fun toArtist(
+        packages: List<ArtistPackage>,
+        tech: List<String>,
+        samples: List<Sample>,
+        coverUrl: String?,
+    ): Artist {
+        val primary = packages.firstOrNull { it.popular } ?: packages.firstOrNull()
+        return Artist(
+            id = id.lowercase(),
+            name = stageName,
+            handle = handle,
+            category = category,
+            genre = genre.orEmpty(),
+            city = baseCity,
+            price = primary?.price ?: 0,
+            duration = primary?.duration ?: "set",
+            score = score,
+            gradient = ArtistGradient.palette(coverGradientIndex),
+            bio = bio.orEmpty(),
+            followers = followersLabel,
+            streams = streamsLabel,
+            response = responseLabel,
+            onTime = onTimeRate,
+            gigs = totalGigs,
+            rating = rating,
+            packages = packages,
+            tech = tech,
+            samples = samples,
+            spotifyArtistUrl = spotifyArtistUrl,
+            instagramHandle = instagramHandle,
+            youtubeChannelUrl = youtubeChannelUrl,
+            daysAvailable = daysAvailable.orEmpty(),
+            timeSlots = defaultTimeSlots.orEmpty(),
+            coverUrl = coverUrl,
+            newArtistDiscountPct = newArtistDiscountPct ?: 0,
+        )
+    }
+}
+
+@Serializable
+internal data class DbPackage(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val name: String,
+    val duration: String,
+    val price: Int,
+    val includes: List<String> = emptyList(),
+    val popular: Boolean = false,
+) {
+    fun toPackage() = ArtistPackage(
+        id = id,
+        name = name,
+        duration = duration,
+        price = price,
+        includes = includes,
+        popular = popular,
+    )
+}
+
+@Serializable
+internal data class DbTechItem(
+    @SerialName("artist_id") val artistId: String,
+    val item: String,
+)
+
+@Serializable
+internal data class DbSample(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val title: String,
+    val duration: String = "",
+) {
+    fun toSample() = Sample(id = id, title = title, duration = duration)
+}
+
+@Serializable
+internal data class DbArtistCover(
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("storage_path") val storagePath: String,
+    val position: Int = 0,
+)
