@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- WizardMediaCache + camera capture staging under cacheDir/artist-wizard -->
+    <cache-path name="wizard" path="artist-wizard/" />
+</paths>

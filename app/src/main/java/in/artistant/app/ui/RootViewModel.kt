@@ -30,6 +30,7 @@ class RootViewModel @Inject constructor(
     private val session: SessionManager,
     private val users: UsersRepository,
     private val prefs: AppPreferences,
+    private val uploadQueue: `in`.artistant.app.platform.media.UploadQueue,
 ) : ViewModel() {
 
     private val _gate = MutableStateFlow<RootGate>(RootGate.Loading)
@@ -99,6 +100,8 @@ class RootViewModel @Inject constructor(
         // gateFor is pure and can't touch prefs.
         if (route is ReturningLoginRoute.RouteIn) prefs.setRole(route.role)
         _gate.value = gateFor(route, profile)
+        // Auth is hydrated — resume any UploadQueue snapshot left by a killed session.
+        uploadQueue.resumeAfterLaunch()
     }
 
     /** Re-run the routing fetch (the signup flow's hydration-error Retry). */

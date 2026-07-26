@@ -26,6 +26,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +38,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.ArtistGradient
+import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
@@ -271,13 +275,38 @@ private fun AvailabilityStepContent(state: WizardUiState, vm: WizardViewModel) {
 @Composable
 private fun CoverStepContent(state: WizardUiState, vm: WizardViewModel) {
     val space = AppTheme.dimens.space
+    val context = androidx.compose.ui.platform.LocalContext.current
     val pickPhoto = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { uri ->
         if (uri != null) vm.onCoverPicked(uri)
     }
+    // Camera still capture via TakePicture → FileProvider (CameraX preview deferred;
+    // still-image capture is the cover path iOS uses most often).
+    var cameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val takePicture = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { ok ->
+        if (ok) cameraUri?.let { vm.onCoverPicked(it) }
+    }
+    val requestCamera = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            val file = java.io.File(context.cacheDir, "artist-wizard/camera-${java.util.UUID.randomUUID()}.jpg").also {
+                it.parentFile?.mkdirs()
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            cameraUri = uri
+            takePicture.launch(uri)
+        }
+    }
     Text(
-        "Pick a cover from your gallery, or choose a gradient fallback. Upload runs after you go live.",
+        "Shoot or pick a cover photo, or choose a gradient fallback. Upload runs after you go live.",
         style = AppTheme.type.body,
         color = AppTheme.colors.ink2,
     )
@@ -285,6 +314,15 @@ private fun CoverStepContent(state: WizardUiState, vm: WizardViewModel) {
     PrimaryButton(
         text = if (state.pendingCover != null) "Change cover photo" else "Choose cover photo",
         onClick = { pickPhoto.launch("image/*") },
+        fullWidth = true,
+    )
+    Spacer(Modifier.height(space.sm))
+    PrimaryButton(
+        text = "Take photo",
+        onClick = {
+            requestCamera.launch(android.Manifest.permission.CAMERA)
+        },
+        variant = ButtonVariant.Ghost,
         fullWidth = true,
     )
     if (state.pendingCover != null) {

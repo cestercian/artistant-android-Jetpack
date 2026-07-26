@@ -140,6 +140,23 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
 
+    // UploadQueue persistence + drain kick
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
+    // Cover video trim (Media3 Transformer)
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.common)
+
+    // Play Billing seam (flag-gated)
+    implementation(libs.billing.ktx)
+
+    // CameraX still capture for wizard cover
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }

@@ -25,6 +25,11 @@ googleid = "1.1.1"
 # FCM — BoM pins messaging; google-services plugin applied only when json present.
 firebaseBom = "33.7.0"
 googleServices = "4.4.2"
+work = "2.10.0"
+hiltWork = "1.2.0"
+media3 = "1.5.1"
+billing = "7.1.1"
+camerax = "1.4.1"
 # Test
 junit = "4.13.2"
 coroutinesTest = "1.9.0"
@@ -74,6 +79,19 @@ googleid = { module = "com.google.android.libraries.identity.googleid:googleid",
 # FCM
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
+# WorkManager + Hilt workers (UploadQueue persistence drain)
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "hiltWork" }
+androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltWork" }
+# Media3 Transformer — cover video trim ≤10s
+media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
+media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
+# Play Billing — inert until subscriptionsEnabled
+billing-ktx = { module = "com.android.billingclient:billing-ktx", version.ref = "billing" }
+# CameraX — still-image capture for wizard cover
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutinesTest" }
