@@ -54,6 +54,7 @@ import `in`.artistant.app.domain.score.ScoreTier
 fun ArtistProfileScreen(
     onBack: () -> Unit,
     onBook: (artistId: String) -> Unit = {},
+    onRequestQuote: (artistId: String) -> Unit = {},
     onMessage: (artistId: String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ArtistProfileViewModel = hiltViewModel(),
@@ -139,6 +140,12 @@ fun ArtistProfileScreen(
                     PrimaryButton(
                         text = "Check availability",
                         onClick = { onBook(artist.id) },
+                    )
+                    Spacer(Modifier.height(space.sm))
+                    PrimaryButton(
+                        text = "Request a quote",
+                        onClick = { onRequestQuote(artist.id) },
+                        variant = ButtonVariant.Ghost,
                     )
                     Spacer(Modifier.height(space.sm))
                     PrimaryButton(

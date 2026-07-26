@@ -28,6 +28,7 @@ sealed interface ClientRoute {
 
 /** String routes for the client NavHost (mirrors [ClientRoute] until typed nav lands). */
 object ClientNavRoutes {
+    const val CHAT = "chat/{threadId}"
     const val BOOKING = "booking/{artistId}"
     const val CHECKOUT = "checkout"
     const val CONFIRMED = "confirmed/{bookingId}"
@@ -35,6 +36,7 @@ object ClientNavRoutes {
     const val REQUEST_QUOTE = "request_quote/{artistId}"
 
     fun bookingCompose(artistId: String) = "booking/$artistId"
+    fun chat(threadId: String) = "chat/$threadId"
     fun confirmed(bookingId: String) = "confirmed/$bookingId"
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
@@ -43,5 +45,15 @@ object ClientNavRoutes {
 /** Artist-side pushed routes. */
 sealed interface ArtistRoute {
     @Serializable data class GigRequest(val id: String) : ArtistRoute
+    @Serializable data class BookingDetail(val bookingId: String) : ArtistRoute
     @Serializable data object ScoreExplainer : ArtistRoute
+}
+
+/** String routes for the artist NavHost (mirrors [ArtistRoute] until typed nav lands). */
+object ArtistNavRoutes {
+    const val BOOKING_DETAIL = "booking_detail/{bookingId}"
+    const val GIG_REQUEST = "gig_request/{requestId}"
+
+    fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
+    fun gigRequest(requestId: String) = "gig_request/$requestId"
 }

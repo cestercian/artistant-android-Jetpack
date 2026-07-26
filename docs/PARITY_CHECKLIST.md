@@ -42,7 +42,7 @@ moat.
 | `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | partial | M2 — query + facets + sort; filter sheet/histogram deferred |
 | `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | missing | M2 follow-up; accordion + histogram |
 | `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | partial | M2 — debounce + pagination; 0073 dims deferred |
-| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | partial | M2 — hero/bio/packages/reviews/dock; Book/Message stubbed |
+| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | partial | M2 — hero/bio/packages/reviews/dock; Book/Message stubbed; Request quote wired M3 |
 | `Screens/ScoreExplainerView.swift` | `feature/artist/ScoreExplainerScreen.kt` | missing | M2/M5 |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/artist/ScoreBreakdownSheet.kt` | missing | M2/M5 |
 | `Screens/ArtistListView.swift` | (unused / list helper) | obsolete | Discover/Search replaced roster lists |
@@ -63,17 +63,17 @@ moat.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | missing | Verbatim previews — **no** redaction |
-| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | missing | System rows + receipts; Airbnb trust banner |
+| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | partial | Server inbox, verbatim previews, pair-scoped open; filters/deep links deferred |
+| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | partial | System rows, best-effort receipts, Airbnb trust banner; Realtime/report/details deferred |
 | `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | missing | |
 
 ## Screens — Artist home / gigs (M3/M5)
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ArtistHomeView.swift` | `feature/artisthome/ArtistHomeScreen.kt` | missing | “New requests” rail |
-| `Screens/ArtistGigsView.swift` | `feature/gigs/ArtistGigsScreen.kt` | missing | |
-| `Screens/GigRequestDetailView.swift` | `feature/gigs/GigRequestDetailScreen.kt` | missing | Accept/Decline/counter |
+| `Screens/ArtistHomeView.swift` | `feature/artisthome/ArtistHomeScreen.kt` | partial | M3 — "New requests" rail; full dashboard deferred |
+| `Screens/ArtistGigsView.swift` | `feature/gigs/ArtistGigsScreen.kt` | partial | M3 — month list; full calendar grid deferred |
+| `Screens/GigRequestDetailView.swift` | `feature/gigs/GigRequestDetailScreen.kt` | done | Accept/Decline/counter |
 
 ## Screens — Wizard / EPK (M5)
 
@@ -128,7 +128,7 @@ moat.
 | `Repositories/ScoreRepository.swift` | `data/repository/ScoreRepository.kt` + Fake | missing | M2/M5 |
 | `Repositories/BookingsRepository.swift` | `data/repository/BookingsRepository.kt` + Fake | missing | M3 — request→accept |
 | `Repositories/RequestsRepository.swift` | `data/repository/RequestsRepository.kt` + Fake | missing | M3 |
-| `Repositories/MessagesRepository.swift` | `data/repository/MessagesRepository.kt` + Fake | missing | M4 — verbatim `body`; `kind`/`action_route`; `thread_reads`; **no** redact |
+| `Repositories/MessagesRepository.swift` | `data/repository/MessagesRepository.kt` + Fake | partial | Explicit message projections, 0072 fallback, receipts; Realtime no-op deferred |
 | `Repositories/SamplesRepository.swift` | `data/repository/SamplesRepository.kt` | missing | M5 |
 | `Repositories/TechRiderRepository.swift` | `data/repository/TechRiderRepository.kt` | missing | M5 |
 | `Repositories/ArtistLinksRepository.swift` | `data/repository/ArtistLinksRepository.kt` | missing | M5 |
@@ -146,7 +146,7 @@ moat.
 | `State/SavedStore.swift` | `SavedViewModel` / prefs | missing | M2/M6 |
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
-| `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | missing | M4 |
+| `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | M4 repository-backed inbox/chat; no persistent store or Realtime yet |
 | `State/EPKStore.swift` | `EPKViewModel` | missing | M5 |
 | `State/ArtistOnboardingStore.swift` | `WizardViewModel` | missing | M5 |
 | `State/EntitlementStore.swift` | `EntitlementViewModel` | missing | M7 inert |

@@ -16,14 +16,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
+import `in`.artistant.app.feature.booking.BookingDetailScreen
+import `in`.artistant.app.feature.gigs.ArtistGigsScreen
+import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
 import `in`.artistant.app.ui.Placeholder
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
@@ -37,10 +42,14 @@ private enum class ArtistTab(val route: String, val label: String, val icon: Ima
 @Composable
 fun ArtistTabsScaffold() {
     val nav = rememberNavController()
+    val current by nav.currentBackStackEntryAsState()
+    val route = current?.destination?.route
+    val showBottomBar = ArtistTab.entries.any { it.route == route }
+
     Scaffold(
         containerColor = AppTheme.colors.bg,
         bottomBar = {
-            val current by nav.currentBackStackEntryAsState()
+            if (!showBottomBar) return@Scaffold
             NavigationBar(containerColor = AppTheme.colors.bgElev) {
                 ArtistTab.entries.forEach { tab ->
                     val selected = current?.destination?.hierarchy?.any { it.route == tab.route } == true
@@ -66,8 +75,32 @@ fun ArtistTabsScaffold() {
             startDestination = ArtistTab.Home.route,
             modifier = Modifier.padding(inner),
         ) {
-            ArtistTab.entries.forEach { tab ->
-                composable(tab.route) { Placeholder(tab.label) }
+            composable(ArtistTab.Home.route) {
+                ArtistHomeScreen(
+                    onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                )
+            }
+            composable(ArtistTab.Gigs.route) {
+                ArtistGigsScreen(
+                    onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                )
+            }
+            composable(ArtistTab.Messages.route) { Placeholder(ArtistTab.Messages.label) }
+            composable(ArtistTab.Epk.route) { Placeholder(ArtistTab.Epk.label) }
+            composable(
+                route = ArtistNavRoutes.BOOKING_DETAIL,
+                arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
+            ) {
+                BookingDetailScreen(
+                    isArtistViewer = true,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable(
+                route = ArtistNavRoutes.GIG_REQUEST,
+                arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
+            ) {
+                GigRequestDetailScreen(onBack = { nav.popBackStack() })
             }
         }
     }
@@ -77,7 +110,7 @@ fun ArtistTabsScaffold() {
  * Shared bottom-nav click behaviour: single-top, restore state, and pop to the
  * graph start so tabs don't stack. Used by both role scaffolds.
  */
-internal fun navigateToTab(nav: NavController, route: String) {
+internal fun navigateToTab(nav: androidx.navigation.NavController, route: String) {
     nav.navigate(route) {
         popUpTo(nav.graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true

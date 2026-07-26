@@ -24,6 +24,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.hilt.navigation.compose.hiltViewModel
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.artist.ArtistProfileScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
@@ -33,6 +34,9 @@ import `in`.artistant.app.feature.booking.ConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.messages.ChatScreen
+import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.MessagesViewModel
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.ui.Placeholder
 
@@ -91,7 +95,9 @@ fun ClientTabsScaffold() {
                     onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                 )
             }
-            composable(ClientTab.Messages.route) { Placeholder(ClientTab.Messages.label) }
+            composable(ClientTab.Messages.route) {
+                MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
+            }
             composable(ClientTab.Profile.route) { Placeholder(ClientTab.Profile.label) }
             composable(ClientTab.Search.route) {
                 SearchScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
@@ -100,10 +106,25 @@ fun ClientTabsScaffold() {
                 route = ARTIST_PROFILE_ROUTE,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
+                val messagesViewModel: MessagesViewModel = hiltViewModel()
                 ArtistProfileScreen(
                     onBack = { nav.popBackStack() },
                     onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
-                    onMessage = { /* deferred M4 */ },
+                    onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
+                    onMessage = { artistId ->
+                        messagesViewModel.findOrCreateThread(artistId) { threadId ->
+                            nav.navigate(ClientNavRoutes.chat(threadId))
+                        }
+                    },
+                )
+            }
+            composable(
+                route = ClientNavRoutes.CHAT,
+                arguments = listOf(navArgument("threadId") { type = NavType.StringType }),
+            ) {
+                ChatScreen(
+                    onBack = { nav.popBackStack() },
+                    onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                 )
             }
             composable(
