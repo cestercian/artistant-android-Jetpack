@@ -14,11 +14,14 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
@@ -59,12 +62,14 @@ fun ScoreBreakdownSheet(
         ) {
             Text("Bookability Score", style = AppTheme.type.headline, color = colors.ink)
             Spacer(Modifier.height(space.sm))
-            Text(
-                ring?.toString() ?: "NEW",
-                style = AppTheme.type.displayTitle,
-                color = colors.brand,
+            ScoreRing(
+                value = ring,
+                size = AppTheme.dimens.size.ringLg,
+                stroke = 6.dp,
+                showLabel = true,
+                totalGigs = gigs,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
             )
-            Text(tier.label, style = AppTheme.type.callout, color = colors.ink2)
             Spacer(Modifier.height(space.lg))
             HRule()
             Spacer(Modifier.height(space.lg))

@@ -23,6 +23,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,8 +40,9 @@ import `in`.artistant.app.data.repository.ScoreHistoryPoint
 import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.ScoreRing
+import `in`.artistant.app.designsystem.component.Sparkline
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.domain.score.ScoreTier
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -95,7 +99,9 @@ fun ScoreExplainerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val size = AppTheme.dimens.size
     val b = state.breakdown
+    var showHistory by remember { mutableStateOf(false) }
 
     Column(
         modifier
@@ -130,18 +136,13 @@ fun ScoreExplainerScreen(
                 Text("Bookability Score", style = AppTheme.type.displaySub, color = colors.ink)
                 Spacer(Modifier.height(space.lg))
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        b.numericScore?.toString() ?: "NEW",
-                        style = AppTheme.type.displayTitle,
-                        color = colors.brand,
+                    ScoreRing(
+                        value = b.numericScore,
+                        size = size.ringXl,
+                        stroke = 8.dp,
+                        showLabel = true,
                     )
                 }
-                Text(
-                    b.tier.label,
-                    style = AppTheme.type.headline,
-                    color = colors.ink2,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                )
                 Spacer(Modifier.height(space.xl))
                 HRule()
                 Spacer(Modifier.height(space.lg))
@@ -177,19 +178,20 @@ fun ScoreExplainerScreen(
                     Spacer(Modifier.height(space.lg))
                     Text("History", style = AppTheme.type.caption, color = colors.ink3)
                     Spacer(Modifier.height(space.sm))
-                    state.history.takeLast(12).forEach { point ->
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = space.xs),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(point.computedAtIso.take(10), style = AppTheme.type.footnote, color = colors.ink3)
-                            Text(point.score.toString(), style = AppTheme.type.monoMedium, color = colors.ink)
-                        }
-                    }
+                    Sparkline(values = state.history.map { it.score })
+                    Spacer(Modifier.height(space.md))
+                    PrimaryButton(
+                        text = "Full history",
+                        onClick = { showHistory = true },
+                        fullWidth = true,
+                    )
                 }
                 Spacer(Modifier.height(space.xxl))
             }
         }
+    }
+    if (showHistory) {
+        ScoreHistorySheet(history = state.history, onDismiss = { showHistory = false })
     }
 }
 

@@ -28,13 +28,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.score.ScoreTier
 
 /**
  * Artist dashboard — M3 slice of iOS `ArtistHomeView`: "New requests" rail
@@ -89,13 +93,23 @@ fun ArtistHomeScreen(
                     ) {
                         Text("Home", style = AppTheme.type.displaySub, color = colors.ink)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "Score",
-                                style = AppTheme.type.callout,
-                                color = colors.brand,
+                            val ringValue = if (
+                                state.gigs < ScoreBands.MIN_GIGS_FOR_RANK ||
+                                    ScoreBands.tier(state.score ?: 0, state.gigs) == ScoreTier.New
+                            ) {
+                                null
+                            } else {
+                                state.score
+                            }
+                            ScoreRing(
+                                value = ringValue,
+                                size = AppTheme.dimens.size.ringMd,
+                                stroke = 5.dp,
+                                showLabel = false,
+                                totalGigs = state.gigs,
                                 modifier = Modifier
                                     .clickable(onClick = onScoreExplainer)
-                                    .padding(horizontal = space.sm),
+                                    .padding(end = space.sm),
                             )
                             IconButton(onClick = onProfileClick) {
                                 Icon(Icons.Filled.Settings, contentDescription = "Profile & settings", tint = colors.ink2)
