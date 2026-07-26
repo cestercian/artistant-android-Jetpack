@@ -10,6 +10,7 @@ import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
+import `in`.artistant.app.data.repository.ReportsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,7 @@ data class ChatUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
     val counterpartLastReadAt: Long? = null,
+    val showDetails: Boolean = false,
 )
 
 /**
@@ -35,6 +37,7 @@ class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val messagesRepository: MessagesRepository,
     private val artistsRepository: ArtistsRepository,
+    private val reports: ReportsRepository,
 ) : ViewModel() {
     private val threadId: String = checkNotNull(savedStateHandle["threadId"])
     private val _state = MutableStateFlow(ChatUiState())
@@ -159,6 +162,13 @@ class ChatViewModel @Inject constructor(
         runCatching { messagesRepository.markThreadReadReceipt(threadId) }
         val readAt = runCatching { messagesRepository.counterpartLastRead(threadId) }.getOrNull()
         _state.update { it.copy(counterpartLastReadAt = readAt) }
+    }
+
+    fun openDetails() = _state.update { it.copy(showDetails = true) }
+    fun dismissDetails() = _state.update { it.copy(showDetails = false) }
+
+    fun reportConversation(reason: String) = viewModelScope.launch {
+        runCatching { reports.reportConversation(threadId, reason) }
     }
 
     override fun onCleared() {

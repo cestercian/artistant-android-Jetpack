@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -60,6 +61,9 @@ fun ChatScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
             }
             Text(state.title, style = AppTheme.type.headline, color = colors.ink, modifier = Modifier.weight(1f))
+            IconButton(onClick = viewModel::openDetails) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Details", tint = colors.ink2)
+            }
         }
         SafetyBanner()
         HRule()
@@ -107,6 +111,19 @@ fun ChatScreen(
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = colors.brand)
             }
         }
+    }
+
+    if (state.showDetails) {
+        val thread = state.thread
+        ThreadDetailsSheet(
+            title = state.title,
+            bookingId = thread?.bookingId,
+            bookingSummary = thread?.bookingId?.let { "Open booking" },
+            counterpartLabel = state.title,
+            onBookingClick = onBookingClick,
+            onReport = viewModel::reportConversation,
+            onDismiss = viewModel::dismissDetails,
+        )
     }
 }
 

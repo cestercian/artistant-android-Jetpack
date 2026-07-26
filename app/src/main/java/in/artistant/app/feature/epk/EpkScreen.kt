@@ -1,6 +1,9 @@
 package `in`.artistant.app.feature.epk
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,17 +29,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
-import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.signup.SignupInputRow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
- * Read-only EPK editor shell — port of iOS `EPKView` scaffold. Shows the signed-in
- * artist's published row; inline edits and media management land in a later M5 pass.
+ * EPK editor — packages / tech / links / samples writable (iOS EPKView parity).
+ * Cover reorder stays wizard-side; gallery pick for samples via SAF.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,6 +52,9 @@ fun EpkScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.onSamplePicked(uri, uri.lastPathSegment)
+    }
 
     PullToRefreshBox(
         isRefreshing = state.isLoading && state.artist != null,
@@ -85,12 +92,16 @@ fun EpkScreen(
                             color = colors.warm,
                         )
                         Spacer(Modifier.height(space.md))
-                        PrimaryButton(
-                            text = "Finish your profile",
-                            onClick = onEditInWizard,
-                            fullWidth = true,
-                        )
+                        PrimaryButton(text = "Finish your profile", onClick = onEditInWizard, fullWidth = true)
                         Spacer(Modifier.height(space.lg))
+                    }
+                    state.message?.let {
+                        Text(it, style = AppTheme.type.footnote, color = colors.brand)
+                        Spacer(Modifier.height(space.sm))
+                    }
+                    state.error?.let {
+                        Text(it, style = AppTheme.type.footnote, color = colors.hot)
+                        Spacer(Modifier.height(space.sm))
                     }
                     val artist = state.artist
                     if (artist != null) {
@@ -98,43 +109,132 @@ fun EpkScreen(
                         Spacer(Modifier.height(space.lg))
                         EpkSection(title = "Bio") {
                             Text(
-                                artist.bio.ifBlank { "No bio yet." },
+                                artist.bio.ifBlank { "No bio yet — edit in wizard." },
                                 style = AppTheme.type.body,
                                 color = if (artist.bio.isBlank()) colors.ink3 else colors.ink2,
                             )
                         }
                         EpkSection(title = "Packages") {
-                            if (artist.packages.isEmpty()) {
-                                Text(
-                                    "No packages on server yet — wizard draft not persisted to packages table.",
-                                    style = AppTheme.type.footnote,
-                                    color = colors.ink3,
+                            if (state.editingPackages) {
+                                SignupInputRow("Name", state.packageName, viewModel::onPackageName)
+                                Spacer(Modifier.height(space.sm))
+                                SignupInputRow("Duration", state.packageDuration, viewModel::onPackageDuration)
+                                Spacer(Modifier.height(space.sm))
+                                SignupInputRow("Price (INR)", state.packagePrice, viewModel::onPackagePrice)
+                                Spacer(Modifier.height(space.md))
+                                PrimaryButton(
+                                    text = if (state.isSaving) "Saving…" else "Save package",
+                                    onClick = viewModel::savePackages,
+                                    enabled = !state.isSaving,
+                                    fullWidth = true,
                                 )
                             } else {
-                                artist.packages.forEach { pkg ->
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        Column {
-                                            Text(pkg.name, style = AppTheme.type.callout, color = colors.ink)
-                                            Text(pkg.duration, style = AppTheme.type.footnote, color = colors.ink3)
+                                if (artist.packages.isEmpty()) {
+                                    Text("No packages yet.", style = AppTheme.type.footnote, color = colors.ink3)
+                                } else {
+                                    artist.packages.forEach { pkg ->
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Column {
+                                                Text(pkg.name, style = AppTheme.type.callout, color = colors.ink)
+                                                Text(pkg.duration, style = AppTheme.type.footnote, color = colors.ink3)
+                                            }
+                                            Text(formatInr(pkg.price), style = AppTheme.type.monoMedium, color = colors.ink)
                                         }
-                                        Text(formatInr(pkg.price), style = AppTheme.type.monoMedium, color = colors.ink)
                                     }
                                 }
+                                Spacer(Modifier.height(space.sm))
+                                Text(
+                                    "Edit packages",
+                                    style = AppTheme.type.footnote,
+                                    color = colors.brand,
+                                    modifier = Modifier.clickable(onClick = viewModel::toggleEditingPackages),
+                                )
                             }
                         }
                         EpkSection(title = "Tech rider") {
-                            Text(
-                                artist.tech.joinToString(", ").ifBlank { "No tech items yet." },
-                                style = AppTheme.type.body,
-                                color = if (artist.tech.isEmpty()) colors.ink3 else colors.ink2,
+                            if (artist.tech.isEmpty()) {
+                                Text("No tech items yet.", style = AppTheme.type.footnote, color = colors.ink3)
+                            } else {
+                                artist.tech.forEach { item ->
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = space.xs),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(item, style = AppTheme.type.body, color = colors.ink2)
+                                        Text(
+                                            "Remove",
+                                            style = AppTheme.type.footnote,
+                                            color = colors.hot,
+                                            modifier = Modifier.clickable { viewModel.removeTechItem(item) },
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(space.sm))
+                            SignupInputRow("Add item", state.techDraft, viewModel::onTechDraft)
+                            Spacer(Modifier.height(space.sm))
+                            PrimaryButton(text = "Add", onClick = viewModel::addTechItem, variant = ButtonVariant.Ghost)
+                        }
+                        EpkSection(title = "Samples") {
+                            if (artist.samples.isEmpty()) {
+                                Text("No samples yet.", style = AppTheme.type.footnote, color = colors.ink3)
+                            } else {
+                                artist.samples.forEach { sample ->
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = space.xs),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Column {
+                                            Text(sample.title, style = AppTheme.type.callout, color = colors.ink)
+                                            Text(sample.duration, style = AppTheme.type.footnote, color = colors.ink3)
+                                        }
+                                        Text(
+                                            "Delete",
+                                            style = AppTheme.type.footnote,
+                                            color = colors.hot,
+                                            modifier = Modifier.clickable { viewModel.deleteSample(sample) },
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(space.sm))
+                            PrimaryButton(
+                                text = "Add audio sample",
+                                onClick = { pickAudio.launch(arrayOf("audio/*")) },
+                                variant = ButtonVariant.Ghost,
+                                fullWidth = true,
                             )
+                        }
+                        EpkSection(title = "Links") {
+                            state.links.forEach { link ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = space.xs),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(link.label, style = AppTheme.type.callout, color = colors.ink)
+                                        Text(link.url, style = AppTheme.type.footnote, color = colors.ink3)
+                                    }
+                                    Text(
+                                        "Delete",
+                                        style = AppTheme.type.footnote,
+                                        color = colors.hot,
+                                        modifier = Modifier.clickable { viewModel.deleteLink(link.id) },
+                                    )
+                                }
+                            }
+                            SignupInputRow("Label", state.linkLabel, viewModel::onLinkLabel)
+                            Spacer(Modifier.height(space.sm))
+                            SignupInputRow("URL", state.linkUrl, viewModel::onLinkUrl)
+                            Spacer(Modifier.height(space.sm))
+                            PrimaryButton(text = "Add link", onClick = viewModel::addLink, variant = ButtonVariant.Ghost)
                         }
                         Spacer(Modifier.height(space.lg))
                         PrimaryButton(
-                            text = "Edit in wizard",
+                            text = "Full edit in wizard",
                             onClick = onEditInWizard,
                             variant = ButtonVariant.Ghost,
                             fullWidth = true,
@@ -146,11 +246,7 @@ fun EpkScreen(
                             color = colors.ink3,
                         )
                         Spacer(Modifier.height(space.lg))
-                        PrimaryButton(
-                            text = "Open wizard",
-                            onClick = onEditInWizard,
-                            fullWidth = true,
-                        )
+                        PrimaryButton(text = "Open wizard", onClick = onEditInWizard, fullWidth = true)
                     }
                 }
             }
