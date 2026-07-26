@@ -116,6 +116,11 @@ class RootViewModel @Inject constructor(
         viewModelScope.launch { routeSignedIn() }
     }
 
+    /** Wizard Done → re-fetch profile so setup_complete routes the artist into tabs. */
+    fun markWizardComplete() {
+        viewModelScope.launch { routeSignedIn() }
+    }
+
     private suspend fun fetchWithRetry(attempts: Int = 3): Result<SelfProfile?> {
         var last: Throwable? = null
         repeat(attempts) { i ->
@@ -154,3 +159,7 @@ fun gateFor(route: ReturningLoginRoute, profile: SelfProfile?): RootGate = when 
     // shows onboarding.
     ReturningLoginRoute.Onboard, ReturningLoginRoute.Degrade -> RootGate.Onboarding
 }
+
+/** Artist with a complete users row but incomplete EPK — show wizard, not signup. */
+fun shouldShowArtistWizard(profile: SelfProfile?): Boolean =
+    profile?.role == AppRole.Artist && profile.isComplete && profile.artistSetupComplete != true

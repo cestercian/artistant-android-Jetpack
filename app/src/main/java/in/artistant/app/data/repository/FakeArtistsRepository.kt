@@ -22,6 +22,13 @@ class FakeArtistsRepository(
     /** When true, [fetchArtist] throws so callers can exercise degrade paths. */
     var failFetch: Boolean = false
 
+    /** Set by [publishWizardProfile] — what tests assert on Done. */
+    var setupComplete: Boolean = false
+        private set
+
+    var lastPublishedDraft: WizardProfileDraft? = null
+        private set
+
     override fun find(id: String): Artist? = byId[id.lowercase()]
 
     override fun cachedArtists(ids: List<String>): List<Artist> =
@@ -52,6 +59,29 @@ class FakeArtistsRepository(
         } catch (_: Throwable) {
             null
         }
+
+    override suspend fun publishWizardProfile(draft: WizardProfileDraft) {
+        setupComplete = true
+        lastPublishedDraft = draft
+        val id = draft.artistId.lowercase()
+        byId[id] = FakeArtistsRepository.sample(
+            id = id,
+            name = draft.stageName,
+            city = draft.baseCity,
+            category = draft.category,
+        ).copy(
+            handle = draft.handle.lowercase(),
+            genre = draft.genre,
+            bio = draft.bio,
+            daysAvailable = draft.daysAvailable,
+            timeSlots = draft.timeSlots,
+            instagramHandle = draft.instagramHandle,
+            spotifyArtistUrl = draft.spotifyArtistUrl,
+            youtubeChannelUrl = draft.youtubeChannelUrl,
+        )
+        hydratedIds.add(id)
+        _cacheGeneration.value = _cacheGeneration.value + 1
+    }
 
     fun seedFull(artists: List<Artist>) {
         for (a in artists) {

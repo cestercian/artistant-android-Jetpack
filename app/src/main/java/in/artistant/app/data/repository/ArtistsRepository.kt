@@ -1,10 +1,13 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import `in`.artistant.app.core.config.AppEnvironment
+import `in`.artistant.app.core.result.AppError
+import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
@@ -40,6 +43,9 @@ interface ArtistsRepository {
 
     /** Non-throwing convenience — swallows transport errors as null. */
     suspend fun ensureFull(id: String): Artist?
+
+    /** Wizard Done — upsert the signed-in artist row and flip `setup_complete`. */
+    suspend fun publishWizardProfile(draft: WizardProfileDraft)
 }
 
 @Singleton
@@ -84,6 +90,38 @@ class SupabaseArtistsRepository @Inject constructor(
         } catch (_: Throwable) {
             null
         }
+
+    override suspend fun publishWizardProfile(draft: WizardProfileDraft) {
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        require(userId == draft.artistId.lowercase()) {
+            "Wizard publish must target the signed-in artist."
+        }
+        val row = WizardPublishRow(
+            id = userId,
+            handle = draft.handle.trim().lowercase(),
+            stageName = draft.stageName.trim(),
+            category = draft.category,
+            baseCity = draft.baseCity.trim(),
+            genre = draft.genre.ifBlank { null },
+            bio = draft.bio.ifBlank { null },
+            coverGradientIndex = draft.coverGradientIndex,
+            daysAvailable = draft.daysAvailable,
+            defaultTimeSlots = draft.timeSlots,
+            instagramHandle = draft.instagramHandle?.ifBlank { null },
+            spotifyArtistUrl = draft.spotifyArtistUrl?.ifBlank { null },
+            youtubeChannelUrl = draft.youtubeChannelUrl?.ifBlank { null },
+            setupComplete = true,
+        )
+        try {
+            client.from("artists").upsert(row) { onConflict = "id" }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+        byId.remove(userId)
+        hydratedIds.remove(userId)
+        _cacheGeneration.value = _cacheGeneration.value + 1
+    }
 
     private suspend fun fetchMany(ids: List<String>): List<Artist> {
         if (ids.isEmpty()) return emptyList()
@@ -264,6 +302,24 @@ internal data class DbSample(
 ) {
     fun toSample() = Sample(id = id, title = title, duration = duration)
 }
+
+@Serializable
+private data class WizardPublishRow(
+    val id: String,
+    val handle: String,
+    @SerialName("stage_name") val stageName: String,
+    val category: String,
+    @SerialName("base_city") val baseCity: String,
+    val genre: String? = null,
+    val bio: String? = null,
+    @SerialName("cover_gradient_index") val coverGradientIndex: Int = 0,
+    @SerialName("days_available") val daysAvailable: List<String> = emptyList(),
+    @SerialName("default_time_slots") val defaultTimeSlots: List<String> = emptyList(),
+    @SerialName("instagram_handle") val instagramHandle: String? = null,
+    @SerialName("spotify_artist_url") val spotifyArtistUrl: String? = null,
+    @SerialName("youtube_channel_url") val youtubeChannelUrl: String? = null,
+    @SerialName("setup_complete") val setupComplete: Boolean,
+)
 
 @Serializable
 internal data class DbArtistCover(
