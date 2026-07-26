@@ -73,6 +73,17 @@ class SessionManager @Inject constructor(
     val signInGeneration: StateFlow<Int> = _signInGeneration
 
     /**
+     * One-shot error channel for a FAILED OAuth deep-link completion (closes #12).
+     * The Apple/Google browser return lands here via [handleDeepLink] from MainActivity,
+     * OUTSIDE any ViewModel try/catch. Auth UI observes this and calls [consumeDeepLinkError].
+     */
+    private val _deepLinkError = MutableStateFlow<String?>(null)
+    val deepLinkError: StateFlow<String?> = _deepLinkError
+
+    /** The auth UI calls this once it has shown [deepLinkError], so it never re-surfaces. */
+    fun consumeDeepLinkError() { _deepLinkError.value = null }
+
+    /**
      * Sign-in state as a Flow (the iOS `isSignedIn` @Published analogue). Maps the raw
      * supabase status: Authenticated → true, everything else (Initializing, NotAuthenticated,
      * RefreshFailure) → false. Started eagerly + kept while subscribed.
@@ -235,16 +246,47 @@ class SessionManager @Inject constructor(
     // MARK: - Deep link
 
     /**
-     * Finish an OAuth flow that returned via `in.artistant.app://login-callback`. supabase-kt's
-     * [handleDeeplinks] parses the intent, imports the session, and fires the callback — where
-     * we bump the generation so a same-user Google/Apple return still advances the router.
+     * Finish an OAuth flow that returned via `in.artistant.app://login-callback`.
+     *
+     * Provider denials arrive as `?error=` / `#error=` on the callback URL BEFORE any
+     * session exchange — we surface those to [deepLinkError] (closes #12; ports iOS
+     * AuthService.handleDeepLink → lastError). Successful returns still go through
+     * supabase-kt 3.0.3's `handleDeeplinks` (PKCE/IMPLICIT APIs like
+     * `parseSessionFromFragment` / `SessionSource` aren't public on this BOM).
      */
     fun handleDeepLink(intent: Intent) {
-        // handleDeeplinks is a SupabaseClient extension (Android-only). It parses the intent,
-        // imports the session, and fires the callback — where we bump the generation so a
-        // same-user return still advances the router.
-        client.handleDeeplinks(intent) { _ ->
-            completedSignIn()
+        val data = intent.data
+        if (data != null &&
+            data.scheme == client.auth.config.scheme &&
+            data.host == client.auth.config.host
+        ) {
+            val error = data.getQueryParameter("error") ?: fragmentParam(data.fragment, "error")
+            if (error != null) {
+                // Bare access_denied (no error_code) == user dismissed consent — silent cancel.
+                // access_denied WITH error_code is a real denial and must surface.
+                val errorCode = data.getQueryParameter("error_code")
+                    ?: fragmentParam(data.fragment, "error_code")
+                if (error == "access_denied" && errorCode == null) return
+                val desc = data.getQueryParameter("error_description")
+                    ?: fragmentParam(data.fragment, "error_description")
+                _deepLinkError.value = desc?.takeIf { it.isNotBlank() }
+                    ?: "Couldn't complete sign-in. Try again."
+                return
+            }
+        }
+
+        // Success / non-error callbacks: let supabase-kt import the session, then bump
+        // generation so a same-user Google/Apple return still advances the router.
+        try {
+            client.handleDeeplinks(intent) { _ ->
+                _deepLinkError.value = null
+                completedSignIn()
+            }
+        } catch (t: Throwable) {
+            Timber.e(t, "OAuth deep-link completion failed")
+            crash.record(t)
+            _deepLinkError.value = (t as? AuthException)?.message
+                ?: "Couldn't complete sign-in. Check your connection and try again."
         }
     }
 
@@ -259,6 +301,17 @@ class SessionManager @Inject constructor(
      *  stray capital/space doesn't produce a spurious "invalid credentials". */
     private fun normalizeEmail(email: String): String = email.trim().lowercase()
 }
+
+/**
+ * Read a key from an OAuth callback URL fragment (`a=1&b=2`). Pure / JVM-testable.
+ * Malformed percent-escape falls back to the raw value.
+ */
+internal fun fragmentParam(fragment: String?, key: String): String? =
+    fragment?.split("&")
+        ?.firstOrNull { it.substringBefore("=") == key }
+        ?.substringAfter("=", "")
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { raw -> runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw) }
 
 /** Result of an email sign-in / sign-up (port of iOS `EmailAuthOutcome`). */
 sealed interface EmailAuthOutcome {

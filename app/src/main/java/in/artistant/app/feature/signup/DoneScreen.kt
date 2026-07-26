@@ -44,8 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
-import androidx.compose.foundation.Canvas
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -110,7 +110,7 @@ fun DoneScreen(
 
         // Score primer — no card chrome, just the ring + two lines.
         Row(modifier = Modifier.fillMaxWidth().padding(bottom = space.xl), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(space.md)) {
-            ScoreRing(value = 94)
+            ScoreRing(value = 94, size = 48.dp, stroke = 4.dp, showLabel = false)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Bookability Score™", style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Black), color = colors.ink)
                 Text("Every artist rated for reliability — not just talent.", style = AppTheme.type.caption, color = colors.ink3)
@@ -123,27 +123,5 @@ fun DoneScreen(
             fullWidth = true,
             modifier = Modifier.semantics { testTag = "done.continue" },
         )
-    }
-}
-
-
-
-/**
- * A minimal score ring — a brand arc over a track with the mono value centred. iOS has a richer
- * `ScoreRing` component; this is the "simple ring" the M1b brief allows until a shared one exists.
- */
-@Composable
-private fun ScoreRing(value: Int, modifier: Modifier = Modifier) {
-    val colors = AppTheme.colors
-    Box(modifier = modifier.size(48.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val stroke = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
-            val sweep = 360f * (value.coerceIn(0, 100) / 100f)
-            drawArc(color = colors.line, startAngle = 0f, sweepAngle = 360f, useCenter = false, style = stroke, size = Size(size.width, size.height))
-            rotate(-90f) {
-                drawArc(color = colors.brand, startAngle = 0f, sweepAngle = sweep, useCenter = false, style = stroke, size = Size(size.width, size.height))
-            }
-        }
-        Text("$value", style = AppTheme.type.monoMedium.copy(fontWeight = FontWeight.Bold), color = colors.ink)
     }
 }

@@ -8,6 +8,7 @@ import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
 import `in`.artistant.app.core.config.AppEnvironment
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Builds the single SupabaseClient with the five modules the app uses. supabase-kt
@@ -27,6 +28,11 @@ object SupabaseClientFactory {
             supabaseUrl = url,
             supabaseKey = AppEnvironment.supabaseAnonKey,
         ) {
+            // supabase-kt's default request timeout is 10s (SupabaseClientBuilder.requestTimeout).
+            // That's too tight for real mobile networks — a merely-slow (not dead) connection on a
+            // congested cell tower can take longer than 10s to complete a signup round-trip, and the
+            // user just sees a timeout. 30s gives a slow-but-alive network room to finish.
+            requestTimeout = 30.seconds
             install(Auth) {
                 // OAuth callback deep link — matches the manifest scheme/host.
                 scheme = "in.artistant.app"

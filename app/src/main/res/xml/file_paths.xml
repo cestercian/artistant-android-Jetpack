@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths for wizard media + camera capture staging. -->
 <paths>
-    <!-- WizardMediaCache + camera capture staging under cacheDir/artist-wizard -->
+    <!-- Ours: WizardMediaCache + TakePicture staging under cacheDir/artist-wizard -->
     <cache-path name="wizard" path="artist-wizard/" />
+    <!-- Main: short-lived camera capture dir before adopt into wizard cache -->
+    <cache-path name="wizard-capture" path="wizard-capture/" />
 </paths>

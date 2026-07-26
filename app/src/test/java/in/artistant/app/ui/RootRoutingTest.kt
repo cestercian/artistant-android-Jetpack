@@ -24,22 +24,24 @@ class RootRoutingTest {
     )
 
     @Test
-    fun `RouteIn artist with incomplete EPK goes to onboarding, not tabs`() {
+    fun `RouteIn artist with incomplete EPK goes to the wizard, not tabs`() {
+        // M5b: a base-profile-complete artist whose EPK wizard isn't done lands on the real
+        // wizard tier (was RootGate.Onboarding when the wizard was a placeholder).
         val gate = gateFor(
             ReturningLoginRoute.RouteIn(AppRole.Artist),
             profile(role = AppRole.Artist, artistSetupComplete = false),
         )
-        assertEquals(RootGate.Onboarding, gate)
+        assertEquals(RootGate.ArtistWizard, gate)
     }
 
     @Test
-    fun `RouteIn artist with null EPK flag also goes to onboarding`() {
+    fun `RouteIn artist with null EPK flag also goes to the wizard`() {
         // null (no artists row / not hydrated) is treated the same as incomplete.
         val gate = gateFor(
             ReturningLoginRoute.RouteIn(AppRole.Artist),
             profile(role = AppRole.Artist, artistSetupComplete = null),
         )
-        assertEquals(RootGate.Onboarding, gate)
+        assertEquals(RootGate.ArtistWizard, gate)
     }
 
     @Test

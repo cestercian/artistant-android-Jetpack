@@ -33,6 +33,14 @@ object AppEnvironment {
      */
     val subscriptionsEnabled: Boolean get() = false
 
+    /**
+     * Observability keys — blank by default (dark-until-key). PostHogAnalytics /
+     * SentryCrash early-return when empty so shipping without SDKs linked is safe.
+     * Operator fills secrets.properties; empty string is the enable switch.
+     */
+    val posthogApiKey: String get() = BuildConfig.POSTHOG_API_KEY
+    val sentryDsn: String get() = BuildConfig.SENTRY_DSN
+
     /** Play product ids — fixed across environments (mirrors iOS StoreKit ids). */
     const val artistMonthlyProductId: String = "in.artistant.subscription.artist.monthly"
     const val clientMonthlyProductId: String = "in.artistant.subscription.client.monthly"

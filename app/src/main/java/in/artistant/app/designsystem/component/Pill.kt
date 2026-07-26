@@ -11,7 +11,7 @@ import androidx.compose.ui.graphics.Color
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /** Tone drives the capsule fill + text color. Neutral is the default chrome-free chip. */
-enum class PillTone { Neutral, Brand, Good, Warm, Hot }
+enum class PillTone { Neutral, Brand, Accent, Good, Warm, Hot }
 
 /** Small capsule label — the Pill port. Mono-ish caption text, no border. */
 @Composable
@@ -20,6 +20,8 @@ fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.
     val (bg, fg) = when (tone) {
         PillTone.Neutral -> colors.bgSoft to colors.ink2
         PillTone.Brand -> colors.brandSoft to colors.brand
+        // Fixed violet accent — distinct from the role-reactive brand (iOS `.accent`).
+        PillTone.Accent -> colors.accentSoft to colors.accentInk
         PillTone.Good -> Color(0x1A5BE074) to colors.good
         PillTone.Warm -> Color(0x1AFFB454) to colors.warm
         PillTone.Hot -> Color(0x1AFF5A5F) to colors.hot

@@ -15,7 +15,6 @@ import `in`.artistant.app.feature.signup.SignupViewModel
 import `in`.artistant.app.feature.wizard.WizardScreen
 import `in`.artistant.app.ui.RootGate
 import `in`.artistant.app.ui.RootViewModel
-import `in`.artistant.app.ui.shouldShowArtistWizard
 
 /**
  * Top-level surface switch. The gate is driven by [RootViewModel] (session status + fetched
@@ -61,25 +60,25 @@ fun ArtistantNavHost() {
             }
 
         RootGate.Onboarding ->
-            if (shouldShowArtistWizard(routedProfile)) {
-                ArtistantTheme(role = AppRole.Artist) {
-                    WizardScreen(onFinished = viewModel::markWizardComplete)
-                }
-            } else {
-                // Signed in, profile incomplete → resume mid-flow at Profile. Always in Signup mode:
-                // an incomplete profile must walk the full profile → notif → done tail, which only
-                // exists in the signup order (a login-mode user who landed here still needs it).
-                ArtistantTheme(role = signupState.role) {
-                    SignupFlow(
-                        startStep = SignupStep.Profile,
-                        startMode = SignupMode.Signup,
-                        onFinished = viewModel::markSignupComplete,
-                        profileHydrationError = hydrationError,
-                        onRetryHydration = viewModel::retryRouting,
-                        reduceMotion = reduceMotion,
-                        viewModel = signupVm,
-                    )
-                }
+            // Signed in, profile incomplete → resume mid-flow at Profile. Always in Signup mode:
+            // an incomplete profile must walk the full profile → notif → done tail, which only
+            // exists in the signup order (a login-mode user who landed here still needs it).
+            // (Incomplete-EPK artists are [RootGate.ArtistWizard], not this branch.)
+            ArtistantTheme(role = signupState.role) {
+                SignupFlow(
+                    startStep = SignupStep.Profile,
+                    startMode = SignupMode.Signup,
+                    onFinished = viewModel::markSignupComplete,
+                    profileHydrationError = hydrationError,
+                    onRetryHydration = viewModel::retryRouting,
+                    reduceMotion = reduceMotion,
+                    viewModel = signupVm,
+                )
+            }
+
+        RootGate.ArtistWizard ->
+            ArtistantTheme(role = AppRole.Artist) {
+                WizardScreen(onFinished = viewModel::markWizardComplete)
             }
 
         is RootGate.Tabs ->

@@ -37,6 +37,11 @@ android {
         // (clear TODO) until the operator drops the real id. Shared across flavors —
         // the same GCP OAuth client backs every Supabase project.
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${secret("GOOGLE_WEB_CLIENT_ID", "REPLACE")}\"")
+
+        // Observability — blank default keeps PostHog/Sentry wrappers as no-ops
+        // until the operator sets secrets.properties (see AppEnvironment).
+        buildConfigField("String", "POSTHOG_API_KEY", "\"${secret("POSTHOG_API_KEY", "")}\"")
+        buildConfigField("String", "SENTRY_DSN", "\"${secret("SENTRY_DSN", "")}\"")
     }
 
     // Product flavors carry the per-environment Supabase creds as BuildConfig

@@ -140,22 +140,23 @@ class RootViewModel @Inject constructor(
 
 /**
  * Pure routing: map a classified [ReturningLoginRoute] + the fetched profile to a [RootGate].
- * Extracted from [RootViewModel.routeSignedIn] so the three-tier artist gate is unit-testable
+ * Extracted from [RootViewModel.routeSignedIn] so the artist EPK gate is unit-testable
  * without a coroutine/StateFlow.
  *
  * parity: iOS gates an incomplete-EPK artist into the wizard (RootView), not the tabs —
- * `role == .artist && !setupComplete → ArtistWizardView`. Since M1a has no wizard tier yet,
- * an incomplete artist lands on [RootGate.Onboarding] (the placeholder that becomes the wizard
- * in a later phase), NOT on artist tabs where their booking dashboard would render half-built.
+ * `role == .artist && !setupComplete → ArtistWizardView`. A base-profile-complete artist
+ * whose EPK isn't done lands on [RootGate.ArtistWizard]; a half-finished users-row still
+ * lands on [RootGate.Onboarding] (signup Profile step). Never artist tabs half-built.
  */
 fun gateFor(route: ReturningLoginRoute, profile: SelfProfile?): RootGate = when (route) {
     is ReturningLoginRoute.RouteIn ->
-        // An artist whose EPK wizard isn't done (setup_complete false/null) is NOT ready for the
-        // artist tabs — route to onboarding/wizard. Clients and complete artists go straight in.
-        if (route.role == AppRole.Artist && profile?.artistSetupComplete != true) {
-            RootGate.Onboarding
-        } else {
-            RootGate.Tabs(route.role)
+        when {
+            // Users-row incomplete → finish signup Profile/notif/done first.
+            profile == null || !profile.isComplete -> RootGate.Onboarding
+            // Base profile done, EPK wizard not → dedicated wizard tier (not signup, not tabs).
+            route.role == AppRole.Artist && profile.artistSetupComplete != true ->
+                RootGate.ArtistWizard
+            else -> RootGate.Tabs(route.role)
         }
     // Genuinely new/half-finished, OR a failed fetch: move PAST the auth screen either way so a
     // live session is never wedged there. Degrade skips returning-user hydration but still
