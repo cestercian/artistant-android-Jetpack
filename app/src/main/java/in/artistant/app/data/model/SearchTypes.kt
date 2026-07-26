@@ -58,7 +58,35 @@ data class SearchFacets(
     }
 }
 
+/** One bar of the `price_histogram` RPC (16 buckets). */
+data class PriceBucket(
+    val bucketMin: Int,
+    val bucketMax: Int,
+    val count: Int,
+)
+
 object SearchTuning {
     /** Rows per page. RPC clamps `p_limit` to 1…50. */
     const val PAGE_LIMIT = 20
+    const val PRICE_FLOOR = 10_000
+    const val PRICE_CEILING = 80_000
+}
+
+/** Event types offered in the filter sheet (iOS ArtistOnboardingStore.allEventTypes). */
+object SearchCatalog {
+    val eventTypes = listOf(
+        "College fest", "Cafe / pub", "Wedding", "Corporate", "Private party", "Club night",
+    )
+    val services = listOf(
+        "wedding-sangeet" to "Wedding / sangeet",
+        "corporate-set" to "Corporate set",
+        "acoustic-duo" to "Acoustic duo",
+        "full-band" to "Full band",
+        "dj-set" to "DJ set",
+        "festival-slot" to "Festival slot",
+        "private-party" to "Private party",
+        "devotional" to "Devotional",
+        "kids-event" to "Kids event",
+    )
+    val flexOptions = listOf(0 to "Exact", 1 to "±1 day", 2 to "±2 days", 7 to "±7 days")
 }

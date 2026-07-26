@@ -15,6 +15,7 @@ import `in`.artistant.app.data.model.SearchFilters
 import `in`.artistant.app.data.model.SearchPage
 import `in`.artistant.app.data.model.SearchSort
 import `in`.artistant.app.data.model.SearchTuning
+import `in`.artistant.app.data.model.PriceBucket
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNull
@@ -46,6 +47,9 @@ interface SearchRepository {
     ): SearchPage = search(filters, cursor)
 
     suspend fun facets(): SearchFacets
+
+    /** `price_histogram` RPC — 16 buckets; empty/fail → empty list (legacy sliders). */
+    suspend fun priceHistogram(city: String?): List<PriceBucket> = emptyList()
 }
 
 @Singleton
@@ -137,6 +141,19 @@ class SupabaseSearchRepository @Inject constructor(
         val cities = rows.filter { it.kind == "city" }
             .map { SearchFacet(label = it.label, count = it.n) }
         return SearchFacets(categories = categories, cities = cities)
+    }
+
+    override suspend fun priceHistogram(city: String?): List<PriceBucket> {
+        val params = buildJsonObject {
+            put("p_city", city?.let { JsonPrimitive(it) } ?: JsonNull)
+        }
+        return try {
+            client.postgrest.rpc("price_histogram", params)
+                .decodeList<PriceBucketRow>()
+                .map { PriceBucket(it.bucketMin, it.bucketMax, it.n) }
+        } catch (_: Throwable) {
+            emptyList()
+        }
     }
 
     private suspend fun executeSearch(
@@ -248,5 +265,12 @@ data class SearchArtistRow(
 private data class SearchFacetRow(
     val kind: String,
     val label: String,
+    val n: Int,
+)
+
+@Serializable
+private data class PriceBucketRow(
+    @SerialName("bucket_min") val bucketMin: Int,
+    @SerialName("bucket_max") val bucketMax: Int,
     val n: Int,
 )

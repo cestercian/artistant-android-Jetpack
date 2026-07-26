@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,6 +31,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,9 +48,8 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Search tab — port of iOS `SearchView` (debounced query, facet rails, paged
- * results). Full filter sheet / histogram polish can land later; city + category
- * chips + sort cover the M2 browse path.
+ * Search tab — port of iOS `SearchView` (debounced query, facet rails, filter sheet,
+ * paged results).
  */
 @Composable
 fun SearchScreen(
@@ -57,6 +60,7 @@ fun SearchScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val space = AppTheme.dimens.space
     val colors = AppTheme.colors
+    var showFilters by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -95,6 +99,22 @@ fun SearchScreen(
             if (state.query.isNotEmpty()) {
                 IconButton(onClick = viewModel::clearQuery) {
                     Icon(Icons.Filled.Clear, contentDescription = "Clear", tint = colors.ink3)
+                }
+            }
+            IconButton(onClick = { showFilters = true }) {
+                Box {
+                    Icon(Icons.Filled.Tune, contentDescription = "Filters", tint = colors.ink2)
+                    if (state.activeFilterCount > 0) {
+                        Text(
+                            state.activeFilterCount.toString(),
+                            style = AppTheme.type.monoSmall,
+                            color = colors.brandInk,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .background(colors.brand, RoundedCornerShape(AppTheme.dimens.radii.xl))
+                                .padding(horizontal = 4.dp),
+                        )
+                    }
                 }
             }
         }
@@ -182,6 +202,26 @@ fun SearchScreen(
                 }
             }
         }
+    }
+
+    if (showFilters) {
+        SearchFilterSheet(
+            state = state,
+            cityOptions = state.facets.cities.map { it.label },
+            onDismiss = { showFilters = false },
+            onSelectCity = viewModel::selectCity,
+            onSetDate = viewModel::setDate,
+            onSetFlex = viewModel::setFlexDays,
+            onSetEventType = viewModel::setEventType,
+            onToggleService = viewModel::toggleService,
+            onSetPrice = viewModel::setPriceRange,
+            onSetScore = viewModel::setMinScore,
+            onClear = viewModel::clearFilters,
+            onApply = {
+                viewModel.applyFilters()
+                showFilters = false
+            },
+        )
     }
 }
 

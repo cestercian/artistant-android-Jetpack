@@ -105,7 +105,7 @@ socials/bio) can be built before F8 lands.*
   pagination + generation guard, facets, recents (DataStore). **L.** → SearchRepo.
 - [ ] **SearchScreen** — search bar, empty chips, 2-col grid, infinite scroll, sort
   menu, states. **M.**
-- [ ] **SearchFilterSheet** — city/budget/score/category/occasion. **M.**
+- [x] **SearchFilterSheet** — city/date/event/services/budget histogram/score. **M.**
 
 *F4 and F5 share `SearchRepository` (independent of each other after it exists).*
 

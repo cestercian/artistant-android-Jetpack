@@ -145,21 +145,22 @@ Update this section's "current state" line as phases land.
 **Current state:** M0–M1 merged; **M2–M7 substantially landed on
 `feature/m2-browse`** (PR open → `main`). Product truth aligned with Jul-2026 iOS:
 redaction retired, booking = request→accept (`pending_confirm` / “Request sent.”),
-Airbnb chat trust. Shipped on the branch: Discover/Search/Artist profile; Bookings
-+ Requests repos; client Booking→Checkout→Confirmed + Bookings tab; artist Home
-New requests / Gigs / GigRequest detail Accept/Decline; Messages inbox + Chat
-(verbatim, system rows, trust banner — Realtime/FCM deferred); Wizard scaffold +
-EPK shell; Profile (sign-out / delete-account / data-export); inert Paywall behind
-`subscriptionsEnabled=false`. **~81 unit tests, 0 failures** (`assembleDebug` +
-`testDebugUnitTest` green). Stack unchanged (AGP 8.9.1 / Kotlin 2.1.0 / Hilt 2.54 /
+Airbnb chat trust. Shipped on the branch: Discover/Search (+ filter sheet +
+histogram)/Artist profile (saved heart); Bookings + Requests repos; client
+Booking→Checkout→Confirmed + Bookings tab; artist Home New requests / Gigs /
+GigRequest detail Accept/Decline; Messages inbox + Chat (Realtime + optimistic
+send, system rows, trust banner); FCM client (`claim_device_token` + TabRouter
+deep links — needs operator `google-services.json` + send-push FCM); Wizard
+scaffold + EPK shell; Profile (sign-out / delete-account / data-export); inert
+Paywall behind `subscriptionsEnabled=false`. **Unit tests green** (`assembleDebug`
++ `testDebugUnitTest`). Stack unchanged (AGP 8.9.1 / Kotlin 2.1.0 / Hilt 2.54 /
 supabase-kt 3.0.3).
 
-**Still missing / deferred:** live Realtime chat subscribe, FCM token register +
-deep links, CameraX wizard media + packages/samples table writes, ManageAvailability
-editor, CalendarSync, Search filter sheet/histogram, Score explainer sheets,
+**Still missing / deferred:** CameraX wizard media + packages/samples table writes,
+ManageAvailability editor, CalendarSync, Score explainer/breakdown sheets,
 ThreadDetails/report, Play Billing live path, M8 hardening. Operator: no emulator
-here; Google `GOOGLE_WEB_CLIENT_ID` + SHA-1; Apple OAuth (#12); brand `.ttf` (#15);
-backend unchanged (shared with iOS).
+here; Google `GOOGLE_WEB_CLIENT_ID` + SHA-1 + `google-services.json`; Apple OAuth
+(#12); brand `.ttf` (#15); backend `send-push` FCM path (schema 0069/0075 ready).
 
 ---
 

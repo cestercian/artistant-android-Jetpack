@@ -39,10 +39,10 @@ moat.
 |---|---|---|---|
 | `Screens/DiscoverView.swift` | `feature/discover/DiscoverScreen.kt` | done | M2 — rails via concurrent `search_artists` |
 | `State/DiscoverFeedStore.swift` | `feature/discover/DiscoverViewModel.kt` | done | M2 |
-| `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | partial | M2 — query + facets + sort; filter sheet/histogram deferred |
-| `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | missing | M2 follow-up; accordion + histogram |
-| `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | partial | M2 — debounce + pagination; 0073 dims deferred |
-| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | partial | M2 — hero/bio/packages/reviews/dock; Book/Message stubbed; Request quote wired M3 |
+| `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | done | Query + facets + sort + filter sheet badge |
+| `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | done | Accordion + histogram + 0073 dims |
+| `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | done | Debounce + pagination + filter/histogram |
+| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | partial | Hero/bio/packages/reviews/dock + saved heart; score sheets deferred |
 | `Screens/ScoreExplainerView.swift` | `feature/artist/ScoreExplainerScreen.kt` | missing | M2/M5 |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/artist/ScoreBreakdownSheet.kt` | missing | M2/M5 |
 | `Screens/ArtistListView.swift` | (unused / list helper) | obsolete | Discover/Search replaced roster lists |
@@ -121,7 +121,7 @@ moat.
 | `Repositories/ArtistsRepository.swift` | `data/repository/ArtistsRepository.kt` + Fake | done | M2 — id-keyed hydrating cache |
 | `Repositories/SearchRepository.swift` | `data/repository/SearchRepository.kt` + Fake | done | M2 |
 | `Repositories/SearchTypes.swift` | `data/model/SearchTypes.kt` | done | M2 |
-| `Repositories/SavedArtistsRepository.swift` | `data/repository/SavedArtistsRepository.kt` + Fake | missing | M2 profile rails / Saved |
+| `Repositories/SavedArtistsRepository.swift` | `data/repository/SavedArtistsRepository.kt` + Fake | done | saved_artists upsert/delete/list + SavedStore |
 | `Repositories/ReviewsRepository.swift` | `data/repository/ReviewsRepository.kt` + Fake | done | M2 profile (listForArtist) |
 | `Repositories/PackagesRepository.swift` | `data/repository/PackagesRepository.kt` + Fake | missing | M2/M5 |
 | `Repositories/ArtistMediaRepository.swift` | `data/repository/ArtistMediaRepository.kt` | missing | M2 covers / M5 upload |
@@ -143,7 +143,7 @@ moat.
 | `State/RoleStore.swift` | `AppPreferences` + RootViewModel | partial | Role persisted; store shape differs |
 | `State/DiscoverFeedStore.swift` | `DiscoverViewModel` | done | M2 |
 | `State/SearchStore.swift` | `SearchViewModel` | partial | M2 |
-| `State/SavedStore.swift` | `SavedViewModel` / prefs | missing | M2/M6 |
+| `State/SavedStore.swift` | `feature/saved/SavedStore.kt` | done | Optimistic toggle + prefs + sign-out reset |
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
 | `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | Inbox + Chat with Realtime/optimistic reconcile; no global MessageStore yet |

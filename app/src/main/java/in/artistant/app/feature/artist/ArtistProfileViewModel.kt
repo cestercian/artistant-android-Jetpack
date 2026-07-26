@@ -8,6 +8,7 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
+import `in`.artistant.app.feature.saved.SavedStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,7 @@ data class ArtistProfileUiState(
     val isLoading: Boolean = true,
     val loadError: String? = null,
     val selectedPackageIndex: Int = 0,
+    val isSaved: Boolean = false,
 )
 
 @HiltViewModel
@@ -28,6 +30,7 @@ class ArtistProfileViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val artistsRepository: ArtistsRepository,
     private val reviewsRepository: ReviewsRepository,
+    private val savedStore: SavedStore,
 ) : ViewModel() {
 
     private val artistId: String = checkNotNull(savedStateHandle["artistId"])
@@ -37,6 +40,11 @@ class ArtistProfileViewModel @Inject constructor(
 
     init {
         refresh()
+        viewModelScope.launch {
+            savedStore.ids.collect { ids ->
+                _state.update { it.copy(isSaved = artistId.lowercase() in ids) }
+            }
+        }
     }
 
     fun refresh() {
@@ -65,6 +73,7 @@ class ArtistProfileViewModel @Inject constructor(
                     selectedPackageIndex = popularIdx,
                     isLoading = false,
                     loadError = null,
+                    isSaved = savedStore.contains(artistId),
                 )
             }
         }
@@ -72,5 +81,9 @@ class ArtistProfileViewModel @Inject constructor(
 
     fun selectPackage(index: Int) {
         _state.update { it.copy(selectedPackageIndex = index) }
+    }
+
+    fun toggleSaved() {
+        savedStore.toggle(artistId)
     }
 }

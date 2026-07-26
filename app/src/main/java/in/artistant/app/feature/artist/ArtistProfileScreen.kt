@@ -17,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,7 +92,7 @@ fun ArtistProfileScreen(
                         .weight(1f)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    Hero(artist = artist, onBack = onBack)
+                    Hero(artist = artist, onBack = onBack, isSaved = state.isSaved, onToggleSaved = viewModel::toggleSaved)
                     Column(Modifier.padding(space.lg)) {
                         Text(artist.name, style = AppTheme.type.displaySub, color = colors.ink)
                         Spacer(Modifier.height(space.sm))
@@ -160,8 +162,14 @@ fun ArtistProfileScreen(
 }
 
 @Composable
-private fun Hero(artist: Artist, onBack: () -> Unit) {
+private fun Hero(
+    artist: Artist,
+    onBack: () -> Unit,
+    isSaved: Boolean,
+    onToggleSaved: () -> Unit,
+) {
     val size = AppTheme.dimens.size
+    val space = AppTheme.dimens.space
     Box(
         Modifier
             .fillMaxWidth()
@@ -191,11 +199,19 @@ private fun Hero(artist: Artist, onBack: () -> Unit) {
         )
         IconButton(
             onClick = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(AppTheme.dimens.space.sm),
+            modifier = Modifier.align(Alignment.TopStart).padding(space.sm),
         ) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+        }
+        IconButton(
+            onClick = onToggleSaved,
+            modifier = Modifier.align(Alignment.TopEnd).padding(space.sm),
+        ) {
+            Icon(
+                imageVector = if (isSaved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (isSaved) "Unsave" else "Save",
+                tint = if (isSaved) AppTheme.colors.brand else Color.White,
+            )
         }
     }
 }

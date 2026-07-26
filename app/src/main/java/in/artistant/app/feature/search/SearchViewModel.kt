@@ -4,10 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.PriceBucket
+import `in`.artistant.app.data.model.SearchCatalog
 import `in`.artistant.app.data.model.SearchCursor
 import `in`.artistant.app.data.model.SearchFacets
 import `in`.artistant.app.data.model.SearchFilters
 import `in`.artistant.app.data.model.SearchSort
+import `in`.artistant.app.data.model.SearchTuning
 import `in`.artistant.app.data.repository.SearchRepository
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -21,14 +24,25 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Search tab — port of iOS `SearchStore`. Debounced text + filters drive
- * `search_artists`; facets power the empty-state browse rails.
+ * Search tab — port of iOS `SearchStore`. Debounced text + accordion filters drive
+ * `search_artists` (incl. 0073 dims); facets power empty-state rails; histogram
+ * feeds the Budget section.
  */
 data class SearchUiState(
     val query: String = "",
     val city: String? = null,
     val categories: Set<String> = emptySet(),
     val sort: SearchSort = SearchSort.Bookability,
+    val minPrice: Int = SearchTuning.PRICE_FLOOR,
+    val maxPrice: Int = SearchTuning.PRICE_CEILING,
+    val priceDataMin: Int = SearchTuning.PRICE_FLOOR,
+    val priceDataMax: Int = SearchTuning.PRICE_CEILING,
+    val minScore: Int = 0,
+    val eventType: String? = null,
+    val services: Set<String> = emptySet(),
+    val dateIso: String? = null,
+    val flexDays: Int = 0,
+    val histogram: List<PriceBucket> = emptyList(),
     val results: List<Artist> = emptyList(),
     val facets: SearchFacets = SearchFacets.Empty,
     val isLoading: Boolean = false,
@@ -37,7 +51,20 @@ data class SearchUiState(
     val loadError: String? = null,
 ) {
     val hasActiveQuery: Boolean
-        get() = query.isNotBlank() || city != null || categories.isNotEmpty()
+        get() = query.isNotBlank() || activeFilterCount > 0 || categories.isNotEmpty()
+
+    /** Badge count for the filter button — excludes category rails (iOS sheet count). */
+    val activeFilterCount: Int
+        get() {
+            var n = 0
+            if (city != null) n++
+            if (dateIso != null) n++
+            if (eventType != null) n++
+            if (services.isNotEmpty()) n++
+            if (minPrice > priceDataMin || maxPrice < priceDataMax) n++
+            if (minScore > 0) n++
+            return n
+        }
 }
 
 @OptIn(FlowPreview::class)
@@ -53,6 +80,7 @@ class SearchViewModel @Inject constructor(
     private var nextCursor: SearchCursor? = null
     private var searchJob: Job? = null
     private var generation = 0
+    private val histogramCache = mutableMapOf<String, List<PriceBucket>>()
 
     init {
         viewModelScope.launch {
@@ -68,11 +96,11 @@ class SearchViewModel @Inject constructor(
                     runSearch(reset = true)
                 }
         }
+        loadHistogram(null)
     }
 
     fun onQueryChange(text: String) {
         queryFlow.value = text
-        // Reflect typed text immediately in the field; search waits for debounce.
         _state.update { it.copy(query = text) }
     }
 
@@ -84,6 +112,7 @@ class SearchViewModel @Inject constructor(
 
     fun selectCity(city: String?) {
         _state.update { it.copy(city = city) }
+        loadHistogram(city)
         runSearch(reset = true)
     }
 
@@ -101,6 +130,54 @@ class SearchViewModel @Inject constructor(
         runSearch(reset = true)
     }
 
+    fun setPriceRange(min: Int, max: Int) {
+        _state.update { it.copy(minPrice = min.coerceAtMost(max), maxPrice = max.coerceAtLeast(min)) }
+    }
+
+    fun setMinScore(score: Int) {
+        _state.update { it.copy(minScore = score.coerceIn(0, 100)) }
+    }
+
+    fun setEventType(type: String?) {
+        _state.update { it.copy(eventType = type) }
+    }
+
+    fun toggleService(slug: String) {
+        _state.update { s ->
+            val next = s.services.toMutableSet()
+            if (!next.add(slug)) next.remove(slug)
+            s.copy(services = next)
+        }
+    }
+
+    fun setDate(iso: String?) {
+        _state.update { it.copy(dateIso = iso, flexDays = if (iso == null) 0 else it.flexDays) }
+    }
+
+    fun setFlexDays(days: Int) {
+        _state.update { it.copy(flexDays = days) }
+    }
+
+    /** Apply sheet edits and re-search (sheet mutates live; Apply just closes + refreshes). */
+    fun applyFilters() = runSearch(reset = true)
+
+    fun clearFilters() {
+        _state.update {
+            it.copy(
+                city = null,
+                minPrice = it.priceDataMin,
+                maxPrice = it.priceDataMax,
+                minScore = 0,
+                eventType = null,
+                services = emptySet(),
+                dateIso = null,
+                flexDays = 0,
+            )
+        }
+        loadHistogram(null)
+        runSearch(reset = true)
+    }
+
     fun loadMore() {
         if (_state.value.isLoadingMore || !_state.value.canLoadMore) return
         runSearch(reset = false)
@@ -108,13 +185,44 @@ class SearchViewModel @Inject constructor(
 
     fun retry() = runSearch(reset = true)
 
+    private fun loadHistogram(city: String?) {
+        val key = city.orEmpty()
+        histogramCache[key]?.let { cached ->
+            applyHistogram(cached)
+            return
+        }
+        viewModelScope.launch {
+            val buckets = searchRepository.priceHistogram(city)
+            if (buckets.isNotEmpty()) histogramCache[key] = buckets
+            applyHistogram(buckets)
+        }
+    }
+
+    private fun applyHistogram(buckets: List<PriceBucket>) {
+        if (buckets.isEmpty()) {
+            _state.update { it.copy(histogram = emptyList()) }
+            return
+        }
+        val dataMin = buckets.minOf { it.bucketMin }
+        val dataMax = buckets.maxOf { it.bucketMax }
+        _state.update {
+            // Widen span; keep current selection if still inside, else reset to full span.
+            val min = it.minPrice.coerceIn(dataMin, dataMax)
+            val max = it.maxPrice.coerceIn(dataMin, dataMax)
+            it.copy(
+                histogram = buckets,
+                priceDataMin = dataMin,
+                priceDataMax = dataMax,
+                minPrice = if (min >= max) dataMin else min,
+                maxPrice = if (min >= max) dataMax else max,
+            )
+        }
+    }
+
     private fun runSearch(reset: Boolean) {
         val snapshot = _state.value
         if (!snapshot.hasActiveQuery && snapshot.query.isBlank()) {
-            // Empty browse: still show top results so the tab isn't blank.
-            // Matching iOS empty-state rails when query+filters are empty — we
-            // leave results empty and show facets; only search when active.
-            if (snapshot.query.isBlank() && snapshot.city == null && snapshot.categories.isEmpty()) {
+            if (snapshot.activeFilterCount == 0 && snapshot.categories.isEmpty()) {
                 _state.update {
                     it.copy(results = emptyList(), canLoadMore = false, loadError = null, isLoading = false)
                 }
@@ -138,22 +246,25 @@ class SearchViewModel @Inject constructor(
                 return@launch
             }
             try {
-                val filters = SearchFilters(
-                    text = snapshot.query,
-                    city = snapshot.city,
-                    categories = snapshot.categories.toList(),
-                    sort = snapshot.sort,
-                )
-                // Re-read query from flow in case debounce already advanced state.
                 val live = _state.value
+                val narrowedMin = live.minPrice.takeIf { it > live.priceDataMin }
+                val narrowedMax = live.maxPrice.takeIf { it < live.priceDataMax }
+                val filters = SearchFilters(
+                    text = live.query,
+                    city = live.city,
+                    categories = live.categories.toList(),
+                    minPrice = narrowedMin,
+                    maxPrice = narrowedMax,
+                    minScore = live.minScore.takeIf { it > 0 },
+                    eventType = live.eventType,
+                    sort = live.sort,
+                )
                 val page = searchRepository.search(
-                    filters.copy(
-                        text = live.query,
-                        city = live.city,
-                        categories = live.categories.toList(),
-                        sort = live.sort,
-                    ),
-                    cursor,
+                    filters = filters,
+                    cursor = cursor,
+                    services = live.services.takeIf { it.isNotEmpty() }?.toList(),
+                    date = live.dateIso,
+                    flexDays = live.flexDays.takeIf { live.dateIso != null },
                 )
                 if (gen != generation) return@launch
                 nextCursor = page.nextCursor
@@ -177,5 +288,12 @@ class SearchViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    companion object {
+        /** Exposed for sheet labels — keeps UI from importing catalog directly. */
+        val eventTypes get() = SearchCatalog.eventTypes
+        val services get() = SearchCatalog.services
+        val flexOptions get() = SearchCatalog.flexOptions
     }
 }
