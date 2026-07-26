@@ -10,23 +10,20 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.FlowType
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.auth.parseSessionFromFragment
+import io.github.jan.supabase.auth.handleDeeplinks
 import io.github.jan.supabase.auth.providers.Apple
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.builtin.IDToken
-import io.github.jan.supabase.auth.status.SessionSource
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
-import com.google.firebase.messaging.FirebaseMessaging
 import `in`.artistant.app.BuildConfig
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
-import `in`.artistant.app.platform.push.DeviceTokenRepository
+import `in`.artistant.app.platform.push.PushService
+import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.storage.AppPreferences
-import `in`.artistant.app.platform.upload.UploadQueue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
@@ -34,8 +31,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import timber.log.Timber
@@ -58,8 +53,8 @@ class SessionManager @Inject constructor(
     private val analytics: Analytics,
     private val crash: Crash,
     private val prefs: AppPreferences,
-    private val uploadQueue: UploadQueue,
-    private val deviceTokens: DeviceTokenRepository,
+    private val pushService: PushService,
+    private val savedStore: SavedStore,
 ) {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
@@ -78,13 +73,9 @@ class SessionManager @Inject constructor(
     val signInGeneration: StateFlow<Int> = _signInGeneration
 
     /**
-     * One-shot error channel for a FAILED OAuth deep-link completion. The Apple/Google browser
-     * return lands here (via [handleDeepLink] from MainActivity), OUTSIDE any ViewModel's
-     * sign-in call — so a failed exchange can't surface through their try/catch. Non-null when
-     * the completion failed; the auth UI ([AuthViewModel]) observes it, folds it into its
-     * `state.error`, and calls [consumeDeepLinkError] to clear it. Being a StateFlow, its
-     * retained value also covers the cold-launch race (set before the VM exists, read on first
-     * collect). Ports the intent of iOS `AuthService.lastError`.
+     * One-shot error channel for a FAILED OAuth deep-link completion (closes #12).
+     * The Apple/Google browser return lands here via [handleDeepLink] from MainActivity,
+     * OUTSIDE any ViewModel try/catch. Auth UI observes this and calls [consumeDeepLinkError].
      */
     private val _deepLinkError = MutableStateFlow<String?>(null)
     val deepLinkError: StateFlow<String?> = _deepLinkError
@@ -244,33 +235,12 @@ class SessionManager @Inject constructor(
     /** Sign out + drop the analytics identity + wipe local prefs (DPDP §11 parity). The
      *  status observer also resets analytics, but wiping prefs is this method's job. */
     suspend fun signOut() {
-        // Push cleanup FIRST, and SYNCHRONOUSLY, while STILL AUTHENTICATED. The device_tokens
-        // DELETE is RLS-gated (`auth.uid() = user_id`), so it MUST complete before signOut() drops
-        // the session — a fire-and-forget unregister could race the teardown, match zero rows, and
-        // orphan this device's row (the signed-out user would then keep getting pushes here after
-        // an account switch). Await the token + the unregister, THEN invalidate the token so the
-        // next user on this device gets a fresh one mapped to THEM. Best-effort — a push-cleanup
-        // failure must never block sign-out.
-        runCatching {
-            awaitFcmToken()?.let { deviceTokens.unregister(it) }
-            FirebaseMessaging.getInstance().deleteToken()
-        }
         client.auth.signOut()
         analytics.reset()
         crash.setUser(null)
         prefs.wipeAll()
-        // Cancel any in-flight wizard uploads + wipe the staged media so the next account
-        // that signs in on this device inherits nothing (iOS `UploadQueue.cancelAll`).
-        uploadQueue.cancelAll()
-    }
-
-    /** Await FCM's current token (its Play-services Task, bridged to a suspend without the
-     *  kotlinx-coroutines-play-services dep); null on any failure so sign-out cleanup degrades
-     *  gracefully rather than throwing. */
-    private suspend fun awaitFcmToken(): String? = suspendCancellableCoroutine { cont ->
-        FirebaseMessaging.getInstance().token
-            .addOnSuccessListener { cont.resume(it) }
-            .addOnFailureListener { cont.resume(null) }
+        savedStore.reset()
+        pushService.onSignedOut()
     }
 
     // MARK: - Deep link
@@ -278,73 +248,45 @@ class SessionManager @Inject constructor(
     /**
      * Finish an OAuth flow that returned via `in.artistant.app://login-callback`.
      *
-     * WHY NOT supabase-kt's `handleDeeplinks`: in 3.0.3 it runs the PKCE `exchangeCodeForSession`
-     * (or the implicit session import) on its own internal auth scope with NO try/catch and no
-     * error callback. On a failed completion (flaky network / expired-or-invalid code / provider
-     * error) `onSessionSuccess` never fires, [signInGeneration] never bumps, and the router stays
-     * WEDGED on the auth screen with no feedback. So we replicate its two-flow logic here on OUR
-     * scope, wrapped, and surface any failure to [deepLinkError] — the Android port of iOS
-     * `AuthService.handleDeepLink`'s do/catch → `lastError` (whose doc names this exact
-     * "server logged a success but the app is stuck on auth" symptom).
+     * Provider denials arrive as `?error=` / `#error=` on the callback URL BEFORE any
+     * session exchange — we surface those to [deepLinkError] (closes #12; ports iOS
+     * AuthService.handleDeepLink → lastError). Successful returns still go through
+     * supabase-kt 3.0.3's `handleDeeplinks` (PKCE/IMPLICIT APIs like
+     * `parseSessionFromFragment` / `SessionSource` aren't public on this BOM).
      */
     fun handleDeepLink(intent: Intent) {
-        val data = intent.data ?: return
-        // Only OUR OAuth callback — ignore any unrelated intent that reaches the activity (the
-        // same scheme/host guard supabase-kt's handleDeeplinks applies before touching auth).
-        if (data.scheme != client.auth.config.scheme || data.host != client.auth.config.host) return
-
-        // (1) The provider can return an explicit denial instead of a token/code — the user backed
-        // out of the consent screen, or the provider rejected the request. Supabase puts it in the
-        // query (?error=…) or the URL fragment (#error=…). We MUST catch it here: the PKCE branch
-        // below does `getQueryParameter("code") ?: return` and would silently wedge on a null code.
-        val error = data.getQueryParameter("error") ?: fragmentParam(data.fragment, "error")
-        if (error != null) {
-            // A BARE access_denied (no error_code) == the user dismissed the consent screen — a
-            // silent cancel, like a dismissed Google picker, no banner. But GoTrue REUSES
-            // access_denied for real server-side denials that DO carry an error_code
-            // (signup_disabled, a banned/blocked account, a provider-policy rejection). Silencing
-            // those would reintroduce the very wedge this method exists to kill — so only the
-            // code-less access_denied is treated as a cancel; everything else is surfaced.
-            val errorCode = data.getQueryParameter("error_code") ?: fragmentParam(data.fragment, "error_code")
-            if (error == "access_denied" && errorCode == null) return
-            val desc = data.getQueryParameter("error_description")
-                ?: fragmentParam(data.fragment, "error_description")
-            _deepLinkError.value = desc?.takeIf { it.isNotBlank() }
-                ?: "Couldn't complete sign-in. Try again."
-            return
+        val data = intent.data
+        if (data != null &&
+            data.scheme == client.auth.config.scheme &&
+            data.host == client.auth.config.host
+        ) {
+            val error = data.getQueryParameter("error") ?: fragmentParam(data.fragment, "error")
+            if (error != null) {
+                // Bare access_denied (no error_code) == user dismissed consent — silent cancel.
+                // access_denied WITH error_code is a real denial and must surface.
+                val errorCode = data.getQueryParameter("error_code")
+                    ?: fragmentParam(data.fragment, "error_code")
+                if (error == "access_denied" && errorCode == null) return
+                val desc = data.getQueryParameter("error_description")
+                    ?: fragmentParam(data.fragment, "error_description")
+                _deepLinkError.value = desc?.takeIf { it.isNotBlank() }
+                    ?: "Couldn't complete sign-in. Try again."
+                return
+            }
         }
 
-        // (2) The happy path AND the failure the library was silently swallowing. Run the
-        // flow-appropriate completion on OUR scope inside try/catch. Branching on the configured
-        // flowType (not assuming one) keeps this correct if the operator later switches to PKCE.
-        scope.launch {
-            try {
-                when (client.auth.config.flowType) {
-                    FlowType.PKCE -> {
-                        val code = data.getQueryParameter("code")
-                            ?: throw AuthException("Sign-in link was malformed.")
-                        client.auth.exchangeCodeForSession(code) // persists the session on success
-                    }
-                    FlowType.IMPLICIT -> {
-                        val fragment = data.fragment
-                            ?: throw AuthException("Sign-in link was malformed.")
-                        // parseSessionFromFragment leaves user=null (per its doc) — fetch the user
-                        // and import the complete session, exactly as the library's implicit path.
-                        val parsed = client.auth.parseSessionFromFragment(fragment)
-                        val user = client.auth.retrieveUser(parsed.accessToken)
-                        client.auth.importSession(parsed.copy(user = user), source = SessionSource.External)
-                    }
-                }
+        // Success / non-error callbacks: let supabase-kt import the session, then bump
+        // generation so a same-user Google/Apple return still advances the router.
+        try {
+            client.handleDeeplinks(intent) { _ ->
                 _deepLinkError.value = null
                 completedSignIn()
-            } catch (t: Throwable) {
-                // The wedge symptom, now surfaced: log for triage, record to crash, and hand the
-                // auth UI a friendly message so the user can retry instead of a dead screen.
-                Timber.e(t, "OAuth deep-link completion failed")
-                crash.record(t)
-                _deepLinkError.value = (t as? AuthException)?.message
-                    ?: "Couldn't complete sign-in. Check your connection and try again."
             }
+        } catch (t: Throwable) {
+            Timber.e(t, "OAuth deep-link completion failed")
+            crash.record(t)
+            _deepLinkError.value = (t as? AuthException)?.message
+                ?: "Couldn't complete sign-in. Check your connection and try again."
         }
     }
 
@@ -361,10 +303,8 @@ class SessionManager @Inject constructor(
 }
 
 /**
- * Read a key from an OAuth callback URL fragment (`a=1&b=2`, the part after `#`), percent-decoded.
- * Used for the implicit-flow `#error=…&error_description=…` return. Kept a pure top-level fn (no
- * Android `Uri`) so it's JVM-unit-testable — `URLDecoder` over `Uri.decode` for the same reason.
- * A malformed percent-escape falls back to the raw value rather than throwing.
+ * Read a key from an OAuth callback URL fragment (`a=1&b=2`). Pure / JVM-testable.
+ * Malformed percent-escape falls back to the raw value.
  */
 internal fun fragmentParam(fragment: String?, key: String): String? =
     fragment?.split("&")

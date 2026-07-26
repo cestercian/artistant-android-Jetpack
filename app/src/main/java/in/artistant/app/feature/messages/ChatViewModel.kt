@@ -4,134 +4,177 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.ArtistsRepository
-import `in`.artistant.app.state.BookingStore
-import `in`.artistant.app.state.MessageStore
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.SharingStarted
+import `in`.artistant.app.data.repository.MessagesRepository
+import `in`.artistant.app.data.repository.MessagesSubscription
+import `in`.artistant.app.data.repository.ReportsRepository
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class ChatUiState(
+    val thread: Thread? = null,
+    val title: String = "Chat",
+    val messages: List<Message> = emptyList(),
+    val isLoading: Boolean = true,
+    val error: String? = null,
+    val counterpartLastReadAt: Long? = null,
+    val showDetails: Boolean = false,
+)
+
 /**
- * Drives the shared `ChatScreen` (port of iOS `ChatView`). The message list lives
- * in the process-wide [MessageStore]; this VM is the per-thread orchestrator —
- * ensure/refresh/mark-read on open, optimistic send + retry, and the Realtime
- * subscription lifecycle (open on foreground, tear down on background/dispose).
+ * Chat VM: poll-on-open + Realtime INSERT + optimistic send with 3-way reconcile
+ * (local optimistic ↔ send RETURNING ↔ Realtime echo), matching iOS MessageStore.
  */
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val store: MessageStore,
-    private val artists: ArtistsRepository,
-    private val bookings: BookingStore,
+    private val messagesRepository: MessagesRepository,
+    private val artistsRepository: ArtistsRepository,
+    private val reports: ReportsRepository,
 ) : ViewModel() {
+    private val threadId: String = checkNotNull(savedStateHandle["threadId"])
+    private val _state = MutableStateFlow(ChatUiState())
+    val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
-    val threadId: String = savedStateHandle.get<String>("threadId").orEmpty()
+    private var subscription: MessagesSubscription? = null
+    /** Bumped on each subscribe attempt so a superseded join is discarded. */
+    private var subscribeGeneration = 0
 
-    /**
-     * This thread, tracked out of the store (re-emits on send/receive/refresh).
-     * Eagerly (not WhileSubscribed) because the VM reads [thread]`.value` synchronously
-     * from [displayBody] / [artistName] during composition — a lazily-started flow
-     * would hand back the stale construction-time snapshot there.
-     */
-    val thread: StateFlow<Thread?> =
-        store.threads
-            .map { list -> list.firstOrNull { it.id == threadId } }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, store.thread(threadId))
-
-    /**
-     * Messages in chronological order. Optimistic inserts (local `Date`) and realtime
-     * echoes arrive out of band, so sort by sentAt at render; tie-break on id so
-     * same-instant rows keep a STABLE order across recompositions (parity with iOS
-     * `orderedMessages`).
-     */
-    val messages: StateFlow<List<Message>> =
-        thread
-            .map { t ->
-                (t?.messages ?: emptyList()).sortedWith(
-                    compareBy({ it.sentAt }, { it.id }),
-                )
-            }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    // --- Realtime subscription lifecycle -------------------------------------
-    // store.subscribe() launches the channel collect on the store's own scope and
-    // returns the Job; cancelling the Job tears the channel + WebSocket down. We
-    // hold the latest Job + a generation token: teardown cancels and bumps the
-    // generation so any superseded subscribe is authoritatively retired (iOS's
-    // onDisappear generation bump). The token is belt-and-suspenders here — subscribe
-    // returns synchronously — but keeps the invariant if it ever goes async.
-    private var realtimeJob: Job? = null
-    private var generation = 0
-
-    /**
-     * Open the thread: ensure it's in the store (a chat reached from find-or-create
-     * isn't in the list yet — pull the set), hydrate messages + the header artist,
-     * and mark read. Silent-on-failure paths live in the store.
-     */
-    fun load() {
-        viewModelScope.launch {
-            if (store.thread(threadId) == null) store.refreshFromServer()
-            store.refreshMessages(threadId)
-            store.thread(threadId)?.artistId?.let { artists.ensureFull(it) }
-            store.markRead(threadId)
-        }
-    }
-
-    /** Foreground return: fill the gap missed while backgrounded, then re-subscribe. */
-    fun onForeground() {
-        viewModelScope.launch { store.refreshMessages(threadId) }
+    init {
+        refresh()
         subscribeRealtime()
     }
 
-    /** (Re)open the Realtime channel. Gated inside the repo on realtimeEnabled + a UUID thread. */
-    fun subscribeRealtime() {
-        realtimeJob?.cancel()
-        generation++
-        realtimeJob = store.subscribe(threadId)
+    fun refresh() = viewModelScope.launch {
+        _state.update { it.copy(isLoading = true, error = null) }
+        runCatching {
+            val thread = messagesRepository.listThreadsForUser().firstOrNull { it.id == threadId }
+            val messages = messagesRepository.listMessages(threadId)
+            thread to messages
+        }.onSuccess { (thread, serverMessages) ->
+            val title = thread?.clientName?.takeIf { it.isNotBlank() }
+                ?: thread?.let { artistsRepository.find(it.artistId)?.name }
+                ?: "Chat"
+            _state.update { state ->
+                state.copy(
+                    thread = thread,
+                    title = title,
+                    messages = ChatRealtimeLogic.mergePreservingOptimistic(
+                        server = serverMessages,
+                        existing = state.messages,
+                    ),
+                    isLoading = false,
+                )
+            }
+            markReadBestEffort()
+        }.onFailure { e -> _state.update { it.copy(isLoading = false, error = e.message) } }
     }
-
-    /** Tear the channel down (background / dispose). Idempotent. */
-    fun teardownRealtime() {
-        realtimeJob?.cancel()
-        realtimeJob = null
-        generation++
-    }
-
-    // Return the store's write Job so a test can join() it deterministically (the
-    // store settles the send on its own dispatcher; the screen ignores the return).
-    fun send(body: String): Job = store.send(threadId, body)
-
-    fun retry(messageId: String): Job = store.retryFailedMessage(threadId, messageId)
-
-    /** The client-viewer's header artist (null until hydrated / for the artist viewer). */
-    fun artistName(): String? = thread.value?.artistId?.let { artists.find(it)?.name }
-
-    fun artistId(): String? = thread.value?.artistId
 
     /**
-     * Per-bubble redaction gate (the anti-leakage moat). Bodies stay masked until the
-     * thread's booking is confirmed/completed; a bookingless inquiry always redacts.
-     * The server trigger is authoritative — this mirrors it for optimistic/echoed
-     * bodies. Applied per bubble in the composable so each row masks independently.
+     * Optimistic insert (`.sending`) then background write. Cap at 4000 chars —
+     * same choke point as iOS for both composer and retry.
      */
-    fun displayBody(raw: String): String {
-        val t = thread.value ?: return raw
-        return store.displayBody(raw, t, bookingConfirmed(t))
+    fun send(body: String) {
+        val capped = body.take(4000)
+        val text = capped.trim()
+        if (text.isEmpty()) return
+        val optimisticId = "optimistic-${System.currentTimeMillis()}"
+        val optimistic = Message(
+            id = optimisticId,
+            threadId = threadId,
+            body = capped,
+            sentAtEpochMs = System.currentTimeMillis(),
+            isMine = true,
+            delivery = MessageDelivery.Sending,
+        )
+        _state.update { it.copy(messages = it.messages + optimistic, error = null) }
+        deliver(optimisticId, capped)
     }
 
-    private fun bookingConfirmed(thread: Thread): Boolean {
-        val status = thread.bookingId?.let { bookings.booking(it)?.status } ?: return false
-        return status == BookingStatus.Confirmed || status == BookingStatus.Completed
+    fun retryFailedMessage(messageId: String) {
+        val message = _state.value.messages.firstOrNull { it.id == messageId } ?: return
+        if (message.delivery != MessageDelivery.Failed) return
+        _state.update {
+            it.copy(messages = ChatRealtimeLogic.markDelivery(it.messages, messageId, MessageDelivery.Sending))
+        }
+        deliver(messageId, message.body)
+    }
+
+    private fun deliver(optimisticId: String, body: String) = viewModelScope.launch {
+        runCatching { messagesRepository.send(threadId, body) }
+            .onSuccess { server ->
+                _state.update {
+                    it.copy(
+                        messages = ChatRealtimeLogic.reconcileSendSuccess(
+                            existing = it.messages,
+                            optimisticId = optimisticId,
+                            server = server,
+                        ),
+                    )
+                }
+                markReadBestEffort()
+            }
+            .onFailure { e ->
+                _state.update {
+                    it.copy(
+                        messages = ChatRealtimeLogic.markDelivery(
+                            it.messages,
+                            optimisticId,
+                            MessageDelivery.Failed,
+                        ),
+                        error = e.message,
+                    )
+                }
+            }
+    }
+
+    private fun subscribeRealtime() = viewModelScope.launch {
+        subscribeGeneration += 1
+        val myGeneration = subscribeGeneration
+        // Tear down any prior channel before joining (foreground re-subscribe).
+        subscription?.cancel()
+        subscription = null
+        val sub = messagesRepository.subscribeMessages(threadId) { incoming ->
+            // Realtime callback may arrive off Main; ViewModel updates must be serialised.
+            viewModelScope.launch {
+                if (myGeneration != subscribeGeneration) return@launch
+                _state.update {
+                    it.copy(messages = ChatRealtimeLogic.receiveRealtimeMessage(it.messages, incoming))
+                }
+            }
+        }
+        if (myGeneration != subscribeGeneration) {
+            sub.cancel()
+            return@launch
+        }
+        subscription = sub
+    }
+
+    private fun markReadBestEffort() = viewModelScope.launch {
+        runCatching { messagesRepository.markThreadRead(threadId) }
+        runCatching { messagesRepository.markThreadReadReceipt(threadId) }
+        val readAt = runCatching { messagesRepository.counterpartLastRead(threadId) }.getOrNull()
+        _state.update { it.copy(counterpartLastReadAt = readAt) }
+    }
+
+    fun openDetails() = _state.update { it.copy(showDetails = true) }
+    fun dismissDetails() = _state.update { it.copy(showDetails = false) }
+
+    fun reportConversation(reason: String) = viewModelScope.launch {
+        runCatching { reports.reportConversation(threadId, reason) }
     }
 
     override fun onCleared() {
-        teardownRealtime()
+        subscribeGeneration += 1
+        subscription?.cancel()
+        subscription = null
+        super.onCleared()
     }
 }

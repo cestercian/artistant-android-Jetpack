@@ -5,64 +5,120 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.BookingDraft
 import `in`.artistant.app.data.repository.ArtistsRepository
-import `in`.artistant.app.data.repository.fee
-import `in`.artistant.app.state.BookingStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 import javax.inject.Inject
 
-/**
- * Drives `BookingScreen` (port of iOS `BookingView`). The in-flight [draft] lives
- * in the shared [BookingStore] singleton (so Checkout sees the same one); this VM
- * owns the artist hydrate + the field mutators. [artist] is fetched-on-miss so a
- * deep link straight into Book still resolves packages/availability.
- */
+data class BookingUiState(
+    val artist: Artist? = null,
+    val isLoading: Boolean = true,
+    val loadError: String? = null,
+    val packageIndex: Int = 0,
+    val dateChips: List<DateChip> = emptyList(),
+    val selectedDateEpochMs: Long = 0L,
+    val selectedDateLabel: String = "",
+    val timeSlots: List<String> = DefaultTimeSlots,
+    val selectedTime: String = "",
+    val venue: String = "",
+    val guests: Int = 100,
+    val venueNotes: String = "",
+    val canContinue: Boolean = false,
+)
+
 @HiltViewModel
 class BookingViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    val store: BookingStore,
-    private val artists: ArtistsRepository,
+    private val artistsRepository: ArtistsRepository,
+    private val draftStore: BookingDraftStore,
 ) : ViewModel() {
 
-    private val artistId: String = savedStateHandle.get<String>("artistId").orEmpty()
+    private val artistId: String = checkNotNull(savedStateHandle["artistId"])
 
-    private val _artist = MutableStateFlow(artists.find(artistId))
-    val artist: StateFlow<Artist?> = _artist.asStateFlow()
-
-    val draft = store.draft
+    private val _state = MutableStateFlow(BookingUiState())
+    val state: StateFlow<BookingUiState> = _state.asStateFlow()
 
     init {
+        refresh()
+    }
+
+    fun refresh() {
         viewModelScope.launch {
-            // Hydrate before startDraft so the package/time seed reads real data.
-            artists.ensureFull(artistId)?.let { _artist.value = it }
-            if (store.draft.value?.artistId != artistId) store.startDraft(artistId)
+            _state.update { it.copy(isLoading = true, loadError = null) }
+            val full = artistsRepository.ensureFull(artistId)
+            if (full == null) {
+                _state.update { it.copy(isLoading = false, loadError = "Artist not found.") }
+                return@launch
+            }
+            val chips = upcomingDateChips(daysAvailable = full.daysAvailable)
+            val firstAvailable = chips.firstOrNull { it.available } ?: chips.first()
+            val slots = resolveTimeSlots(full.timeSlots)
+            val popularIdx = full.packages.indexOfFirst { it.popular }.takeIf { it >= 0 } ?: 0
+            _state.update {
+                it.copy(
+                    artist = full,
+                    isLoading = false,
+                    packageIndex = popularIdx,
+                    dateChips = chips,
+                    selectedDateEpochMs = firstAvailable.epochMs,
+                    selectedDateLabel = firstAvailable.label,
+                    timeSlots = slots,
+                    selectedTime = defaultTimeFromSlots(slots),
+                    canContinue = true,
+                )
+            }
         }
     }
 
-    /** Preferred time slots for this artist, else the standard menu (iOS fallback). */
-    fun timeSlots(): List<String> =
-        _artist.value?.timeSlots?.takeIf { it.isNotEmpty() } ?: DEFAULT_TIME_SLOTS
+    fun selectPackage(index: Int) {
+        _state.update { it.copy(packageIndex = index) }
+    }
 
-    /** Artist's quoted fee for the current draft (0 until the artist resolves). */
-    fun draftFee(): Int = store.draft.value?.fee(artists) ?: 0
+    fun selectDate(chip: DateChip) {
+        if (!chip.available) return
+        _state.update { it.copy(selectedDateEpochMs = chip.epochMs, selectedDateLabel = chip.label) }
+    }
 
-    fun setPackage(index: Int) = store.updateDraft { it.copy(packageIndex = index) }
-    fun setDate(date: LocalDate) =
-        store.updateDraft { it.copy(dateRaw = date, date = BookingStore.dateLabel(date)) }
-    fun setTime(time: String) = store.updateDraft { it.copy(time = time) }
-    fun setVenue(venue: String) = store.updateDraft { it.copy(venue = venue) }
-    fun setGuests(guests: Int) = store.updateDraft { it.copy(guests = guests.coerceIn(10, 5000)) }
+    fun selectTime(slot: String) {
+        _state.update { it.copy(selectedTime = slot) }
+    }
 
-    companion object {
-        // The standard slot menu shown when the artist hasn't picked any (the
-        // truthful "we don't know, here's the usual set" state — iOS uses the
-        // wizard's full allTimeSlots list).
-        private val DEFAULT_TIME_SLOTS = listOf(
-            "6:00 PM", "7:30 PM", "8:30 PM", "9:00 PM", "10:00 PM", "11:00 PM",
+    fun setVenue(value: String) {
+        _state.update { it.copy(venue = value) }
+    }
+
+    fun setGuests(value: Int) {
+        _state.update { it.copy(guests = value.coerceIn(10, 5000)) }
+    }
+
+    fun setVenueNotes(value: String) {
+        _state.update { it.copy(venueNotes = value) }
+    }
+
+    /** Snapshot draft into [BookingDraftStore] for Checkout. */
+    fun onContinue(): Boolean {
+        val s = _state.value
+        val artist = s.artist ?: return false
+        val pkg = artist.packages.getOrNull(s.packageIndex)
+        val fee = pkg?.price ?: artist.price
+        val draft = BookingDraft(
+            artistId = artistId,
+            packageIndex = s.packageIndex,
+            packageName = pkg?.name ?: "Custom",
+            packageDuration = pkg?.duration ?: artist.duration,
+            feeInr = fee,
+            date = s.selectedDateLabel,
+            dateRawEpochMs = s.selectedDateEpochMs,
+            time = s.selectedTime,
+            venue = s.venue,
+            guests = s.guests,
+            venueNotes = s.venueNotes,
         )
+        draftStore.setDraft(draft)
+        return true
     }
 }

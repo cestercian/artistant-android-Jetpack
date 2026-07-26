@@ -15,18 +15,20 @@ clean history. If a change doesn't build, it doesn't merge. No exceptions.
 
 Artistant is a two-sided marketplace for booking live performers in India. v1 is a
 **no-payments matchmaker** (match → chat → confirm). Hero: **Bookability Score™**.
-Moat: **anti-leakage chat redaction** (contact info hidden until a booking is
-confirmed). Dark-only, phone-only, portrait, INR.
+Trust: **Airbnb-style** (safety banner + “always communicate through Artistant” +
+report) — chat redaction was **scrapped Jul 2026** (mig `0071`). Booking =
+**request → accept** (`pending_confirm`, “Request sent.”; artist Accept/Decline).
+Dark-only, phone-only, portrait, INR.
 
 - **iOS source of truth:** `~/Desktop/ios-swift` (145 Swift files). Read it when
   porting a screen — match its behaviour and design.
 - **Shared backend:** the same Supabase project the iOS + web clients use. **We do
   not fork the schema.** The only server changes Android forces are an FCM push
   path and (later) Play billing notifications. See `docs/API_MAPPING.md`.
-- **The plan lives in `docs/`** — eight documents. `ANDROID_MIGRATION_PLAN.md` is
-  the index; the others are architecture, screens, API contract, feature
-  checklist, roadmap, structure, risks. **Read the relevant doc before touching a
-  layer.**
+- **The plan lives in `docs/`** — nine documents. `ANDROID_MIGRATION_PLAN.md` is
+  the index; others cover architecture, screens, API, features, roadmap,
+  structure, risks, plus **`PARITY_CHECKLIST.md`** (iOS file → Android status).
+  **Read the relevant doc before touching a layer.**
 
 ---
 
@@ -97,7 +99,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 # compile-check (the green-tree gate — run before every commit/PR)
 ./gradlew :app:assembleDebug
 
-# fast unit tests (pure logic: money math, score bands, redaction, planner)
+# fast unit tests (pure logic: money math, score bands, planner)
 ./gradlew :app:testDebugUnitTest
 
 # lint (run before a PR; don't let it rot)
@@ -140,37 +142,18 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** **M0–M8 COMPLETE — feature-complete for both roles and
-release-buildable**, all merged to `main`, green, adversarially reviewed. A client
-signs up → browses → books → realtime-chats; an artist onboards (11-step wizard) →
-publishes → manages the ArtistHome dashboard + EPK editor. Over the live shared
-`artistant-dev` backend. Stack (see `gradle/libs.versions.toml`): AGP 8.9.1, Gradle
-8.13, Kotlin 2.1.0, Compose BOM 2024.12.01, Hilt 2.54, supabase-kt 3.0.3, Ktor 3.0.1.
-Shipped: M1 auth+signup · M2 browse · M3 booking funnel+calendar · M4 messaging
-(realtime chat + redaction; push is operator-gated, runbook in `docs/PUSH_SETUP.md`)
-· M5 artist authoring (write repos + media pipeline on WorkManager/Media3, wizard,
-dashboard, EPK) · M6 platform+DPDP (Profile/settings, data-export, delete-account,
-CalendarSync, observability) · M7 dormant Play-Billing subscription seam + editorial
-polish (kerning/haptics/ArtistHome parity/a11y) · M8 hardening (R8 on — minify +
-resource-shrink + keep rules; `assembleProdRelease` green, serializers verified kept;
-release runbook `docs/RELEASE.md`). **210 unit tests, 0 failures**, warning-free.
-**What's left is device/operator-gated, not code** — see `docs/RELEASE.md` §0:
-signing, Play Console, per-flavor `google-services.json`, on-device smoke test,
-instrumented/Compose-UI tests + baseline profile (need an AVD/device), and flipping
-the operator flags (subscriptions, PostHog/Sentry keys, real brand fonts).
+**Current state:** M0–M1 merged; **M2–M7 + polish wave on `feature/m2-browse`**
+(PR #44 → `main`). Product truth aligned with Jul-2026 iOS: redaction retired,
+booking = request→accept, Airbnb chat trust. Latest polish: ScoreRing/Sparkline/
+ScoreHistorySheet; UploadQueue JSON snapshot + WorkManager drain; wizard camera
+TakePicture + Media3 VideoTrimmer; EPK photo grid + `reorder_artist_media`;
+calendar clash/busy + calendar picker; Play Billing Client (flag-gated).
+**Unit tests green** (`assembleDevDebug` + `testDevDebugUnitTest`).
 
-Canonical checkout is **`~/AndroidStudioProjects/artistant-android`** (the old
-`~/Desktop/artistant-android` is abandoned — macOS blocked tool access to Desktop).
-
-Open tracked issues: #15 (signup design-token polish + brand assets), #18 (gallery
-strip / Spotify embed / audio playback — operator assets/SDK), #24 (Push/FCM
-activation — operator + backend), #26 (wizard draft persistence). (#28 ArtistHome
-cosmetic parity closed in M7b; #12 OAuth deep-link error surfacing closed — the
-failed-exchange wedge now surfaces via SessionManager.deepLinkError.) Operator: no emulator in the agent
-env (compile + unit-test only — but the user CAN run it); Google needs
-`GOOGLE_WEB_CLIENT_ID` + SHA-1; Supabase dashboard needs the Android redirect +
-Apple provider; drop brand `.ttf` into `res/font/`; real launcher icon. Backend
-unchanged (shared with iOS).
+**Still operator / follow-ups:** CameraX live preview (still capture works),
+ExoPlayer AutoplayVideo/SamplePlayer, brand `.ttf`, `google-services.json` +
+backend `send-push` FCM path, Google/Apple OAuth dashboard (#12/#15), flip
+`subscriptionsEnabled` for live Play Billing, M8 instrumented UI / Play upload.
 
 ---
 

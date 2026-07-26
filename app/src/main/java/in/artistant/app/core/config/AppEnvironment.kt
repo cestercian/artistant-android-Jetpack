@@ -1,6 +1,7 @@
 package `in`.artistant.app.core.config
 
 import `in`.artistant.app.BuildConfig
+import `in`.artistant.app.designsystem.theme.AppRole
 
 /**
  * Typed accessors over the flavored BuildConfig fields — the Android analogue
@@ -15,47 +16,38 @@ object AppEnvironment {
     val flavor: String get() = BuildConfig.FLAVOR
     val isProd: Boolean get() = flavor == "prod"
 
+    /** Hosted legal URLs — same canonical host as iOS AppEnvironment. */
+    const val privacyPolicyUrl: String = "https://www.artistant.in/legal/privacy"
+    const val termsOfServiceUrl: String = "https://www.artistant.in/legal/terms"
+    const val supportEmail: String = "support@artistant.in"
+
     /**
-     * Realtime chat kill-switch (the iOS `realtimeEnabled` flag). Default ON;
-     * flip off to fall back to poll-on-send if a Realtime transport issue shows
-     * up in the field. A compile-time constant for now — no BuildConfig field
-     * until it needs to differ per flavor.
+     * Chat Realtime subscribe. Default ON (matches iOS). When false, Chat falls
+     * back to poll-on-open/send — still correct, just not push-fresh.
      */
     val realtimeEnabled: Boolean get() = true
 
     /**
-     * v1 monetization gate (the iOS `subscriptionsEnabled` flag). DEFAULT OFF — v1 ships
-     * with zero payment code, so the whole M7 Play-Billing seam stays DORMANT: the artist
-     * "stay listed" banner is hidden, the paywall is unreachable, and PlayBilling never
-     * touches BillingClient. The operator flips `SUBSCRIPTIONS_ENABLED` (secrets.properties)
-     * once the Play Console products + RTDN backend are live — a config change, no code.
+     * Master flag for the ₹99/mo subscription system. Default OFF — paywall +
+     * gates stay inert until the operator flips Play Billing on.
      */
-    val subscriptionsEnabled: Boolean get() = BuildConfig.SUBSCRIPTIONS_ENABLED
+    val subscriptionsEnabled: Boolean get() = false
 
     /**
-     * The two Play subscription product ids (iOS `AppEnvironment.{artist,client}MonthlyProductID`).
-     * Role is derived from the `.artist.monthly` / `.client.monthly` suffix. Constants, not
-     * BuildConfig — the same ids back every flavor's Play Console entry.
-     */
-    const val ARTIST_MONTHLY_PRODUCT_ID: String = "in.artistant.subscription.artist.monthly"
-    const val CLIENT_MONTHLY_PRODUCT_ID: String = "in.artistant.subscription.client.monthly"
-
-    /** Both product ids, the set the paywall queries (iOS `subscriptionProductIDs`). */
-    val subscriptionProductIds: List<String>
-        get() = listOf(ARTIST_MONTHLY_PRODUCT_ID, CLIENT_MONTHLY_PRODUCT_ID)
-
-    /**
-     * Observability keys — DARK-UNTIL-KEY. Blank (the default) means the PostHog /
-     * Sentry wrappers stay a silent no-op and never init the SDK. iOS parity: the
-     * value being nil/empty is the enable switch, not a code change.
+     * Observability keys — blank by default (dark-until-key). PostHogAnalytics /
+     * SentryCrash early-return when empty so shipping without SDKs linked is safe.
+     * Operator fills secrets.properties; empty string is the enable switch.
      */
     val posthogApiKey: String get() = BuildConfig.POSTHOG_API_KEY
     val sentryDsn: String get() = BuildConfig.SENTRY_DSN
 
-    /** Support inbox for the Profile → Help mailto (iOS `AppEnvironment.supportEmail`). */
-    const val SUPPORT_EMAIL: String = "support@artistant.in"
+    /** Play product ids — fixed across environments (mirrors iOS StoreKit ids). */
+    const val artistMonthlyProductId: String = "in.artistant.subscription.artist.monthly"
+    const val clientMonthlyProductId: String = "in.artistant.subscription.client.monthly"
 
-    /** Hosted legal pages (iOS `AppEnvironment.{terms,privacy}PolicyURL`) — shown on the paywall. */
-    const val TERMS_URL: String = "https://www.artistant.in/legal/terms"
-    const val PRIVACY_URL: String = "https://www.artistant.in/legal/privacy"
+    fun subscriptionProductId(role: AppRole): String =
+        when (role) {
+            AppRole.Artist -> artistMonthlyProductId
+            AppRole.Client -> clientMonthlyProductId
+        }
 }

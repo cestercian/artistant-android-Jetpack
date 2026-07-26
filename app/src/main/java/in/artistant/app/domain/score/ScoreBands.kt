@@ -1,5 +1,8 @@
 package `in`.artistant.app.domain.score
 
+import androidx.compose.ui.graphics.Color
+import `in`.artistant.app.designsystem.theme.AppColors
+
 /**
  * Port of the iOS ScoreTier single-source-of-truth banding
  * (ScoreRepository.swift). Bands at 60 / 75 / 90; a `<5 completed gigs`
@@ -31,4 +34,12 @@ object ScoreBands {
             else -> ScoreTier.New
         }
     }
+}
+
+/** Tier → semantic color (matches iOS Color.tier). */
+fun tierColor(tier: ScoreTier, colors: AppColors): Color = when (tier) {
+    ScoreTier.New -> colors.ink4
+    ScoreTier.Rising -> colors.warm
+    ScoreTier.Trusted -> colors.good
+    ScoreTier.Elite -> colors.brand
 }

@@ -11,132 +11,129 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
-import `in`.artistant.app.designsystem.component.CardView
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.KVRow
-import `in`.artistant.app.designsystem.component.Pill
-import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
-import androidx.compose.runtime.LaunchedEffect
 
-/**
- * Confirm-match screen (port of iOS `CheckoutView`). Shows a summary card built
- * from the draft + resolved artist, then a Confirm button that runs the payment
- * seam → booking write and, on success, navigates to Confirmed ([onConfirmed]).
- */
+/** Checkout — summary + "Send request" (mock payment → create → pending_confirm). */
 @Composable
 fun CheckoutScreen(
     onBack: () -> Unit,
-    onConfirmed: (String) -> Unit,
+    onConfirmed: (bookingId: String) -> Unit,
+    modifier: Modifier = Modifier,
     viewModel: CheckoutViewModel = hiltViewModel(),
-    // M7: pushed when the dormant subscription gate trips. Defaulted to a no-op so callers that
-    // don't wire subscriptions (and every v1 caller — the flag is off) need no change.
-    onPaywall: () -> Unit = {},
 ) {
-    val draft by viewModel.draft.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val artist = viewModel.artist()
 
-    // One-shot confirmed → navigate forward.
-    LaunchedEffect(Unit) {
-        viewModel.confirmed.collect(onConfirmed)
-    }
-    // One-shot paywall gate (dormant in v1) → push the paywall instead of confirming.
-    LaunchedEffect(Unit) {
-        viewModel.needsPaywall.collect { onPaywall() }
-    }
-
-    Column(Modifier.fillMaxSize().background(colors.bg)) {
-        FunnelHeader("Confirm match", onBack)
-
-        state.error?.let { msg ->
-            Row(
-                Modifier.fillMaxWidth().background(colors.bgCard).padding(horizontal = space.lg, vertical = space.sm),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(space.sm),
-            ) {
-                Text(msg, style = AppTheme.type.footnote, color = colors.hot, modifier = Modifier.weight(1f))
-                Text(
-                    "Retry",
-                    style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
-                    color = colors.brand,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable(enabled = !state.confirming) { viewModel.confirm() }
-                        .padding(space.xs),
-                )
-            }
+    LaunchedEffect(state.confirmedBookingId) {
+        state.confirmedBookingId?.let { id ->
+            onConfirmed(id)
+            viewModel.clearNavigation()
         }
+    }
 
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.lg),
+    Column(modifier.fillMaxSize().background(colors.bg)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = space.sm),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            val d = draft
-            if (d != null && artist != null) {
-                val pkg = artist.packages.getOrNull(d.packageIndex)
-                CardView {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(space.md)) {
-                        InitialAvatar(artist.name)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(artist.name, style = AppTheme.type.callout.copy(fontWeight = FontWeight.SemiBold), color = colors.ink)
-                            Text(pkg?.name ?: "Custom", style = AppTheme.type.caption, color = colors.ink3)
-                        }
-                        Pill("${artist.score}", tone = PillTone.Brand)
-                    }
-                    Spacer(Modifier.height(space.md))
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+            }
+            Text("Confirm request", style = AppTheme.type.headline, color = colors.ink)
+        }
+        state.lastCreateErrorMessage?.let { err ->
+            Text(
+                err,
+                style = AppTheme.type.footnote,
+                color = colors.hot,
+                modifier = Modifier.padding(horizontal = space.lg, vertical = space.sm),
+            )
+        }
+        val draft = state.draft
+        if (draft == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No draft found.", style = AppTheme.type.body, color = colors.ink3)
+            }
+        } else {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(space.lg),
+            ) {
+                Text(state.artistName.ifBlank { "Artist" }, style = AppTheme.type.displaySmall, color = colors.ink)
+                Spacer(Modifier.height(space.lg))
+                SummaryRow("Package", draft.packageName)
+                HRule()
+                SummaryRow("Date", draft.date)
+                HRule()
+                SummaryRow("Time", draft.time)
+                HRule()
+                SummaryRow("Venue", draft.venue.ifBlank { "Not set" })
+                HRule()
+                SummaryRow("Guests", "${draft.guests}")
+                if (draft.venueNotes.isNotBlank()) {
                     HRule()
-                    KVRow("Date", d.date)
-                    KVRow("Time", d.time)
-                    KVRow("Venue", d.venue.ifEmpty { "TBD" })
-                    KVRow("Guests", "${d.guests}")
-                    HRule()
-                    KVRow("Artist fee", formatInr(pkg?.price ?: 0), bold = true, lime = true, big = true)
+                    SummaryRow("Notes", draft.venueNotes)
+                }
+                Spacer(Modifier.height(space.xl))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Artist fee", style = AppTheme.type.headline, color = colors.ink)
+                    Text(formatInr(draft.feeInr), style = AppTheme.type.monoMedium, color = colors.ink)
                 }
             }
-        }
-
-        CtaBar {
-            PrimaryButton(
-                text = if (state.confirming) "Confirming match…" else "Confirm match",
-                onClick = viewModel::confirm,
-                fullWidth = true,
-                enabled = !state.confirming && draft != null,
-            )
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(colors.bgElev)
+                    .padding(space.lg),
+            ) {
+                if (state.isSubmitting) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = colors.brand)
+                    }
+                } else {
+                    PrimaryButton(
+                        text = "Send request",
+                        onClick = viewModel::sendRequest,
+                        fullWidth = true,
+                    )
+                }
+            }
         }
     }
 }
 
-/** Tiny initials chip standing in for the not-yet-built shared Avatar. */
 @Composable
-internal fun InitialAvatar(name: String, size: Int = 44) {
-    val colors = AppTheme.colors
-    Box(
-        Modifier.size(size.dp).clip(CircleShape).background(colors.bgSoft),
-        contentAlignment = Alignment.Center,
+private fun SummaryRow(label: String, value: String) {
+    val space = AppTheme.dimens.space
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = false) {}
+            .padding(vertical = space.md),
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            name.trim().firstOrNull()?.uppercase() ?: "?",
-            style = AppTheme.type.headline,
-            color = colors.ink2,
-        )
+        Text(label, style = AppTheme.type.caption, color = AppTheme.colors.ink3)
+        Text(value, style = AppTheme.type.body, color = AppTheme.colors.ink)
     }
 }

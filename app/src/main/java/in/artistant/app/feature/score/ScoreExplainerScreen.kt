@@ -1,7 +1,6 @@
 package `in`.artistant.app.feature.score
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,20 +10,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ShowChart
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,185 +29,192 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import `in`.artistant.app.data.model.ScoreBreakdown
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import `in`.artistant.app.data.repository.ScoreBreakdown
+import `in`.artistant.app.data.repository.ScoreHistoryPoint
+import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.ScoreRing
+import `in`.artistant.app.designsystem.component.Sparkline
 import `in`.artistant.app.designsystem.theme.AppTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+import kotlin.math.max
+import kotlin.math.min
 
-/** One weighted metric row (label · weight% + value + clamped bar). */
-private data class Metric(val name: String, val weight: Int, val value: Int)
-
-/** The 5 weighted metrics from the breakdown; Cancellations is flipped (100 − rate). */
-private fun metricsOf(b: ScoreBreakdown): List<Metric> = listOf(
-    Metric("Show-up rate", 30, clamp(b.showUpRate)),
-    Metric("Reviews", 25, clamp(b.reviewScore)),
-    Metric("Reply speed", 20, clamp(b.replySpeed)),
-    Metric("Cancellations", 15, clamp(100 - b.cancellationRate)),
-    Metric("Social proof", 10, clamp(b.socialProof)),
+data class ScoreExplainerUiState(
+    val breakdown: ScoreBreakdown = ScoreBreakdown.NewArtist,
+    val history: List<ScoreHistoryPoint> = emptyList(),
+    val isLoading: Boolean = true,
+    val error: String? = null,
 )
 
-private fun clamp(v: Int) = v.coerceIn(0, 100)
+@HiltViewModel
+class ScoreExplainerViewModel @Inject constructor(
+    private val scores: ScoreRepository,
+) : ViewModel() {
+    private val _state = MutableStateFlow(ScoreExplainerUiState())
+    val state: StateFlow<ScoreExplainerUiState> = _state.asStateFlow()
+
+    init {
+        refresh()
+    }
+
+    fun refresh() = viewModelScope.launch {
+        _state.update { it.copy(isLoading = true, error = null) }
+        runCatching {
+            val b = scores.breakdownForSelf()
+            val h = runCatching { scores.historyForSelf() }.getOrDefault(emptyList())
+            b to h
+        }.onSuccess { (b, h) ->
+            _state.update { it.copy(breakdown = b, history = h, isLoading = false) }
+        }.onFailure { e ->
+            _state.update {
+                it.copy(isLoading = false, error = e.message ?: "Couldn't load score.")
+            }
+        }
+    }
+}
 
 /**
- * Score Explainer (port of iOS `ScoreExplainerView`). Centered ring + body, a
- * hairline-row tiers table, and the weighted "what goes into it" rows. A failed
- * breakdown fetch shows an explicit retryable error, never a fake zero.
+ * Self-facing Bookability Score explainer — port of iOS ScoreExplainerView
+ * (ring + tiers + weighted metric bars). History listed compactly when present.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScoreExplainerScreen(
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
     viewModel: ScoreExplainerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val size = AppTheme.dimens.size
+    val b = state.breakdown
     var showHistory by remember { mutableStateOf(false) }
 
-    Scaffold(
-        containerColor = colors.bg,
-        topBar = {
-            TopAppBar(
-                title = { Text("Bookability Score™", style = AppTheme.type.headline, color = colors.ink) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showHistory = true }) {
-                        Icon(Icons.AutoMirrored.Filled.ShowChart, contentDescription = "View history", tint = colors.ink)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.bg),
-            )
-        },
-    ) { inner ->
-        Column(
-            Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(horizontal = space.xl),
-        ) {
-            when (val s = state) {
-                ScoreExplainerUiState.Loading, is ScoreExplainerUiState.Loaded -> {
-                    val breakdown = (s as? ScoreExplainerUiState.Loaded)?.breakdown ?: ScoreBreakdown.newArtist
-                    Hero(breakdown)
-                    TiersSection()
-                    MetricsSection(breakdown)
-                    Spacer(Modifier.height(space.xxl))
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(colors.bg)
+            .statusBarsPadding(),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = space.sm), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+            }
+        }
+        when {
+            state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = colors.brand)
+            }
+            state.error != null -> Column(
+                Modifier.fillMaxSize().padding(space.xl),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(state.error!!, style = AppTheme.type.body, color = colors.hot)
+                Spacer(Modifier.height(space.md))
+                PrimaryButton(text = "Retry", onClick = viewModel::refresh)
+            }
+            else -> Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = space.xl),
+            ) {
+                Text("Bookability Score", style = AppTheme.type.displaySub, color = colors.ink)
+                Spacer(Modifier.height(space.lg))
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    ScoreRing(
+                        value = b.numericScore,
+                        size = size.ringXl,
+                        stroke = 8.dp,
+                        showLabel = true,
+                    )
                 }
-                ScoreExplainerUiState.Error -> ErrorState(onRetry = viewModel::load)
+                Spacer(Modifier.height(space.xl))
+                HRule()
+                Spacer(Modifier.height(space.lg))
+                Text("Tiers", style = AppTheme.type.caption, color = colors.ink3)
+                Spacer(Modifier.height(space.sm))
+                listOf(
+                    "New" to "0–60",
+                    "Rising" to "60–75",
+                    "Trusted" to "75–90",
+                    "Elite" to "90+",
+                ).forEach { (label, range) ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = space.xs),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(label, style = AppTheme.type.callout, color = colors.ink)
+                        Text(range, style = AppTheme.type.monoSmall, color = colors.ink3)
+                    }
+                }
+                Spacer(Modifier.height(space.lg))
+                HRule()
+                Spacer(Modifier.height(space.lg))
+                Text("What goes into it", style = AppTheme.type.caption, color = colors.ink3)
+                Spacer(Modifier.height(space.md))
+                MetricBar("Show-up rate", 30, clamp(b.showUpRate))
+                MetricBar("Reviews", 25, clamp(b.reviewScore))
+                MetricBar("Reply speed", 20, clamp(b.replySpeed))
+                MetricBar("Cancellations", 15, clamp(100 - b.cancellationRate))
+                MetricBar("Social proof", 10, clamp(b.socialProof))
+                if (state.history.isNotEmpty()) {
+                    Spacer(Modifier.height(space.xl))
+                    HRule()
+                    Spacer(Modifier.height(space.lg))
+                    Text("History", style = AppTheme.type.caption, color = colors.ink3)
+                    Spacer(Modifier.height(space.sm))
+                    Sparkline(values = state.history.map { it.score })
+                    Spacer(Modifier.height(space.md))
+                    PrimaryButton(
+                        text = "Full history",
+                        onClick = { showHistory = true },
+                        fullWidth = true,
+                    )
+                }
+                Spacer(Modifier.height(space.xxl))
             }
         }
     }
-
-    if (showHistory) ScoreHistorySheet(onDismiss = { showHistory = false })
+    if (showHistory) {
+        ScoreHistorySheet(history = state.history, onDismiss = { showHistory = false })
+    }
 }
 
 @Composable
-private fun Hero(breakdown: ScoreBreakdown) {
+private fun MetricBar(name: String, weight: Int, value: Int) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    Column(
-        Modifier.fillMaxWidth().padding(vertical = space.xl),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(space.lg),
-    ) {
-        ScoreRing(value = breakdown.numericScore, size = 120.dp, stroke = 7.dp, showLabel = false)
-        Text(
-            "A trust score combining reply speed, show-up rate, reviews, social proof, and cancellations.",
-            style = AppTheme.type.callout,
-            color = colors.ink2,
-            textAlign = TextAlign.Center,
+    Column(Modifier.padding(bottom = space.md)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("$name · ${weight}%", style = AppTheme.type.footnote, color = colors.ink2)
+            Text("$value", style = AppTheme.type.monoSmall, color = colors.ink)
+        }
+        Spacer(Modifier.height(space.xs))
+        LinearProgressIndicator(
+            progress = { value / 100f },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp)),
+            color = colors.brand,
+            trackColor = colors.bgSoft,
         )
     }
 }
 
-@Composable
-private fun TiersSection() {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    // (label, range, dot color) — bands match ScoreBands.
-    val tiers = listOf(
-        Triple("New", "0–60", colors.ink4),
-        Triple("Rising", "60–75", colors.warm),
-        Triple("Trusted", "75–90", colors.good),
-        Triple("Elite", "90+", colors.brand),
-    )
-    Column(Modifier.padding(top = space.md), verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("TIERS", style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold), color = colors.ink3)
-        Column {
-            HRule()
-            tiers.forEach { (label, range, c) ->
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = space.md),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(space.sm),
-                ) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(c))
-                    Text(label, style = AppTheme.type.callout.copy(fontWeight = FontWeight.SemiBold), color = c, modifier = Modifier.weight(1f))
-                    Text(range, style = AppTheme.type.monoSmall, color = colors.ink3)
-                }
-                HRule()
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetricsSection(breakdown: ScoreBreakdown) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(Modifier.padding(top = space.xl), verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("WHAT GOES INTO IT", style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold), color = colors.ink3)
-        Column {
-            HRule()
-            metricsOf(breakdown).forEach { m ->
-                MetricRow(m)
-                HRule()
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetricRow(m: Metric) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(Modifier.padding(vertical = space.md), verticalArrangement = Arrangement.spacedBy(space.sm)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(m.name, style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold), color = colors.ink)
-            Spacer(Modifier.size(4.dp))
-            Text("· ${m.weight}%", style = AppTheme.type.footnote, color = colors.ink3, modifier = Modifier.weight(1f))
-            Text("${m.value}", style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold), color = colors.ink)
-        }
-        Box(Modifier.fillMaxWidth().height(3.dp).clip(CircleShape).background(colors.bgSoft)) {
-            Box(Modifier.fillMaxWidth(m.value / 100f).height(3.dp).clip(CircleShape).background(colors.brand))
-        }
-    }
-}
-
-@Composable
-private fun ErrorState(onRetry: () -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(
-        Modifier.fillMaxWidth().padding(vertical = space.xxl),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(space.lg),
-    ) {
-        Text("Couldn't load your score", style = AppTheme.type.displaySmall, color = colors.ink)
-        Text(
-            "We hit a problem fetching your Bookability breakdown — this isn't your real score.",
-            style = AppTheme.type.callout,
-            color = colors.ink2,
-            textAlign = TextAlign.Center,
-        )
-        PrimaryButton(text = "Retry", onClick = onRetry)
-    }
-}
+private fun clamp(v: Int) = min(100, max(0, v))

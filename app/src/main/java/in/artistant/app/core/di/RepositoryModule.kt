@@ -4,40 +4,40 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import `in`.artistant.app.data.payments.MockPaymentsService
+import `in`.artistant.app.data.payments.PaymentsService
+import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.ArtistLinksRepository
 import `in`.artistant.app.data.repository.ArtistMediaRepository
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
-import `in`.artistant.app.data.repository.PackagesRepository
-import `in`.artistant.app.data.repository.SamplesRepository
-import `in`.artistant.app.data.repository.SupabaseArtistLinksRepository
-import `in`.artistant.app.data.repository.SupabaseArtistMediaRepository
-import `in`.artistant.app.data.repository.SupabasePackagesRepository
-import `in`.artistant.app.data.repository.SupabaseSamplesRepository
-import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
-import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.MessagesRepository
+import `in`.artistant.app.data.repository.PackagesRepository
+import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.data.repository.SavedArtistsRepository
+import `in`.artistant.app.data.repository.SamplesRepository
 import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.data.repository.SearchRepository
+import `in`.artistant.app.data.repository.SupabaseAccountRepository
+import `in`.artistant.app.data.repository.SupabaseArtistLinksRepository
+import `in`.artistant.app.data.repository.SupabaseArtistMediaRepository
 import `in`.artistant.app.data.repository.SupabaseArtistsRepository
 import `in`.artistant.app.data.repository.SupabaseBookingsRepository
 import `in`.artistant.app.data.repository.SupabaseMessagesRepository
+import `in`.artistant.app.data.repository.SupabasePackagesRepository
+import `in`.artistant.app.data.repository.SupabaseReportsRepository
 import `in`.artistant.app.data.repository.SupabaseRequestsRepository
 import `in`.artistant.app.data.repository.SupabaseReviewsRepository
 import `in`.artistant.app.data.repository.SupabaseSavedArtistsRepository
+import `in`.artistant.app.data.repository.SupabaseSamplesRepository
 import `in`.artistant.app.data.repository.SupabaseScoreRepository
 import `in`.artistant.app.data.repository.SupabaseSearchRepository
+import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
+import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
-import `in`.artistant.app.feature.search.DataStoreSearchRecents
-import `in`.artistant.app.feature.search.SearchRecents
-import `in`.artistant.app.platform.payments.MockPaymentsService
-import `in`.artistant.app.platform.payments.PaymentsService
-import `in`.artistant.app.platform.upload.MediaUploadEnqueuer
-import `in`.artistant.app.platform.upload.UploadQueue
 
 /**
  * Binds each repository interface → its Supabase impl. Repositories land here as their
@@ -47,9 +47,11 @@ import `in`.artistant.app.platform.upload.UploadQueue
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
     @Binds
+    abstract fun bindAccount(impl: SupabaseAccountRepository): AccountRepository
+
+    @Binds
     abstract fun bindUsers(impl: SupabaseUsersRepository): UsersRepository
 
-    // M2a Browse read layer.
     @Binds
     abstract fun bindArtists(impl: SupabaseArtistsRepository): ArtistsRepository
 
@@ -60,34 +62,8 @@ abstract class RepositoryModule {
     abstract fun bindReviews(impl: SupabaseReviewsRepository): ReviewsRepository
 
     @Binds
-    abstract fun bindScore(impl: SupabaseScoreRepository): ScoreRepository
-
-    @Binds
     abstract fun bindSavedArtists(impl: SupabaseSavedArtistsRepository): SavedArtistsRepository
 
-    // M2b Browse — Search recents persistence seam.
-    @Binds
-    abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents
-
-    // M3 Booking funnel + gig requests.
-    @Binds
-    abstract fun bindBookings(impl: SupabaseBookingsRepository): BookingsRepository
-
-    @Binds
-    abstract fun bindRequests(impl: SupabaseRequestsRepository): RequestsRepository
-
-    // M4 Messaging — realtime chat + redaction.
-    @Binds
-    abstract fun bindMessages(impl: SupabaseMessagesRepository): MessagesRepository
-
-    // Push P2a — device-token registration seam (inert until P1 adds the fcm_token column + P2b
-    // produces the token; see DeviceTokenRepository).
-    @Binds
-    abstract fun bindDeviceToken(
-        impl: `in`.artistant.app.platform.push.SupabaseDeviceTokenRepository,
-    ): `in`.artistant.app.platform.push.DeviceTokenRepository
-
-    // M5a Artist-authoring write layer + media pipeline.
     @Binds
     abstract fun bindPackages(impl: SupabasePackagesRepository): PackagesRepository
 
@@ -103,50 +79,22 @@ abstract class RepositoryModule {
     @Binds
     abstract fun bindArtistLinks(impl: SupabaseArtistLinksRepository): ArtistLinksRepository
 
-    // M5b wizard Publish — the enqueue seam over the (WorkManager-backed) UploadQueue. The
-    // interface exists purely so the publish-ordering test can fake it (UploadQueue needs a
-    // Context); the concrete @Singleton is still injectable directly for cancelAll/resume.
     @Binds
-    abstract fun bindMediaUploadEnqueuer(impl: UploadQueue): MediaUploadEnqueuer
+    abstract fun bindScore(impl: SupabaseScoreRepository): ScoreRepository
 
-    // M5c ArtistHome banner — read seam over the same UploadQueue, faked in the
-    // ArtistHome ViewModel test for the same Context-can't-be-constructed reason.
     @Binds
-    abstract fun bindUploadBannerSource(impl: UploadQueue): `in`.artistant.app.platform.upload.UploadBannerSource
+    abstract fun bindReports(impl: SupabaseReportsRepository): ReportsRepository
 
-    // M5c EPK editor — media-staging seam over WizardMediaCache (needs a Context),
-    // faked in the EpkViewModel test so the ViewModel stays plain-JVM constructible.
     @Binds
-    abstract fun bindEpkMediaStager(
-        impl: `in`.artistant.app.platform.media.WizardMediaCache,
-    ): `in`.artistant.app.platform.media.EpkMediaStager
+    abstract fun bindBookings(impl: SupabaseBookingsRepository): BookingsRepository
 
-    // Payments seam — dormant mock in v1 (real provider is M7).
+    @Binds
+    abstract fun bindRequests(impl: SupabaseRequestsRepository): RequestsRepository
+
+    @Binds
+    abstract fun bindMessages(impl: SupabaseMessagesRepository): MessagesRepository
+
+    /** Dormant mock payments — real Razorpay is a later one-line swap. */
     @Binds
     abstract fun bindPayments(impl: MockPaymentsService): PaymentsService
-
-    // M6 DPDP §11 — data-export + delete-account Edge Function wrapper.
-    @Binds
-    abstract fun bindAccountService(
-        impl: `in`.artistant.app.platform.account.SupabaseAccountService,
-    ): `in`.artistant.app.platform.account.AccountService
-
-    // M6 calendar-sync seam — real Calendar-Provider (CalendarContract) mirror.
-    @Binds
-    abstract fun bindCalendarSync(
-        impl: `in`.artistant.app.platform.calendar.CalendarSyncService,
-    ): `in`.artistant.app.platform.calendar.CalendarSync
-
-    // M7 subscription seam — dormant in v1. The SubscriptionService + EntitlementStore
-    // themselves are picked/built in BillingModule (flag-gated); these two are the plain
-    // @Inject-constructed token seams (Supabase binding-row write + DataStore token persist).
-    @Binds
-    abstract fun bindSubscriptionTokenWriter(
-        impl: `in`.artistant.app.platform.billing.SupabaseSubscriptionTokenWriter,
-    ): `in`.artistant.app.platform.billing.SubscriptionTokenWriter
-
-    @Binds
-    abstract fun bindAccountTokenStore(
-        impl: `in`.artistant.app.platform.billing.DataStoreAccountTokenStore,
-    ): `in`.artistant.app.platform.billing.AccountTokenStore
 }

@@ -1,55 +1,77 @@
 package `in`.artistant.app.data.repository
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.storage.storage
 import io.ktor.http.ContentType
-import `in`.artistant.app.common.util.SupabaseISO8601
-import `in`.artistant.app.common.util.lowercaseUuid
-import `in`.artistant.app.data.model.ArtistMediaItem
-import `in`.artistant.app.data.model.MediaAspect
-import `in`.artistant.app.data.model.MediaKind
+import `in`.artistant.app.core.config.AppEnvironment
+import `in`.artistant.app.core.result.mapPostgrest
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import java.time.Instant
+import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class ArtistMediaKind { photo, video }
+
+enum class ArtistMediaAspect {
+    square, portrait, landscape;
+
+    companion object {
+        fun classify(width: Int, height: Int): ArtistMediaAspect {
+            if (height <= 0) return square
+            val ratio = width.toFloat() / height
+            return when {
+                ratio > 1.2f -> landscape
+                ratio < 0.85f -> portrait
+                else -> square
+            }
+        }
+    }
+}
+
+data class ArtistMediaItem(
+    val id: String,
+    val artistId: String,
+    val kind: ArtistMediaKind,
+    val aspect: ArtistMediaAspect,
+    val position: Int,
+    val storagePath: String,
+    val mimeType: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val durationSeconds: Double? = null,
+) {
+    val publicUrl: String?
+        get() {
+            val base = AppEnvironment.supabaseUrl.trimEnd('/')
+            if (base.isBlank() || storagePath.isBlank()) return null
+            return "$base/storage/v1/object/public/$BUCKET/$storagePath"
+        }
+
+    companion object {
+        const val BUCKET = "artist-media"
+    }
+}
+
 /**
- * Reads + writes `public.artist_media` and the matching objects in the public
- * `artist-media` bucket (port of iOS `ArtistMediaRepository`). Bucket layout is
- * `<artistId>/<photo|video>/<uuid>.<ext>`; storage RLS gates the write on the
- * leading artist-uuid path segment.
- *
- * Caps (6 photos / 1 video) are enforced SERVER-SIDE by the `tg_artist_media_cap`
- * trigger; a rejected insert surfaces as [ArtistMediaError.CapReached]. On any
- * insert failure the just-uploaded object is rolled back so the bucket stays
- * consistent with the table.
+ * `public.artist_media` + `artist-media` bucket — port of iOS ArtistMediaRepository.
+ * Cover photo = kind=photo position=0. Cap enforced server-side (6 photos).
  */
 interface ArtistMediaRepository {
     suspend fun list(artistId: String): List<ArtistMediaItem>
-
-    /** Upload an already-normalized JPEG. [position] null → next free slot. */
-    suspend fun uploadPhoto(
-        jpegBytes: ByteArray,
-        width: Int,
-        height: Int,
-        artistId: String,
-        position: Int? = null,
-    ): ArtistMediaItem
-
-    /** Upload an already-trimmed MP4 (trim happens upstream in VideoTrimmer). */
-    suspend fun uploadVideo(
-        mp4Bytes: ByteArray,
-        durationSeconds: Double,
-        width: Int,
-        height: Int,
-        artistId: String,
-    ): ArtistMediaItem
-
+    suspend fun uploadPhoto(jpegFile: File, artistId: String, position: Int? = null): ArtistMediaItem
     suspend fun delete(item: ArtistMediaItem)
+    /** Cover-first id order — RPC `reorder_artist_media(p_ids)`. */
+    suspend fun reorder(ids: List<String>)
 }
 
 @Singleton
@@ -58,124 +80,113 @@ class SupabaseArtistMediaRepository @Inject constructor(
 ) : ArtistMediaRepository {
 
     override suspend fun list(artistId: String): List<ArtistMediaItem> =
-        client.postgrest.from("artist_media")
-            .select(MEDIA_COLUMNS) {
-                filter { eq("artist_id", artistId.lowercaseUuid()) }
-                order("kind", Order.ASCENDING)
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DBArtistMedia>()
-            .mapNotNull { it.toItem() }
+        try {
+            client.from("artist_media")
+                .select {
+                    filter { eq("artist_id", artistId.lowercase()) }
+                    order("kind", Order.ASCENDING)
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<MediaRow>()
+                .mapNotNull { it.toItem() }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
 
     override suspend fun uploadPhoto(
-        jpegBytes: ByteArray,
-        width: Int,
-        height: Int,
+        jpegFile: File,
         artistId: String,
         position: Int?,
     ): ArtistMediaItem {
-        val artist = artistId.lowercaseUuid()
-        val resolvedPosition = position ?: nextPosition(artist, MediaKind.Photo)
-        val path = storagePath(artist, MediaKind.Photo, "jpg")
-
-        client.storage.from(BUCKET).upload(path, jpegBytes) {
-            upsert = false
-            contentType = ContentType.Image.JPEG
+        val artist = artistId.lowercase()
+        val normalized = normalizeJpeg(jpegFile)
+        val aspect = ArtistMediaAspect.classify(normalized.width, normalized.height)
+        val resolvedPosition = position ?: nextPosition(artist, ArtistMediaKind.photo)
+        val fileUuid = UUID.randomUUID().toString().lowercase()
+        val path = "$artist/photo/$fileUuid.jpg"
+        try {
+            client.storage.from(ArtistMediaItem.BUCKET).upload(path, normalized.bytes) {
+                contentType = ContentType.Image.JPEG
+                upsert = false
+            }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
         }
-        return insertRowOrRollback(
-            path = path,
-            artistId = artist,
-            kind = MediaKind.Photo,
-            aspect = MediaAspect.classify(width, height),
-            position = resolvedPosition,
-            mimeType = "image/jpeg",
-            width = width,
-            height = height,
-            durationSeconds = null,
-        )
-    }
-
-    override suspend fun uploadVideo(
-        mp4Bytes: ByteArray,
-        durationSeconds: Double,
-        width: Int,
-        height: Int,
-        artistId: String,
-    ): ArtistMediaItem {
-        val artist = artistId.lowercaseUuid()
-        val position = nextPosition(artist, MediaKind.Video)
-        val path = storagePath(artist, MediaKind.Video, "mp4")
-
-        client.storage.from(BUCKET).upload(path, mp4Bytes) {
-            upsert = false
-            contentType = ContentType.Video.MP4
+        return try {
+            insertRow(
+                artistId = artist,
+                kind = ArtistMediaKind.photo,
+                aspect = aspect,
+                position = resolvedPosition,
+                storagePath = path,
+                mimeType = "image/jpeg",
+                width = normalized.width,
+                height = normalized.height,
+                durationSeconds = null,
+            )
+        } catch (t: Throwable) {
+            runCatching { client.storage.from(ArtistMediaItem.BUCKET).delete(path) }
+            throw mapPostgrest(t)
         }
-        return insertRowOrRollback(
-            path = path,
-            artistId = artist,
-            kind = MediaKind.Video,
-            aspect = MediaAspect.classify(width, height),
-            position = position,
-            mimeType = "video/mp4",
-            width = width,
-            height = height,
-            durationSeconds = durationSeconds,
-        )
     }
 
     override suspend fun delete(item: ArtistMediaItem) {
-        // Row first so no live reference points at the file; if the storage
-        // delete then fails the object is a cleanable orphan, not a broken row.
-        client.postgrest.from("artist_media")
-            .delete { filter { eq("id", item.id.lowercaseUuid()) } }
-        runCatching { client.storage.from(BUCKET).delete(item.storagePath) }
+        try {
+            client.from("artist_media").delete {
+                filter { eq("id", item.id.lowercase()) }
+            }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+        runCatching { client.storage.from(ArtistMediaItem.BUCKET).delete(item.storagePath) }
     }
 
-    /** Insert the row; on ANY failure roll the uploaded object back and rethrow. */
-    private suspend fun insertRowOrRollback(
-        path: String,
+    override suspend fun reorder(ids: List<String>) {
+        if (ids.isEmpty()) return
+        val payload = ReorderParams(pIds = ids.map { it.lowercase() })
+        try {
+            client.postgrest.rpc("reorder_artist_media", payload)
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+    }
+
+    private suspend fun insertRow(
         artistId: String,
-        kind: MediaKind,
-        aspect: MediaAspect,
+        kind: ArtistMediaKind,
+        aspect: ArtistMediaAspect,
         position: Int,
+        storagePath: String,
         mimeType: String,
         width: Int?,
         height: Int?,
         durationSeconds: Double?,
     ): ArtistMediaItem {
-        try {
-            return client.postgrest.from("artist_media")
-                .insert(
-                    MediaInsert(
-                        artist_id = artistId,
-                        kind = kind.db,
-                        aspect = aspect.db,
-                        position = position,
-                        storage_path = path,
-                        mime_type = mimeType,
-                        width = width,
-                        height = height,
-                        duration_seconds = durationSeconds,
-                    ),
-                ) { select(MEDIA_COLUMNS) }
-                .decodeSingle<DBArtistMedia>()
-                .toItem()
-                ?: throw ArtistMediaError.InsertReturnedEmpty
-        } catch (t: Throwable) {
-            runCatching { client.storage.from(BUCKET).delete(path) }
-            // The cap trigger raises a check_violation carrying "cap reached".
-            if (t.message?.contains("cap reached", ignoreCase = true) == true) {
-                throw ArtistMediaError.CapReached(kind)
-            }
-            if (t is ArtistMediaError) throw t
-            throw ArtistMediaError.Underlying(t)
-        }
+        val row = client.from("artist_media")
+            .insert(
+                MediaInsert(
+                    artistId = artistId,
+                    kind = kind.name,
+                    aspect = aspect.name,
+                    position = position,
+                    storagePath = storagePath,
+                    mimeType = mimeType,
+                    width = width,
+                    height = height,
+                    durationSeconds = durationSeconds,
+                ),
+            ) { select() }
+            .decodeSingle<MediaRow>()
+        return row.toItem() ?: error("artist_media insert returned unreadable row")
     }
 
-    private suspend fun nextPosition(artistId: String, kind: MediaKind): Int {
-        val rows = client.postgrest.from("artist_media")
+    private suspend fun nextPosition(artistId: String, kind: ArtistMediaKind): Int {
+        val rows = client.from("artist_media")
             .select(Columns.list("position")) {
-                filter { eq("artist_id", artistId); eq("kind", kind.db) }
+                filter {
+                    eq("artist_id", artistId)
+                    eq("kind", kind.name)
+                }
                 order("position", Order.DESCENDING)
                 limit(1)
             }
@@ -183,131 +194,119 @@ class SupabaseArtistMediaRepository @Inject constructor(
         return (rows.firstOrNull()?.position ?: -1) + 1
     }
 
-    private fun storagePath(artistId: String, kind: MediaKind, ext: String): String =
-        "$artistId/${kind.db}/${UUID.randomUUID().toString().lowercaseUuid()}.$ext"
+    companion object {
+        private const val MAX_DIM = 2048
+        private const val JPEG_QUALITY = 85
 
-    @Serializable
-    private data class MediaInsert(
-        val artist_id: String,
-        val kind: String,
-        val aspect: String,
-        val position: Int,
-        val storage_path: String,
-        val mime_type: String,
-        val width: Int?,
-        val height: Int?,
-        val duration_seconds: Double?,
-    )
+        data class NormalizedJpeg(val bytes: ByteArray, val width: Int, val height: Int)
 
-    @Serializable private data class PositionOnly(val position: Int)
-
-    @Serializable
-    private data class DBArtistMedia(
-        val id: String,
-        val artist_id: String,
-        val kind: String,
-        val aspect: String,
-        val position: Int,
-        val storage_path: String,
-        val mime_type: String,
-        val width: Int? = null,
-        val height: Int? = null,
-        val duration_seconds: Double? = null,
-        val created_at: String? = null,
-    ) {
-        fun toItem(): ArtistMediaItem? {
-            val k = MediaKind.fromDb(kind) ?: return null
-            val a = MediaAspect.fromDb(aspect) ?: return null
-            return ArtistMediaItem(
-                id = id,
-                artistId = artist_id,
-                kind = k,
-                aspect = a,
-                position = position,
-                storagePath = storage_path,
-                mimeType = mime_type,
-                width = width,
-                height = height,
-                durationSeconds = duration_seconds,
-                createdAt = created_at?.let { SupabaseISO8601.parse(it) } ?: Instant.EPOCH,
-            )
+        fun normalizeJpeg(file: File): NormalizedJpeg {
+            val original = BitmapFactory.decodeFile(file.absolutePath)
+                ?: error("Could not decode image")
+            val scale = maxOf(original.width, original.height).toFloat() / MAX_DIM
+            val bitmap = if (scale > 1f) {
+                val w = (original.width / scale).toInt().coerceAtLeast(1)
+                val h = (original.height / scale).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(original, w, h, true).also {
+                    if (it !== original) original.recycle()
+                }
+            } else {
+                original
+            }
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+            val w = bitmap.width
+            val h = bitmap.height
+            if (bitmap !== original) bitmap.recycle() else original.recycle()
+            return NormalizedJpeg(out.toByteArray(), w, h)
         }
     }
+}
 
-    companion object {
-        const val BUCKET = "artist-media"
-        private val MEDIA_COLUMNS = Columns.list(
-            "id", "artist_id", "kind", "aspect", "position", "storage_path",
-            "mime_type", "width", "height", "duration_seconds", "created_at",
+class FakeArtistMediaRepository : ArtistMediaRepository {
+    private val byArtist = mutableMapOf<String, MutableList<ArtistMediaItem>>()
+    val uploaded = mutableListOf<File>()
+
+    override suspend fun list(artistId: String): List<ArtistMediaItem> =
+        byArtist[artistId.lowercase()].orEmpty()
+
+    override suspend fun uploadPhoto(
+        jpegFile: File,
+        artistId: String,
+        position: Int?,
+    ): ArtistMediaItem {
+        uploaded.add(jpegFile)
+        val item = ArtistMediaItem(
+            id = UUID.randomUUID().toString().lowercase(),
+            artistId = artistId.lowercase(),
+            kind = ArtistMediaKind.photo,
+            aspect = ArtistMediaAspect.square,
+            position = position ?: byArtist[artistId.lowercase()].orEmpty().size,
+            storagePath = "${artistId.lowercase()}/photo/${UUID.randomUUID()}.jpg",
+            mimeType = "image/jpeg",
+            width = 100,
+            height = 100,
+        )
+        byArtist.getOrPut(artistId.lowercase()) { mutableListOf() }.add(item)
+        return item
+    }
+
+    override suspend fun delete(item: ArtistMediaItem) {
+        byArtist[item.artistId.lowercase()]?.removeAll { it.id == item.id }
+    }
+
+    override suspend fun reorder(ids: List<String>) {
+        // no-op for tests
+    }
+}
+
+@Serializable
+private data class MediaInsert(
+    @SerialName("artist_id") val artistId: String,
+    val kind: String,
+    val aspect: String,
+    val position: Int,
+    @SerialName("storage_path") val storagePath: String,
+    @SerialName("mime_type") val mimeType: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    @SerialName("duration_seconds") val durationSeconds: Double? = null,
+)
+
+@Serializable
+private data class MediaRow(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val kind: String,
+    val aspect: String,
+    val position: Int,
+    @SerialName("storage_path") val storagePath: String,
+    @SerialName("mime_type") val mimeType: String = "image/jpeg",
+    val width: Int? = null,
+    val height: Int? = null,
+    @SerialName("duration_seconds") val durationSeconds: Double? = null,
+) {
+    fun toItem(): ArtistMediaItem? {
+        val k = runCatching { ArtistMediaKind.valueOf(kind) }.getOrNull() ?: return null
+        val a = runCatching { ArtistMediaAspect.valueOf(aspect) }.getOrNull()
+            ?: ArtistMediaAspect.square
+        return ArtistMediaItem(
+            id = id.lowercase(),
+            artistId = artistId.lowercase(),
+            kind = k,
+            aspect = a,
+            position = position,
+            storagePath = storagePath,
+            mimeType = mimeType,
+            width = width,
+            height = height,
+            durationSeconds = durationSeconds,
         )
     }
 }
 
-/** Typed media-write failures (iOS `ArtistMediaError`). */
-sealed class ArtistMediaError(message: String) : Exception(message) {
-    class CapReached(val kind: MediaKind) : ArtistMediaError(
-        when (kind) {
-            MediaKind.Photo -> "You can have up to 6 photos. Remove one first."
-            MediaKind.Video -> "You can have one short video. Remove it first to replace it."
-        },
-    )
-    data object InsertReturnedEmpty : ArtistMediaError("Upload finished but the server returned no record.")
-    class Underlying(cause: Throwable) : ArtistMediaError(cause.message ?: "Upload failed.")
-}
+@Serializable
+private data class ReorderParams(@SerialName("p_ids") val pIds: List<String>)
 
-/** In-memory twin — enforces the 6-photo / 1-video caps like the server trigger. */
-class FakeArtistMediaRepository : ArtistMediaRepository {
-    private val store = mutableMapOf<String, MutableList<ArtistMediaItem>>()
-
-    override suspend fun list(artistId: String): List<ArtistMediaItem> =
-        store[artistId].orEmpty().sortedWith(compareBy({ it.kind.db }, { it.position }))
-
-    override suspend fun uploadPhoto(
-        jpegBytes: ByteArray,
-        width: Int,
-        height: Int,
-        artistId: String,
-        position: Int?,
-    ): ArtistMediaItem {
-        val list = store.getOrPut(artistId) { mutableListOf() }
-        if (list.count { it.kind == MediaKind.Photo } >= 6) throw ArtistMediaError.CapReached(MediaKind.Photo)
-        val pos = position ?: ((list.filter { it.kind == MediaKind.Photo }.maxOfOrNull { it.position } ?: -1) + 1)
-        return item(artistId, MediaKind.Photo, MediaAspect.classify(width, height), pos, "image/jpeg", width, height, null)
-            .also { list.add(it) }
-    }
-
-    override suspend fun uploadVideo(
-        mp4Bytes: ByteArray,
-        durationSeconds: Double,
-        width: Int,
-        height: Int,
-        artistId: String,
-    ): ArtistMediaItem {
-        val list = store.getOrPut(artistId) { mutableListOf() }
-        if (list.any { it.kind == MediaKind.Video }) throw ArtistMediaError.CapReached(MediaKind.Video)
-        val pos = (list.filter { it.kind == MediaKind.Video }.maxOfOrNull { it.position } ?: -1) + 1
-        return item(artistId, MediaKind.Video, MediaAspect.classify(width, height), pos, "video/mp4", width, height, durationSeconds)
-            .also { list.add(it) }
-    }
-
-    override suspend fun delete(item: ArtistMediaItem) {
-        store[item.artistId]?.removeAll { it.id == item.id }
-    }
-
-    private fun item(
-        artistId: String, kind: MediaKind, aspect: MediaAspect, position: Int,
-        mime: String, width: Int?, height: Int?, duration: Double?,
-    ) = ArtistMediaItem(
-        id = UUID.randomUUID().toString(),
-        artistId = artistId,
-        kind = kind,
-        aspect = aspect,
-        position = position,
-        storagePath = "$artistId/${kind.db}/$position.${if (kind == MediaKind.Photo) "jpg" else "mp4"}",
-        mimeType = mime,
-        width = width,
-        height = height,
-        durationSeconds = duration,
-        createdAt = Instant.now(),
-    )
-}
+@Serializable
+private data class PositionOnly(val position: Int)

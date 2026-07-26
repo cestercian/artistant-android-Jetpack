@@ -10,11 +10,8 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.domain.auth.ReturningLoginRoute
 import `in`.artistant.app.domain.auth.authAdvanceKey
 import `in`.artistant.app.domain.auth.returningLoginRoute
-import com.google.firebase.messaging.FirebaseMessaging
 import `in`.artistant.app.platform.auth.SessionManager
-import `in`.artistant.app.platform.push.DeviceTokenRepository
 import `in`.artistant.app.platform.storage.AppPreferences
-import `in`.artistant.app.platform.upload.UploadQueue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,13 +30,8 @@ class RootViewModel @Inject constructor(
     private val session: SessionManager,
     private val users: UsersRepository,
     private val prefs: AppPreferences,
-    private val uploadQueue: UploadQueue,
-    private val deviceTokens: DeviceTokenRepository,
+    private val uploadQueue: `in`.artistant.app.platform.media.UploadQueue,
 ) : ViewModel() {
-
-    // One-shot guard so the cross-account upload purge runs once per launch, not on every
-    // token refresh / re-auth that re-fires the session collector.
-    private var uploadsResumed = false
 
     private val _gate = MutableStateFlow<RootGate>(RootGate.Loading)
     val gate: StateFlow<RootGate> = _gate
@@ -69,21 +61,9 @@ class RootViewModel @Inject constructor(
                     when (status) {
                         is SessionStatus.Authenticated -> {
                             val uid = status.session.user?.id?.lowercase()
-                            // Drain any wizard uploads stranded by a prior kill + purge tasks
-                            // belonging to a different account (iOS `resumeAfterLaunch`). Once
-                            // per launch, off the main thread inside the queue.
-                            if (!uploadsResumed) {
-                                uploadsResumed = true
-                                viewModelScope.launch { uploadQueue.resumeAfterLaunch(uid) }
-                            }
                             val key = authAdvanceKey(uid, gen)
                             if (key != lastRoutedKey) {
                                 lastRoutedKey = key
-                                // Register this device's FCM token on a genuine sign-in AND on
-                                // cold launch with a restored session (both land here; a bare
-                                // background token refresh does NOT bump the generation, so it
-                                // won't re-fire). The service's onNewToken covers a later rotation.
-                                registerPushToken()
                                 routeSignedIn()
                             }
                         }
@@ -120,22 +100,8 @@ class RootViewModel @Inject constructor(
         // gateFor is pure and can't touch prefs.
         if (route is ReturningLoginRoute.RouteIn) prefs.setRole(route.role)
         _gate.value = gateFor(route, profile)
-    }
-
-    /**
-     * Fetch the current FCM token and upsert it for the signed-in user. All best-effort:
-     * `getInstance()` can throw when Firebase isn't configured (no google-services.json in a
-     * dev build), the token fetch can fail offline, and the upsert can 4xx — none of which may
-     * disturb the launch/sign-in flow, so the whole thing is runCatching-guarded. Uses the
-     * Play-services `Task` callback rather than pulling in a coroutines-play-services `await()`
-     * dependency for one call.
-     */
-    private fun registerPushToken() {
-        runCatching {
-            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-                viewModelScope.launch { runCatching { deviceTokens.register(token) } }
-            }
-        }
+        // Auth is hydrated — resume any UploadQueue snapshot left by a killed session.
+        uploadQueue.resumeAfterLaunch()
     }
 
     /** Re-run the routing fetch (the signup flow's hydration-error Retry). */
@@ -150,6 +116,11 @@ class RootViewModel @Inject constructor(
      * explicit nudge. Idempotent: a re-fetch of a complete profile just lands on Tabs again.
      */
     fun markSignupComplete() {
+        viewModelScope.launch { routeSignedIn() }
+    }
+
+    /** Wizard Done → re-fetch profile so setup_complete routes the artist into tabs. */
+    fun markWizardComplete() {
         viewModelScope.launch { routeSignedIn() }
     }
 
@@ -169,26 +140,30 @@ class RootViewModel @Inject constructor(
 
 /**
  * Pure routing: map a classified [ReturningLoginRoute] + the fetched profile to a [RootGate].
- * Extracted from [RootViewModel.routeSignedIn] so the three-tier artist gate is unit-testable
+ * Extracted from [RootViewModel.routeSignedIn] so the artist EPK gate is unit-testable
  * without a coroutine/StateFlow.
  *
  * parity: iOS gates an incomplete-EPK artist into the wizard (RootView), not the tabs —
- * `role == .artist && !setupComplete → ArtistWizardView`. M5b makes that literal: a
- * base-profile-complete artist whose EPK wizard isn't done lands on [RootGate.ArtistWizard]
- * (the real wizard), NOT on artist tabs where their booking dashboard would render half-built.
- * A user who hasn't even finished the base profile is a different case → [RootGate.Onboarding].
+ * `role == .artist && !setupComplete → ArtistWizardView`. A base-profile-complete artist
+ * whose EPK isn't done lands on [RootGate.ArtistWizard]; a half-finished users-row still
+ * lands on [RootGate.Onboarding] (signup Profile step). Never artist tabs half-built.
  */
 fun gateFor(route: ReturningLoginRoute, profile: SelfProfile?): RootGate = when (route) {
     is ReturningLoginRoute.RouteIn ->
-        // An artist whose EPK wizard isn't done (setup_complete false/null) is NOT ready for the
-        // artist tabs — route into the wizard. Clients and complete artists go straight in.
-        if (route.role == AppRole.Artist && profile?.artistSetupComplete != true) {
-            RootGate.ArtistWizard
-        } else {
-            RootGate.Tabs(route.role)
+        when {
+            // Users-row incomplete → finish signup Profile/notif/done first.
+            profile == null || !profile.isComplete -> RootGate.Onboarding
+            // Base profile done, EPK wizard not → dedicated wizard tier (not signup, not tabs).
+            route.role == AppRole.Artist && profile.artistSetupComplete != true ->
+                RootGate.ArtistWizard
+            else -> RootGate.Tabs(route.role)
         }
     // Genuinely new/half-finished, OR a failed fetch: move PAST the auth screen either way so a
     // live session is never wedged there. Degrade skips returning-user hydration but still
     // shows onboarding.
     ReturningLoginRoute.Onboard, ReturningLoginRoute.Degrade -> RootGate.Onboarding
 }
+
+/** Artist with a complete users row but incomplete EPK — show wizard, not signup. */
+fun shouldShowArtistWizard(profile: SelfProfile?): Boolean =
+    profile?.role == AppRole.Artist && profile.isComplete && profile.artistSetupComplete != true

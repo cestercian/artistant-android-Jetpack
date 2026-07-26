@@ -2,133 +2,211 @@ package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
-import `in`.artistant.app.common.util.lowercaseUuid
 import `in`.artistant.app.data.model.Review
-import `in`.artistant.app.data.model.dto.DBReview
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Read + write surface for `public.reviews` (iOS `ReviewsRepository`). Clients
- * insert one review per COMPLETED booking; the artist profile reads the full list.
- *
- * Reads the DENORMALIZED `client_name` column (migration 0030), NOT a `client:users`
- * embed: RLS (`users_select_self`) nulls the embed for every reviewer except the
- * viewer, so an embed would render a generic "Client" for all reviews.
- */
-interface ReviewsRepository {
-    /** All reviews for the artist, newest-first. `[]` (not an error) when none. */
-    suspend fun listForArtist(artistId: String): List<Review>
-
-    /**
-     * Insert a review for the signed-in client against a completed booking. The
-     * artist_id is resolved from the booking row, so the caller supplies only the
-     * booking. Throws [ReviewError] (invalid rating / not signed in / booking not
-     * found / not completed / already reviewed).
-     */
-    suspend fun insert(bookingId: String, rating: Int, body: String?): Review
+sealed class ReviewRepositoryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    data object NotSignedIn : ReviewRepositoryError("Sign in to leave a review.")
+    data object BookingNotFound : ReviewRepositoryError("Booking not found.")
+    data object AlreadyReviewed : ReviewRepositoryError("You already reviewed this booking.")
+    data object InvalidRating : ReviewRepositoryError("Rating must be between 1 and 5.")
+    data object BookingNotCompleted : ReviewRepositoryError("Reviews are only allowed after the show is completed.")
+    class Underlying(cause: Throwable) : ReviewRepositoryError(cause.message ?: "Review failed", cause)
 }
 
-/** Typed review-write failures (iOS `ReviewRepositoryError`). */
-sealed class ReviewError(message: String) : Exception(message) {
-    data object NotSignedIn : ReviewError("Sign in to leave a review.")
-    data object InvalidRating : ReviewError("Rating must be 1–5.")
-    data object BookingNotFound : ReviewError("Booking not found or not yours.")
-    data object BookingNotCompleted : ReviewError("You can only review a completed booking.")
-    data object AlreadyReviewed : ReviewError("You already reviewed this booking.")
+/** Reviews seam — port of iOS `ReviewsRepository`. */
+interface ReviewsRepository {
+    suspend fun listForArtist(artistId: String): List<Review>
+
+    suspend fun insert(
+        bookingId: String,
+        rating: Int,
+        body: String?,
+        categories: Map<String, Int>?,
+    ): Review
 }
 
 @Singleton
 class SupabaseReviewsRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : ReviewsRepository {
-
-    override suspend fun listForArtist(artistId: String): List<Review> =
-        client.postgrest.from("reviews")
-            .select(REVIEW_COLUMNS) {
-                filter { eq("artist_id", artistId) }
+    override suspend fun listForArtist(artistId: String): List<Review> {
+        val rows = client.from("reviews")
+            .select(
+                Columns.list(
+                    "id", "client_name", "client_org", "rating", "body", "created_at",
+                ),
+            ) {
+                filter { eq("artist_id", artistId.lowercase()) }
                 order("created_at", Order.DESCENDING)
             }
-            .decodeList<DBReview>()
-            .map { it.toReview() }
+            .decodeList<ReviewRow>()
+        return rows.map { it.toReview() }
+    }
 
-    override suspend fun insert(bookingId: String, rating: Int, body: String?): Review {
-        if (rating !in 1..5) throw ReviewError.InvalidRating
-        val clientId = client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
-            ?: throw ReviewError.NotSignedIn
+    override suspend fun insert(
+        bookingId: String,
+        rating: Int,
+        body: String?,
+        categories: Map<String, Int>?,
+    ): Review {
+        if (rating !in 1..5) throw ReviewRepositoryError.InvalidRating
+        val clientId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw ReviewRepositoryError.NotSignedIn
 
-        // Resolve the booking's artist + gig date + status in one round trip. A
-        // zero-row result (missing OR RLS-hidden) is PGRST116 → BookingNotFound.
         val booking = try {
-            client.postgrest.from("bookings")
+            client.from("bookings")
                 .select(Columns.list("artist_id", "start_datetime", "status")) {
-                    filter { eq("id", bookingId.lowercaseUuid()) }
-                    single()
+                    filter { eq("id", bookingId.lowercase()) }
+                    limit(1)
                 }
-                .decodeSingle<BookingLookup>()
+                .decodeList<BookingLookup>()
+                .firstOrNull()
         } catch (t: Throwable) {
-            if (isNotFound(t)) throw ReviewError.BookingNotFound else throw t
+            throw ReviewRepositoryError.Underlying(t)
+        } ?: throw ReviewRepositoryError.BookingNotFound
+
+        if (booking.status != "completed") {
+            throw ReviewRepositoryError.BookingNotCompleted
         }
 
-        // Server-side gate (iOS PR #62): the "Leave a review" CTA only shows for
-        // completed bookings, but a push-driven sheet can reach here directly, so
-        // re-check the fetched status. Defense in depth against a forged/early write.
-        if (booking.status != "completed") throw ReviewError.BookingNotCompleted
+        val gigDate = booking.startDatetime?.substringBefore("T")
+        val trimmedBody = body?.trim()?.takeIf { it.isNotEmpty() }
+        val categoriesPayload = categories?.takeIf { it.isNotEmpty() }
 
-        val gigDate = booking.start_datetime?.substringBefore("T")
         val row = ReviewInsert(
-            booking_id = bookingId.lowercaseUuid(),
-            artist_id = booking.artist_id,
-            client_id = clientId,
+            bookingId = bookingId.lowercase(),
+            artistId = booking.artistId.lowercase(),
+            clientId = clientId,
             rating = rating,
-            body = body?.trim()?.takeIf { it.isNotEmpty() },
-            client_org = null,
-            gig_date = gigDate,
+            body = trimmedBody,
+            clientOrg = null,
+            gigDate = gigDate,
+            categories = categoriesPayload,
         )
 
         return try {
-            client.postgrest.from("reviews")
-                .insert(row) { select(REVIEW_COLUMNS) }
-                .decodeSingle<DBReview>()
-                .toReview()
+            client.from("reviews")
+                .insert(row) { select() }
+                .decodeSingle<ReviewInsertRow>()
+                .toReview(displayName = "You", org = "")
         } catch (t: Throwable) {
-            // The unique index on reviews.booking_id → 23505 when re-reviewing.
-            val msg = t.message.orEmpty().lowercase()
-            if ("23505" in msg || "unique_violation" in msg) throw ReviewError.AlreadyReviewed
-            throw t
+            val msg = t.message.orEmpty()
+            if (msg.contains("23505") || msg.contains("unique", ignoreCase = true)) {
+                throw ReviewRepositoryError.AlreadyReviewed
+            }
+            // Pre-0073: retry without categories column.
+            if (categoriesPayload != null && msg.contains("42703")) {
+                return try {
+                    client.from("reviews")
+                        .insert(row.copy(categories = null)) { select() }
+                        .decodeSingle<ReviewInsertRow>()
+                        .toReview(displayName = "You", org = "")
+                } catch (inner: Throwable) {
+                    throw ReviewRepositoryError.Underlying(inner)
+                }
+            }
+            throw ReviewRepositoryError.Underlying(t)
         }
     }
+}
 
-    private fun isNotFound(t: Throwable): Boolean {
-        val m = t.message.orEmpty().lowercase()
-        return "pgrst116" in m || "no rows" in m
-    }
+class FakeReviewsRepository(
+    private val byArtist: Map<String, List<Review>> = emptyMap(),
+    private val bookings: Map<String, FakeBookingMeta> = emptyMap(),
+) : ReviewsRepository {
+    private val inserted = mutableListOf<Review>()
 
-    @Serializable
-    private data class BookingLookup(
-        val artist_id: String,
-        val start_datetime: String? = null,
-        val status: String,
+    data class FakeBookingMeta(
+        val artistId: String,
+        val status: String = "completed",
+        val startDatetime: String? = null,
     )
 
-    @Serializable
-    private data class ReviewInsert(
-        val booking_id: String,
-        val artist_id: String,
-        val client_id: String,
-        val rating: Int,
-        val body: String?,
-        val client_org: String?,
-        val gig_date: String?,
-    )
+    override suspend fun listForArtist(artistId: String): List<Review> =
+        byArtist[artistId.lowercase()].orEmpty() + inserted.filter { true }
 
-    companion object {
-        private val REVIEW_COLUMNS = Columns.list(
-            "id", "rating", "body", "client_name", "client_org", "gig_date", "created_at",
+    override suspend fun insert(
+        bookingId: String,
+        rating: Int,
+        body: String?,
+        categories: Map<String, Int>?,
+    ): Review {
+        if (rating !in 1..5) throw ReviewRepositoryError.InvalidRating
+        val meta = bookings[bookingId.lowercase()] ?: throw ReviewRepositoryError.BookingNotFound
+        if (meta.status != "completed") throw ReviewRepositoryError.BookingNotCompleted
+        val review = Review(
+            id = "fake-review-${inserted.size}",
+            name = "You",
+            org = "",
+            rating = rating,
+            body = body.orEmpty(),
+            categories = categories,
         )
+        inserted.add(review)
+        return review
     }
+}
+
+@Serializable
+private data class BookingLookup(
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("start_datetime") val startDatetime: String? = null,
+    val status: String = "",
+)
+
+@Serializable
+private data class ReviewInsert(
+    @SerialName("booking_id") val bookingId: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("client_id") val clientId: String,
+    val rating: Int,
+    val body: String? = null,
+    @SerialName("client_org") val clientOrg: String? = null,
+    @SerialName("gig_date") val gigDate: String? = null,
+    val categories: Map<String, Int>? = null,
+)
+
+@Serializable
+private data class ReviewInsertRow(
+    val id: String,
+    val rating: Int = 0,
+    val body: String? = null,
+    @SerialName("client_org") val clientOrg: String? = null,
+    @SerialName("gig_date") val gigDate: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+) {
+    fun toReview(displayName: String, org: String) = Review(
+        id = id,
+        name = displayName,
+        org = org,
+        rating = rating,
+        body = body.orEmpty(),
+        createdAt = createdAt,
+    )
+}
+
+@Serializable
+private data class ReviewRow(
+    val id: String,
+    @SerialName("client_name") val clientName: String? = null,
+    @SerialName("client_org") val clientOrg: String? = null,
+    val rating: Int = 0,
+    val body: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+) {
+    fun toReview() = Review(
+        id = id,
+        name = clientName.orEmpty().ifBlank { "Client" },
+        org = clientOrg.orEmpty(),
+        rating = rating,
+        body = body,
+        createdAt = createdAt,
+    )
 }

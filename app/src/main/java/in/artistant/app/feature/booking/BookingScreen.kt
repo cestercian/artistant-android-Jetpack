@@ -3,274 +3,317 @@ package `in`.artistant.app.feature.booking
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.ArtistPackage
-import `in`.artistant.app.designsystem.component.CardView
-import `in`.artistant.app.designsystem.component.DateScroller
+import `in`.artistant.app.designsystem.component.ButtonVariant
+import `in`.artistant.app.designsystem.component.EmptyState
+import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
- * Booking-funnel compose screen (port of iOS `BookingView`). Package radio picker,
- * a [DateScroller] over the artist's real availability, a preferred-slot time
- * grid, venue + guests, and a fee-only summary (v1 hides platform/GST). Continue
- * → Checkout ([onCheckout]).
+ * Booking compose — package, date chips, time grid, venue/guests.
+ * Port of iOS `BookingView`; draft lands in [BookingDraftStore] on Continue.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BookingScreen(
     onBack: () -> Unit,
-    onCheckout: () -> Unit,
+    onContinue: () -> Unit,
+    modifier: Modifier = Modifier,
     viewModel: BookingViewModel = hiltViewModel(),
 ) {
-    val artist by viewModel.artist.collectAsStateWithLifecycle()
-    val draft by viewModel.draft.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val radii = AppTheme.dimens.radii
 
-    Column(Modifier.fillMaxSize().background(colors.bg)) {
-        FunnelHeader("Book ${artist?.name ?: ""}", onBack)
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.xl),
-        ) {
-            Spacer(Modifier.height(space.xs))
-
-            // Package picker.
-            val a = artist
-            if (a != null && draft != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                    SectionLabel("Pick a package")
-                    a.packages.forEachIndexed { idx, pkg ->
-                        PackageRow(pkg, selected = idx == draft!!.packageIndex) { viewModel.setPackage(idx) }
-                    }
-                }
+    when {
+        state.isLoading && state.artist == null -> {
+            Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = colors.brand)
             }
-
-            // Date.
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                SectionLabel("Pick a date")
-                DateScroller(
-                    selected = draft?.dateRaw ?: java.time.LocalDate.now(),
-                    onSelect = viewModel::setDate,
-                    daysAvailable = artist?.daysAvailable,
-                    modifier = Modifier.fillMaxWidth(),
+        }
+        state.artist == null -> {
+            Column(modifier.fillMaxSize().background(colors.bg)) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+                }
+                EmptyState(
+                    title = "Artist not found",
+                    body = state.loadError,
+                    actionLabel = "Retry",
+                    onAction = viewModel::refresh,
                 )
             }
-
-            // Time — 3-column grid built from chunked rows (a LazyGrid can't nest
-            // inside a vertical scroll).
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                SectionLabel("Pick a time")
-                viewModel.timeSlots().chunked(3).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(space.md)) {
-                        row.forEach { slot ->
-                            TimeCell(slot, selected = draft?.time == slot, Modifier.weight(1f)) {
-                                viewModel.setTime(slot)
-                            }
-                        }
-                        // Pad a short final row so cells keep their column width.
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+        else -> {
+            val artist = state.artist!!
+            val selectedPkg = artist.packages.getOrNull(state.packageIndex)
+            val fee = selectedPkg?.price ?: artist.price
+            Column(modifier.fillMaxSize().background(colors.bg)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = space.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
                     }
-                }
-            }
-
-            // Venue + guests.
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                SectionLabel("Venue & guests")
-                CardView {
-                    OutlinedTextField(
-                        value = draft?.venue ?: "",
-                        onValueChange = viewModel::setVenue,
-                        label = { Text("Venue", color = colors.ink3) },
-                        placeholder = { Text("e.g. Hard Rock Café, Bangalore", color = colors.ink4) },
-                        singleLine = true,
-                        colors = fieldColors(),
-                        modifier = Modifier.fillMaxWidth(),
+                    Text(
+                        "Book ${artist.name}",
+                        style = AppTheme.type.headline,
+                        color = colors.ink,
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.height(space.md))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            SectionLabel("Guests")
-                            Text(
-                                "${draft?.guests ?: 0}",
-                                style = AppTheme.type.monoLarge,
-                                color = colors.ink,
+                }
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = space.lg),
+                ) {
+                    SectionTitle("Pick a package")
+                    Spacer(Modifier.height(space.sm))
+                    if (artist.packages.isEmpty()) {
+                        Text(
+                            "Custom · ${formatInr(artist.price)}",
+                            style = AppTheme.type.body,
+                            color = colors.ink2,
+                        )
+                    } else {
+                        artist.packages.forEachIndexed { index, pkg ->
+                            PackagePickerRow(
+                                pkg = pkg,
+                                selected = index == state.packageIndex,
+                                onClick = { viewModel.selectPackage(index) },
+                            )
+                            Spacer(Modifier.height(space.sm))
+                        }
+                    }
+                    Spacer(Modifier.height(space.xl))
+                    SectionTitle("Pick a date")
+                    Spacer(Modifier.height(space.sm))
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(space.sm),
+                    ) {
+                        state.dateChips.forEach { chip ->
+                            val selected = chip.epochMs == state.selectedDateEpochMs
+                            DateChipView(
+                                chip = chip,
+                                selected = selected,
+                                onClick = { viewModel.selectDate(chip) },
                             )
                         }
-                        Stepper(
-                            value = draft?.guests ?: 100,
-                            onChange = viewModel::setGuests,
+                    }
+                    Spacer(Modifier.height(space.xl))
+                    SectionTitle("Pick a time")
+                    Spacer(Modifier.height(space.sm))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(space.sm),
+                        verticalArrangement = Arrangement.spacedBy(space.sm),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        state.timeSlots.forEach { slot ->
+                            val selected = slot == state.selectedTime
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(radii.sm))
+                                    .background(if (selected) colors.brand else colors.bg)
+                                    .border(
+                                        1.dp,
+                                        if (selected) colors.brand else colors.line,
+                                        RoundedCornerShape(radii.sm),
+                                    )
+                                    .clickable { viewModel.selectTime(slot) }
+                                    .padding(horizontal = space.lg, vertical = space.md),
+                            ) {
+                                Text(
+                                    slot,
+                                    style = AppTheme.type.monoSmall,
+                                    color = if (selected) colors.brandInk else colors.ink,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(space.xl))
+                    SectionTitle("Venue & guests")
+                    Spacer(Modifier.height(space.sm))
+                    Text("Venue", style = AppTheme.type.caption, color = colors.ink3)
+                    Spacer(Modifier.height(space.xs))
+                    BasicTextField(
+                        value = state.venue,
+                        onValueChange = viewModel::setVenue,
+                        textStyle = AppTheme.type.body.copy(color = colors.ink),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(radii.sm))
+                            .background(colors.bgSoft)
+                            .padding(space.md),
+                        decorationBox = { inner ->
+                            if (state.venue.isEmpty()) {
+                                Text("e.g. Hard Rock Café, Bangalore", style = AppTheme.type.body, color = colors.ink3)
+                            }
+                            inner()
+                        },
+                    )
+                    Spacer(Modifier.height(space.lg))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Guests", style = AppTheme.type.caption, color = colors.ink3)
+                            Text("${state.guests}", style = AppTheme.type.monoLarge, color = colors.ink)
+                        }
+                        PrimaryButton(
+                            text = "−",
+                            onClick = { viewModel.setGuests(state.guests - 10) },
+                            variant = ButtonVariant.Ghost,
+                        )
+                        Spacer(Modifier.padding(horizontal = space.xs))
+                        PrimaryButton(
+                            text = "+",
+                            onClick = { viewModel.setGuests(state.guests + 10) },
+                            variant = ButtonVariant.Ghost,
                         )
                     }
-                }
-            }
-
-            // Summary — v1 shows the artist fee only.
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                SectionLabel("Summary")
-                CardView {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Artist fee",
-                            style = AppTheme.type.callout.copy(fontWeight = FontWeight.Bold),
-                            color = colors.ink,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            formatInr(viewModel.draftFee()),
-                            style = AppTheme.type.monoMedium.copy(fontWeight = FontWeight.Bold),
-                            color = colors.brand,
-                        )
+                    Spacer(Modifier.height(space.lg))
+                    Text("Directions / notes", style = AppTheme.type.caption, color = colors.ink3)
+                    Spacer(Modifier.height(space.xs))
+                    BasicTextField(
+                        value = state.venueNotes,
+                        onValueChange = viewModel::setVenueNotes,
+                        textStyle = AppTheme.type.body.copy(color = colors.ink),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(radii.sm))
+                            .background(colors.bgSoft)
+                            .padding(space.md),
+                    )
+                    Spacer(Modifier.height(space.xl))
+                    HRule()
+                    Spacer(Modifier.height(space.lg))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Artist fee", style = AppTheme.type.callout, color = colors.ink2)
+                        Text(formatInr(fee), style = AppTheme.type.monoMedium, color = colors.ink)
                     }
+                    Spacer(Modifier.height(space.xxl))
+                }
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(colors.bgElev)
+                        .padding(space.lg),
+                ) {
+                    PrimaryButton(
+                        text = "Continue",
+                        onClick = {
+                            if (viewModel.onContinue()) onContinue()
+                        },
+                        fullWidth = true,
+                        enabled = state.canContinue && state.selectedTime.isNotBlank(),
+                    )
                 }
             }
-            Spacer(Modifier.height(space.lg))
-        }
-
-        CtaBar {
-            PrimaryButton(
-                text = "Continue →",
-                onClick = onCheckout,
-                fullWidth = true,
-                enabled = draft != null,
-            )
         }
     }
 }
 
 @Composable
-private fun PackageRow(pkg: ArtistPackage, selected: Boolean, onClick: () -> Unit) {
+private fun SectionTitle(text: String) {
+    Text(text, style = AppTheme.type.headline, color = AppTheme.colors.ink)
+}
+
+@Composable
+private fun PackagePickerRow(pkg: ArtistPackage, selected: Boolean, onClick: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val shape = RoundedCornerShape(AppTheme.dimens.radii.md)
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(if (selected) colors.brandSoft else Color.Transparent)
-            .border(1.dp, if (selected) colors.brand else colors.lineSoft, shape)
-            .clickable(onClick = onClick)
-            .padding(space.md),
-        horizontalArrangement = Arrangement.spacedBy(space.md),
-    ) {
-        Box(
-            Modifier
-                .padding(top = 2.dp)
-                .size(20.dp)
-                .clip(CircleShape)
-                .border(2.dp, if (selected) colors.brand else colors.lineSoft, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(colors.brand))
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(space.xs)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                Text(
-                    pkg.name,
-                    style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.ink,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (pkg.popular) Pill("Popular", tone = PillTone.Brand)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    formatInr(pkg.price),
-                    style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                    color = colors.ink,
-                )
-            }
-            Text(
-                "${pkg.duration} · ${pkg.includes.joinToString(" · ")}",
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
+            .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
+            .background(if (selected) colors.brandSoft else colors.bg)
+            .border(
+                1.dp,
+                if (selected) colors.brand else colors.line,
+                RoundedCornerShape(AppTheme.dimens.radii.md),
             )
+            .clickable(onClick = onClick)
+            .padding(space.lg),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(pkg.name, style = AppTheme.type.callout, color = colors.ink)
+            Text(formatInr(pkg.price), style = AppTheme.type.monoSmall, color = colors.ink)
+        }
+        Text(pkg.duration, style = AppTheme.type.caption, color = colors.ink3)
+        if (pkg.popular) {
+            Spacer(Modifier.height(space.xs))
+            Pill("Popular", tone = PillTone.Brand)
         }
     }
 }
 
 @Composable
-private fun TimeCell(slot: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun DateChipView(chip: DateChip, selected: Boolean, onClick: () -> Unit) {
     val colors = AppTheme.colors
-    val shape = RoundedCornerShape(AppTheme.dimens.radii.sm)
-    Box(
-        modifier
-            .clip(shape)
-            .background(if (selected) colors.brand else Color.Transparent)
-            .border(1.dp, if (selected) Color.Transparent else colors.lineSoft, shape)
-            .clickable(onClick = onClick)
-            .padding(vertical = AppTheme.dimens.space.md),
-        contentAlignment = Alignment.Center,
+    val radii = AppTheme.dimens.radii
+    val space = AppTheme.dimens.space
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(radii.sm))
+            .background(if (selected) colors.brand else colors.bg)
+            .border(1.dp, if (selected) colors.brand else colors.line, RoundedCornerShape(radii.sm))
+            .clickable(enabled = chip.available, onClick = onClick)
+            .padding(horizontal = space.md, vertical = space.sm),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            slot,
-            style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = if (selected) colors.brandInk else colors.ink,
+            chip.weekdayAbbrev,
+            style = AppTheme.type.caption,
+            color = when {
+                !chip.available -> colors.ink4
+                selected -> colors.brandInk
+                else -> colors.ink3
+            },
+        )
+        Text(
+            chip.label.substringAfter(", ").take(6),
+            style = AppTheme.type.monoSmall,
+            color = when {
+                !chip.available -> colors.ink4
+                selected -> colors.brandInk
+                else -> colors.ink
+            },
         )
     }
 }
-
-@Composable
-private fun Stepper(value: Int, onChange: (Int) -> Unit) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StepButton("−") { onChange(value - 10) }
-        StepButton("+") { onChange(value + 10) }
-    }
-}
-
-@Composable
-private fun StepButton(label: String, onClick: () -> Unit) {
-    val colors = AppTheme.colors
-    Box(
-        Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(colors.bgSoft)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, style = AppTheme.type.title, color = colors.ink)
-    }
-}
-
-@Composable
-internal fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = AppTheme.colors.ink,
-    unfocusedTextColor = AppTheme.colors.ink,
-    focusedBorderColor = AppTheme.colors.brand,
-    unfocusedBorderColor = AppTheme.colors.line,
-    cursorColor = AppTheme.colors.brand,
-    focusedContainerColor = AppTheme.colors.bgSoft,
-    unfocusedContainerColor = AppTheme.colors.bgSoft,
-)

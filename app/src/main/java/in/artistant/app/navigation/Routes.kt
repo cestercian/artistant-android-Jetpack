@@ -18,25 +18,51 @@ sealed interface ClientRoute {
     @Serializable data class ArtistProfile(val artistId: String) : ClientRoute
     @Serializable data class Chat(val threadId: String) : ClientRoute
     @Serializable data object Search : ClientRoute
-    // M3 booking funnel. Chat (M4) + ScoreExplainer stay stubs.
-    @Serializable data class Booking(val artistId: String) : ClientRoute
-    @Serializable data class RequestQuote(val artistId: String) : ClientRoute
-    // The draft lives in BookingStore, so Checkout takes no args; Confirmed +
-    // BookingDetail carry the persisted booking id.
+    /** M3 — booking funnel (request → accept). */
+    @Serializable data class BookingCompose(val artistId: String) : ClientRoute
     @Serializable data object Checkout : ClientRoute
     @Serializable data class Confirmed(val bookingId: String) : ClientRoute
     @Serializable data class BookingDetail(val bookingId: String) : ClientRoute
-    @Serializable data object ScoreExplainer : ClientRoute
-    // M7 — the ₹99/mo paywall, pushed from the (dormant) checkout quota gate. Sells the
-    // client product; the artist product is sold from ArtistHome's banner (ArtistTabsScaffold).
-    @Serializable data object Paywall : ClientRoute
+    @Serializable data class RequestQuote(val artistId: String) : ClientRoute
+}
+
+/** String routes for the client NavHost (mirrors [ClientRoute] until typed nav lands). */
+object ClientNavRoutes {
+    const val CHAT = "chat/{threadId}"
+    const val BOOKING = "booking/{artistId}"
+    const val CHECKOUT = "checkout"
+    const val CONFIRMED = "confirmed/{bookingId}"
+    const val BOOKING_DETAIL = "booking_detail/{bookingId}"
+    const val REQUEST_QUOTE = "request_quote/{artistId}"
+
+    fun bookingCompose(artistId: String) = "booking/$artistId"
+    fun chat(threadId: String) = "chat/$threadId"
+    fun confirmed(bookingId: String) = "confirmed/$bookingId"
+    fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
+    fun requestQuote(artistId: String) = "request_quote/$artistId"
+    const val PAYWALL = "paywall"
 }
 
 /** Artist-side pushed routes. */
 sealed interface ArtistRoute {
     @Serializable data class GigRequest(val id: String) : ArtistRoute
-    @Serializable data class Chat(val threadId: String) : ArtistRoute
+    @Serializable data class BookingDetail(val bookingId: String) : ArtistRoute
     @Serializable data object ScoreExplainer : ArtistRoute
-    // M5c — the post-onboarding availability editor, pushed from ArtistHome.
-    @Serializable data object ManageAvailability : ArtistRoute
+    @Serializable data object Wizard : ArtistRoute
+}
+
+/** String routes for the artist NavHost (mirrors [ArtistRoute] until typed nav lands). */
+object ArtistNavRoutes {
+    const val BOOKING_DETAIL = "booking_detail/{bookingId}"
+    const val GIG_REQUEST = "gig_request/{requestId}"
+    const val CHAT = "chat/{threadId}"
+
+    fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
+    fun gigRequest(requestId: String) = "gig_request/$requestId"
+    fun chat(threadId: String) = "chat/$threadId"
+    const val PROFILE = "profile"
+    const val PAYWALL = "paywall"
+    const val WIZARD = "wizard"
+    const val MANAGE_AVAILABILITY = "manage_availability"
+    const val SCORE_EXPLAINER = "score_explainer"
 }

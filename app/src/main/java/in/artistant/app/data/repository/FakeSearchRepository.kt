@@ -8,58 +8,61 @@ import `in`.artistant.app.data.model.SearchFilters
 import `in`.artistant.app.data.model.SearchPage
 import `in`.artistant.app.data.model.SearchSort
 import `in`.artistant.app.data.model.SearchTuning
-import `in`.artistant.app.data.model.nextSearchCursor
 
 /**
- * In-memory [SearchRepository] for tests / previews (iOS `FakeSearchRepository`).
- * Filters a fixed roster with `contains`, applies the same sort + pagination shape
- * as the server path so cursor behaviour is exercised offline + deterministic.
+ * In-memory [SearchRepository] — filters/sorts/paginates a seeded roster so
+ * Discover/Search ViewModels stay offline + deterministic (iOS Fake twin).
  */
 class FakeSearchRepository(
-    private val roster: List<Artist> = emptyList(),
+    private val roster: () -> List<Artist> = { emptyList() },
 ) : SearchRepository {
 
+    /** Convenience ctor that holds a fixed list. */
+    constructor(artists: List<Artist>) : this({ artists })
+
+    var failSearch: Boolean = false
+
     override suspend fun search(filters: SearchFilters, cursor: SearchCursor): SearchPage {
-        val hasQuery = filters.hasTextQuery
-        val q = filters.text.trim().lowercase()
-
-        var matches = roster.asSequence()
-            .filter { !hasQuery || it.name.lowercase().contains(q) || it.category.lowercase().contains(q) }
-            .filter { filters.city == null || it.city.equals(filters.city, ignoreCase = true) }
-            .filter { filters.categories.isEmpty() || it.category in filters.categories }
-            .filter { filters.minPrice == null || it.price >= filters.minPrice }
-            .filter { filters.maxPrice == null || it.price <= filters.maxPrice }
-            .filter { filters.minScore == null || it.score >= filters.minScore }
-            .toList()
-
-        matches = when {
-            hasQuery -> matches  // "relevance": leave insertion order
-            else -> when (filters.sort) {
-                SearchSort.Bookability -> matches.sortedWith(compareByDescending<Artist> { it.score }.thenBy { it.id })
-                SearchSort.Price -> matches.sortedBy { it.price }
-                SearchSort.New -> matches
+        if (failSearch) throw IllegalStateException("fake search failure")
+        var matched = roster().filter { a ->
+            if (filters.hasTextQuery) {
+                val q = filters.text.lowercase()
+                val hay = "${a.name} ${a.handle} ${a.category} ${a.genre} ${a.city}".lowercase()
+                if (!hay.contains(q)) return@filter false
+            }
+            if (filters.city != null && a.city != filters.city) return@filter false
+            if (filters.categories.isNotEmpty() && a.category !in filters.categories) return@filter false
+            if (filters.minPrice != null && a.price < filters.minPrice) return@filter false
+            if (filters.maxPrice != null && a.price > filters.maxPrice) return@filter false
+            if (filters.minScore != null && a.score < filters.minScore) return@filter false
+            true
+        }
+        if (!filters.hasTextQuery) {
+            matched = when (filters.sort) {
+                SearchSort.Bookability -> matched.sortedByDescending { it.score }
+                SearchSort.Price -> matched.sortedBy { it.price }
+                SearchSort.New -> matched
             }
         }
-
         val limit = SearchTuning.PAGE_LIMIT
         val offset = when (cursor) {
-            is SearchCursor.Offset -> cursor.value
-            is SearchCursor.Keyset -> matches.indexOfFirst { it.id == cursor.afterId } + 1
+            is SearchCursor.Offset -> cursor.offset
             else -> 0
-        }.coerceIn(0, matches.size)
-
-        val page = matches.drop(offset).take(limit)
-        val last = page.lastOrNull()
-        val next = nextSearchCursor(
-            rowCount = page.size, limit = limit,
-            lastScore = last?.score, lastId = last?.id,
-            hasQuery = hasQuery, sort = filters.sort, offset = offset,
-        )
+        }
+        val page = matched.drop(offset).take(limit)
+        val next: SearchCursor =
+            if (page.size < limit) SearchCursor.End else SearchCursor.Offset(offset + limit)
         return SearchPage(artists = page, nextCursor = next)
     }
 
-    override suspend fun facets(): SearchFacets = SearchFacets(
-        categories = roster.groupingBy { it.category }.eachCount().map { SearchFacet(it.key, it.value) },
-        cities = roster.groupingBy { it.city }.eachCount().map { SearchFacet(it.key, it.value) },
-    )
+    override suspend fun facets(): SearchFacets {
+        val list = roster()
+        val categories = list.groupBy { it.category }
+            .map { SearchFacet(it.key, it.value.size) }
+            .sortedBy { it.label }
+        val cities = list.groupBy { it.city }
+            .map { SearchFacet(it.key, it.value.size) }
+            .sortedBy { it.label }
+        return SearchFacets(categories = categories, cities = cities)
+    }
 }

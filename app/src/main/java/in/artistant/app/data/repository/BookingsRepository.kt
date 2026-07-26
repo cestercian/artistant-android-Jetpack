@@ -3,212 +3,484 @@ package `in`.artistant.app.data.repository
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.functions.functions
-import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
-import io.ktor.client.statement.bodyAsText
-import `in`.artistant.app.common.util.SupabaseISO8601
-import `in`.artistant.app.common.util.lowercaseUuid
-import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingDraft
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.EscrowStatus
-import `in`.artistant.app.data.model.dto.DBBooking
-import `in`.artistant.app.data.model.dto.DBBookingInsert
-import `in`.artistant.app.data.model.dto.DBBookingWithClient
-import `in`.artistant.app.domain.booking.BookingCharges
-import `in`.artistant.app.domain.booking.BookingMath
-import `in`.artistant.app.platform.calendar.CalendarSync
-import `in`.artistant.app.platform.payments.PaymentResult
+import `in`.artistant.app.data.model.PaymentMethod
+import `in`.artistant.app.data.payments.PaymentResult
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.headersOf
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import java.time.LocalTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Booking funnel data boundary (port of iOS `BookingsRepository`). v1 matchmaker:
- * [create] is a DIRECT insert (no `create-booking` Edge Function / payments) — fees
- * are computed client-side via [BookingMath] and the row lands `confirmed` /
- * escrow `held`, honouring the DB guards (self-booking CHECK, no-overlap, insert
- * status ∈ {pending_confirm, confirmed}, escrow clamped to held — API_MAPPING §3).
- * [cancel] must route through the `cancel-booking` Edge Function (a direct
- * escrow_status PATCH is rejected by the guard trigger). Every fetch/create/cancel
- * feeds [CalendarSync.ingest] — the single seam both roles route through, so the
- * calendar mirror sees client + artist gigs without any per-screen wiring (iOS parity).
+ * Bookings seam — port of iOS `BookingsRepository`.
+ *
+ * Create inserts directly (status = pending_confirm). Accept is a status-only
+ * PATCH → confirmed (0083 guards artist-only). Decline/cancel route through
+ * the `cancel-booking` Edge Function so escrow flips as service_role (0034).
  */
+
+sealed class BookingRepositoryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    data object NotSignedIn : BookingRepositoryError("You're not signed in. Sign in and try booking again.")
+    class MalformedTime(raw: String) : BookingRepositoryError("Couldn't parse the show time \"$raw\".")
+    class Underlying(cause: Throwable) : BookingRepositoryError(cause.message ?: "Booking request failed", cause)
+}
+
 interface BookingsRepository {
-    /** Insert a booking from [draft] + the (mock) [paymentResult]. Returns the row. */
     suspend fun create(draft: BookingDraft, paymentResult: PaymentResult): Booking
-
-    /** All bookings where the signed-in user is the client, newest-first. */
     suspend fun listForClient(): List<Booking>
-
-    /** All bookings where the signed-in user owns the artist row, newest-first.
-     *  Uses the `client:users!client_id(full_name)` embed for the client's name. */
     suspend fun listForArtist(): List<Booking>
-
-    /** Cancel via the `cancel-booking` function, then refetch the updated row. */
-    suspend fun cancel(id: String): Booking
+    suspend fun fetchOne(id: String): Booking?
+    suspend fun cancel(id: String, reason: String?): Booking
+    suspend fun accept(id: String): Booking
+    suspend fun declineByArtist(id: String, reason: String?): Booking
 }
 
 @Singleton
 class SupabaseBookingsRepository @Inject constructor(
     private val client: SupabaseClient,
-    // Injected to resolve the draft's fee + package snapshot (iOS reads the shared
-    // ArtistsRepository singleton). find() hits the by-id cache the funnel warmed.
-    private val artists: ArtistsRepository,
-    // The calendar mirror's ingest seam — fed after every create/fetch/cancel below.
-    private val calendar: CalendarSync,
+    private val calendarSync: `in`.artistant.app.platform.calendar.CalendarSyncService,
 ) : BookingsRepository {
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     override suspend fun create(draft: BookingDraft, paymentResult: PaymentResult): Booking {
-        val clientId = currentUserId()
-        val artistUuid = draft.artistId.lowercaseUuid()
-
-        // Fee comes from the artist's package price; totals from BookingMath. The
-        // package name/duration are SNAPSHOTTED onto the row so a later package edit
-        // doesn't rewrite this booking's history (schema requires them non-null).
-        val pkg = artists.find(artistUuid)?.packages?.getOrNull(draft.packageIndex)
-        val fee = draft.fee(artists)
-        val charges = BookingMath.compute(fee)
-        val (start, end) = startEnd(draft)
-
-        val row = DBBookingInsert(
-            client_id = clientId,
-            artist_id = artistUuid,
-            package_id = null,
-            package_name = pkg?.name ?: "Custom",
-            package_duration_label = pkg?.duration ?: "Custom",
-            package_index = draft.packageIndex,
-            date_label = draft.date,
-            time_label = draft.time,
-            start_datetime = SupabaseISO8601.format(start),
-            end_datetime = SupabaseISO8601.format(end),
-            venue = draft.venue.ifEmpty { "TBD" },
+        val clientId = currentUserId() ?: throw BookingRepositoryError.NotSignedIn
+        val artistId = draft.artistId.lowercase()
+        if (runCatching { UUID.fromString(artistId) }.isFailure) {
+            throw BookingRepositoryError.Underlying(
+                IllegalArgumentException("Internal: artist_id is not a UUID ($artistId)."),
+            )
+        }
+        val (startIso, endIso) = startEndIso(draft)
+        val charges = draft.charges
+        val row = DbBookingInsert(
+            clientId = clientId,
+            artistId = artistId,
+            packageId = null,
+            packageName = draft.packageName.ifBlank { "Custom" },
+            packageDurationLabel = draft.packageDuration.ifBlank { "Custom" },
+            packageIndex = draft.packageIndex,
+            dateLabel = draft.date,
+            timeLabel = draft.time,
+            startDatetime = startIso,
+            endDatetime = endIso,
+            venue = draft.venue.ifBlank { "TBD" },
             guests = draft.guests,
-            fee_inr = fee,
-            platform_fee_inr = charges.platform,
-            gst_inr = charges.gst,
-            total_inr = charges.total,
-            // v1 matchmaker: confirmed on insert, escrow held (the DB clamps it too).
-            status = BookingStatus.Confirmed.dbValue,
-            escrow_status = EscrowStatus.Held.dbValue,
-            payment_method = draft.paymentMethod.dbValue,
-            protection_enabled = true,
-            razorpay_order_id = paymentResult.orderId,
-            razorpay_payment_id = paymentResult.paymentId,
+            feeInr = draft.feeInr,
+            platformFeeInr = charges.platform,
+            gstInr = charges.gst,
+            totalInr = charges.total,
+            status = BookingStatus.PendingConfirm.dbValue,
+            escrowStatus = EscrowStatus.Held.dbValue,
+            paymentMethod = draft.paymentMethod.dbValue,
+            protectionEnabled = true,
+            razorpayOrderId = paymentResult.orderId,
+            razorpayPaymentId = paymentResult.paymentId,
         )
-
-        return client.postgrest.from("bookings")
-            .insert(row) { select(BOOKING_COLUMNS) }
-            .decodeSingle<DBBooking>()
-            .toBooking()
-            .also { calendar.ingest(listOf(it)) }
+        return try {
+            var booking = client.from("bookings")
+                .insert(row) { select() }
+                .decodeSingle<DbBooking>()
+                .toDomain()
+            val notes = draft.venueNotes.trim()
+            if (notes.isNotEmpty()) {
+                try {
+                    client.from("bookings").update(VenueNotesPatch(notes)) {
+                        filter { eq("id", booking.id.lowercase()) }
+                    }
+                    booking = booking.copy(venueNotes = notes)
+                } catch (_: Throwable) {
+                    // Pre-0072 column missing — booking already landed; drop notes.
+                }
+            }
+            calendarSync.ingest(listOf(booking))
+            booking
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
     }
 
     override suspend fun listForClient(): List<Booking> {
-        val clientId = currentUserId()
-        return client.postgrest.from("bookings")
-            .select(BOOKING_COLUMNS) {
-                filter { eq("client_id", clientId) }
-                order("start_datetime", Order.DESCENDING)
-            }
-            .decodeList<DBBooking>()
-            .map { it.toBooking() }
-            .also { calendar.ingest(it) }
+        val clientId = currentUserId() ?: throw BookingRepositoryError.NotSignedIn
+        return try {
+            client.from("bookings")
+                .select {
+                    filter { eq("client_id", clientId) }
+                    order("start_datetime", Order.DESCENDING)
+                }
+                .decodeList<DbBooking>()
+                .map { it.toDomain() }
+                .also { calendarSync.ingest(it) }
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
     }
 
     override suspend fun listForArtist(): List<Booking> {
-        val artistId = currentUserId()
-        return client.postgrest.from("bookings")
-            .select(Columns.raw("$BOOKING_COLS, client:users!client_id(full_name)")) {
-                filter { eq("artist_id", artistId) }
-                order("start_datetime", Order.DESCENDING)
-            }
-            .decodeList<DBBookingWithClient>()
-            .map { it.toBooking() }
-            .also { calendar.ingest(it) }
+        val userId = currentUserId() ?: throw BookingRepositoryError.NotSignedIn
+        return try {
+            // Prefer live embed; fall back to 0080 client_name (RLS nulls embed for artists).
+            client.from("bookings")
+                .select(Columns.raw("*, client:users!client_id(full_name)")) {
+                    filter { eq("artist_id", userId) }
+                    order("start_datetime", Order.DESCENDING)
+                }
+                .decodeList<DbBookingWithClient>()
+                .map { it.toDomain() }
+                .also { calendarSync.ingest(it) }
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
     }
 
-    override suspend fun cancel(id: String): Booking {
-        currentUserId() // ensure signed in (throws NotFoundOrUnauthorized otherwise)
-        // Cancel is service-role work (escrow flip is guard-blocked for participants),
-        // so route through the Edge Function; cancelled_by='client' — the only cancel
-        // surface is the client's booking detail (don't penalize the artist's metric).
-        val resp = client.functions.invoke(
-            function = "cancel-booking",
-            body = CancelBody(booking_id = id.lowercaseUuid(), cancelled_by = "client", reason = null),
-        )
-        val decoded = LENIENT_JSON.decodeFromString<CancelResponse>(resp.bodyAsText())
-        require(decoded.cancelled) { "cancel-booking returned cancelled=false" }
-
-        // Refetch so the local model reflects the server's status/escrow flip.
-        return client.postgrest.from("bookings")
-            .select(BOOKING_COLUMNS) {
-                filter { eq("id", id.lowercaseUuid()) }
-                single()
-            }
-            .decodeSingle<DBBooking>()
-            .toBooking()
-            .also { calendar.ingest(listOf(it)) } // cancelled → the reconcile removes its event
+    override suspend fun fetchOne(id: String): Booking? {
+        return try {
+            client.from("bookings")
+                .select(Columns.raw("*, client:users!client_id(full_name)")) {
+                    filter { eq("id", id.lowercase()) }
+                    limit(1)
+                }
+                .decodeList<DbBookingWithClient>()
+                .firstOrNull()
+                ?.toDomain()
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
     }
 
-    // --- helpers ---------------------------------------------------------
+    override suspend fun cancel(id: String, reason: String?): Booking =
+        cancelViaEdgeFunction(id, reason, cancelledBy = "client")
 
-    private fun currentUserId(): String =
-        client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
-            ?: throw AppError.NotFoundOrUnauthorized
+    override suspend fun accept(id: String): Booking {
+        if (currentUserId() == null) throw BookingRepositoryError.NotSignedIn
+        return try {
+            client.from("bookings")
+                .update(AcceptPayload(status = BookingStatus.Confirmed.dbValue)) {
+                    filter { eq("id", id.lowercase()) }
+                    select()
+                }
+                .decodeSingle<DbBooking>()
+                .toDomain()
+                .also { calendarSync.ingest(listOf(it)) }
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
+    }
 
-    @Serializable
-    private data class CancelBody(val booking_id: String, val cancelled_by: String, val reason: String?)
+    override suspend fun declineByArtist(id: String, reason: String?): Booking =
+        cancelViaEdgeFunction(id, reason, cancelledBy = "artist")
 
-    @Serializable
-    private data class CancelResponse(val cancelled: Boolean = false)
+    private suspend fun cancelViaEdgeFunction(
+        id: String,
+        reason: String?,
+        cancelledBy: String,
+    ): Booking {
+        if (currentUserId() == null) throw BookingRepositoryError.NotSignedIn
+        try {
+            val response = client.functions.invoke(
+                function = "cancel-booking",
+                body = CancelBody(
+                    bookingId = id.lowercase(),
+                    cancelledBy = cancelledBy,
+                    reason = reason,
+                ),
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+            )
+            val parsed = json.decodeFromString<CancelEdgeResponse>(response.bodyAsText())
+            if (!parsed.cancelled) {
+                throw BookingRepositoryError.Underlying(
+                    IllegalStateException("cancel-booking returned cancelled=false"),
+                )
+            }
+            return client.from("bookings")
+                .select {
+                    filter { eq("id", id.lowercase()) }
+                    limit(1)
+                }
+                .decodeSingle<DbBooking>()
+                .toDomain()
+                .also { calendarSync.ingest(listOf(it)) }
+        } catch (e: BookingRepositoryError) {
+            throw e
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
+    }
+
+    private fun currentUserId(): String? =
+        client.auth.currentSessionOrNull()?.user?.id?.lowercase()
 
     companion object {
-        private const val BOOKING_COLS =
-            "id, client_id, artist_id, package_index, date_label, time_label, venue, guests, " +
-                "fee_inr, platform_fee_inr, gst_inr, total_inr, status, escrow_status, " +
-                "payment_method, protection_enabled, created_at, start_datetime, end_datetime"
-        private val BOOKING_COLUMNS = Columns.raw(BOOKING_COLS)
-
-        private val LENIENT_JSON = Json { ignoreUnknownKeys = true }
-
-        // 12-hour ("8:30 PM") first, then 24-hour ("20:30"). US locale: the labels use
-        // English AM/PM tokens, so a device-locale formatter could fail to parse them.
-        private val TIME_FORMATS = listOf("h:mm a", "HH:mm").map {
-            DateTimeFormatter.ofPattern(it, Locale.US)
-        }
+        /** Pinned cancel-booking body keys — never include escrow_status (0034). */
+        val cancelPayloadKeys: Set<String> = setOf("booking_id", "cancelled_by", "reason")
 
         /**
-         * Combine the draft's day + time into a concrete start Instant; end defaults to
-         * start + 2h (the same placeholder the cron jobs assume until a duration parser
-         * lands). Uses the device zone — matches iOS `Calendar.current`.
+         * Combines draft day + time into ISO start/end. End = start + 2h
+         * (same placeholder as iOS until package-duration parsing lands).
          */
-        internal fun startEnd(draft: BookingDraft): Pair<java.time.Instant, java.time.Instant> {
-            val time = TIME_FORMATS.firstNotNullOfOrNull { fmt ->
-                runCatching { LocalTime.parse(draft.time.trim(), fmt) }.getOrNull()
-            } ?: LocalTime.of(20, 0) // benign fallback if free-text time is unparseable
-            val zone = ZoneId.systemDefault()
-            val start = draft.dateRaw.atTime(time).atZone(zone).toInstant()
-            return start to start.plusSeconds(2 * 3600)
+        fun startEndIso(draft: BookingDraft): Pair<String, String> {
+            val cal = Calendar.getInstance()
+            cal.timeInMillis = draft.dateRawEpochMs
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+
+            val timeParts = parseTimeOfDay(draft.time)
+                ?: throw BookingRepositoryError.MalformedTime(draft.time)
+            cal.set(Calendar.HOUR_OF_DAY, timeParts.first)
+            cal.set(Calendar.MINUTE, timeParts.second)
+            val start = cal.time
+            cal.add(Calendar.HOUR_OF_DAY, 2)
+            val end = cal.time
+            return isoUtc(start) to isoUtc(end)
+        }
+
+        private fun parseTimeOfDay(raw: String): Pair<Int, Int>? {
+            val formats = listOf("h:mm a", "HH:mm")
+            for (fmt in formats) {
+                val f = SimpleDateFormat(fmt, Locale.US)
+                f.isLenient = false
+                val parsed = runCatching { f.parse(raw) }.getOrNull() ?: continue
+                val c = Calendar.getInstance().apply { time = parsed }
+                return c.get(Calendar.HOUR_OF_DAY) to c.get(Calendar.MINUTE)
+            }
+            return null
+        }
+
+        private fun isoUtc(date: Date): String {
+            val f = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            f.timeZone = TimeZone.getTimeZone("UTC")
+            return f.format(date)
         }
     }
 }
 
-// --- BookingDraft fee resolution (kept here to avoid a data.model → repository cycle) ---
+@Serializable
+private data class AcceptPayload(val status: String)
 
-/** The draft's resolved artist package (or null if the artist/index isn't cached). */
-fun BookingDraft.resolvedPackage(artists: ArtistsRepository) =
-    artists.find(artistId.lowercaseUuid())?.packages?.getOrNull(packageIndex)
+@Serializable
+private data class VenueNotesPatch(@SerialName("venue_notes") val venueNotes: String)
 
-/** Performance fee for the draft, 0 when the package can't be resolved. */
-fun BookingDraft.fee(artists: ArtistsRepository): Int = resolvedPackage(artists)?.price ?: 0
+@Serializable
+private data class CancelBody(
+    @SerialName("booking_id") val bookingId: String,
+    @SerialName("cancelled_by") val cancelledBy: String,
+    val reason: String?,
+)
 
-/** Platform/GST/total for the draft's fee (iOS `BookingDraft.totals`). */
-fun BookingDraft.charges(artists: ArtistsRepository): BookingCharges = BookingMath.compute(fee(artists))
+@Serializable
+private data class CancelEdgeResponse(val cancelled: Boolean)
+
+@Serializable
+private data class DbBookingInsert(
+    @SerialName("client_id") val clientId: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("package_id") val packageId: String?,
+    @SerialName("package_name") val packageName: String,
+    @SerialName("package_duration_label") val packageDurationLabel: String,
+    @SerialName("package_index") val packageIndex: Int,
+    @SerialName("date_label") val dateLabel: String,
+    @SerialName("time_label") val timeLabel: String,
+    @SerialName("start_datetime") val startDatetime: String,
+    @SerialName("end_datetime") val endDatetime: String,
+    val venue: String,
+    val guests: Int,
+    @SerialName("fee_inr") val feeInr: Int,
+    @SerialName("platform_fee_inr") val platformFeeInr: Int,
+    @SerialName("gst_inr") val gstInr: Int,
+    @SerialName("total_inr") val totalInr: Int,
+    val status: String,
+    @SerialName("escrow_status") val escrowStatus: String,
+    @SerialName("payment_method") val paymentMethod: String,
+    @SerialName("protection_enabled") val protectionEnabled: Boolean,
+    @SerialName("razorpay_order_id") val razorpayOrderId: String?,
+    @SerialName("razorpay_payment_id") val razorpayPaymentId: String?,
+)
+
+@Serializable
+private data class DbBooking(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("package_index") val packageIndex: Int = 0,
+    @SerialName("date_label") val dateLabel: String = "",
+    @SerialName("time_label") val timeLabel: String = "",
+    val venue: String = "TBD",
+    val guests: Int = 0,
+    @SerialName("fee_inr") val feeInr: Int = 0,
+    @SerialName("platform_fee_inr") val platformFeeInr: Int = 0,
+    @SerialName("gst_inr") val gstInr: Int = 0,
+    @SerialName("total_inr") val totalInr: Int = 0,
+    val status: String = BookingStatus.PendingConfirm.dbValue,
+    @SerialName("escrow_status") val escrowStatus: String = EscrowStatus.Held.dbValue,
+    @SerialName("payment_method") val paymentMethod: String = PaymentMethod.Upi.dbValue,
+    @SerialName("protection_enabled") val protectionEnabled: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("start_datetime") val startDatetime: String? = null,
+    @SerialName("end_datetime") val endDatetime: String? = null,
+    @SerialName("venue_notes") val venueNotes: String? = null,
+    @SerialName("client_name") val clientName: String? = null,
+) {
+    fun toDomain(clientFullName: String? = null): Booking {
+        val stamped = clientName?.trim()?.takeIf { it.isNotEmpty() }
+        return Booking(
+            id = id,
+            artistId = artistId,
+            packageIndex = packageIndex,
+            date = dateLabel,
+            time = timeLabel,
+            venue = venue,
+            guests = guests,
+            fee = feeInr,
+            platformFee = platformFeeInr,
+            gst = gstInr,
+            total = totalInr,
+            status = BookingStatus.fromDb(status),
+            escrowStatus = EscrowStatus.fromDb(escrowStatus),
+            paymentMethod = PaymentMethod.fromDb(paymentMethod),
+            protectionEnabled = protectionEnabled,
+            createdAtEpochMs = System.currentTimeMillis(),
+            clientFullName = clientFullName ?: stamped,
+            startDatetimeIso = startDatetime,
+            endDatetimeIso = endDatetime,
+            venueNotes = venueNotes,
+        )
+    }
+}
+
+@Serializable
+private data class DbBookingWithClient(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("package_index") val packageIndex: Int = 0,
+    @SerialName("date_label") val dateLabel: String = "",
+    @SerialName("time_label") val timeLabel: String = "",
+    val venue: String = "TBD",
+    val guests: Int = 0,
+    @SerialName("fee_inr") val feeInr: Int = 0,
+    @SerialName("platform_fee_inr") val platformFeeInr: Int = 0,
+    @SerialName("gst_inr") val gstInr: Int = 0,
+    @SerialName("total_inr") val totalInr: Int = 0,
+    val status: String = BookingStatus.PendingConfirm.dbValue,
+    @SerialName("escrow_status") val escrowStatus: String = EscrowStatus.Held.dbValue,
+    @SerialName("payment_method") val paymentMethod: String = PaymentMethod.Upi.dbValue,
+    @SerialName("protection_enabled") val protectionEnabled: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("start_datetime") val startDatetime: String? = null,
+    @SerialName("end_datetime") val endDatetime: String? = null,
+    @SerialName("venue_notes") val venueNotes: String? = null,
+    @SerialName("client_name") val clientName: String? = null,
+    val client: ClientEmbed? = null,
+) {
+    @Serializable
+    data class ClientEmbed(@SerialName("full_name") val fullName: String? = null)
+
+    fun toDomain(): Booking {
+        val embed = client?.fullName?.trim()?.takeIf { it.isNotEmpty() }
+        val stamped = clientName?.trim()?.takeIf { it.isNotEmpty() }
+        return DbBooking(
+            id = id,
+            artistId = artistId,
+            packageIndex = packageIndex,
+            dateLabel = dateLabel,
+            timeLabel = timeLabel,
+            venue = venue,
+            guests = guests,
+            feeInr = feeInr,
+            platformFeeInr = platformFeeInr,
+            gstInr = gstInr,
+            totalInr = totalInr,
+            status = status,
+            escrowStatus = escrowStatus,
+            paymentMethod = paymentMethod,
+            protectionEnabled = protectionEnabled,
+            createdAt = createdAt,
+            startDatetime = startDatetime,
+            endDatetime = endDatetime,
+            venueNotes = venueNotes,
+            clientName = clientName,
+        ).toDomain(clientFullName = embed ?: stamped)
+    }
+}
+
+/**
+ * In-memory [BookingsRepository] for unit tests. Accept/decline/cancel mutate
+ * status in place; create stamps a UUID + pending_confirm.
+ */
+class FakeBookingsRepository(
+    seed: List<Booking> = emptyList(),
+) : BookingsRepository {
+    private val rows = seed.toMutableList()
+    var signedIn: Boolean = true
+    var failCreate: Boolean = false
+
+    override suspend fun create(draft: BookingDraft, paymentResult: PaymentResult): Booking {
+        if (!signedIn) throw BookingRepositoryError.NotSignedIn
+        if (failCreate) throw BookingRepositoryError.Underlying(IllegalStateException("fake create fail"))
+        val charges = draft.charges
+        val booking = Booking(
+            id = UUID.randomUUID().toString(),
+            artistId = draft.artistId.lowercase(),
+            packageIndex = draft.packageIndex,
+            date = draft.date,
+            time = draft.time,
+            venue = draft.venue.ifBlank { "TBD" },
+            guests = draft.guests,
+            fee = draft.feeInr,
+            platformFee = charges.platform,
+            gst = charges.gst,
+            total = charges.total,
+            status = BookingStatus.PendingConfirm,
+            escrowStatus = EscrowStatus.Held,
+            paymentMethod = draft.paymentMethod,
+            protectionEnabled = true,
+            createdAtEpochMs = System.currentTimeMillis(),
+            venueNotes = draft.venueNotes.trim().takeIf { it.isNotEmpty() },
+        )
+        rows.add(0, booking)
+        return booking
+    }
+
+    override suspend fun listForClient(): List<Booking> {
+        if (!signedIn) throw BookingRepositoryError.NotSignedIn
+        return rows.toList()
+    }
+
+    override suspend fun listForArtist(): List<Booking> = listForClient()
+
+    override suspend fun fetchOne(id: String): Booking? =
+        rows.firstOrNull { it.id.equals(id, ignoreCase = true) }
+
+    override suspend fun cancel(id: String, reason: String?): Booking =
+        mutate(id) { it.copy(status = BookingStatus.Cancelled, escrowStatus = EscrowStatus.Refunded) }
+
+    override suspend fun accept(id: String): Booking =
+        mutate(id) { it.copy(status = BookingStatus.Confirmed) }
+
+    override suspend fun declineByArtist(id: String, reason: String?): Booking =
+        cancel(id, reason)
+
+    private fun mutate(id: String, transform: (Booking) -> Booking): Booking {
+        if (!signedIn) throw BookingRepositoryError.NotSignedIn
+        val idx = rows.indexOfFirst { it.id.equals(id, ignoreCase = true) }
+        if (idx < 0) throw BookingRepositoryError.Underlying(NoSuchElementException(id))
+        val updated = transform(rows[idx])
+        rows[idx] = updated
+        return updated
+    }
+}

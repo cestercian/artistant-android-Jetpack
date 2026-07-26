@@ -1,53 +1,44 @@
 package `in`.artistant.app.data.model
 
-import androidx.compose.ui.graphics.Color
-import `in`.artistant.app.designsystem.theme.AppColors
-import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import `in`.artistant.app.domain.booking.BookingMath
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /**
- * Booking-funnel domain models — ports of iOS `Models/Booking.swift`. Plain data
- * classes; the DTOs in `data/model/dto` decode Postgres and map INTO them. Money
- * math lives in `domain/booking/BookingMath` (India 5% platform + 18% GST).
+ * Port of iOS `Models/Booking.swift` + draft shape from `BookingStore`.
+ * Status enum matches the DB check constraint; create always lands
+ * `pending_confirm` (request→accept). Money columns still persist
+ * platform/GST even though matchmaker UI shows artist fee only.
  */
 
-/**
- * Lifecycle of a booking. Rawvalues match the `bookings.status` enum verbatim so
- * `fromDb`/`dbValue` round-trip. Participants may only walk
- * pending_confirm→confirmed / →cancelled (API_MAPPING §3); completed/disputed are
- * service-role only. [calendarTint] is the single source for the month-calendar /
- * schedule-row tint — takes [AppColors] so it stays token-driven (no raw hex).
- */
-enum class BookingStatus(val dbValue: String, val label: String) {
-    PendingConfirm("pending_confirm", "Awaiting confirm"),
-    Confirmed("confirmed", "Confirmed"),
-    Completed("completed", "Completed"),
-    Cancelled("cancelled", "Cancelled"),
-    Disputed("disputed", "Disputed");
+enum class BookingStatus(val dbValue: String) {
+    PendingConfirm("pending_confirm"),
+    Confirmed("confirmed"),
+    Completed("completed"),
+    Cancelled("cancelled"),
+    Disputed("disputed");
 
-    fun calendarTint(colors: AppColors): Color = when (this) {
-        Confirmed -> colors.good
-        PendingConfirm -> colors.warm
-        Completed -> colors.ink3
-        Cancelled, Disputed -> colors.hot
-    }
+    val label: String
+        get() = when (this) {
+            PendingConfirm -> "Awaiting confirm"
+            Confirmed -> "Confirmed"
+            Completed -> "Completed"
+            Cancelled -> "Cancelled"
+            Disputed -> "Disputed"
+        }
 
     companion object {
-        /** Unknown/absent → PendingConfirm (iOS decode fallback). */
         fun fromDb(raw: String?): BookingStatus =
             entries.firstOrNull { it.dbValue == raw } ?: PendingConfirm
     }
 }
 
-/** Escrow state. Insert-time is clamped to `held` by the DB (API_MAPPING §3). */
-enum class EscrowStatus(val dbValue: String, val label: String) {
-    Held("held", "Held in escrow"),
-    Released("released", "Released to artist"),
-    Refunded("refunded", "Refunded");
+enum class EscrowStatus(val dbValue: String) {
+    Held("held"),
+    Released("released"),
+    Refunded("refunded");
 
     companion object {
         fun fromDb(raw: String?): EscrowStatus =
@@ -55,11 +46,17 @@ enum class EscrowStatus(val dbValue: String, val label: String) {
     }
 }
 
-/** How the client paid (dormant in v1 matchmaker; the seam stays for M7). */
-enum class PaymentMethod(val dbValue: String, val label: String) {
-    Upi("upi", "UPI"),
-    Card("card", "Card"),
-    Split("split", "Split");
+enum class PaymentMethod(val dbValue: String) {
+    Upi("upi"),
+    Card("card"),
+    Split("split");
+
+    val label: String
+        get() = when (this) {
+            Upi -> "UPI"
+            Card -> "Card"
+            Split -> "Split"
+        }
 
     companion object {
         fun fromDb(raw: String?): PaymentMethod =
@@ -67,79 +64,61 @@ enum class PaymentMethod(val dbValue: String, val label: String) {
     }
 }
 
-/**
- * A persisted booking (iOS `Booking`). [clientFullName] is populated only by
- * `listForArtist` via the `client:users!client_id(full_name)` embed — null on the
- * client's own list (their name comes from their profile). [startDatetime] /
- * [endDatetime] are the machine show-window; [resolvedStart]/[resolvedEnd] fall
- * back to parsing the display labels for the rare row that lacks them.
- */
 data class Booking(
     val id: String,
     val artistId: String,
     val packageIndex: Int,
-    val dateLabel: String,          // "Sat, May 16, 2026"
-    val timeLabel: String,          // "8:30 PM"
-    val startDatetime: Instant?,
-    val endDatetime: Instant?,
+    val date: String,
+    val time: String,
     val venue: String,
     val guests: Int,
-    val fee: Int,                   // performance fee, INR
-    val platformFee: Int,           // 5% of fee
-    val gst: Int,                   // 18% of (fee + platform)
-    val total: Int,                 // fee + platform + gst
+    val fee: Int,
+    val platformFee: Int,
+    val gst: Int,
+    val total: Int,
     val status: BookingStatus,
     val escrowStatus: EscrowStatus,
     val paymentMethod: PaymentMethod,
     val protectionEnabled: Boolean,
-    val createdAt: Instant?,
+    val createdAtEpochMs: Long,
+    /** Artist-side display name — prefer embed, else 0080 `client_name`. */
     val clientFullName: String? = null,
+    val startDatetimeIso: String? = null,
+    val endDatetimeIso: String? = null,
+    val venueNotes: String? = null,
 )
 
-// --- Resolved show window (calendar sync) --------------------------------
-// Port of iOS `Booking.resolvedStart/resolvedEnd`. Every server row carries
-// start_datetime/end_datetime; the label-parse fallback exists only for a rare
-// pre-datetime local snapshot. The calendar mirror keys its fingerprint + the
-// "can this become an event?" guard off these.
-
-/** Best-effort concrete start: the machine timestamp when present, else a parse of
- *  the display labels. Null when neither resolves (the mirror then skips the row). */
-val Booking.resolvedStart: Instant?
-    get() = startDatetime ?: parseBookingLabels(dateLabel, timeLabel)
-
-/** End of the show window; falls back to start + 2h — the same placeholder duration
- *  `SupabaseBookingsRepository.startEnd` writes on create, so both paths agree. */
-val Booking.resolvedEnd: Instant?
-    get() = endDatetime ?: resolvedStart?.plusSeconds(2 * 3600)
-
-// "EEE, MMM d, yyyy" (the load-bearing date-label contract) + the same 12h/24h time
-// pair the repo's startEnd accepts. Locale.US because the tokens are English name
-// words; device zone to match iOS `Calendar.current` / the repo's startEnd.
-private val LABEL_FORMATS = listOf("EEE, MMM d, yyyy h:mm a", "EEE, MMM d, yyyy HH:mm")
-    .map { DateTimeFormatter.ofPattern(it, Locale.US) }
-
-private fun parseBookingLabels(date: String, time: String): Instant? {
-    val text = "${date.trim()} ${time.trim()}"
-    for (fmt in LABEL_FORMATS) {
-        val parsed = runCatching { LocalDateTime.parse(text, fmt) }.getOrNull()
-        if (parsed != null) return parsed.atZone(ZoneId.systemDefault()).toInstant()
-    }
-    return null
-}
-
 /**
- * In-flight booking being composed (iOS `BookingDraft`). Holds only inputs; the
- * fee/totals are computed against the artist's packages via `ArtistsRepository`
- * (see the `fee`/`charges` extensions in `BookingsRepository.kt`, kept there to
- * avoid a data.model → data.repository import cycle). [guests] defaults to 100.
+ * In-memory compose draft. Fee/package snapshot fields are filled by the
+ * ViewModel from [Artist] so [BookingsRepository.create] never needs the
+ * artist cache (keeps Fake tests offline).
  */
 data class BookingDraft(
     val artistId: String,
-    val packageIndex: Int,
-    val date: String,               // display label, e.g. "Sat, May 16, 2026"
-    val dateRaw: LocalDate,
-    val time: String,               // "8:30 PM"
+    val packageIndex: Int = 0,
+    val packageName: String = "Custom",
+    val packageDuration: String = "Custom",
+    val feeInr: Int = 0,
+    val date: String,
+    val dateRawEpochMs: Long,
+    val time: String,
     val venue: String = "",
     val guests: Int = 100,
     val paymentMethod: PaymentMethod = PaymentMethod.Upi,
-)
+    val venueNotes: String = "",
+) {
+    val charges get() = BookingMath.compute(feeInr)
+}
+
+object BookingDateFormat {
+    /** Writer/reader contract — same as iOS `Booking.dateFormat`. */
+    const val PATTERN = "EEE, MMM d, yyyy"
+
+    private val posix = Locale.US
+
+    fun weekdayString(epochMs: Long): String {
+        val f = SimpleDateFormat(PATTERN, posix)
+        f.timeZone = TimeZone.getDefault()
+        return f.format(Date(epochMs))
+    }
+}

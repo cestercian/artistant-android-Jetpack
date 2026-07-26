@@ -1,62 +1,35 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
 import io.ktor.http.ContentType
-import `in`.artistant.app.common.util.lowercaseUuid
-import `in`.artistant.app.common.util.storagePathFromPublicUrl
-import `in`.artistant.app.common.util.storagePublicUrl
-import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.core.result.mapPostgrest
-import `in`.artistant.app.data.model.SampleInput
-import `in`.artistant.app.data.model.SampleRow
-import `in`.artistant.app.data.model.dto.replaceSamplesParams
+import `in`.artistant.app.core.result.AppError
+import `in`.artistant.app.data.model.Sample
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Read + write for `public.samples` — the per-artist audio clips on the EPK
- * "Music" tab (port of iOS `SamplesRepository`). Audio bytes live in the public
- * `artist-samples` bucket at `<artistId>/<sampleId>.<ext>`; each row carries a
- * public-URL pointer + title + duration + position.
- *
- * Two write paths:
- *  - [upload] — single-sample append (what the upload queue drains, one task per
- *    sample). Uploads bytes, then inserts with a MAX(position)+1 lookup and a
- *    `23505` collision retry (two devices racing the same position), rolling the
- *    storage object back if the insert never lands.
- *  - [replaceAll] — atomic delete+insert via the `replace_samples` RPC for the
- *    future EPK bulk editor, plus best-effort storage cleanup of orphaned objects.
+ * `public.samples` + `artist-samples` bucket — port of iOS SamplesRepository.
+ * Wizard / UploadQueue use [upload] (append). EPK delete is targeted by id —
+ * never [replaceAll] for single-row edits (orphan prune can kill unknown rows).
  */
 interface SamplesRepository {
-    suspend fun list(artistId: String): List<SampleRow>
-
-    /** Append one uploaded sample. [ext]/[mime] preserve the source audio format. */
+    suspend fun list(artistId: String): List<Sample>
     suspend fun upload(
-        audioBytes: ByteArray,
-        ext: String,
-        mime: String,
+        audioFile: File,
         title: String,
         durationSeconds: Double,
         artistId: String,
-    ): SampleRow
-
-    /** Atomic replace-all + orphan storage prune (EPK bulk editor). */
-    suspend fun replaceAll(artistId: String, samples: List<SampleInput>)
-
-    /**
-     * Targeted single-row delete for the EPK editor (iOS `SamplesRepository.delete`).
-     * A targeted delete — NOT replaceAll(remaining) — so removing one clip can't prune
-     * another device's newer sample the local list hasn't seen yet. Also best-effort
-     * prunes this clip's own bucket object so the quota doesn't leak.
-     */
-    suspend fun delete(row: SampleRow, artistId: String)
+    ): Sample
+    suspend fun delete(sampleId: String, storagePathOrUrl: String?)
 }
 
 @Singleton
@@ -64,236 +37,174 @@ class SupabaseSamplesRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : SamplesRepository {
 
-    override suspend fun list(artistId: String): List<SampleRow> =
-        client.postgrest.from("samples")
-            .select(SAMPLE_COLUMNS) {
-                filter { eq("artist_id", artistId.lowercaseUuid()) }
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DBSampleFull>()
-            .map { it.toDomain() }
+    override suspend fun list(artistId: String): List<Sample> =
+        try {
+            client.from("samples")
+                .select {
+                    filter { eq("artist_id", artistId.lowercase()) }
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<SampleRow>()
+                .map { it.toDomain() }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
 
     override suspend fun upload(
-        audioBytes: ByteArray,
-        ext: String,
-        mime: String,
+        audioFile: File,
         title: String,
         durationSeconds: Double,
         artistId: String,
-    ): SampleRow {
-        val artist = artistId.lowercaseUuid()
-        val sampleId = UUID.randomUUID().toString().lowercaseUuid()
-        // Path layout matches the storage RLS: first segment = artist uuid, so
-        // `owns_artist(split_part(name,'/',1))` gates the write to their folder.
-        val path = "$artist/$sampleId.$ext"
-
-        client.storage.from(BUCKET).upload(path, audioBytes) {
-            upsert = false
-            contentType = ContentType.parse(mime)
-        }
-        val publicUrl = storagePublicUrl(BUCKET, path)
-
-        // Insert with position retry; on ANY failure roll the uploaded object back
-        // so a failed insert doesn't leak bytes into the artist's quota.
-        return try {
-            insertWithPositionRetry(
-                nextPosition = { nextPosition(artist) },
-                insert = { position ->
-                    try {
-                        client.postgrest.from("samples")
-                            .insert(
-                                SampleInsert(
-                                    id = sampleId,
-                                    artist_id = artist,
-                                    position = position,
-                                    title = title.trim(),
-                                    duration_label = formatDuration(durationSeconds),
-                                    audio_url = publicUrl,
-                                ),
-                            ) { select(SAMPLE_COLUMNS) }
-                            .decodeSingle<DBSampleFull>()
-                            .toDomain()
-                    } catch (t: Throwable) {
-                        throw mapPostgrest(t) // 23505 → UniqueViolation (retryable)
-                    }
-                },
-            )
+    ): Sample {
+        val id = UUID.randomUUID().toString().lowercase()
+        val artist = artistId.lowercase()
+        val (ext, mime) = audioFormat(audioFile)
+        val path = "$artist/$id.$ext"
+        val bytes = audioFile.readBytes()
+        try {
+            client.storage.from(BUCKET).upload(path, bytes) {
+                contentType = ContentType.parse(mime)
+                upsert = false
+            }
         } catch (t: Throwable) {
-            runCatching { client.storage.from(BUCKET).delete(path) }
-            throw t
+            throw mapPostgrest(t)
         }
+        val publicUrl = client.storage.from(BUCKET).publicUrl(path)
+        // Position can race under concurrent uploads; retry on unique_violation.
+        var lastError: Throwable? = null
+        repeat(MAX_POSITION_RETRIES) {
+            val position = nextPosition(artist)
+            try {
+                val row = client.from("samples")
+                    .insert(
+                        SampleInsert(
+                            id = id,
+                            artistId = artist,
+                            position = position,
+                            title = title.trim().ifBlank { "Sample" },
+                            durationLabel = formatDuration(durationSeconds),
+                            audioUrl = publicUrl,
+                        ),
+                    ) { select() }
+                    .decodeSingle<SampleRow>()
+                return row.toDomain()
+            } catch (t: Throwable) {
+                lastError = t
+                val mapped = mapPostgrest(t)
+                if (mapped !is AppError.UniqueViolation) {
+                    runCatching { client.storage.from(BUCKET).delete(path) }
+                    throw mapped
+                }
+            }
+        }
+        runCatching { client.storage.from(BUCKET).delete(path) }
+        throw mapPostgrest(lastError ?: IllegalStateException("sample upload failed"))
     }
 
-    override suspend fun replaceAll(artistId: String, samples: List<SampleInput>) {
-        val artist = artistId.lowercaseUuid()
-        // Snapshot existing audio_urls BEFORE the RPC — afterwards the rows are
-        // gone and we'd have no way to know which bucket objects to prune.
-        val existingPaths = runCatching {
-            client.postgrest.from("samples")
-                .select(Columns.list("audio_url")) { filter { eq("artist_id", artist) } }
-                .decodeList<AudioUrlOnly>()
-                .mapNotNull { storagePathFromPublicUrl(BUCKET, it.audio_url) }
-                .toSet()
-        }.getOrDefault(emptySet())
-
-        client.postgrest.rpc("replace_samples", replaceSamplesParams(artist, samples))
-
-        // Prune objects that were on an old row but not in the new set. Best-effort
-        // (a leaked object is a quota nit, not a correctness bug). Subtracting the
-        // new set means a rename/re-order that keeps the same URLs touches nothing.
-        val newPaths = samples.mapNotNull { storagePathFromPublicUrl(BUCKET, it.audioUrl) }.toSet()
-        val orphans = (existingPaths - newPaths).toList()
-        if (orphans.isNotEmpty()) runCatching { client.storage.from(BUCKET).delete(orphans) }
-    }
-
-    override suspend fun delete(row: SampleRow, artistId: String) {
-        // Row first so no live pointer references a file mid-delete; if the storage
-        // delete then fails the object is a cleanable orphan, not a broken row.
-        client.postgrest.from("samples")
-            .delete { filter { eq("id", row.id.lowercaseUuid()) } }
-        val path = row.audioUrl?.let { storagePathFromPublicUrl(BUCKET, it) }
-        if (path != null) runCatching { client.storage.from(BUCKET).delete(path) }
+    override suspend fun delete(sampleId: String, storagePathOrUrl: String?) {
+        try {
+            client.from("samples").delete {
+                filter { eq("id", sampleId.lowercase()) }
+            }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+        val path = storagePathFromUrl(storagePathOrUrl) ?: return
+        runCatching { client.storage.from(BUCKET).delete(path) }
     }
 
     private suspend fun nextPosition(artistId: String): Int {
-        val rows = client.postgrest.from("samples")
+        val rows = client.from("samples")
             .select(Columns.list("position")) {
                 filter { eq("artist_id", artistId) }
                 order("position", Order.DESCENDING)
                 limit(1)
             }
-            .decodeList<PositionOnly>()
+            .decodeList<PositionRow>()
         return (rows.firstOrNull()?.position ?: -1) + 1
     }
 
-    @Serializable
-    private data class SampleInsert(
-        val id: String,
-        val artist_id: String,
-        val position: Int,
-        val title: String,
-        val duration_label: String,
-        val audio_url: String?,
-    )
-
-    @Serializable private data class PositionOnly(val position: Int)
-    @Serializable private data class AudioUrlOnly(val audio_url: String? = null)
-
-    @Serializable
-    private data class DBSampleFull(
-        val id: String,
-        val artist_id: String,
-        val position: Int,
-        val title: String,
-        val duration_label: String,
-        val audio_url: String? = null,
-        val spotify_track_url: String? = null,
-        val cover_art_url: String? = null,
-    ) {
-        fun toDomain() = SampleRow(
-            id = id,
-            artistId = artist_id,
-            position = position,
-            title = title,
-            durationLabel = duration_label,
-            audioUrl = audio_url,
-            spotifyTrackUrl = spotify_track_url,
-            coverArtUrl = cover_art_url,
-        )
-    }
-
     companion object {
-        const val BUCKET = "artist-samples"
-        private val SAMPLE_COLUMNS = Columns.list(
-            "id", "artist_id", "position", "title", "duration_label",
-            "audio_url", "spotify_track_url", "cover_art_url",
-        )
-    }
-}
+        private const val BUCKET = "artist-samples"
+        private const val MAX_POSITION_RETRIES = 5
 
-/**
- * Runs [insert] with a fresh [nextPosition] each attempt, retrying only on a
- * position collision ([AppError.UniqueViolation] = SQLSTATE 23505) so the slower
- * of two racing uploads still lands instead of failing the caller. Any other
- * error propagates immediately. Pure (no Supabase types) so it's unit-testable.
- * Port of the iOS `SamplesRepository.upload` retry loop.
- */
-suspend fun <T> insertWithPositionRetry(
-    maxRetries: Int = 5,
-    nextPosition: suspend () -> Int,
-    insert: suspend (Int) -> T,
-): T {
-    var lastError: Throwable? = null
-    repeat(maxRetries) {
-        val position = nextPosition()
-        try {
-            return insert(position)
-        } catch (e: AppError.UniqueViolation) {
-            lastError = e // another uploader claimed this position — retry fresh
+        fun formatDuration(seconds: Double): String {
+            val total = seconds.toInt().coerceAtLeast(0)
+            val m = total / 60
+            val s = total % 60
+            return "%d:%02d".format(m, s)
+        }
+
+        fun audioFormat(file: File): Pair<String, String> {
+            val ext = file.extension.lowercase().ifBlank { "m4a" }
+            val mime = when (ext) {
+                "mp3" -> "audio/mpeg"
+                "wav" -> "audio/wav"
+                "aac" -> "audio/aac"
+                "ogg" -> "audio/ogg"
+                else -> "audio/mp4"
+            }
+            return ext to mime
+        }
+
+        /** Extract bucket-relative path from a public URL, or return as-is if already a path. */
+        fun storagePathFromUrl(urlOrPath: String?): String? {
+            if (urlOrPath.isNullOrBlank()) return null
+            val marker = "/object/public/$BUCKET/"
+            val idx = urlOrPath.indexOf(marker)
+            return if (idx >= 0) urlOrPath.substring(idx + marker.length) else urlOrPath
         }
     }
-    throw lastError ?: IllegalStateException("position retry exhausted")
 }
 
-/** `30s` / `1:24` — same shape as the wizard preview so the row reads identically. */
-internal fun formatDuration(seconds: Double): String {
-    val secs = Math.round(seconds).toInt()
-    return if (secs < 60) "${secs}s" else "%d:%02d".format(secs / 60, secs % 60)
-}
+class FakeSamplesRepository : SamplesRepository {
+    private val byArtist = mutableMapOf<String, MutableList<Sample>>()
+    val uploadedFiles = mutableListOf<File>()
 
-/**
- * In-memory twin — models the `UNIQUE(artist_id, position)` table: [upload]
- * appends at the next free position and [list] returns them position-ordered, so
- * a test can assert sequential position assignment across multiple uploads.
- */
-class FakeSamplesRepository(
-    seed: Map<String, List<SampleRow>> = emptyMap(),
-) : SamplesRepository {
-    private val store = seed.mapValues { it.value.toMutableList() }.toMutableMap()
-
-    override suspend fun list(artistId: String): List<SampleRow> =
-        store[artistId].orEmpty().sortedBy { it.position }
+    override suspend fun list(artistId: String): List<Sample> =
+        byArtist[artistId.lowercase()].orEmpty()
 
     override suspend fun upload(
-        audioBytes: ByteArray,
-        ext: String,
-        mime: String,
+        audioFile: File,
         title: String,
         durationSeconds: Double,
         artistId: String,
-    ): SampleRow {
-        val list = store.getOrPut(artistId) { mutableListOf() }
-        val position = (list.maxOfOrNull { it.position } ?: -1) + 1
-        val row = SampleRow(
-            id = UUID.randomUUID().toString(),
-            artistId = artistId,
-            position = position,
-            title = title.trim(),
-            durationLabel = formatDuration(durationSeconds),
-            audioUrl = "fake://$artistId/$position.$ext",
-            spotifyTrackUrl = null,
-            coverArtUrl = null,
+    ): Sample {
+        uploadedFiles.add(audioFile)
+        val sample = Sample(
+            id = UUID.randomUUID().toString().lowercase(),
+            title = title,
+            duration = SupabaseSamplesRepository.formatDuration(durationSeconds),
         )
-        list.add(row)
-        return row
+        byArtist.getOrPut(artistId.lowercase()) { mutableListOf() }.add(sample)
+        return sample
     }
 
-    override suspend fun delete(row: SampleRow, artistId: String) {
-        store[artistId]?.removeAll { it.id == row.id }
-    }
-
-    override suspend fun replaceAll(artistId: String, samples: List<SampleInput>) {
-        store[artistId] = samples.mapIndexed { idx, s ->
-            SampleRow(
-                id = "s-$idx",
-                artistId = artistId,
-                position = idx,
-                title = s.title,
-                durationLabel = s.durationLabel,
-                audioUrl = s.audioUrl,
-                spotifyTrackUrl = s.spotifyTrackUrl,
-                coverArtUrl = s.coverArtUrl,
-            )
-        }.toMutableList()
+    override suspend fun delete(sampleId: String, storagePathOrUrl: String?) {
+        byArtist.values.forEach { list -> list.removeAll { it.id == sampleId.lowercase() } }
     }
 }
+
+@Serializable
+private data class SampleInsert(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val position: Int,
+    val title: String,
+    @SerialName("duration_label") val durationLabel: String,
+    @SerialName("audio_url") val audioUrl: String,
+)
+
+@Serializable
+private data class SampleRow(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val title: String,
+    @SerialName("duration_label") val durationLabel: String = "",
+    @SerialName("audio_url") val audioUrl: String? = null,
+) {
+    fun toDomain() = Sample(id = id, title = title, duration = durationLabel)
+}
+
+@Serializable
+private data class PositionRow(val position: Int)

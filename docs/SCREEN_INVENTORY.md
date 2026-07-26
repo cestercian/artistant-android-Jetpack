@@ -297,15 +297,16 @@ on `UploadQueue.batchCompleted`. *Deps:* EPKStore, UploadQueue.
 **MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *ViewModel:*
 `MessagesViewModel` (`MessageStore` port). *Compose:* `LazyColumn` thread rows→
 `Chat(id)`: `Avatar` 44, role-resolved counterpart name, BOOKING pill, timeAgo,
-2-line **redacted** preview, unread dot. *APIs:* `listThreadsForUser`. *State:*
+2-line preview (verbatim body — **no** redaction), unread dot. *APIs:* `listThreadsForUser`. *State:*
 threads (badge = Σ unread). *Lifecycle:* two-stage hydrate (artists, then names);
 `pendingThreadId` deep link; pull-to-refresh; skeleton/empty/error. *Deps:*
 SessionManager, RoleStore, BookingStore, ArtistsRepository.
 
 **ChatScreen** (S, `Chat`) → `feature/messages/`. *ViewModel:* `ChatViewModel`.
 *Compose:* `LazyColumn` (reverse) with `rememberLazyListState` auto-scroll to
-bottom on new message; bubbles system(centered)/me(brand)/other(card), **per-bubble
-redaction**, failed-send retry chip + haptic; **composer** multiline field + send,
+bottom on new message; bubbles system(centered)/me(brand)/other(card), **Airbnb
+trust banner** (not redaction), failed-send retry chip + haptic; **composer**
+multiline field + send,
 glass floating bar (`Scaffold` bottomBar). *APIs:* `MessagesRepository`
 (listMessages explicit columns, send, **realtime** `subscribeMessages`,
 markThreadRead, findOrCreateThread). *Lifecycle:* `LaunchedEffect(threadId,userId)`

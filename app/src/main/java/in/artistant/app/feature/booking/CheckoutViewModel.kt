@@ -3,87 +3,79 @@ package `in`.artistant.app.feature.booking
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.artistant.app.core.config.AppEnvironment
-import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.BookingDraft
+import `in`.artistant.app.data.payments.PaymentsService
 import `in`.artistant.app.data.repository.ArtistsRepository
-import `in`.artistant.app.platform.payments.PaymentException
-import `in`.artistant.app.platform.payments.PaymentsService
-import `in`.artistant.app.state.BookingStore
-import `in`.artistant.app.state.EntitlementStore
-import kotlinx.coroutines.flow.MutableSharedFlow
+import `in`.artistant.app.data.repository.BookingRepositoryError
+import `in`.artistant.app.data.repository.BookingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * Drives `CheckoutScreen` (port of iOS `CheckoutView`). Confirm routes through the
- * [PaymentsService] seam (mock in v1) → [BookingStore.confirmDraftAsBooking] → a
- * one-shot [confirmed] event carrying the new booking id. A payment throw OR a
- * post-payment write failure surfaces on [state].error with a retry.
- *
- * M7 subscription gate: [confirm] checks the dormant client paywall gate first — but it's
- * behind `subscriptionsEnabled`, so in v1 it's always false and confirm goes straight through.
- */
+data class CheckoutUiState(
+    val draft: BookingDraft? = null,
+    val artistName: String = "",
+    val isSubmitting: Boolean = false,
+    val lastCreateErrorMessage: String? = null,
+    val confirmedBookingId: String? = null,
+)
+
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
-    private val store: BookingStore,
-    private val payments: PaymentsService,
-    private val artists: ArtistsRepository,
-    private val entitlements: EntitlementStore,
+    private val draftStore: BookingDraftStore,
+    private val artistsRepository: ArtistsRepository,
+    private val bookingsRepository: BookingsRepository,
+    private val paymentsService: PaymentsService,
 ) : ViewModel() {
 
-    data class UiState(val confirming: Boolean = false, val error: String? = null)
+    private val _state = MutableStateFlow(CheckoutUiState())
+    val state: StateFlow<CheckoutUiState> = _state.asStateFlow()
 
-    val draft = store.draft
-
-    private val _state = MutableStateFlow(UiState())
-    val state: StateFlow<UiState> = _state.asStateFlow()
-
-    private val _confirmed = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val confirmed: SharedFlow<String> = _confirmed.asSharedFlow()
-
-    /** Emitted when the dormant M7 gate trips — the screen pushes the paywall instead of confirming. */
-    private val _needsPaywall = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val needsPaywall: SharedFlow<Unit> = _needsPaywall.asSharedFlow()
-
-    /** The artist behind the current draft (cache hit — the funnel warmed it). */
-    fun artist(): Artist? = store.draft.value?.let { artists.find(it.artistId) }
-
-    fun confirm() {
-        val current = store.draft.value ?: return
-        if (_state.value.confirming) return
-        // M7 DORMANT gate: with subscriptionsEnabled off this is always false, so confirm behaves
-        // exactly as before. When the operator flips the flag (+ wires Play), a non-entitled
-        // client is routed to the paywall instead of confirming.
-        // ponytail: the free-intro quota (5 bookings before the gate bites, per iOS) is a go-live
-        // refinement — today the whole gate is behind the flag, so there's nothing to count yet.
-        if (AppEnvironment.subscriptionsEnabled &&
-            !entitlements.isEntitled(AppEnvironment.CLIENT_MONTHLY_PRODUCT_ID)
-        ) {
-            _needsPaywall.tryEmit(Unit)
-            return
-        }
-        _state.update { it.copy(confirming = true, error = null) }
+    init {
         viewModelScope.launch {
-            try {
-                val result = payments.collectPayment(current)
-                val booking = store.confirmDraftAsBooking(result)
-                if (booking != null) {
-                    _confirmed.tryEmit(booking.id)
-                    _state.update { it.copy(confirming = false) }
-                } else {
-                    // Payment cleared but the write didn't land (auth race / RLS /
-                    // network) — recoverable, so a visible retry, not a dead end.
-                    _state.update { it.copy(confirming = false, error = "Couldn't confirm the match. Please retry.") }
-                }
-            } catch (_: PaymentException) {
-                _state.update { it.copy(confirming = false, error = "Payment didn't go through. Please retry.") }
+            val draft = draftStore.draft.value
+            if (draft == null) {
+                _state.update { it.copy(lastCreateErrorMessage = "No booking draft — go back and try again.") }
+                return@launch
+            }
+            val artist = artistsRepository.find(draft.artistId)
+            _state.update {
+                it.copy(draft = draft, artistName = artist?.name.orEmpty())
             }
         }
+    }
+
+    fun sendRequest() {
+        val draft = _state.value.draft ?: return
+        if (_state.value.isSubmitting) return
+        viewModelScope.launch {
+            _state.update { it.copy(isSubmitting = true, lastCreateErrorMessage = null) }
+            try {
+                val payment = paymentsService.collectPayment(draft)
+                val booking = bookingsRepository.create(draft, payment)
+                draftStore.clear()
+                _state.update {
+                    it.copy(isSubmitting = false, confirmedBookingId = booking.id)
+                }
+            } catch (e: BookingRepositoryError) {
+                _state.update {
+                    it.copy(isSubmitting = false, lastCreateErrorMessage = e.message)
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isSubmitting = false,
+                        lastCreateErrorMessage = e.message ?: "Couldn't send your request.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearNavigation() {
+        _state.update { it.copy(confirmedBookingId = null) }
     }
 }

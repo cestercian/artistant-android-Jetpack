@@ -7,8 +7,6 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
-    // FCM push (P2b): processes app/google-services.json into the FCM config resources.
-    alias(libs.plugins.google.services)
 }
 
 // Supabase creds are read from a gitignored `secrets.properties` at the repo root
@@ -40,19 +38,10 @@ android {
         // the same GCP OAuth client backs every Supabase project.
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${secret("GOOGLE_WEB_CLIENT_ID", "REPLACE")}\"")
 
-        // Observability keys — DARK-UNTIL-KEY (iOS parity). Empty by default so the
-        // PostHog/Sentry wrappers stay a silent no-op; the operator drops real values
-        // into gitignored secrets.properties post-plan and nothing else changes.
+        // Observability — blank default keeps PostHog/Sentry wrappers as no-ops
+        // until the operator sets secrets.properties (see AppEnvironment).
         buildConfigField("String", "POSTHOG_API_KEY", "\"${secret("POSTHOG_API_KEY", "")}\"")
         buildConfigField("String", "SENTRY_DSN", "\"${secret("SENTRY_DSN", "")}\"")
-
-        // v1 monetization gate (iOS `subscriptionsEnabled`). DEFAULT OFF — v1 is a
-        // no-payments matchmaker, so the whole M7 Play-Billing seam ships DORMANT: the
-        // Mock service runs, the paywall is unreachable, and PlayBilling never touches
-        // BillingClient. The operator flips this to `true` (secrets.properties) once the
-        // Play Console products + RTDN backend are live. Single source, read via
-        // AppEnvironment.subscriptionsEnabled — never BuildConfig.* directly.
-        buildConfigField("boolean", "SUBSCRIPTIONS_ENABLED", secret("SUBSCRIPTIONS_ENABLED", "false"))
     }
 
     // Product flavors carry the per-environment Supabase creds as BuildConfig
@@ -80,13 +69,7 @@ android {
 
     buildTypes {
         release {
-            // M8: R8 on — shrink + obfuscate + resource-strip. Keep rules for the
-            // serialization/nav surfaces R8 could otherwise break live in
-            // proguard-rules.pro (a green assemble proves the static pass; the release
-            // build still MUST be device-smoke-tested before Play submission — the
-            // runtime survival of generated serializers can't be seen at build time).
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -137,17 +120,6 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // WorkManager + Hilt-Work: persistent, retrying upload queue for wizard media.
-    // hilt-compiler (androidx.hilt) generates the HiltWorkerFactory glue via KSP.
-    implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.androidx.hilt.work)
-    ksp(libs.androidx.hilt.compiler)
-
-    // Media3 Transformer — on-device video trim + MP4 re-encode.
-    implementation(libs.androidx.media3.transformer)
-    implementation(libs.androidx.media3.common)
-    implementation(libs.androidx.media3.effect)
-
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
@@ -169,15 +141,33 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
 
-    // Play Billing — M7 dormant subscription seam (guarded behind subscriptionsEnabled).
-    implementation(libs.billing.ktx)
-
-    // Firebase Cloud Messaging — the P2b push RECEIVER + token lifecycle. The BOM keeps
-    // firebase-messaging's transitive deps aligned; the google-services plugin (above)
-    // supplies the config from app/google-services.json.
+    // FCM — soft-fail at runtime when google-services.json is absent (gitignored).
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
 
+    // UploadQueue persistence + drain kick
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
+    // Cover video trim (Media3 Transformer)
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.common)
+
+    // Play Billing seam (flag-gated)
+    implementation(libs.billing.ktx)
+
+    // CameraX still capture for wizard cover
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+}
+
+// google-services.json is gitignored (operator drops per-flavor copies). Apply the
+// plugin only when present so CI / green-tree builds stay green without secrets.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }

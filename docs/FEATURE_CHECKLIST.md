@@ -11,47 +11,49 @@ Legend for dependencies: → means "needs". "Foundation" = the M0 items below.
 
 ---
 
-## F0 — Foundation & scaffolding  *(blocks everything)*
+## F0 — Foundation & scaffolding  *(blocks everything)* ✅ done (M0)
 
-- [ ] **Gradle project + version catalog** — `:app`, KTS, `libs.versions.toml`,
+- [x] **Gradle project + version catalog** — `:app`, KTS, `libs.versions.toml`,
   Compose plugin, KSP. **S.** Deps: none. Risk: low.
-- [ ] **Product flavors + BuildConfig** — dev/staging/prod, `SUPABASE_URL`/`ANON_KEY`
+- [x] **Product flavors + BuildConfig** — dev/staging/prod, `SUPABASE_URL`/`ANON_KEY`
   from `local.properties`/CI, flags (`REALTIME_ENABLED`, `SUBSCRIPTIONS_ENABLED`),
   product ids. **S.** Risk: secret handling — never commit keys.
-- [ ] **Hilt setup** — `@HiltAndroidApp`, `SupabaseModule`, `DispatcherModule`,
+- [x] **Hilt setup** — `@HiltAndroidApp`, `SupabaseModule`, `DispatcherModule`,
   `RepositoryModule` (empty binds to fill in). **S.** Deps: Gradle.
-- [ ] **supabase-kt client** — `createSupabaseClient` + installs; **tier guard**
+- [x] **supabase-kt client** — `createSupabaseClient` + installs; **tier guard**
   (prod host assertion). **M.** Risk: version/API drift vs supabase-swift.
-- [ ] **AppEnvironment** — `object` reading BuildConfig (port). **S.**
-- [ ] **Design system** — `ArtistantTheme`, `AppColors` (role-reactive),
+- [x] **AppEnvironment** — `object` reading BuildConfig (port). **S.**
+- [x] **Design system** — `ArtistantTheme`, `AppColors` (role-reactive),
   `AppType` (3 `FontFamily`s + ramp), `Dimens`, INR util, `PiiScrub`. **L.**
   Deps: fonts dropped in `res/font/`. Risk: role-accent switching; font metrics.
-- [ ] **Navigation shell** — `NavHost`, typed routes, `ArtistantRoot` auth-gate,
+- [x] **Navigation shell** — `NavHost`, typed routes, `ArtistantRoot` auth-gate,
   Client/Artist tab scaffolds, `DeepLinkRouter`. **M.** Deps: theme.
-- [ ] **Core components (subset needed early)** — `PrimaryButton`, `Pill`,
+- [x] **Core components (subset needed early)** — `PrimaryButton`, `Pill`,
   `CardView`, `HRule`, `KVRow`, `HeaderBar`, `EmptyState`, `Skeleton`, `Avatar`,
   `Toast`. **L.** Independent per-component once theme exists.
-- [ ] **Result/error model** — sealed `AppError` + PostgREST code mapping. **S.**
-- [ ] **DataStore `AppPreferences`** — Persistence port (`artistant.state.*`,
+  *(Some browse components still land with M2 — gallery ships the early set.)*
+- [x] **Result/error model** — sealed `AppError` + PostgREST code mapping. **S.**
+- [x] **DataStore `AppPreferences`** — Persistence port (`artistant.state.*`,
   `wipeAll`). **S.**
 
-*Foundation total ≈ 2 weeks. Design system + components are the long pole and are
-internally parallelizable.*
+*Foundation shipped in M0. Remaining polish (brand `.ttf`, full component set)
+tracked under #15 / M2.*
 
 ---
 
-## F1 — Auth & routing  *(gates the app)*
+## F1 — Auth & routing  *(gates the app)* ✅ done (M1a)
 
-- [ ] **SessionManager** — supabase-kt Auth wrapper; `sessionStatus` Flow;
+- [x] **SessionManager** — supabase-kt Auth wrapper; `sessionStatus` Flow;
   `signInGeneration`; expose `currentUser`, `effectiveUserId`. **M.** → Foundation.
-- [ ] **Google sign-in** — Credential Manager → ID token → supabase. **M.** Risk:
+- [x] **Google sign-in** — Credential Manager → ID token → supabase. **M.** Risk:
   Credential Manager setup, SHA-1 in console, nonce.
-- [ ] **Apple sign-in** — Custom Tabs OAuth web flow + nonce. **M.** Risk: **no
+- [x] **Apple sign-in** — Custom Tabs OAuth web flow + nonce. **M.** Risk: **no
   native SDK**; redirect + deep-link plumbing; test on device.
-- [ ] **Email/password** — sign-in/up + confirmationRequired. **S.**
-- [ ] **Deep-link intent-filter** (`in.artistant.app://login-callback`) + add to
+  *(#12 Apple deep-link error handling still open — blocks Apple go-live.)*
+- [x] **Email/password** — sign-in/up + confirmationRequired. **S.**
+- [x] **Deep-link intent-filter** (`in.artistant.app://login-callback`) + add to
   Supabase dashboard. **S.** Risk: dashboard step is operator-side.
-- [ ] **Returning-login router** — `routeIn/onboard/degrade` (pure, testable);
+- [x] **Returning-login router** — `routeIn/onboard/degrade` (pure, testable);
   fetch self-profile with retry; hydrate role + artist setup. **M.** Risk: the
   edge cases the iOS `RootView` documents (stranded step, same-UUID re-auth).
 
@@ -60,27 +62,27 @@ SessionManager.*
 
 ---
 
-## F2 — Signup onboarding  *(SHARED)*
+## F2 — Signup onboarding  *(SHARED)* ✅ done (M1b)
 
-- [ ] **SignupViewModel** — step machine (signup/login orders), handle-availability
+- [x] **SignupViewModel** — step machine (signup/login orders), handle-availability
   debounce (`handle_is_available`, 350ms), returning-user hydration banners. **M.**
-- [ ] **Welcome / Role / Auth / EmailAuth / Profile / NotifPermission / Done /
+- [x] **Welcome / Role / Auth / EmailAuth / Profile / NotifPermission / Done /
   Legal** screens. **L** total. Deps: F1, components, `ScoreRing`. Risk: Role
   screen's tap-commit + appear-debounce; Auth screen's animated lineup background
   (motion-gated).
-- [ ] **Notif permission** wiring → `POST_NOTIFICATIONS` + FCM register. **S.** → F9.
+- [x] **Notif permission** wiring → `POST_NOTIFICATIONS` + FCM register. **S.** → F9.
+  *(Permission UI shipped; FCM token register via PushService — soft without google-services.json.)*
 
 ---
 
 ## F3 — Artist wizard  *(ARTIST)*
 
-- [ ] **WizardViewModel** — `flowOrder`, per-step validation, pending-media handoff.
+- [x] **WizardViewModel** — `flowOrder`, per-step validation, pending-media handoff.
   **L** (the 585-line store port). → Foundation, `WizardMediaCache`, `UploadQueue`.
-- [ ] **11 step screens** (identity/location/pricing/tech/availability/cover/
-  socials/bio/samples/preview/done). **XL** total. Deps: F8 media (cover/samples
-  steps), F0 chips (`FlowRow`). Risk: the cover step (camera + trim + gallery) and
-  preview/publish (multi-write + upload enqueue).
-- [ ] **Publish flow** — upsert artist, parallel packages/tech write, flip
+- [x] **11 step screens** (identity/location/pricing/tech/availability/cover/
+  socials/bio/samples/preview/done). **XL** total. Cover uses gallery pick (CameraX
+  deferred); samples via SAF.
+- [x] **Publish flow** — upsert artist, parallel packages/tech write, flip
   published, enqueue media. **M.** → F8, `replace_*` RPCs.
 
 *Independent: steps with no media (identity/location/pricing/tech/availability/
@@ -102,7 +104,7 @@ socials/bio) can be built before F8 lands.*
   pagination + generation guard, facets, recents (DataStore). **L.** → SearchRepo.
 - [ ] **SearchScreen** — search bar, empty chips, 2-col grid, infinite scroll, sort
   menu, states. **M.**
-- [ ] **SearchFilterSheet** — city/budget/score/category/occasion. **M.**
+- [x] **SearchFilterSheet** — city/date/event/services/budget histogram/score. **M.**
 
 *F4 and F5 share `SearchRepository` (independent of each other after it exists).*
 
@@ -119,26 +121,24 @@ socials/bio) can be built before F8 lands.*
 
 ## F7 — Booking funnel + gig requests
 
-- [ ] **BookingViewModel + BookingScreen** — draft, `DateScroller`, time grid,
+- [x] **BookingViewModel + BookingScreen** — draft, date chips, time grid,
   venue/guests, summary. **M.** → BookingStore draft, ArtistsRepository.
-- [ ] **CheckoutScreen** — confirm → payment seam → `confirmDraftAsBooking` →
-  Confirmed; quota gate → Paywall. **M.** → F16 (billing seam, dormant).
-- [ ] **ConfirmedScreen** — celebration + actions (AddToCalendar, view booking). **S.**
-- [ ] **RequestQuoteScreen** — custom quote → `RequestsRepository.create`. **S.**
-- [ ] **GigRequestDetailScreen** (ARTIST) — accept/decline/counter, clash card. **M.**
+- [x] **CheckoutScreen** — confirm → payment seam → create → Confirmed;
+  quota gate → Paywall deferred. **M.** → F16 (billing seam, dormant).
+- [x] **ConfirmedScreen** — celebration + actions (view booking / discover). **S.**
+- [x] **RequestQuoteScreen** — custom quote → `RequestsRepository.create`. **S.**
+- [x] **GigRequestDetailScreen** (ARTIST) — accept/decline/counter, clash card. **M.**
   → CalendarSync clash read.
-- [ ] **Booking math** (`BookingMath.kt`) — 5%/18% (pure, unit-tested). **S.**
+- [x] **Booking math** (`BookingMath.kt`) — 5%/18% (pure, unit-tested). **S.**
 
 ## F8 — Media pipeline  *(cross-cutting; unblocks wizard + EPK)*
 
-- [ ] **Photo Picker + CameraX** integration. **M.** Risk: CameraX config.
-- [ ] **SAF audio picker** (`OpenDocument`). **S.**
-- [ ] **VideoTrimmer** (Media3 Transformer, ≤10s, first-frame). **L.** Risk:
-  transcode reliability across devices/codecs — the single biggest media risk.
-- [ ] **WizardMediaCache** (cacheDir staging, bitmap normalize, duration probe). **M.**
-- [ ] **UploadQueue → WorkManager** — per-task workers, backoff, foreground info,
-  foreign-user purge, publish gate. **L.** → SessionManager.
-- [ ] **ArtistMedia/Samples repos** — storage upload + insert + rollback + retry. **M.**
+- [x] **Photo Picker** (gallery `GetContent`) + camera `TakePicture` via FileProvider. **M.**
+- [x] **SAF audio picker** (`OpenDocument`). **S.**
+- [x] **VideoTrimmer** (Media3 Transformer, ≤10s; copy fallback). **L.**
+- [x] **WizardMediaCache** (cacheDir staging, JPEG normalize on upload). **M.**
+- [x] **UploadQueue** — serial drain + retry + JSON snapshot + WorkManager kick. **M.**
+- [x] **ArtistMedia/Samples repos** — storage upload + insert + rollback + reorder RPC. **M.**
 - [ ] **AutoplayVideo (ExoPlayer)**, **SamplePlayer (ExoPlayer)**, **SpotifyEmbed
   (WebView)**, **MediaContainer**. **M** total.
 
@@ -146,33 +146,34 @@ socials/bio) can be built before F8 lands.*
 
 ## F9 — Push notifications  *(needs a backend change)*
 
-- [ ] **FirebaseMessagingService** — `onNewToken` (upsert token), `onMessageReceived`
-  (foreground), tap `PendingIntent` → `DeepLinkRouter` (map `artistant_*` keys). **M.**
+- [x] **FirebaseMessagingService** — `onNewToken` → `claim_device_token` (p_fcm),
+  `onMessageReceived` + notification-tap Intent → TabRouter (`artistant_*` keys).
+  Soft-fails without `google-services.json`. **M.**
 - [ ] **FCM token table + `send-push` FCM path** (backend). **M.** Risk: **server
-  work**; FCM HTTP v1 + service-account auth; operator secrets. Blocks real
-  delivery (client can be built ahead).
-- [ ] **POST_NOTIFICATIONS** permission (API 33+). **S.**
+  work**; FCM HTTP v1 + service-account auth; operator secrets. Schema `0069`/`0075`
+  already shared; Android client claims tokens. Blocks real delivery.
+- [x] **POST_NOTIFICATIONS** permission (API 33+) + register-on-allow. **S.**
 
 ## F10 — Messages + chat  *(SHARED)*
 
-- [ ] **MessagesViewModel** — thread list, role-resolved names, redacted preview,
-  two-stage hydrate, `pendingThreadId` deep link. **M.**
-- [ ] **ChatViewModel** — optimistic send + 3-way reconcile, **realtime subscribe**,
-  redaction gate, retry, markRead, findOrCreateThread. **L.** Risk: the
-  realtime-vs-send dedup race (port the iOS content-match); channel lifecycle.
-- [ ] **ChatScreen** — reverse `LazyColumn` auto-scroll, bubbles, failed-retry chip,
-  glass composer. **M.**
-- [ ] **Redaction** (`Redaction.kt`) — 6 regexes + `shouldRedact` (pure, tested). **S.**
+- [x] **MessagesViewModel** — thread list, verbatim preview, real pair-scoped
+  `findOrCreateThread`. Push `pendingThreadId` deep link wired in both role scaffolds.
+- [x] **ChatViewModel** — paged load, optimistic send + Realtime INSERT reconcile,
+  mark-read + best-effort 0072 receipts, tap-to-retry, details/report. **M.**
+- [x] **ChatScreen** — bubbles, system rows/action route, Airbnb trust banner + composer,
+  retry chip + ThreadDetailsSheet. **partial:** reverse auto-scroll, glass polish deferred.
+- [x] ~~**Redaction** (`Redaction.kt`)~~ — **obsolete.** Scrapped Jul 2026 (mig
+  `0071`); deleted from Android. Do not rebuild.
 
 ## F11 — Bookings list + detail  *(SHARED)*
 
-- [ ] **BookingsViewModel + BookingsScreen** (CLIENT) — `MonthCalendar` + schedule;
-  `pendingBookingDetail` deep link. **M.** → `MonthCalendar` component.
+- [x] **BookingsViewModel + BookingsScreen** (CLIENT) — schedule list;
+  `pendingBookingDetail` deep link via TabRouter. **M.**
 - [ ] **ArtistGigsScreen** (ARTIST) — `MonthCalendar` of gigs. **S.**
-- [ ] **BookingDetailScreen** (SHARED) — timeline, KV, actions (message/cancel/
-  review/calendar); `pendingReviewSheet`. **M.**
-- [ ] **MonthCalendar / MiniMonthCalendar / DateScroller** components. **L.** Risk:
-  custom calendar layout + status dots.
+- [x] **BookingDetailScreen** (SHARED) — timeline, KV, actions (cancel/accept/decline);
+  message/review/calendar deferred. **M.**
+- [ ] **MonthCalendar / MiniMonthCalendar / DateScroller** components. **partial** —
+  `MonthCalendarHeader` + date chips shipped; full grid deferred. **L.**
 
 ---
 
@@ -180,52 +181,42 @@ socials/bio) can be built before F8 lands.*
 
 - [ ] **ArtistHomeViewModel + Screen** — earnings `Sparkline`, bookability card,
   14-day availability strip, requests, upcoming, upload banner, subscribe banner.
-  **L** (~1300-line screen). → Score/Bookings/Artists repos, RequestStore,
-  CalendarSync busy-days, EntitlementStore.
-- [ ] **EpkViewModel + EpkScreen** — cover, photos grid, samples, socials, bio,
-  pricing (debounced replaceAll), tech, links CRUD, share-link. **L.** → F8.
-- [ ] **ManageAvailabilityScreen** — days/times chips + save. **S.**
+  **partial:** New requests rail + Score CTA shipped; sparkline/busy strip deferred.
+- [x] **EpkViewModel + EpkScreen** — packages replace, tech, links CRUD, samples
+  add/delete. **partial:** photo grid reorder / share-link deferred.
+- [x] **ManageAvailabilityScreen** — days/times chips + save. **S.**
 
 ## F13 — Bookability score  *(mostly ARTIST)*
 
-- [ ] **ScoreExplainerScreen** — hero ring, tiers, weighted metric bars. **M.**
-- [ ] **ScoreBreakdownSheet** (CLIENT, on ArtistProfile) — metrics + reply-speed
+- [x] **ScoreExplainerScreen** — hero ring, tiers, weighted metric bars. **M.**
+- [x] **ScoreBreakdownSheet** (CLIENT, on ArtistProfile) — metrics + reply-speed
   inversion. **S.**
-- [ ] **ScoreHistorySheet** — `Sparkline` + delta. **S.**
-- [ ] **ScoreRing + Sparkline** components. **M.** → Canvas.
-- [ ] **ScoreBands** (`ScoreBands.kt`) — tier bands + <5-gig rule (pure, tested). **S.**
+- [x] **ScoreHistorySheet** — `Sparkline` + delta. **S.**
+- [x] **ScoreRing + Sparkline** components. **M.** → Canvas.
+- [x] **ScoreBands** (`ScoreBands.kt`) — tier bands + <5-gig rule (pure, tested). **S.**
 
 ## F14 — Reviews  *(CLIENT write)*
 
-- [ ] **ReviewSheet** — stars + text; `ReviewsRepository.insert` (gate: completed
+- [x] **ReviewSheet** — stars + text; `ReviewsRepository.insert` (gate: completed
   booking; `23505`→alreadyReviewed). **S.**
 
 ---
 
 ## F15 — Profile, settings, DPDP, calendar sync
 
-- [ ] **ProfileScreen** — header, stats, saved carousel, settings rows. **M.**
-- [ ] **Sign out** — `signOut` + wipe prefs + reset all stores + role→client. **S.**
-  Risk: the store-reset leakage invariant (a new account must see zero prior data)
-  — the iOS unit tests exist specifically for this; replicate.
-- [ ] **DataExportScreen** — `data-export` → temp JSON → Android share sheet. **S.**
-- [ ] **Delete account** — "DELETE" confirm → `delete-account` → wipe + welcome. **S.**
-- [ ] **CalendarSyncService** — CalendarContract mirror (create/update/delete
-  events + reminders), `event.url` marker, pure **SyncPlanner** (desired-vs-persisted
-  diff), clash/busy reads. **L.** Risk: **big EventKit→Provider port**;
-  `READ/WRITE_CALENDAR` perms; can't create a calendar under a Google account (offer
-  existing ones, like iOS). → `AddToCalendar` intent (permission-free path).
+- [x] **ProfileScreen** — identity header + settings rows (sign out, delete, export, privacy/help) + calendar sync toggle. **M.** Stats/saved carousel deferred.
+- [x] **Sign out** — `SessionManager.signOut` + prefs wipe; RootViewModel routes to auth. **S.**
+- [x] **Data export** — `data-export` EF → share sheet (inline) or browser (signed URL). **S.**
+- [x] **Delete account** — confirm dialog → `delete-account` EF → calendar wipe + signOut. **S.**
+- [x] **CalendarSyncService** — CalendarContract mirror + SyncPlanner + clash/busy + calendar picker. **M.**
+- [x] **ManageAvailabilityScreen** — full open-date editor. **M.**
 
 ---
 
 ## F16 — Payments / subscriptions  *(DORMANT in v1 — build the seam only)*
 
-- [ ] **Play Billing seam** — `SubscriptionService` interface + mock impl (mirrors
-  iOS dormant StoreKit seam); `EntitlementStore` (obfuscatedAccountId binding,
-  entitlement mirror). **M.** Deps: `subscriptionsEnabled=false`. Risk: none while
-  dormant.
-- [ ] **PaywallScreen** — role-aware pitch, price card, subscribe/restore. **M.**
-  Inert until flag flipped.
+- [x] **Play Billing seam** — `PlayBillingService` + `EntitlementStore` (flag-gated). **M.**
+- [x] **PaywallScreen** — role-aware pitch, price card, subscribe/restore (wired; inert when flag off). **M.**
 - [ ] **Google Play RTDN backend** — deferred to IAP go-live (see API_MAPPING §7).
 
 ---
@@ -243,7 +234,7 @@ socials/bio) can be built before F8 lands.*
 
 ## F18 — Testing  *(continuous)*
 
-- [ ] **Unit** (JUnit + MockK + Turbine): BookingMath, ScoreBands, Redaction,
+- [ ] **Unit** (JUnit + MockK + Turbine): BookingMath, ScoreBands,
   SyncPlanner, ReturningLoginRoute, ISO8601, INR, store-reset leakage. **M**, grows.
 - [ ] **Repository tests** against `Fake*` impls. **M.**
 - [ ] **ViewModel tests** — assert `StateFlow` emissions. **M.**

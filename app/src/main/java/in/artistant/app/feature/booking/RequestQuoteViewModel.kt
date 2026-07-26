@@ -4,67 +4,103 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
-import `in`.artistant.app.state.BookingStore
+import `in`.artistant.app.data.repository.RequestsRepositoryError
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.LocalDate
-import java.time.temporal.ChronoUnit
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
-/**
- * Drives `RequestQuoteScreen` (port of iOS `RequestQuoteView`). The client
- * proposes a custom date + budget (+ optional message/venue/guests); [submit]
- * writes a `gig_requests` row via [RequestsRepository.create] with a 7-day expiry.
- * Field state lives in the screen (plain compose remember); this VM owns the
- * artist hydrate + the write lifecycle.
- */
+data class RequestQuoteUiState(
+    val artistName: String = "",
+    val amountInr: String = "",
+    val dateLabel: String = "",
+    val message: String = "",
+    val isSubmitting: Boolean = false,
+    val errorMessage: String? = null,
+    val success: Boolean = false,
+)
+
 @HiltViewModel
 class RequestQuoteViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val requests: RequestsRepository,
-    private val artists: ArtistsRepository,
+    private val artistsRepository: ArtistsRepository,
+    private val requestsRepository: RequestsRepository,
 ) : ViewModel() {
 
-    private val artistId: String = savedStateHandle.get<String>("artistId").orEmpty()
+    private val artistId: String = checkNotNull(savedStateHandle["artistId"])
 
-    private val _artist = MutableStateFlow(artists.find(artistId))
-    val artist: StateFlow<Artist?> = _artist.asStateFlow()
-
-    data class UiState(val submitting: Boolean = false, val error: String? = null, val sent: Boolean = false)
-
-    private val _state = MutableStateFlow(UiState())
-    val state: StateFlow<UiState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(RequestQuoteUiState())
+    val state: StateFlow<RequestQuoteUiState> = _state.asStateFlow()
 
     init {
-        viewModelScope.launch { artists.ensureFull(artistId)?.let { _artist.value = it } }
-    }
-
-    fun submit(amount: Int, date: LocalDate, message: String, venue: String, guests: Int) {
-        if (amount <= 0 || _state.value.submitting) return
-        _state.update { it.copy(submitting = true, error = null) }
         viewModelScope.launch {
-            try {
-                requests.create(
-                    artistId = artistId,
-                    proposedAmountInr = amount,
-                    dateLabel = BookingStore.dateLabel(date),
-                    message = message,
-                    venue = venue,
-                    crowdSize = guests,
-                    // Auto-expire after a week if the artist never answers.
-                    expiresAt = Instant.now().plus(7, ChronoUnit.DAYS),
+            val artist = artistsRepository.find(artistId) ?: artistsRepository.ensureFull(artistId)
+            val chips = upcomingDateChips(count = 1)
+            _state.update {
+                it.copy(
+                    artistName = artist?.name.orEmpty(),
+                    dateLabel = chips.firstOrNull()?.label.orEmpty(),
                 )
-                _state.update { it.copy(submitting = false, sent = true) }
-            } catch (t: Throwable) {
-                _state.update { it.copy(submitting = false, error = t.message ?: "Couldn't send the request.") }
             }
         }
     }
+
+    fun setAmount(value: String) {
+        _state.update { it.copy(amountInr = value.filter { c -> c.isDigit() }) }
+    }
+
+    fun setDate(value: String) {
+        _state.update { it.copy(dateLabel = value) }
+    }
+
+    fun setMessage(value: String) {
+        _state.update { it.copy(message = value) }
+    }
+
+    fun submit() {
+        val s = _state.value
+        val amount = s.amountInr.toIntOrNull() ?: 0
+        if (amount <= 0) {
+            _state.update { it.copy(errorMessage = "Enter a valid amount.") }
+            return
+        }
+        if (s.dateLabel.isBlank()) {
+            _state.update { it.copy(errorMessage = "Pick a date.") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isSubmitting = true, errorMessage = null) }
+            try {
+                requestsRepository.create(
+                    artistId = artistId,
+                    proposedAmountInr = amount,
+                    dateLabel = s.dateLabel,
+                    message = s.message.ifBlank { null },
+                    venue = null,
+                    crowdSize = null,
+                    expiresAtEpochMs = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(7),
+                )
+                _state.update { it.copy(isSubmitting = false, success = true) }
+            } catch (e: RequestsRepositoryError) {
+                _state.update { it.copy(isSubmitting = false, errorMessage = e.message) }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(isSubmitting = false, errorMessage = e.message ?: "Request failed.")
+                }
+            }
+        }
+    }
+
+    /** Quick-pick chips for date — same formatter as booking funnel. */
+    fun pickChip(chip: DateChip) {
+        _state.update { it.copy(dateLabel = chip.label) }
+    }
+
+    fun dateChips(): List<DateChip> = upcomingDateChips()
 }

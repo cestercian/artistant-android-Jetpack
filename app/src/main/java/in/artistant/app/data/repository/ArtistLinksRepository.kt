@@ -1,137 +1,153 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
-import `in`.artistant.app.common.util.lowercaseUuid
-import `in`.artistant.app.core.result.AppError
-import `in`.artistant.app.data.model.ArtistLink
-import `in`.artistant.app.data.model.dto.DBArtistLink
+import `in`.artistant.app.core.result.mapPostgrest
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class ArtistLink(
+    val id: String,
+    val artistId: String,
+    val label: String,
+    val url: String,
+    val position: Int,
+)
+
 /**
- * CRUD for the EPK Links section (`public.artist_links`; port of iOS
- * `ArtistLinksRepository`). Every write is scoped to the signed-in artist's own
- * rows by RLS; the DB CHECK constraints (label length, url shape) surface bad
- * input rather than a client-side regex. [add] packs the new link at MAX+1.
+ * `public.artist_links` CRUD — port of iOS ArtistLinksRepository.
+ * No RPC; direct insert/update/delete under owns_artist RLS.
  */
 interface ArtistLinksRepository {
     suspend fun list(artistId: String): List<ArtistLink>
-    suspend fun add(label: String, url: String, artistId: String): ArtistLink
-    suspend fun update(link: ArtistLink, label: String, url: String): ArtistLink
-    suspend fun delete(link: ArtistLink)
+    suspend fun upsert(artistId: String, label: String, url: String, id: String? = null, position: Int? = null): ArtistLink
+    suspend fun delete(id: String)
 }
 
 @Singleton
 class SupabaseArtistLinksRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : ArtistLinksRepository {
-
     override suspend fun list(artistId: String): List<ArtistLink> =
-        client.postgrest.from("artist_links")
-            .select(LINK_COLUMNS) {
-                filter { eq("artist_id", artistId.lowercaseUuid()) }
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DBArtistLink>()
-            .map { it.toDomain() }
+        try {
+            client.from("artist_links")
+                .select {
+                    filter { eq("artist_id", artistId.lowercase()) }
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<LinkRow>()
+                .map { it.toDomain() }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
 
-    override suspend fun add(label: String, url: String, artistId: String): ArtistLink {
-        requireSignedIn()
-        val position = nextPosition(artistId)
-        return client.postgrest.from("artist_links")
-            .insert(
-                Insert(
-                    artist_id = artistId.lowercaseUuid(),
-                    label = label.trim(),
-                    url = url.trim(),
-                    position = position,
-                ),
-            ) { select(LINK_COLUMNS) }
-            .decodeSingle<DBArtistLink>()
-            .toDomain()
+    override suspend fun upsert(
+        artistId: String,
+        label: String,
+        url: String,
+        id: String?,
+        position: Int?,
+    ): ArtistLink {
+        val artist = artistId.lowercase()
+        val resolvedId = id?.lowercase() ?: UUID.randomUUID().toString().lowercase()
+        val resolvedPosition = position ?: nextPosition(artist)
+        val row = LinkInsert(
+            id = resolvedId,
+            artistId = artist,
+            label = label.trim(),
+            url = url.trim(),
+            position = resolvedPosition,
+        )
+        return try {
+            client.from("artist_links")
+                .upsert(row) { onConflict = "id"; select() }
+                .decodeSingle<LinkRow>()
+                .toDomain()
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
     }
 
-    override suspend fun update(link: ArtistLink, label: String, url: String): ArtistLink =
-        client.postgrest.from("artist_links")
-            .update(Patch(label = label.trim(), url = url.trim())) {
-                filter { eq("id", link.id.lowercaseUuid()) }
-                select(LINK_COLUMNS)
+    override suspend fun delete(id: String) {
+        try {
+            client.from("artist_links").delete {
+                filter { eq("id", id.lowercase()) }
             }
-            .decodeSingle<DBArtistLink>()
-            .toDomain()
-
-    override suspend fun delete(link: ArtistLink) {
-        client.postgrest.from("artist_links")
-            .delete { filter { eq("id", link.id.lowercaseUuid()) } }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
     }
 
     private suspend fun nextPosition(artistId: String): Int {
-        val rows = client.postgrest.from("artist_links")
-            .select(Columns.list("position")) {
-                filter { eq("artist_id", artistId.lowercaseUuid()) }
+        val rows = client.from("artist_links")
+            .select {
+                filter { eq("artist_id", artistId) }
                 order("position", Order.DESCENDING)
                 limit(1)
             }
-            .decodeList<PositionOnly>()
+            .decodeList<LinkRow>()
         return (rows.firstOrNull()?.position ?: -1) + 1
-    }
-
-    private fun requireSignedIn() {
-        client.auth.currentSessionOrNull()?.user?.id ?: throw AppError.NotFoundOrUnauthorized
-    }
-
-    @Serializable
-    private data class Insert(
-        val artist_id: String,
-        val label: String,
-        val url: String,
-        val position: Int,
-    )
-
-    @Serializable private data class Patch(val label: String, val url: String)
-    @Serializable private data class PositionOnly(val position: Int)
-
-    companion object {
-        private val LINK_COLUMNS = Columns.list("id", "artist_id", "label", "url", "position")
     }
 }
 
-/** In-memory twin; assigns sequential positions on [add]. */
 class FakeArtistLinksRepository : ArtistLinksRepository {
-    private val store = mutableMapOf<String, MutableList<ArtistLink>>()
-    private var counter = 0
+    private val byArtist = mutableMapOf<String, MutableList<ArtistLink>>()
 
     override suspend fun list(artistId: String): List<ArtistLink> =
-        store[artistId].orEmpty().sortedBy { it.position }
+        byArtist[artistId.lowercase()].orEmpty()
 
-    override suspend fun add(label: String, url: String, artistId: String): ArtistLink {
-        val list = store.getOrPut(artistId) { mutableListOf() }
+    override suspend fun upsert(
+        artistId: String,
+        label: String,
+        url: String,
+        id: String?,
+        position: Int?,
+    ): ArtistLink {
+        val list = byArtist.getOrPut(artistId.lowercase()) { mutableListOf() }
+        val resolvedId = id?.lowercase() ?: UUID.randomUUID().toString().lowercase()
+        list.removeAll { it.id == resolvedId }
         val link = ArtistLink(
-            id = "link-${counter++}",
-            artistId = artistId,
-            label = label.trim(),
-            url = url.trim(),
-            position = (list.maxOfOrNull { it.position } ?: -1) + 1,
+            id = resolvedId,
+            artistId = artistId.lowercase(),
+            label = label,
+            url = url,
+            position = position ?: list.size,
         )
         list.add(link)
         return link
     }
 
-    override suspend fun update(link: ArtistLink, label: String, url: String): ArtistLink {
-        val updated = link.copy(label = label.trim(), url = url.trim())
-        store[link.artistId]?.let { list ->
-            val idx = list.indexOfFirst { it.id == link.id }
-            if (idx >= 0) list[idx] = updated
-        }
-        return updated
+    override suspend fun delete(id: String) {
+        byArtist.values.forEach { it.removeAll { link -> link.id == id.lowercase() } }
     }
+}
 
-    override suspend fun delete(link: ArtistLink) {
-        store[link.artistId]?.removeAll { it.id == link.id }
-    }
+@Serializable
+private data class LinkInsert(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val label: String,
+    val url: String,
+    val position: Int,
+)
+
+@Serializable
+private data class LinkRow(
+    val id: String,
+    @SerialName("artist_id") val artistId: String,
+    val label: String,
+    val url: String,
+    val position: Int = 0,
+) {
+    fun toDomain() = ArtistLink(
+        id = id.lowercase(),
+        artistId = artistId.lowercase(),
+        label = label,
+        url = url,
+        position = position,
+    )
 }

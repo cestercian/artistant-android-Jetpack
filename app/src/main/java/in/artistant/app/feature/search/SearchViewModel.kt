@@ -4,276 +4,296 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.PriceBucket
+import `in`.artistant.app.data.model.SearchCatalog
 import `in`.artistant.app.data.model.SearchCursor
 import `in`.artistant.app.data.model.SearchFacets
 import `in`.artistant.app.data.model.SearchFilters
 import `in`.artistant.app.data.model.SearchSort
+import `in`.artistant.app.data.model.SearchTuning
 import `in`.artistant.app.data.repository.SearchRepository
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** All Search inputs + outputs (port of iOS `SearchStore`'s @Published surface). */
+/**
+ * Search tab — port of iOS `SearchStore`. Debounced text + accordion filters drive
+ * `search_artists` (incl. 0073 dims); facets power empty-state rails; histogram
+ * feeds the Budget section.
+ */
 data class SearchUiState(
-    // Inputs
     val query: String = "",
     val city: String? = null,
-    val minPrice: Int = PRICE_FLOOR,
-    val maxPrice: Int = PRICE_CEILING,
-    val minScore: Int = 0,
     val categories: Set<String> = emptySet(),
-    val eventType: String? = null,
     val sort: SearchSort = SearchSort.Bookability,
-    // Outputs
+    val minPrice: Int = SearchTuning.PRICE_FLOOR,
+    val maxPrice: Int = SearchTuning.PRICE_CEILING,
+    val priceDataMin: Int = SearchTuning.PRICE_FLOOR,
+    val priceDataMax: Int = SearchTuning.PRICE_CEILING,
+    val minScore: Int = 0,
+    val eventType: String? = null,
+    val services: Set<String> = emptySet(),
+    val dateIso: String? = null,
+    val flexDays: Int = 0,
+    val histogram: List<PriceBucket> = emptyList(),
     val results: List<Artist> = emptyList(),
+    val facets: SearchFacets = SearchFacets.Empty,
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val canLoadMore: Boolean = false,
     val loadError: String? = null,
-    val facets: SearchFacets = SearchFacets.empty,
-    val recents: List<String> = emptyList(),
 ) {
-    val hasFilters: Boolean
-        get() = city != null || minPrice > PRICE_FLOOR || maxPrice < PRICE_CEILING ||
-            minScore > 0 || categories.isNotEmpty() || eventType != null
+    val hasActiveQuery: Boolean
+        get() = query.isNotBlank() || activeFilterCount > 0 || categories.isNotEmpty()
 
+    /** Badge count for the filter button — excludes category rails (iOS sheet count). */
     val activeFilterCount: Int
         get() {
             var n = 0
             if (city != null) n++
-            if (minPrice > PRICE_FLOOR || maxPrice < PRICE_CEILING) n++
-            if (minScore > 0) n++
-            if (categories.isNotEmpty()) n++
+            if (dateIso != null) n++
             if (eventType != null) n++
+            if (services.isNotEmpty()) n++
+            if (minPrice > priceDataMin || maxPrice < priceDataMax) n++
+            if (minScore > 0) n++
             return n
         }
-
-    /** Something to search? false = the pure-browse empty state (facet chips). */
-    val hasActiveQuery: Boolean get() = query.isNotBlank() || hasFilters
-
-    val allCities: List<String> get() = facets.cities.map { it.label }
-    val allCategories: List<String> get() = facets.categories.map { it.label }
-
-    /** Identity that re-fires the (debounced) search — inputs only, never outputs. */
-    val queryKey: QueryKey
-        get() = QueryKey(query.trim(), city, categories.sorted(), minPrice, maxPrice, minScore, eventType, sort)
-
-    data class QueryKey(
-        val query: String,
-        val city: String?,
-        val categories: List<String>,
-        val minPrice: Int,
-        val maxPrice: Int,
-        val minScore: Int,
-        val eventType: String?,
-        val sort: SearchSort,
-    )
-
-    companion object {
-        const val PRICE_FLOOR = 10_000
-        const val PRICE_CEILING = 80_000
-    }
 }
 
-/**
- * Drives the Search tab (port of iOS `SearchStore`). SERVER-BACKED: it pages
- * [SearchRepository] (the `search_artists` / `search_facets` RPCs) so search
- * scales to thousands of artists with ranking + pagination.
- *
- * Debounce + supersede: an init collector maps the input-only [SearchUiState.queryKey],
- * de-dupes it, and `collectLatest`-runs the first-page search. The ~280ms debounce
- * lives INSIDE [runSearch] (a cancellable `delay` after `isLoading` is raised), so a
- * new key cancels the in-flight search — including its debounce window — exactly like
- * iOS's `.task(id:)`; a fast typist only pays for the last query. A monotonic
- * [generation] additionally guards pagination: a page that arrives after a filter
- * change is dropped rather than appended to a different result set.
- */
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    private val repository: SearchRepository,
-    private val recentsStore: SearchRecents,
+    private val searchRepository: SearchRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = _state.asStateFlow()
 
+    private val queryFlow = MutableStateFlow("")
     private var nextCursor: SearchCursor? = null
-    // Bumped on every first-page search; a stale page's generation != this is dropped.
+    private var searchJob: Job? = null
     private var generation = 0
+    private val histogramCache = mutableMapOf<String, List<PriceBucket>>()
 
     init {
-        // Self-cancelling first-page search on any input change. `collectLatest`
-        // cancels an in-flight `runSearch` — including its debounce `delay` — the
-        // instant the key changes, so mid-flight keystrokes never race a stale
-        // result to the screen (iOS `.task(id:)` parity). The debounce itself lives
-        // inside `runSearch`, after `isLoading` is raised, so the skeleton (not a
-        // "No results" flash) covers the quiet window.
         viewModelScope.launch {
-            _state.map { it.queryKey }.distinctUntilChanged().collectLatest {
-                runSearch()
-            }
+            runCatching { searchRepository.facets() }
+                .onSuccess { facets -> _state.update { it.copy(facets = facets) } }
         }
-        loadFacets()
-        loadRecents()
+        viewModelScope.launch {
+            queryFlow
+                .debounce(280)
+                .distinctUntilChanged()
+                .collect { q ->
+                    _state.update { it.copy(query = q) }
+                    runSearch(reset = true)
+                }
+        }
+        loadHistogram(null)
     }
 
-    // MARK: - Input setters
-
-    fun onQueryChange(text: String) = _state.update { it.copy(query = text) }
-    fun setCity(city: String?) = _state.update { it.copy(city = city) }
-    fun setMinPrice(v: Int) = _state.update { it.copy(minPrice = v) }
-    fun setMaxPrice(v: Int) = _state.update { it.copy(maxPrice = v) }
-    fun setMinScore(v: Int) = _state.update { it.copy(minScore = v) }
-    fun setEventType(e: String?) = _state.update { it.copy(eventType = e) }
-    fun setSort(sort: SearchSort) = _state.update { it.copy(sort = sort) }
-
-    fun toggleCategory(cat: String) = _state.update {
-        it.copy(categories = if (cat in it.categories) it.categories - cat else it.categories + cat)
+    fun onQueryChange(text: String) {
+        queryFlow.value = text
+        _state.update { it.copy(query = text) }
     }
 
-    fun selectOnlyCategory(cat: String) = _state.update { it.copy(categories = setOf(cat)) }
-
-    fun clearFilters() = _state.update {
-        it.copy(
-            city = null,
-            minPrice = SearchUiState.PRICE_FLOOR,
-            maxPrice = SearchUiState.PRICE_CEILING,
-            minScore = 0,
-            categories = emptySet(),
-            eventType = null,
-        )
+    fun clearQuery() {
+        queryFlow.value = ""
+        _state.update { it.copy(query = "") }
+        runSearch(reset = true)
     }
 
-    // MARK: - Loading
-
-    private fun currentFilters(): SearchFilters {
-        val s = _state.value
-        return SearchFilters(
-            text = s.query,
-            city = s.city,
-            categories = s.categories.sorted(),
-            minPrice = if (s.minPrice > SearchUiState.PRICE_FLOOR) s.minPrice else null,
-            maxPrice = if (s.maxPrice < SearchUiState.PRICE_CEILING) s.maxPrice else null,
-            minScore = if (s.minScore > 0) s.minScore else null,
-            eventType = s.eventType,
-            sort = s.sort,
-        )
+    fun selectCity(city: String?) {
+        _state.update { it.copy(city = city) }
+        loadHistogram(city)
+        runSearch(reset = true)
     }
 
-    /**
-     * First-page search for the current inputs. Raises `isLoading` SYNCHRONOUSLY —
-     * before the debounce `delay` — so the skeleton (not a "No results" flash) covers
-     * the whole quiet window: `NoResults` renders only after a search has actually
-     * completed with zero rows. Called from the init collector (superseded via
-     * `collectLatest` cancellation on a new key) and from retry.
-     */
-    suspend fun runSearch() {
-        if (!_state.value.hasActiveQuery) {
-            // Pure browse — clear results; the view shows the facet rails.
-            nextCursor = null
-            _state.update { it.copy(results = emptyList(), canLoadMore = false, loadError = null, isLoading = false) }
+    fun toggleCategory(category: String) {
+        _state.update { s ->
+            val next = s.categories.toMutableSet()
+            if (!next.add(category)) next.remove(category)
+            s.copy(categories = next)
+        }
+        runSearch(reset = true)
+    }
+
+    fun setSort(sort: SearchSort) {
+        _state.update { it.copy(sort = sort) }
+        runSearch(reset = true)
+    }
+
+    fun setPriceRange(min: Int, max: Int) {
+        _state.update { it.copy(minPrice = min.coerceAtMost(max), maxPrice = max.coerceAtLeast(min)) }
+    }
+
+    fun setMinScore(score: Int) {
+        _state.update { it.copy(minScore = score.coerceIn(0, 100)) }
+    }
+
+    fun setEventType(type: String?) {
+        _state.update { it.copy(eventType = type) }
+    }
+
+    fun toggleService(slug: String) {
+        _state.update { s ->
+            val next = s.services.toMutableSet()
+            if (!next.add(slug)) next.remove(slug)
+            s.copy(services = next)
+        }
+    }
+
+    fun setDate(iso: String?) {
+        _state.update { it.copy(dateIso = iso, flexDays = if (iso == null) 0 else it.flexDays) }
+    }
+
+    fun setFlexDays(days: Int) {
+        _state.update { it.copy(flexDays = days) }
+    }
+
+    /** Apply sheet edits and re-search (sheet mutates live; Apply just closes + refreshes). */
+    fun applyFilters() = runSearch(reset = true)
+
+    fun clearFilters() {
+        _state.update {
+            it.copy(
+                city = null,
+                minPrice = it.priceDataMin,
+                maxPrice = it.priceDataMax,
+                minScore = 0,
+                eventType = null,
+                services = emptySet(),
+                dateIso = null,
+                flexDays = 0,
+            )
+        }
+        loadHistogram(null)
+        runSearch(reset = true)
+    }
+
+    fun loadMore() {
+        if (_state.value.isLoadingMore || !_state.value.canLoadMore) return
+        runSearch(reset = false)
+    }
+
+    fun retry() = runSearch(reset = true)
+
+    private fun loadHistogram(city: String?) {
+        val key = city.orEmpty()
+        histogramCache[key]?.let { cached ->
+            applyHistogram(cached)
             return
         }
-        _state.update { it.copy(isLoading = true, loadError = null) }
-        // Debounce lives here (not in the flow) so it's raised AFTER isLoading and is
-        // cancelled by collectLatest when the key changes — CancellationException
-        // propagates out, aborting cleanly without touching state.
-        delay(280)
-        generation += 1
-        val gen = generation
-        try {
-            val page = repository.search(currentFilters(), SearchCursor.Start)
-            if (gen != generation) return  // superseded
-            nextCursor = page.nextCursor
-            _state.update {
-                it.copy(
-                    results = page.artists,
-                    canLoadMore = page.nextCursor != SearchCursor.End,
-                    isLoading = false,
-                )
-            }
-        } catch (t: Throwable) {
-            if (t is CancellationException) throw t  // never swallow cancellation
-            if (gen != generation) return
-            nextCursor = SearchCursor.End
-            _state.update {
-                it.copy(results = emptyList(), canLoadMore = false, isLoading = false, loadError = message(t))
-            }
+        viewModelScope.launch {
+            val buckets = searchRepository.priceHistogram(city)
+            if (buckets.isNotEmpty()) histogramCache[key] = buckets
+            applyHistogram(buckets)
         }
     }
 
-    /** Append the next page (infinite scroll). No-op when loading or at the end. */
-    fun loadMore() {
-        val cursor = nextCursor
-        val s = _state.value
-        if (cursor == null || cursor == SearchCursor.End || s.isLoadingMore || s.isLoading) return
-        val gen = generation
-        viewModelScope.launch {
-            _state.update { it.copy(isLoadingMore = true) }
-            try {
-                val page = repository.search(currentFilters(), cursor)
-                // Drop the page if a filter change bumped the generation mid-flight.
-                if (gen == generation) {
-                    nextCursor = page.nextCursor
-                    _state.update {
-                        val known = it.results.mapTo(HashSet()) { a -> a.id }
-                        it.copy(
-                            results = it.results + page.artists.filter { a -> a.id !in known },
-                            canLoadMore = page.nextCursor != SearchCursor.End,
-                            isLoadingMore = false,
-                        )
-                    }
-                } else {
-                    _state.update { it.copy(isLoadingMore = false) }
+    private fun applyHistogram(buckets: List<PriceBucket>) {
+        if (buckets.isEmpty()) {
+            _state.update { it.copy(histogram = emptyList()) }
+            return
+        }
+        val dataMin = buckets.minOf { it.bucketMin }
+        val dataMax = buckets.maxOf { it.bucketMax }
+        _state.update {
+            // Widen span; keep current selection if still inside, else reset to full span.
+            val min = it.minPrice.coerceIn(dataMin, dataMax)
+            val max = it.maxPrice.coerceIn(dataMin, dataMax)
+            it.copy(
+                histogram = buckets,
+                priceDataMin = dataMin,
+                priceDataMax = dataMax,
+                minPrice = if (min >= max) dataMin else min,
+                maxPrice = if (min >= max) dataMax else max,
+            )
+        }
+    }
+
+    private fun runSearch(reset: Boolean) {
+        val snapshot = _state.value
+        if (!snapshot.hasActiveQuery && snapshot.query.isBlank()) {
+            if (snapshot.activeFilterCount == 0 && snapshot.categories.isEmpty()) {
+                _state.update {
+                    it.copy(results = emptyList(), canLoadMore = false, loadError = null, isLoading = false)
                 }
-            } catch (_: Throwable) {
-                // Keep current results; canLoadMore stays true so scrolling retries.
-                _state.update { it.copy(isLoadingMore = false) }
+                nextCursor = null
+                return
+            }
+        }
+
+        searchJob?.cancel()
+        val gen = ++generation
+        searchJob = viewModelScope.launch {
+            if (reset) {
+                _state.update { it.copy(isLoading = true, loadError = null) }
+                nextCursor = SearchCursor.Start
+            } else {
+                _state.update { it.copy(isLoadingMore = true) }
+            }
+            val cursor = if (reset) SearchCursor.Start else (nextCursor ?: SearchCursor.End)
+            if (cursor is SearchCursor.End) {
+                _state.update { it.copy(isLoading = false, isLoadingMore = false, canLoadMore = false) }
+                return@launch
+            }
+            try {
+                val live = _state.value
+                val narrowedMin = live.minPrice.takeIf { it > live.priceDataMin }
+                val narrowedMax = live.maxPrice.takeIf { it < live.priceDataMax }
+                val filters = SearchFilters(
+                    text = live.query,
+                    city = live.city,
+                    categories = live.categories.toList(),
+                    minPrice = narrowedMin,
+                    maxPrice = narrowedMax,
+                    minScore = live.minScore.takeIf { it > 0 },
+                    eventType = live.eventType,
+                    sort = live.sort,
+                )
+                val page = searchRepository.search(
+                    filters = filters,
+                    cursor = cursor,
+                    services = live.services.takeIf { it.isNotEmpty() }?.toList(),
+                    date = live.dateIso,
+                    flexDays = live.flexDays.takeIf { live.dateIso != null },
+                )
+                if (gen != generation) return@launch
+                nextCursor = page.nextCursor
+                _state.update {
+                    it.copy(
+                        results = if (reset) page.artists else it.results + page.artists,
+                        isLoading = false,
+                        isLoadingMore = false,
+                        canLoadMore = page.nextCursor !is SearchCursor.End,
+                        loadError = null,
+                    )
+                }
+            } catch (t: Throwable) {
+                if (gen != generation) return@launch
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        isLoadingMore = false,
+                        loadError = t.message ?: "Search failed.",
+                    )
+                }
             }
         }
     }
 
-    fun retry() { viewModelScope.launch { runSearch() } }
-
-    private fun loadFacets() {
-        viewModelScope.launch {
-            runCatching { repository.facets() }.onSuccess { f -> _state.update { it.copy(facets = f) } }
-        }
-    }
-
-    // MARK: - Recents (persisted in DataStore)
-
-    fun recordRecent() {
-        val q = _state.value.query.trim()
-        if (q.isEmpty()) return
-        val updated = (listOf(q) + _state.value.recents.filter { !it.equals(q, ignoreCase = true) }).take(6)
-        _state.update { it.copy(recents = updated) }
-        viewModelScope.launch { runCatching { recentsStore.save(updated) } }
-    }
-
-    private fun loadRecents() {
-        viewModelScope.launch {
-            val list = runCatching { recentsStore.load() }.getOrDefault(emptyList())
-            if (list.isNotEmpty()) _state.update { it.copy(recents = list) }
-        }
-    }
-
-    private fun message(error: Throwable): String {
-        val m = (error.message ?: "").lowercase()
-        return if (m.contains("could not find the function") || m.contains("search_artists") ||
-            m.contains("42883") || m.contains("does not exist")
-        ) {
-            "Search isn't available right now. Please try again in a moment."
-        } else {
-            "Couldn't load results. Check your connection and try again."
-        }
+    companion object {
+        /** Exposed for sheet labels — keeps UI from importing catalog directly. */
+        val eventTypes get() = SearchCatalog.eventTypes
+        val services get() = SearchCatalog.services
+        val flexOptions get() = SearchCatalog.flexOptions
     }
 }

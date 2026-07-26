@@ -12,7 +12,7 @@ import `in`.artistant.app.feature.signup.SignupFlow
 import `in`.artistant.app.feature.signup.SignupMode
 import `in`.artistant.app.feature.signup.SignupStep
 import `in`.artistant.app.feature.signup.SignupViewModel
-import `in`.artistant.app.feature.wizard.ArtistWizardScreen
+import `in`.artistant.app.feature.wizard.WizardScreen
 import `in`.artistant.app.ui.RootGate
 import `in`.artistant.app.ui.RootViewModel
 
@@ -63,6 +63,7 @@ fun ArtistantNavHost() {
             // Signed in, profile incomplete → resume mid-flow at Profile. Always in Signup mode:
             // an incomplete profile must walk the full profile → notif → done tail, which only
             // exists in the signup order (a login-mode user who landed here still needs it).
+            // (Incomplete-EPK artists are [RootGate.ArtistWizard], not this branch.)
             ArtistantTheme(role = signupState.role) {
                 SignupFlow(
                     startStep = SignupStep.Profile,
@@ -76,11 +77,8 @@ fun ArtistantNavHost() {
             }
 
         RootGate.ArtistWizard ->
-            // Signed-in artist, base profile done, EPK wizard not — the M5b onboarding wizard.
-            // Always the artist accent. On "Open dashboard" (setup_complete is now true server-
-            // side) re-run routing so the gate re-fetches and moves ArtistWizard → Tabs(Artist).
             ArtistantTheme(role = AppRole.Artist) {
-                ArtistWizardScreen(onDone = viewModel::markSignupComplete)
+                WizardScreen(onFinished = viewModel::markWizardComplete)
             }
 
         is RootGate.Tabs ->

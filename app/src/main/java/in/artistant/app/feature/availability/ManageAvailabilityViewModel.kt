@@ -4,7 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.repository.ArtistsRepository
-import `in`.artistant.app.feature.wizard.WizardConstants
+import `in`.artistant.app.feature.booking.DefaultTimeSlots
+import `in`.artistant.app.feature.wizard.WizardWeekdays
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,25 +13,24 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * Working copy of the availability editor. Local `@State`-equivalent so Cancel
- * discards cleanly and the "how clients see you" preview reacts instantly; nothing
- * reaches the server until [save].
- */
 data class ManageAvailabilityUiState(
     val days: Set<String> = emptySet(),
     val times: Set<String> = emptySet(),
-    val saving: Boolean = false,
+    val isLoading: Boolean = true,
+    val isSaving: Boolean = false,
+    val seedFailed: Boolean = false,
     val error: String? = null,
     val saved: Boolean = false,
-)
+) {
+    /** Discover-style soonest-day label for the live preview. */
+    val previewLabel: String?
+        get() {
+            if (days.isEmpty()) return null
+            val soonest = WizardWeekdays.firstOrNull { it in days } ?: return null
+            return "Open $soonest"
+        }
+}
 
-/**
- * Post-onboarding availability editor VM (port of iOS `ManageAvailabilityView`).
- * Seeds from the artist's own row and PATCHes only availability on save, persisting
- * in the canonical chip order (not Set iteration order) so the client's booking grid
- * stays deterministic. Seed failure is non-fatal (opens on a clean slate).
- */
 @HiltViewModel
 class ManageAvailabilityViewModel @Inject constructor(
     private val artists: ArtistsRepository,
@@ -40,36 +40,77 @@ class ManageAvailabilityViewModel @Inject constructor(
     val state: StateFlow<ManageAvailabilityUiState> = _state.asStateFlow()
 
     init {
+        seed()
+    }
+
+    fun seed() {
         viewModelScope.launch {
-            val current = runCatching { artists.fetchSelfAvailability() }.getOrNull()
-            if (current != null) {
-                _state.update { it.copy(days = current.days.toSet(), times = current.times.toSet()) }
-            }
+            _state.update { it.copy(isLoading = true, error = null, seedFailed = false, saved = false) }
+            runCatching { artists.fetchSelfAvailability() }
+                .onSuccess { draft ->
+                    if (draft == null) {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                seedFailed = true,
+                                error = "Couldn't load availability. Retry before saving.",
+                            )
+                        }
+                        return@launch
+                    }
+                    _state.update {
+                        it.copy(
+                            days = draft.daysAvailable.toSet(),
+                            times = draft.timeSlots.toSet(),
+                            isLoading = false,
+                            seedFailed = false,
+                            error = null,
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            seedFailed = true,
+                            error = e.message ?: "Couldn't load availability.",
+                        )
+                    }
+                }
         }
     }
 
-    fun toggleDay(day: String) = _state.update { it.copy(days = it.days.toggle(day)) }
-    fun toggleTime(time: String) = _state.update { it.copy(times = it.times.toggle(time)) }
+    fun toggleDay(day: String) {
+        _state.update {
+            val next = if (day in it.days) it.days - day else it.days + day
+            it.copy(days = next, saved = false)
+        }
+    }
+
+    fun toggleTime(slot: String) {
+        _state.update {
+            val next = if (slot in it.times) it.times - slot else it.times + slot
+            it.copy(times = next, saved = false)
+        }
+    }
 
     fun save() {
-        if (_state.value.saving) return
+        val snap = _state.value
+        if (snap.seedFailed) return
+        // Canonical order — never Set iteration order (booking grid depends on it).
+        val days = WizardWeekdays.filter { it in snap.days }
+        val times = DefaultTimeSlots.filter { it in snap.times }
         viewModelScope.launch {
-            _state.update { it.copy(saving = true, error = null) }
-            // Persist in the wizard's canonical chip order so the client's booking grid
-            // doesn't jump (mirrors the wizard's sortedTimeSlots; days sorted the same way).
-            val days = WizardConstants.allDays.filter { it in _state.value.days }
-            val times = WizardConstants.allTimeSlots.filter { it in _state.value.times }
-            try {
-                artists.updateAvailability(days, times)
-                _state.update { it.copy(saving = false, saved = true) }
-            } catch (_: Throwable) {
-                _state.update {
-                    it.copy(saving = false, error = "Couldn't save your availability. Check your connection and try again.")
+            _state.update { it.copy(isSaving = true, error = null, saved = false) }
+            runCatching { artists.updateAvailability(days, times) }
+                .onSuccess {
+                    _state.update { it.copy(isSaving = false, saved = true) }
                 }
-            }
+                .onFailure { e ->
+                    _state.update {
+                        it.copy(isSaving = false, error = e.message ?: "Couldn't save.")
+                    }
+                }
         }
     }
-
-    private fun Set<String>.toggle(value: String): Set<String> =
-        if (contains(value)) this - value else this + value
 }

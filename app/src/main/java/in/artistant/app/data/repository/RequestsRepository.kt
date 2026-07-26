@@ -2,36 +2,38 @@ package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
-import `in`.artistant.app.common.util.SupabaseISO8601
-import `in`.artistant.app.common.util.lowercaseUuid
-import `in`.artistant.app.core.result.AppError
-import `in`.artistant.app.core.result.mapPostgrest
+import `in`.artistant.app.data.model.GigRequest
+import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
-import `in`.artistant.app.data.model.dto.DBGigRequestWithClient
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Gig-request (negotiation) data boundary (port of iOS `RequestsRepository`). The
- * artist answers inbound requests (accept / decline / counter); the client composes
- * new ones. RLS gates the writes; the client only sanity-checks auth. A status
- * update that matches zero rows (RLS-filtered / deleted) surfaces as
- * [AppError.NotFoundOrUnauthorized] (via PGRST116) so the UI can roll back instead
- * of showing a fake success.
+ * Gig-request (quote) seam — port of iOS `RequestsRepository`.
+ * Table `gig_requests`; status mutations are status-only PATCH (+ counter amount).
  */
+
+sealed class RequestsRepositoryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    data object NotSignedIn : RequestsRepositoryError("Sign in to accept or decline gig requests.")
+    class NotFoundOrUnauthorized(id: String) :
+        RequestsRepositoryError("Couldn't update this request — it may have been removed ($id).")
+    class Underlying(cause: Throwable) : RequestsRepositoryError(cause.message ?: "Request failed", cause)
+}
+
 interface RequestsRepository {
-    /** Requests targeting the signed-in artist, newest-first (client name embed). */
     suspend fun listForArtist(): List<StoredRequest>
-
-    /** Requests the signed-in client authored, newest-first. */
     suspend fun listForClient(): List<StoredRequest>
-
-    /** Insert a new request the signed-in client is proposing to [artistId]. */
     suspend fun create(
         artistId: String,
         proposedAmountInr: Int,
@@ -39,16 +41,10 @@ interface RequestsRepository {
         message: String?,
         venue: String?,
         crowdSize: Int?,
-        expiresAt: Instant,
+        expiresAtEpochMs: Long,
     ): StoredRequest
-
-    /** Artist accepts → status=accepted. */
     suspend fun accept(id: String)
-
-    /** Artist declines → status=declined. */
     suspend fun decline(id: String)
-
-    /** Artist counters → status=countered + counter_amount_inr=[amount]. */
     suspend fun counter(id: String, amount: Int)
 }
 
@@ -57,20 +53,35 @@ class SupabaseRequestsRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : RequestsRepository {
 
-    override suspend fun listForArtist(): List<StoredRequest> =
-        listWhere("artist_id", currentUserId())
+    override suspend fun listForArtist(): List<StoredRequest> {
+        val userId = currentUserId() ?: throw RequestsRepositoryError.NotSignedIn
+        return try {
+            client.from("gig_requests")
+                .select(Columns.raw("*, client:users!client_id(full_name)")) {
+                    filter { eq("artist_id", userId) }
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<DbGigRequestWithClient>()
+                .map { it.toStoredRequest() }
+        } catch (t: Throwable) {
+            throw RequestsRepositoryError.Underlying(t)
+        }
+    }
 
-    override suspend fun listForClient(): List<StoredRequest> =
-        listWhere("client_id", currentUserId())
-
-    private suspend fun listWhere(column: String, userId: String): List<StoredRequest> =
-        client.postgrest.from("gig_requests")
-            .select(Columns.raw("$REQUEST_COLS, client:users!client_id(full_name)")) {
-                filter { eq(column, userId) }
-                order("created_at", Order.DESCENDING)
-            }
-            .decodeList<DBGigRequestWithClient>()
-            .map { it.toStoredRequest() }
+    override suspend fun listForClient(): List<StoredRequest> {
+        val clientId = currentUserId() ?: throw RequestsRepositoryError.NotSignedIn
+        return try {
+            client.from("gig_requests")
+                .select(Columns.raw("*, client:users!client_id(full_name)")) {
+                    filter { eq("client_id", clientId) }
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<DbGigRequestWithClient>()
+                .map { it.toStoredRequest() }
+        } catch (t: Throwable) {
+            throw RequestsRepositoryError.Underlying(t)
+        }
+    }
 
     override suspend fun create(
         artistId: String,
@@ -79,85 +90,222 @@ class SupabaseRequestsRepository @Inject constructor(
         message: String?,
         venue: String?,
         crowdSize: Int?,
-        expiresAt: Instant,
+        expiresAtEpochMs: Long,
     ): StoredRequest {
-        val clientId = currentUserId()
-        val row = Insert(
-            client_id = clientId,
-            artist_id = artistId.lowercaseUuid(),
-            proposed_amount_inr = proposedAmountInr,
-            date_label = dateLabel,
-            message = message?.trim()?.takeIf { it.isNotEmpty() },
-            venue = venue?.trim()?.takeIf { it.isNotEmpty() },
-            crowd_size = crowdSize,
-            expires_at = SupabaseISO8601.format(expiresAt),
+        val clientId = currentUserId() ?: throw RequestsRepositoryError.NotSignedIn
+        val artistKey = artistId.lowercase()
+        if (runCatching { UUID.fromString(artistKey) }.isFailure) {
+            throw RequestsRepositoryError.Underlying(
+                IllegalArgumentException("Internal: artist_id is not a UUID ($artistId)."),
+            )
+        }
+        val row = GigRequestInsert(
+            clientId = clientId,
+            artistId = artistKey,
+            proposedAmountInr = proposedAmountInr,
+            dateLabel = dateLabel,
+            message = nilIfBlank(message),
+            venue = nilIfBlank(venue),
+            crowdSize = crowdSize,
+            expiresAt = isoUtc(expiresAtEpochMs),
         )
-        return client.postgrest.from("gig_requests")
-            .insert(row) { select(Columns.raw("$REQUEST_COLS, client:users!client_id(full_name)")) }
-            .decodeSingle<DBGigRequestWithClient>()
-            .toStoredRequest()
+        return try {
+            client.from("gig_requests")
+                .insert(row) {
+                    select(Columns.raw("*, client:users!client_id(full_name)"))
+                }
+                .decodeSingle<DbGigRequestWithClient>()
+                .toStoredRequest()
+        } catch (t: Throwable) {
+            throw RequestsRepositoryError.Underlying(t)
+        }
     }
 
     override suspend fun accept(id: String) = updateStatus(id, "accepted", null)
     override suspend fun decline(id: String) = updateStatus(id, "declined", null)
     override suspend fun counter(id: String, amount: Int) = updateStatus(id, "countered", amount)
 
-    /**
-     * Sets status (+ optional counter amount) and forces a single-row return so a
-     * zero-row match (RLS-filtered / deleted) throws PGRST116 → NotFoundOrUnauthorized
-     * — the caller rolls the optimistic flip back instead of showing a fake success.
-     */
     private suspend fun updateStatus(id: String, status: String, counterAmount: Int?) {
-        currentUserId() // ensure signed in
-        val key = id.lowercaseUuid()
+        if (currentUserId() == null) throw RequestsRepositoryError.NotSignedIn
+        if (runCatching { UUID.fromString(id) }.isFailure) {
+            throw RequestsRepositoryError.NotFoundOrUnauthorized(id)
+        }
         try {
-            // Two typed branches — `update(value)` is a reified generic, so the concrete
-            // encoded shape (with or without counter_amount_inr) has to be chosen here.
-            if (counterAmount != null) {
-                client.postgrest.from("gig_requests")
-                    .update(StatusWithCounter(status, counterAmount)) {
-                        filter { eq("id", key) }
-                        single()
+            val rows = if (counterAmount != null) {
+                client.from("gig_requests")
+                    .update(StatusWithCounter(status = status, counterAmountInr = counterAmount)) {
+                        filter { eq("id", id.lowercase()) }
                         select(Columns.list("id"))
                     }
-                    .decodeSingle<IdOnly>()
+                    .decodeList<IdOnly>()
             } else {
-                client.postgrest.from("gig_requests")
-                    .update(StatusOnly(status)) {
-                        filter { eq("id", key) }
-                        single()
+                client.from("gig_requests")
+                    .update(StatusOnly(status = status)) {
+                        filter { eq("id", id.lowercase()) }
                         select(Columns.list("id"))
                     }
-                    .decodeSingle<IdOnly>()
+                    .decodeList<IdOnly>()
             }
+            if (rows.isEmpty()) throw RequestsRepositoryError.NotFoundOrUnauthorized(id)
+        } catch (e: RequestsRepositoryError) {
+            throw e
         } catch (t: Throwable) {
-            throw mapPostgrest(t) // PGRST116 → NotFoundOrUnauthorized; else typed/Unknown
+            throw RequestsRepositoryError.Underlying(t)
         }
     }
 
-    private fun currentUserId(): String =
-        client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
-            ?: throw AppError.NotFoundOrUnauthorized
+    private fun currentUserId(): String? =
+        client.auth.currentSessionOrNull()?.user?.id?.lowercase()
 
+    private fun nilIfBlank(s: String?): String? =
+        s?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun isoUtc(epochMs: Long): String {
+        val f = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        f.timeZone = TimeZone.getTimeZone("UTC")
+        return f.format(Date(epochMs))
+    }
+}
+
+@Serializable
+private data class StatusOnly(val status: String)
+
+@Serializable
+private data class StatusWithCounter(
+    val status: String,
+    @SerialName("counter_amount_inr") val counterAmountInr: Int,
+)
+
+@Serializable
+private data class IdOnly(val id: String)
+
+@Serializable
+private data class GigRequestInsert(
+    @SerialName("client_id") val clientId: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("proposed_amount_inr") val proposedAmountInr: Int,
+    @SerialName("date_label") val dateLabel: String,
+    val message: String?,
+    val venue: String?,
+    @SerialName("crowd_size") val crowdSize: Int?,
+    @SerialName("expires_at") val expiresAt: String,
+)
+
+@Serializable
+private data class DbGigRequestWithClient(
+    val id: String,
+    @SerialName("artist_id") val artistId: String = "",
+    @SerialName("client_id") val clientId: String = "",
+    val message: String? = null,
+    @SerialName("proposed_amount_inr") val proposedAmountInr: Int = 0,
+    @SerialName("counter_amount_inr") val counterAmountInr: Int? = null,
+    @SerialName("date_label") val dateLabel: String = "",
+    val venue: String? = null,
+    @SerialName("crowd_size") val crowdSize: Int? = null,
+    val status: String = "open",
+    @SerialName("created_at") val createdAt: String? = null,
+    val client: ClientEmbed? = null,
+) {
     @Serializable
-    private data class Insert(
-        val client_id: String,
-        val artist_id: String,
-        val proposed_amount_inr: Int,
-        val date_label: String,
-        val message: String?,
-        val venue: String?,
-        val crowd_size: Int?,
-        val expires_at: String,
-    )
+    data class ClientEmbed(@SerialName("full_name") val fullName: String? = null)
 
-    @Serializable private data class StatusOnly(val status: String)
-    @Serializable private data class StatusWithCounter(val status: String, val counter_amount_inr: Int)
-    @Serializable private data class IdOnly(val id: String)
+    fun toStoredRequest(): StoredRequest {
+        val clientName = client?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "Client"
+        return StoredRequest(
+            raw = GigRequest(
+                id = id,
+                client = clientName,
+                message = message.orEmpty(),
+                date = dateLabel,
+                amount = proposedAmountInr,
+                packageLabel = "Custom",
+                timeAgo = relativeTimeAgo(createdAt),
+            ),
+            status = GigRequestStatus.fromDb(status),
+            counterAmount = counterAmountInr,
+        )
+    }
 
-    companion object {
-        private const val REQUEST_COLS =
-            "id, artist_id, client_id, message, proposed_amount_inr, counter_amount_inr, " +
-                "date_label, venue, crowd_size, status, created_at"
+    private fun relativeTimeAgo(createdAt: String?): String {
+        if (createdAt.isNullOrBlank()) return ""
+        // Best-effort: parse ISO prefix; fall back empty.
+        val parsedMs = runCatching {
+            val cleaned = createdAt.replace("Z", "+0000")
+            val formats = listOf(
+                "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+                "yyyy-MM-dd'T'HH:mm:ssXXX",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZ",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+                "yyyy-MM-dd'T'HH:mm:ssZ",
+            )
+            for (fmt in formats) {
+                val f = SimpleDateFormat(fmt, Locale.US)
+                f.isLenient = true
+                val d = runCatching { f.parse(cleaned) }.getOrNull()
+                if (d != null) return@runCatching d.time
+            }
+            null
+        }.getOrNull() ?: return ""
+        val diff = System.currentTimeMillis() - parsedMs
+        val hours = TimeUnit.MILLISECONDS.toHours(diff)
+        return when {
+            hours < 1 -> "just now"
+            hours < 24 -> "${hours}h ago"
+            else -> "${TimeUnit.MILLISECONDS.toDays(diff)}d ago"
+        }
+    }
+}
+
+class FakeRequestsRepository(
+    seed: List<StoredRequest> = emptyList(),
+) : RequestsRepository {
+    private val rows = seed.toMutableList()
+    var signedIn: Boolean = true
+
+    override suspend fun listForArtist(): List<StoredRequest> {
+        if (!signedIn) throw RequestsRepositoryError.NotSignedIn
+        return rows.toList()
+    }
+
+    override suspend fun listForClient(): List<StoredRequest> = listForArtist()
+
+    override suspend fun create(
+        artistId: String,
+        proposedAmountInr: Int,
+        dateLabel: String,
+        message: String?,
+        venue: String?,
+        crowdSize: Int?,
+        expiresAtEpochMs: Long,
+    ): StoredRequest {
+        if (!signedIn) throw RequestsRepositoryError.NotSignedIn
+        val req = StoredRequest(
+            raw = GigRequest(
+                id = UUID.randomUUID().toString(),
+                client = "You",
+                message = message.orEmpty(),
+                date = dateLabel,
+                amount = proposedAmountInr,
+            ),
+            status = GigRequestStatus.Open,
+        )
+        rows.add(0, req)
+        return req
+    }
+
+    override suspend fun accept(id: String) = setStatus(id, GigRequestStatus.Accepted)
+    override suspend fun decline(id: String) = setStatus(id, GigRequestStatus.Declined)
+    override suspend fun counter(id: String, amount: Int) {
+        val idx = rows.indexOfFirst { it.id.equals(id, ignoreCase = true) }
+        if (idx < 0) throw RequestsRepositoryError.NotFoundOrUnauthorized(id)
+        rows[idx] = rows[idx].copy(status = GigRequestStatus.Countered, counterAmount = amount)
+    }
+
+    private fun setStatus(id: String, status: GigRequestStatus) {
+        if (!signedIn) throw RequestsRepositoryError.NotSignedIn
+        val idx = rows.indexOfFirst { it.id.equals(id, ignoreCase = true) }
+        if (idx < 0) throw RequestsRepositoryError.NotFoundOrUnauthorized(id)
+        rows[idx] = rows[idx].copy(status = status)
     }
 }

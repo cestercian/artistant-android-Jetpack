@@ -2,261 +2,359 @@ package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.channel
-import io.github.jan.supabase.realtime.decodeRecord
+import io.github.jan.supabase.realtime.decodeRecordOrNull
 import io.github.jan.supabase.realtime.postgresChangeFlow
-import io.github.jan.supabase.realtime.realtime
-import `in`.artistant.app.common.util.lowercaseUuid
 import `in`.artistant.app.core.config.AppEnvironment
-import `in`.artistant.app.core.result.AppError
-import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.MessageKind
 import `in`.artistant.app.data.model.Thread
-import `in`.artistant.app.data.model.dto.DBMessage
-import `in`.artistant.app.data.model.dto.DBThread
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import timber.log.Timber
+import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.cancellation.CancellationException
 
-/**
- * Thrown when a threadId isn't a server UUID (a local, pre-persistence inquiry
- * thread). The store SWALLOWS it — the message lives on the device and settles to
- * `.Sent` (no retry chip), the same transitional shape as the iOS
- * `.seedThreadNotPersistable` typed error.
- */
-object LocalThreadNotPersistable : Exception("This conversation stays on this device.")
+sealed class MessagesRepositoryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    data object NotSignedIn : MessagesRepositoryError("Sign in to send and sync messages.")
+    class Underlying(cause: Throwable) : MessagesRepositoryError(cause.message ?: "Messages request failed", cause)
+}
 
-/**
- * Chat data boundary (port of iOS `MessagesRepository`). Reads/writes `threads` +
- * `messages` and opens the one Realtime channel the app uses (INSERTs on
- * `public.messages`, filtered to a thread). RLS gates every path on `auth.uid()`.
- *
- * The `messages` reads are COLUMN-SCOPED via [DBMessage.COLUMNS] — never
- * `select("*")`: 0061 revokes `body_raw`, so a `*` read 403s (§4 of API_MAPPING).
- */
+/** Cancellation seam for the Realtime channel — caller MUST cancel on dispose. */
+fun interface MessagesSubscription { fun cancel() }
+
 interface MessagesRepository {
-    /** Threads the signed-in user participates in (RLS-gated), newest-touched first. */
     suspend fun listThreadsForUser(): List<Thread>
-
-    /** Messages for [threadId], oldest first. Explicit columns (a `*` read 403s post-0061). */
-    suspend fun listMessages(threadId: String): List<Message>
-
-    /**
-     * Insert a message; returns the inserted [Message]. The redaction trigger
-     * rewrites `body` inline, so the RETURNING row is already what participants
-     * see — read it back (no echo-and-update dance). Throws
-     * [LocalThreadNotPersistable] for a non-UUID (local) thread.
-     */
+    suspend fun listMessages(threadId: String, limit: Int = 50): List<Message>
     suspend fun send(threadId: String, body: String): Message
+    suspend fun findOrCreateThread(artistId: String, bookingId: String? = null): String
+    suspend fun markThreadRead(threadId: String)
+    suspend fun markThreadReadReceipt(threadId: String)
+    suspend fun counterpartLastRead(threadId: String): Long?
 
     /**
-     * Subscribe to INSERTs on `public.messages` for [threadId]. Collects the
-     * Realtime flow on [scope] and invokes [onInsert] per new row (including the
-     * viewer's own sends echoed back — callers dedup by id). Gated on
-     * [AppEnvironment.realtimeEnabled]. Returns the collecting [Job]; cancel it on
-     * screen dispose to tear the channel down. A no-op (already-complete) Job for a
-     * disabled flag, a non-UUID thread, or a signed-out viewer.
+     * Realtime INSERT subscribe on `public.messages` for one thread. Echoes include
+     * the caller's own sends — ChatViewModel dedups via [ChatRealtimeLogic].
+     * Returns a no-op subscription when realtime is off, unsigned-in, or join fails
+     * (poll-on-open remains the fallback).
      */
-    fun subscribeMessages(threadId: String, scope: CoroutineScope, onInsert: (Message) -> Unit): Job
-
-    /** Find-or-create the REAL threads row for (signed-in client, [artistId], [bookingId]); returns its UUID. */
-    suspend fun findOrCreateThread(artistId: String, bookingId: String?): String
-
-    /** Zero the signed-in viewer's unread counter on [threadId] (mark-as-read). No-op for a non-UUID thread. */
-    suspend fun markThreadRead(threadId: String)
+    suspend fun subscribeMessages(threadId: String, onInsert: (Message) -> Unit): MessagesSubscription
 }
 
 @Singleton
 class SupabaseMessagesRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : MessagesRepository {
-
     override suspend fun listThreadsForUser(): List<Thread> {
-        // Capture the id ONCE — the mapper picks the viewer's unread column by role.
-        val userId = currentUserId()
+        val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
         return try {
-            client.postgrest.from("threads")
-                .select(Columns.raw(DBThread.COLUMNS)) {
-                    // RLS (threads_select_participants) gates the set; order newest-touched first.
-                    order("last_message_at", Order.DESCENDING)
-                }
-                .decodeList<DBThread>()
-                .map { it.toThread(userId) }
+            client.from("threads")
+                .select(THREAD_COLUMNS) { order("last_message_at", Order.DESCENDING) }
+                .decodeList<DbThread>()
+                .map { it.toDomain(userId) }
         } catch (t: Throwable) {
-            throw mapPostgrest(t)
+            throw MessagesRepositoryError.Underlying(t)
         }
     }
 
-    override suspend fun listMessages(threadId: String): List<Message> {
-        // Capture the viewer id ONCE (a second read after the await could race a
-        // sign-out and mis-attribute every row to .Them — the iOS Greptile P1).
-        val userId = currentUserId()
-        if (!threadId.isUuid()) throw LocalThreadNotPersistable
+    override suspend fun listMessages(threadId: String, limit: Int): List<Message> {
+        val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
         return try {
-            client.postgrest.from("messages")
-                .select(Columns.raw(DBMessage.COLUMNS)) {
-                    filter { eq("thread_id", threadId.lowercaseUuid()) }
-                    order("sent_at", Order.ASCENDING)
-                }
-                .decodeList<DBMessage>()
-                .map { it.toMessage(userId) }
+            // 0072 columns are optional during rollout. Retry the base projection if absent.
+            val rows = try {
+                client.from("messages")
+                    .select(MESSAGE_COLUMNS_WITH_SYSTEM) {
+                        filter { eq("thread_id", threadId.lowercase()) }
+                        order("sent_at", Order.DESCENDING)
+                        limit(limit.toLong())
+                    }
+                    .decodeList<DbMessage>()
+            } catch (_: Throwable) {
+                client.from("messages")
+                    .select(MESSAGE_COLUMNS) {
+                        filter { eq("thread_id", threadId.lowercase()) }
+                        order("sent_at", Order.DESCENDING)
+                        limit(limit.toLong())
+                    }
+                    .decodeList<DbMessage>()
+            }
+            rows.asReversed().map { it.toDomain(userId) }
         } catch (t: Throwable) {
-            throw mapPostgrest(t)
+            throw MessagesRepositoryError.Underlying(t)
         }
     }
 
     override suspend fun send(threadId: String, body: String): Message {
-        val userId = currentUserId()
-        if (!threadId.isUuid()) throw LocalThreadNotPersistable
-        val row = MessageInsert(
-            thread_id = threadId.lowercaseUuid(),
-            sender_id = userId,
-            body = body,
-        )
+        val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
+        val trimmed = body.trim()
+        require(trimmed.isNotEmpty()) { "A message can't be empty." }
         return try {
-            client.postgrest.from("messages")
-                // Explicit RETURNING columns — 0061 forbids body_raw, so no `*`.
-                .insert(row) { select(Columns.raw(DBMessage.COLUMNS)) }
-                .decodeSingle<DBMessage>()
-                .toMessage(userId)
-        } catch (t: Throwable) {
-            throw mapPostgrest(t)
-        }
-    }
-
-    override fun subscribeMessages(
-        threadId: String,
-        scope: CoroutineScope,
-        onInsert: (Message) -> Unit,
-    ): Job {
-        // Gate: flag off / local thread / signed-out → no channel. Return a
-        // completed Job so callers can cancel() unconditionally.
-        if (!AppEnvironment.realtimeEnabled || !threadId.isUuid()) return doneJob()
-        val viewerId = client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid() ?: return doneJob()
-
-        // Liveness gate (the iOS OSAllocatedUnfairLock → Mutex): structured
-        // cancellation already stops the collect, but a decode already past the
-        // suspension point could still call onInsert AFTER cancel lands. The
-        // flag is flipped false in `finally`; the callback checks it under the
-        // lock, so no post-cancel store mutation slips through.
-        val liveLock = Mutex()
-        var live = true
-
-        val tid = threadId.lowercaseUuid()
-        // One channel per thread. postgresChangeFlow MUST be built before subscribe
-        // (it errors if called after the channel joins), so build the flow, then join.
-        val channel = client.realtime.channel("messages:$tid")
-        val flow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-            table = "messages"
-            filter("thread_id", FilterOperator.EQ, tid)
-        }
-
-        return scope.launch {
-            try {
-                channel.subscribe(blockUntilSubscribed = true)
-                flow.collect { action ->
-                    val message = runCatching { action.decodeRecord<DBMessage>().toMessage(viewerId) }
-                        .getOrNull() ?: return@collect
-                    liveLock.withLock { if (live) onInsert(message) }
+            client.from("messages")
+                .insert(MessageInsert(threadId.lowercase(), userId, trimmed)) {
+                    select(MESSAGE_COLUMNS)
                 }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (_: Throwable) {
-                // Transport / RLS / join failure — degrade to the poll-on-send path.
-            } finally {
-                liveLock.withLock { live = false }
-                // Tear down off the (already-cancelled) scope so unsubscribe still runs.
-                withContext(NonCancellable) { runCatching { client.realtime.removeChannel(channel) } }
-            }
+                .decodeSingle<DbMessage>()
+                .toDomain(userId)
+        } catch (t: Throwable) {
+            throw MessagesRepositoryError.Underlying(t)
         }
     }
 
     override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String {
-        val clientId = currentUserId()
-        val artistStr = artistId.lowercaseUuid()
-        val bookingStr = bookingId?.lowercaseUuid()
-
-        // A client can have several threads with one artist (one per booking + one
-        // bookingless inquiry), unique per the DB's threads_unique_per_pair_booking.
-        suspend fun findExisting(): String? =
-            client.postgrest.from("threads")
-                .select(Columns.list("id")) {
-                    filter {
-                        eq("client_id", clientId)
-                        eq("artist_id", artistStr)
-                        if (bookingStr != null) eq("booking_id", bookingStr) else exact("booking_id", null)
+        val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
+        val artist = artistId.lowercase()
+        val booking = bookingId?.lowercase()
+        suspend fun existing(): String? = client.from("threads")
+            .select(Columns.list("id")) {
+                filter {
+                    if (booking != null) eq("booking_id", booking)
+                    else {
+                        eq("client_id", userId)
+                        eq("artist_id", artist)
+                        exact("booking_id", null)
                     }
-                    limit(1)
                 }
-                .decodeList<IdOnly>()
-                .firstOrNull()?.id
-
-        return try {
-            findExisting() ?: run {
-                val inserted = client.postgrest.from("threads")
-                    .insert(ThreadInsert(clientId, artistStr, bookingStr)) { select(Columns.list("id")) }
-                    .decodeList<IdOnly>()
-                    .firstOrNull()?.id
-                inserted ?: findExisting() ?: throw AppError.NotFoundOrUnauthorized
+                limit(1)
             }
-        } catch (e: AppError) {
-            throw e
+            .decodeList<ThreadIdRow>()
+            .firstOrNull()?.id
+
+        try {
+            existing()?.let { return it }
+            require(userId != artist) { "The conversation opens once the booking is confirmed." }
+            return client.from("threads")
+                .insert(ThreadInsert(userId, artist, booking)) { select(Columns.list("id")) }
+                .decodeSingle<ThreadIdRow>()
+                .id
         } catch (t: Throwable) {
-            // A parallel insert may have won the unique-index race — re-select once.
-            runCatching { findExisting() }.getOrNull() ?: throw mapPostgrest(t)
+            // A concurrent creator can win the unique-pair race; read once more.
+            existing()?.let { return it }
+            throw MessagesRepositoryError.Underlying(t)
         }
     }
 
     override suspend fun markThreadRead(threadId: String) {
-        // Signed-out or a non-UUID (local) thread → no server row to reset.
-        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid() ?: return
-        if (!threadId.isUuid()) return
-        val tid = threadId.lowercaseUuid()
+        val userId = currentUserId() ?: return
         try {
-            // Two self-selecting updates: whichever participant the viewer is, that
-            // counter resets; the other WHERE matches nothing. RLS gates it.
-            client.postgrest.from("threads").update(UnreadZero(client_unread_count = 0)) {
-                filter { eq("id", tid); eq("client_id", userId) }
+            client.from("threads").update(UnreadPatch(0)) {
+                filter { eq("id", threadId.lowercase()); eq("client_id", userId) }
             }
-            client.postgrest.from("threads").update(UnreadZero(artist_unread_count = 0)) {
-                filter { eq("id", tid); eq("artist_id", userId) }
+            client.from("threads").update(ArtistUnreadPatch(0)) {
+                filter { eq("id", threadId.lowercase()); eq("artist_id", userId) }
             }
         } catch (t: Throwable) {
-            throw mapPostgrest(t)
+            throw MessagesRepositoryError.Underlying(t)
         }
     }
 
-    private fun currentUserId(): String =
-        client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
-            ?: throw AppError.NotFoundOrUnauthorized
+    override suspend fun markThreadReadReceipt(threadId: String) {
+        if (currentUserId() == null) return
+        try {
+            client.postgrest.rpc("mark_thread_read", buildJsonObject { put("p_thread", threadId.lowercase()) })
+        } catch (t: Throwable) {
+            throw MessagesRepositoryError.Underlying(t)
+        }
+    }
 
-    @Serializable private data class IdOnly(val id: String)
-    @Serializable private data class MessageInsert(val thread_id: String, val sender_id: String, val body: String)
-    @Serializable private data class ThreadInsert(val client_id: String, val artist_id: String, val booking_id: String?)
-    // Two nullable fields so a single `update()` shape can zero either counter
-    // (kotlinx omits the null one — only the intended column is written).
-    @Serializable private data class UnreadZero(
-        val client_unread_count: Int? = null,
-        val artist_unread_count: Int? = null,
+    override suspend fun counterpartLastRead(threadId: String): Long? {
+        val userId = currentUserId() ?: return null
+        return try {
+            client.from("thread_reads")
+                .select(Columns.list("user_id", "last_read_at")) {
+                    filter { eq("thread_id", threadId.lowercase()) }
+                }
+                .decodeList<ThreadReadRow>()
+                .filterNot { it.userId.equals(userId, ignoreCase = true) }
+                .mapNotNull { parseEpochMs(it.lastReadAt) }
+                .maxOrNull()
+        } catch (_: Throwable) {
+            // Pre-0072 servers have no table; receipts are strictly best effort.
+            null
+        }
+    }
+
+    override suspend fun subscribeMessages(
+        threadId: String,
+        onInsert: (Message) -> Unit,
+    ): MessagesSubscription {
+        if (!AppEnvironment.realtimeEnabled) return MessagesSubscription {}
+        val userId = currentUserId() ?: return MessagesSubscription {}
+        val tid = threadId.lowercase()
+        // Seed / local-only thread ids aren't on the server — Realtime can't join them.
+        if (!UUID_REGEX.matches(tid)) return MessagesSubscription {}
+
+        // Liveness gate: cancel() flips this synchronously so a callback mid-decode
+        // after teardown never mutates UI (iOS OSAllocatedUnfairLock → AtomicBoolean).
+        val live = AtomicBoolean(true)
+        val channel = client.channel("messages:$tid")
+        val changeFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+            table = "messages"
+            filter("thread_id", FilterOperator.EQ, tid)
+        }
+        // Own scope so collection survives the subscribe await and dies on cancel().
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val collectJob: Job = scope.launch {
+            changeFlow.collect { action ->
+                if (!live.get()) return@collect
+                val row = action.decodeRecordOrNull<DbMessage>() ?: run {
+                    Timber.w("Realtime message decode failed for thread %s", tid)
+                    return@collect
+                }
+                if (!live.get()) return@collect
+                onInsert(row.toDomain(userId))
+            }
+        }
+
+        return try {
+            channel.subscribe(blockUntilSubscribed = true)
+            MessagesSubscription {
+                live.set(false)
+                collectJob.cancel()
+                scope.launch {
+                    runCatching { channel.unsubscribe() }
+                    scope.coroutineContext[Job]?.cancel()
+                }
+            }
+        } catch (t: Throwable) {
+            Timber.w(t, "Realtime subscribe failed for thread %s — polling fallback", tid)
+            live.set(false)
+            collectJob.cancel()
+            scope.coroutineContext[Job]?.cancel()
+            MessagesSubscription {}
+        }
+    }
+
+    private fun currentUserId(): String? = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+
+    companion object {
+        private val UUID_REGEX =
+            Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+        /** Never replace these with `*`: `body_raw` is historically forbidden by RLS. */
+        val MESSAGE_COLUMNS = Columns.list("id", "thread_id", "sender_id", "body", "sent_at")
+        val MESSAGE_COLUMNS_WITH_SYSTEM = Columns.list(
+            "id", "thread_id", "sender_id", "body", "sent_at", "kind", "action_route",
+        )
+        private val THREAD_COLUMNS = Columns.list(
+            "id", "client_id", "artist_id", "booking_id", "client_name",
+            "client_unread_count", "artist_unread_count", "last_message_preview", "last_message_at",
+        )
+    }
+}
+
+@Serializable private data class DbThread(
+    val id: String,
+    @SerialName("client_id") val clientId: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("booking_id") val bookingId: String? = null,
+    @SerialName("client_name") val clientName: String? = null,
+    @SerialName("client_unread_count") val clientUnread: Int? = null,
+    @SerialName("artist_unread_count") val artistUnread: Int? = null,
+    @SerialName("last_message_preview") val lastPreview: String? = null,
+    @SerialName("last_message_at") val lastMessageAt: String? = null,
+) {
+    fun toDomain(userId: String) = Thread(
+        id = id,
+        artistId = artistId,
+        bookingId = bookingId,
+        clientName = clientName,
+        lastPreview = lastPreview.orEmpty(),
+        lastMessageAtEpochMs = parseEpochMs(lastMessageAt),
+        unreadCount = if (artistId.equals(userId, true)) artistUnread ?: 0 else clientUnread ?: 0,
     )
 }
 
-/** True if [this] parses as a UUID (a server thread) vs a local inquiry id. */
-private fun String.isUuid(): Boolean = runCatching { UUID.fromString(this) }.isSuccess
+@Serializable private data class DbMessage(
+    val id: String,
+    @SerialName("thread_id") val threadId: String,
+    @SerialName("sender_id") val senderId: String? = null,
+    val body: String,
+    @SerialName("sent_at") val sentAt: String,
+    val kind: String? = null,
+    @SerialName("action_route") val actionRoute: String? = null,
+) {
+    fun toDomain(userId: String) = Message(
+        id, threadId, senderId, body, parseEpochMs(sentAt) ?: System.currentTimeMillis(),
+        kind = if (kind == "system") MessageKind.System else MessageKind.User,
+        actionRoute = actionRoute,
+        isMine = senderId.equals(userId, ignoreCase = true),
+    )
+}
 
-/** An already-completed Job — the cancel-safe "no subscription" return. */
-private fun doneJob(): Job = Job().apply { complete() }
+@Serializable private data class MessageInsert(
+    @SerialName("thread_id") val threadId: String,
+    @SerialName("sender_id") val senderId: String,
+    val body: String,
+)
+@Serializable private data class ThreadInsert(
+    @SerialName("client_id") val clientId: String,
+    @SerialName("artist_id") val artistId: String,
+    @SerialName("booking_id") val bookingId: String?,
+)
+@Serializable private data class ThreadIdRow(val id: String)
+@Serializable private data class UnreadPatch(@SerialName("client_unread_count") val count: Int)
+@Serializable private data class ArtistUnreadPatch(@SerialName("artist_unread_count") val count: Int)
+@Serializable private data class ThreadReadRow(
+    @SerialName("user_id") val userId: String,
+    @SerialName("last_read_at") val lastReadAt: String,
+)
+
+private fun parseEpochMs(value: String?): Long? = value?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+
+/** In-memory twin for ViewModel tests and deterministic local behaviour. */
+class FakeMessagesRepository(
+    private val userId: String = "00000000-0000-0000-0000-000000000001",
+) : MessagesRepository {
+    private val threads = mutableListOf<Thread>()
+    private val messages = mutableMapOf<String, MutableList<Message>>()
+
+    override suspend fun listThreadsForUser(): List<Thread> = threads.sortedByDescending { it.lastMessageAtEpochMs }
+    override suspend fun listMessages(threadId: String, limit: Int): List<Message> =
+        messages[threadId]?.takeLast(limit)?.toList().orEmpty()
+
+    override suspend fun send(threadId: String, body: String): Message {
+        val text = body.trim()
+        require(text.isNotEmpty()) { "A message can't be empty." }
+        val message = Message(UUID.randomUUID().toString(), threadId, userId, text, System.currentTimeMillis(), isMine = true)
+        messages.getOrPut(threadId) { mutableListOf() }.add(message)
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) threads[index] = threads[index].copy(lastPreview = text, lastMessageAtEpochMs = message.sentAtEpochMs)
+        return message
+    }
+
+    override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String {
+        threads.firstOrNull { it.artistId.equals(artistId, true) && it.bookingId == bookingId }?.let { return it.id }
+        val thread = Thread(UUID.randomUUID().toString(), artistId.lowercase(), bookingId)
+        threads.add(thread)
+        return thread.id
+    }
+
+    override suspend fun markThreadRead(threadId: String) {
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
+    }
+    override suspend fun markThreadReadReceipt(threadId: String) = Unit
+    override suspend fun counterpartLastRead(threadId: String): Long? = null
+
+    /** Test hook: Fake has no WebSocket; callers get a no-op cancel token. */
+    override suspend fun subscribeMessages(
+        threadId: String,
+        onInsert: (Message) -> Unit,
+    ): MessagesSubscription = MessagesSubscription {}
+}

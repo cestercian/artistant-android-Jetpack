@@ -1,70 +1,83 @@
 package `in`.artistant.app.feature.paywall
 
+import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.artistant.app.platform.auth.SessionManager
-import `in`.artistant.app.platform.billing.PurchaseOutcome
-import `in`.artistant.app.state.EntitlementStore
+import `in`.artistant.app.core.config.AppEnvironment
+import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.platform.billing.PlayBillingService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * Drives [PaywallScreen] — a thin adapter over the @Singleton [EntitlementStore] (port of how
- * the iOS `PaywallView` reads `EntitlementStore` + `AuthService`). Re-exposes the store's
- * flows and resolves the buyer's user id from [SessionManager] for the purchase.
- *
- * All of this is a no-op with `subscriptionsEnabled` off: the store is inert, so `products`
- * stays empty and `subscribe`/`restore` short-circuit to Cancelled.
- */
 @HiltViewModel
 class PaywallViewModel @Inject constructor(
     private val entitlements: EntitlementStore,
-    private val session: SessionManager,
+    private val billing: PlayBillingService,
 ) : ViewModel() {
 
-    val products = entitlements.products
-    val loadingProducts = entitlements.loadingProducts
-    val purchasePending = entitlements.purchasePending
+    private val _state = MutableStateFlow(PaywallUiState())
+    val state: StateFlow<PaywallUiState> = _state.asStateFlow()
 
-    private val _working = MutableStateFlow(false)
-    val working: StateFlow<Boolean> = _working.asStateFlow()
-
-    init {
-        // Defensive re-pull in case the paywall opened before the store's own init-load settled
-        // (mirrors iOS `.task { if products.isEmpty { loadProducts() } }`). Inert when disabled.
-        viewModelScope.launch { entitlements.loadProducts() }
-    }
-
-    /**
-     * Buy [productId]. On [PurchaseOutcome.Purchased] invokes [onPurchased] (the gate resumes +
-     * the sheet dismisses); Pending shows the "waiting for approval" line via the store's
-     * `purchasePending`; Cancelled is a no-op.
-     */
-    fun subscribe(productId: String, onPurchased: () -> Unit) {
-        if (_working.value) return
-        _working.value = true
-        viewModelScope.launch {
-            val uid = session.currentUserId
-            val outcome =
-                if (uid == null) PurchaseOutcome.Cancelled
-                else entitlements.purchase(productId, uid)
-            _working.value = false
-            if (outcome == PurchaseOutcome.Purchased) onPurchased()
+    fun bindRole(role: AppRole) {
+        _state.update {
+            it.copy(
+                isArtist = role == AppRole.Artist,
+                productPrice = if (AppEnvironment.subscriptionsEnabled) "₹99" else null,
+            )
+        }
+        if (AppEnvironment.subscriptionsEnabled) {
+            viewModelScope.launch {
+                val price = runCatching { billing.queryMonthlyPrice() }.getOrNull()
+                if (price != null) _state.update { it.copy(productPrice = price) }
+            }
         }
     }
 
-    /** Restore purchases (App-review-required affordance). Resumes the gate if now entitled. */
-    fun restore(productId: String, onPurchased: () -> Unit) {
-        if (_working.value) return
-        _working.value = true
+    fun subscribe(activity: Activity?, onComplete: () -> Unit = {}) {
+        if (!AppEnvironment.subscriptionsEnabled) return
+        if (activity == null) {
+            _state.update { it.copy(error = "Couldn't open Play Billing.") }
+            return
+        }
         viewModelScope.launch {
-            entitlements.restore()
-            _working.value = false
-            if (entitlements.isEntitled(productId)) onPurchased()
+            _state.update { it.copy(working = true, error = null) }
+            val result = runCatching { billing.launchSubscribe(activity) }.getOrElse { Result.failure(it) }
+            result.fold(
+                onSuccess = { purchased ->
+                    if (purchased) {
+                        entitlements.refresh()
+                        _state.update { it.copy(working = false) }
+                        onComplete()
+                    } else {
+                        _state.update { it.copy(working = false) }
+                    }
+                },
+                onFailure = { e ->
+                    _state.update {
+                        it.copy(working = false, error = e.message ?: "Purchase failed.")
+                    }
+                },
+            )
+        }
+    }
+
+    fun restore() {
+        if (!AppEnvironment.subscriptionsEnabled) return
+        viewModelScope.launch {
+            _state.update { it.copy(working = true, error = null) }
+            entitlements.refresh()
+            val entitled = entitlements.isEntitled.value
+            _state.update {
+                it.copy(
+                    working = false,
+                    error = if (entitled) null else "No active subscription found.",
+                )
+            }
         }
     }
 }

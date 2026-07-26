@@ -2,35 +2,55 @@ package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
-import `in`.artistant.app.common.util.lowercaseUuid
 import `in`.artistant.app.core.result.AppError
-import `in`.artistant.app.data.model.ScoreBreakdown
-import `in`.artistant.app.data.model.ScoreHistoryPoint
-import `in`.artistant.app.data.model.dto.DBScoreHistoryRow
-import `in`.artistant.app.data.model.dto.DBScoreMetrics
-import java.time.Duration
-import java.time.Instant
-import java.util.UUID
+import `in`.artistant.app.core.result.mapPostgrest
+import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.score.ScoreTier
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Bookability Score reads (iOS `ScoreRepository`). The score + metric_* columns
- * live on `public.artists`, RLS-readable for any published artist, so
- * [breakdown] needs no auth session; the self surfaces do. A missing row / new
- * artist yields [ScoreBreakdown.newArtist] (the truthful zero-state).
+ * Bookability Score reads — port of iOS ScoreRepository.
+ * Metrics live denormalized on `artists` (written by compute-score EF);
+ * history from `score_history` (self only).
  */
+data class ScoreBreakdown(
+    val score: Int,
+    val showUpRate: Int,
+    val reviewScore: Int,
+    val replySpeed: Int,
+    val cancellationRate: Int,
+    val socialProof: Int,
+    val totalGigs: Int,
+) {
+    val tier: ScoreTier get() = ScoreBands.tier(score, totalGigs)
+
+    /** Null ring for New tier (<5 gigs) — matches ScoreRing nil-handling. */
+    val numericScore: Int? get() = if (tier == ScoreTier.New) null else score
+
+    companion object {
+        val NewArtist = ScoreBreakdown(
+            score = 0,
+            showUpRate = 0,
+            reviewScore = 0,
+            replySpeed = 0,
+            cancellationRate = 0,
+            socialProof = 0,
+            totalGigs = 0,
+        )
+    }
+}
+
+data class ScoreHistoryPoint(val score: Int, val computedAtIso: String)
+
 interface ScoreRepository {
-    /** Per-metric breakdown for the signed-in artist. Throws when not signed in. */
     suspend fun breakdownForSelf(): ScoreBreakdown
-
-    /** Per-metric breakdown for an arbitrary published artist (client viewing a profile). */
-    suspend fun breakdown(forArtist: String): ScoreBreakdown
-
-    /** Signed-in artist's last 12 months of score-history points, oldest-first. */
+    suspend fun breakdown(artistId: String): ScoreBreakdown
     suspend fun historyForSelf(): List<ScoreHistoryPoint>
 }
 
@@ -40,49 +60,106 @@ class SupabaseScoreRepository @Inject constructor(
 ) : ScoreRepository {
 
     override suspend fun breakdownForSelf(): ScoreBreakdown {
-        val userId = selfId() ?: throw AppError.NotFoundOrUnauthorized
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
         return fetchBreakdown(userId)
     }
 
-    override suspend fun breakdown(forArtist: String): ScoreBreakdown {
-        // Non-UUID ids (fixtures) can't have a row — return the New zero-state
-        // rather than letting PostgREST 400 on a malformed uuid literal.
-        val id = runCatching { UUID.fromString(forArtist) }.getOrNull() ?: return ScoreBreakdown.newArtist
-        return fetchBreakdown(id.toString().lowercaseUuid())
+    override suspend fun breakdown(artistId: String): ScoreBreakdown {
+        val id = artistId.lowercase()
+        if (runCatching { java.util.UUID.fromString(id) }.isFailure) {
+            return ScoreBreakdown.NewArtist
+        }
+        return fetchBreakdown(id)
     }
 
     override suspend fun historyForSelf(): List<ScoreHistoryPoint> {
-        val userId = selfId() ?: throw AppError.NotFoundOrUnauthorized
-        // Push the 12-month window into the DB filter (not a client row cap) so an
-        // active artist's earliest baseline isn't silently truncated.
-        val cutoff = Instant.now().minus(Duration.ofDays(365)).toString()
-        return client.postgrest.from("score_history")
-            .select(Columns.list("score", "computed_at")) {
-                filter { eq("artist_id", userId); gte("computed_at", cutoff) }
-                order("computed_at", Order.DESCENDING)
-                limit(5000)  // payload ceiling; not the time window (that's gte above)
-            }
-            .decodeList<DBScoreHistoryRow>()
-            .mapNotNull { it.toDomain() }
-            .sortedBy { it.computedAt }
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        val cutoff = java.time.Instant.now().minusSeconds(365L * 24 * 3600).toString()
+        return try {
+            client.from("score_history")
+                .select(Columns.list("score", "computed_at")) {
+                    filter {
+                        eq("artist_id", userId)
+                        gte("computed_at", cutoff)
+                    }
+                    order("computed_at", Order.ASCENDING)
+                    limit(5000)
+                }
+                .decodeList<HistoryRow>()
+                .map { ScoreHistoryPoint(it.score, it.computedAt) }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
     }
 
-    private suspend fun fetchBreakdown(artistId: String): ScoreBreakdown {
-        val rows = client.postgrest.from("artists")
-            .select(METRIC_COLUMNS) {
-                filter { eq("id", artistId) }
-                limit(1)
-            }
-            .decodeList<DBScoreMetrics>()
-        return rows.firstOrNull()?.toDomain() ?: ScoreBreakdown.newArtist
-    }
-
-    private fun selfId(): String? = client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
-
-    companion object {
-        private val METRIC_COLUMNS = Columns.list(
-            "score", "metric_show_up", "metric_review_score", "metric_reply_speed",
-            "metric_cancellations", "metric_social_proof", "total_gigs",
-        )
-    }
+    private suspend fun fetchBreakdown(artistId: String): ScoreBreakdown =
+        try {
+            client.from("artists")
+                .select(
+                    Columns.list(
+                        "score",
+                        "metric_show_up",
+                        "metric_review_score",
+                        "metric_reply_speed",
+                        "metric_cancellations",
+                        "metric_social_proof",
+                        "total_gigs",
+                    ),
+                ) {
+                    filter { eq("id", artistId) }
+                    limit(1)
+                }
+                .decodeList<MetricsRow>()
+                .firstOrNull()
+                ?.toDomain()
+                ?: ScoreBreakdown.NewArtist
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
 }
+
+class FakeScoreRepository(
+    var self: ScoreBreakdown = ScoreBreakdown.NewArtist,
+    var byId: Map<String, ScoreBreakdown> = emptyMap(),
+    var history: List<ScoreHistoryPoint> = emptyList(),
+    var failSelf: Boolean = false,
+) : ScoreRepository {
+    override suspend fun breakdownForSelf(): ScoreBreakdown {
+        if (failSelf) throw AppError.Unknown(IllegalStateException("score fail"))
+        return self
+    }
+
+    override suspend fun breakdown(artistId: String): ScoreBreakdown =
+        byId[artistId.lowercase()] ?: ScoreBreakdown.NewArtist
+
+    override suspend fun historyForSelf(): List<ScoreHistoryPoint> = history
+}
+
+@Serializable
+private data class MetricsRow(
+    val score: Int = 0,
+    @SerialName("metric_show_up") val metricShowUp: Int = 0,
+    @SerialName("metric_review_score") val metricReviewScore: Int = 0,
+    @SerialName("metric_reply_speed") val metricReplySpeed: Int = 0,
+    @SerialName("metric_cancellations") val metricCancellations: Int = 0,
+    @SerialName("metric_social_proof") val metricSocialProof: Int = 0,
+    @SerialName("total_gigs") val totalGigs: Int = 0,
+) {
+    fun toDomain() = ScoreBreakdown(
+        score = score,
+        showUpRate = metricShowUp,
+        reviewScore = metricReviewScore,
+        replySpeed = metricReplySpeed,
+        cancellationRate = metricCancellations,
+        socialProof = metricSocialProof,
+        totalGigs = totalGigs,
+    )
+}
+
+@Serializable
+private data class HistoryRow(
+    val score: Int,
+    @SerialName("computed_at") val computedAt: String,
+)

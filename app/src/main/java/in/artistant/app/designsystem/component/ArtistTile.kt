@@ -1,19 +1,17 @@
 package `in`.artistant.app.designsystem.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,121 +21,105 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.score.ScoreTier
 
 /**
- * Photo-backed artist card (iOS `ArtistTile`) — the tappable unit across the
- * Discover rails and the Search grid. The cover photo lives BEHIND everything as
- * a Coil [AsyncImage] over the brand-gradient floor (never as a size-driving
- * child), so the tile can't overflow its cell (HANDOFF §9). Overlays: a top-left
- * category pill, a top-right score badge (tier dot + mono number), and the
- * bottom name / genre·city / price strip over a 4-stop darken scrim.
+ * Photo-backed artist card — port of iOS `ArtistTile`.
  *
- * Pass [fullWidth] = true for the 2-col Search grid (the cell decides the width);
- * otherwise a fixed [width] × [height] frame for the horizontally-scrolled rails.
+ * Cover lives in a background Box (Coil / gradient), never as a layout-driving
+ * child that can expand the tile beyond [width]×[height] (iOS HANDOFF §9).
  */
 @Composable
 fun ArtistTile(
     artist: Artist,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    width: Dp = 150.dp,
-    height: Dp = 200.dp,
-    fullWidth: Boolean = false,
+    width: Dp = 192.dp,
+    height: Dp = 252.dp,
 ) {
-    val colors = AppTheme.colors
+    val radii = AppTheme.dimens.radii
     val space = AppTheme.dimens.space
-    val dot = tierColor(artist.score, artist.gigs)
-
-    val sizedModifier = if (fullWidth) {
-        // Grid cell owns the width; keep the card's aspect stable so rows align.
-        modifier.fillMaxWidth().aspectRatio(width.value / height.value)
-    } else {
-        modifier.width(width).height(height)
-    }
-
     Box(
-        sizedModifier
-            .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
-            .background(Brush.linearGradient(artist.gradient)),
+        modifier = modifier
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(radii.md))
+            .clickable(onClick = onClick),
     ) {
-        // Cover photo — transparent while loading / on error, so the gradient
-        // shows through. Skipped entirely when the artist has no uploaded cover.
-        if (!artist.coverUrl.isNullOrEmpty()) {
-            AsyncImage(
-                model = artist.coverUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        // Bottom-darken scrim for headline legibility.
-        BottomDarkenScrim()
-
-        // Top row — category pill (left) + score badge (right).
-        Row(
-            Modifier.fillMaxWidth().padding(space.md),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Pill(text = artist.category)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(colors.bg.copy(alpha = 0.7f))
-                    .padding(horizontal = space.sm, vertical = space.xs),
-            ) {
-                Box(Modifier.size(6.dp).clip(CircleShape).background(dot))
-                Text(
-                    "${artist.score}",
-                    style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
-                )
-            }
-        }
-
-        // Bottom identity strip.
+        ArtistCoverBackground(artist = artist)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.0f to Color.Black.copy(alpha = 0.20f),
+                            0.30f to Color.Transparent,
+                            0.65f to Color.Black.copy(alpha = 0.45f),
+                            1.0f to Color.Black.copy(alpha = 0.85f),
+                        ),
+                    ),
+                ),
+        )
         Column(
             Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .padding(bottom = space.md),
+                .fillMaxSize()
+                .padding(space.md),
         ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(text = artist.category, tone = PillTone.Neutral)
+                ScoreCapsule(score = artist.score, gigs = artist.gigs)
+            }
+            // Flex spacer so the name strip sits at the bottom.
+            val flex = Modifier.weight(1f)
+            Spacer(flex)
             Text(
-                artist.name,
-                style = AppTheme.type.headline.copy(fontWeight = FontWeight.Bold),
+                text = artist.name,
+                style = AppTheme.type.headline,
                 color = Color.White,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                "${artist.genre} · ${artist.city}",
-                style = AppTheme.type.footnote,
-                color = Color.White.copy(alpha = 0.75f),
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(space.sm))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            val subtitle = listOf(artist.genre, artist.city)
+                .filter { it.isNotBlank() }
+                .joinToString(" · ")
+            if (subtitle.isNotBlank()) {
                 Text(
-                    formatInr(artist.price),
-                    style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
+                    text = subtitle,
+                    style = AppTheme.type.footnote,
+                    color = Color.White.copy(alpha = 0.75f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.width(space.xs))
+            }
+            val gap = Modifier.height(space.sm)
+            Spacer(gap)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = formatInr(artist.price),
+                    style = AppTheme.type.monoSmall,
+                    color = Color.White,
+                )
                 if (artist.duration.isNotBlank()) {
                     Text(
-                        artist.duration,
+                        text = artist.duration,
                         style = AppTheme.type.caption,
                         color = Color.White.copy(alpha = 0.6f),
-                        maxLines = 1,
                     )
                 }
             }
@@ -145,18 +127,40 @@ fun ArtistTile(
     }
 }
 
-/** Tile-shaped shimmer used by the Discover / Search loading states. */
 @Composable
-fun ArtistTileSkeleton(
-    modifier: Modifier = Modifier,
-    width: Dp = 150.dp,
-    height: Dp = 200.dp,
-    fullWidth: Boolean = false,
-) {
-    val sized = if (fullWidth) {
-        modifier.fillMaxWidth().aspectRatio(width.value / height.value)
-    } else {
-        modifier.width(width).height(height)
+private fun ArtistCoverBackground(artist: Artist) {
+    val gradient = Brush.verticalGradient(artist.gradient)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(gradient),
+    ) {
+        val url = artist.coverUrl
+        if (!url.isNullOrBlank()) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
-    Skeleton(modifier = sized, cornerRadius = AppTheme.dimens.radii.md)
+}
+
+@Composable
+private fun ScoreCapsule(score: Int, gigs: Int) {
+    val tier = ScoreBands.tier(score, gigs)
+    val label = if (tier == ScoreTier.New) "New" else score.toString()
+    Text(
+        text = label,
+        style = AppTheme.type.caption,
+        color = AppTheme.colors.brandInk,
+        modifier = Modifier
+            .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+            .background(AppTheme.colors.brand)
+            .padding(
+                horizontal = AppTheme.dimens.space.sm,
+                vertical = AppTheme.dimens.space.xs,
+            ),
+    )
 }

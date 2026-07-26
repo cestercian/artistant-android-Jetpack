@@ -1,18 +1,17 @@
 package `in`.artistant.app.data.model
 
 /**
- * Gig-request (negotiation) models — ports of iOS `Models/Artist.swift` GigRequest
- * + `State/RequestStore.swift` StoredRequest/GigRequestStatus. A client proposes a
- * quote; the artist answers accept / decline / counter.
+ * Gig-request (quote) loop — port of iOS `GigRequest` / `StoredRequest`
+ * / `GigRequestStatus`. Separate from package bookings: client proposes
+ * amount via RequestQuote; artist Accept/Decline/Counter on detail.
  */
 
-/** Negotiation state. Rawvalues match `gig_requests.status`. */
-enum class GigRequestStatus(val dbValue: String, val label: String) {
-    Open("open", "Open"),
-    Countered("countered", "Countered"),
-    Accepted("accepted", "Accepted"),
-    Declined("declined", "Declined"),
-    Expired("expired", "Expired");
+enum class GigRequestStatus(val dbValue: String) {
+    Open("open"),
+    Countered("countered"),
+    Accepted("accepted"),
+    Declined("declined"),
+    Expired("expired");
 
     companion object {
         fun fromDb(raw: String?): GigRequestStatus =
@@ -20,25 +19,16 @@ enum class GigRequestStatus(val dbValue: String, val label: String) {
     }
 }
 
-/**
- * The immutable proposal shown in the artist's inbox / client's outbox (iOS
- * `GigRequest`). [client] is the resolved display name from the embed; [package]
- * is a free-text label ("Custom" until a richer projection lands).
- */
 data class GigRequest(
     val id: String,
     val client: String,
     val message: String,
     val date: String,
     val amount: Int,
-    val `package`: String,
-    val timeAgo: String,
+    val packageLabel: String = "Custom",
+    val timeAgo: String = "",
 )
 
-/**
- * A [GigRequest] plus its mutable negotiation state (iOS `StoredRequest`).
- * [counterAmount] is set only when the artist countered.
- */
 data class StoredRequest(
     val raw: GigRequest,
     val status: GigRequestStatus,
