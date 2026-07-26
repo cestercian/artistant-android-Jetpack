@@ -12,8 +12,8 @@ Airbnb-style trust (safety banner + “always communicate through Artistant” +
 report). Schema through ~0085. Android must not rebuild the retired redaction
 moat.
 
-**Android current:** M0 + M1 complete (auth gate + 8 signup screens). Next: **M2
-Browse** on `feature/m2-browse`.
+**Android current:** M0 + M1 complete; **M2 Browse landed** on `feature/m2-browse`
+(Discover + Search + Artist profile). Next: M3 booking request→accept.
 
 ---
 
