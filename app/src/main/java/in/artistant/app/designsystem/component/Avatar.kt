@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -45,7 +44,7 @@ fun Avatar(
                 .clip(CircleShape)
                 .background(gradient)
                 .then(
-                    if (ring) Modifier.border(2.dp, colors.brand, CircleShape)
+                    if (ring) Modifier.border(AppTheme.dimens.size.stroke, colors.brand, CircleShape)
                     else Modifier,
                 ),
             contentAlignment = Alignment.Center,
@@ -64,7 +63,7 @@ fun Avatar(
                     .size(size * 0.28f)
                     .clip(CircleShape)
                     .background(dot)
-                    .border(2.dp, colors.bg, CircleShape),
+                    .border(AppTheme.dimens.size.stroke, colors.bg, CircleShape),
             )
         }
     }

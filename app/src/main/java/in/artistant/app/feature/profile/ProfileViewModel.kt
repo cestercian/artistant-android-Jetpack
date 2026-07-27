@@ -46,6 +46,9 @@ data class ProfileUiState(
     val bookingsCount: Int = 0,
     val savedCount: Int = 0,
     val completedCount: Int = 0,
+    val feedbackSending: Boolean = false,
+    val feedbackStatus: String? = null,
+    val feedbackOk: Boolean = false,
 ) {
     val displayName: String
         get() = profile?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
@@ -135,8 +138,29 @@ class ProfileViewModel @Inject constructor(
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
     fun dismissSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = false) }
 
-    fun showHelp() = _state.update { it.copy(showHelp = true) }
-    fun dismissHelp() = _state.update { it.copy(showHelp = false) }
+    fun showHelp() = _state.update {
+        it.copy(showHelp = true, feedbackStatus = null, feedbackOk = false, feedbackSending = false)
+    }
+    fun dismissHelp() = _state.update {
+        it.copy(showHelp = false, feedbackStatus = null, feedbackOk = false, feedbackSending = false)
+    }
+
+    fun submitFeedback(body: String, isBug: Boolean) = viewModelScope.launch {
+        if (_state.value.feedbackSending) return@launch
+        _state.update { it.copy(feedbackSending = true, feedbackStatus = null) }
+        val ok = bookingsRepository.submitFeedback(body, isBug)
+        _state.update {
+            it.copy(
+                feedbackSending = false,
+                feedbackOk = ok,
+                feedbackStatus = if (ok) {
+                    "Thanks — we got it."
+                } else {
+                    "Couldn't send — check your connection and try again."
+                },
+            )
+        }
+    }
 
     fun signOut() = viewModelScope.launch {
         _state.update { it.copy(showSignOutConfirm = false) }

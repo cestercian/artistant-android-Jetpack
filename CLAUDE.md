@@ -152,8 +152,8 @@ Airbnb chat trust. **Unit tests green**.
 
 **Still operator / follow-ups:** ExoPlayer sample/Spotify embeds, brand `.ttf`,
 `google-services.json` + `send-push` FCM, OAuth dashboard config, flip
-`subscriptionsEnabled`, Profile Saved stats carousel, PROF-* artist polish,
-M8 instrumented UI / Play upload.
+`subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.
+(Profile stats + community pledge shipped on `feature/parity-polish`.)
 
 ---
 

@@ -119,6 +119,25 @@ class SignupViewModelTest {
     }
 
     @Test
+    fun `communityAgreed hydrates from pledge store`() = runTest(dispatcher) {
+        val vm = vm(pledge = FakePledgeStore(agreed = true))
+        advanceUntilIdle()
+        assertTrue(vm.state.value.communityAgreed)
+    }
+
+    @Test
+    fun `agreeCommunity persists pledge and flips state`() = runTest(dispatcher) {
+        val pledge = FakePledgeStore(agreed = false)
+        val vm = vm(pledge = pledge)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.communityAgreed)
+        vm.agreeCommunity()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.communityAgreed)
+        assertTrue(pledge.communityAgreed.value)
+    }
+
+    @Test
     fun `profileValid needs an available handle plus name and city`() = runTest(dispatcher) {
         val vm = vm()
         vm.setName("Yash")

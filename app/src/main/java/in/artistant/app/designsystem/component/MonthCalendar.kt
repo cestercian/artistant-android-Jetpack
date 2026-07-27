@@ -18,6 +18,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -90,15 +94,26 @@ fun MonthDayGrid(
                             .padding(space.xs)
                             .then(
                                 if (day != null) {
+                                    val isSelected = selectedDay == day
+                                    val isBusy = day in busyDays
                                     Modifier
                                         .clip(CircleShape)
                                         .background(
                                             when {
-                                                selectedDay == day -> colors.brand
-                                                day in busyDays -> colors.brand.copy(alpha = 0.2f)
+                                                isSelected -> colors.brand
+                                                isBusy -> colors.brand.copy(alpha = 0.2f)
                                                 else -> Color.Transparent
                                             },
                                         )
+                                        .semantics {
+                                            contentDescription = buildString {
+                                                append("Day $day")
+                                                if (isBusy) append(", has bookings")
+                                                if (isSelected) append(", selected")
+                                            }
+                                            selected = isSelected
+                                            if (isBusy) stateDescription = "Busy"
+                                        }
                                         .clickable { onDayClick(day) }
                                 } else Modifier,
                             ),

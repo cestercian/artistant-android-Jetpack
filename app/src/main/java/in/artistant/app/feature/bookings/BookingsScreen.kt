@@ -96,32 +96,43 @@ fun BookingsScreen(
                     },
                 )
                 Spacer(Modifier.height(space.lg))
-                val groups = if (selectedDay == null) {
-                    viewModel.groupedByMonth()
+                if (selectedDay != null && filtered.isEmpty()) {
+                    Text(
+                        "No bookings on this day",
+                        style = AppTheme.type.footnote,
+                        color = colors.ink3,
+                        modifier = Modifier
+                            .padding(horizontal = space.lg)
+                            .clickable { selectedDay = null },
+                    )
                 } else {
-                    listOf("Selected" to filtered)
-                }
-                groups.forEach { (monthLabel, rows) ->
-                    if (selectedDay == null) MonthCalendarHeader(monthLabel = monthLabel)
-                    rows.forEach { item ->
-                        val b = item.booking
-                        Column(
-                            Modifier
-                                .clickable { onBookingClick(b.id) }
-                                .padding(horizontal = space.lg, vertical = space.md),
-                        ) {
-                            Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
-                            Spacer(Modifier.height(space.xs))
-                            Text(item.artistName, style = AppTheme.type.headline, color = colors.ink)
-                            Text(
-                                "${b.time} · ${b.venue}",
-                                style = AppTheme.type.footnote,
-                                color = colors.ink2,
-                            )
-                            Spacer(Modifier.height(space.xs))
-                            Text(b.status.label, style = AppTheme.type.caption, color = colors.brand)
+                    val groups = if (selectedDay == null) {
+                        viewModel.groupedByMonth()
+                    } else {
+                        listOf("Selected" to filtered)
+                    }
+                    groups.forEach { (monthLabel, rows) ->
+                        if (selectedDay == null) MonthCalendarHeader(monthLabel = monthLabel)
+                        rows.forEach { item ->
+                            val b = item.booking
+                            Column(
+                                Modifier
+                                    .clickable { onBookingClick(b.id) }
+                                    .padding(horizontal = space.lg, vertical = space.md),
+                            ) {
+                                Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
+                                Spacer(Modifier.height(space.xs))
+                                Text(item.artistName, style = AppTheme.type.headline, color = colors.ink)
+                                Text(
+                                    "${b.time} · ${b.venue}",
+                                    style = AppTheme.type.footnote,
+                                    color = colors.ink2,
+                                )
+                                Spacer(Modifier.height(space.xs))
+                                Text(b.status.label, style = AppTheme.type.caption, color = colors.brand)
+                            }
+                            HRule(modifier = Modifier.padding(horizontal = space.lg))
                         }
-                        HRule(modifier = Modifier.padding(horizontal = space.lg))
                     }
                 }
                 Spacer(Modifier.height(space.xxl))

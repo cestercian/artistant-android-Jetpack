@@ -42,6 +42,13 @@ data class Size(
     val heroTall: Dp = 460.dp,
     val heroMed: Dp = 360.dp,
     val heroShort: Dp = 280.dp,
+    /** 1pt hairline borders (Decline CTA, calendar cell chrome). */
+    val hairline: Dp = 1.dp,
+    /** Avatar ring / badge stroke (iOS Avatar uses fixed 2pt). */
+    val stroke: Dp = 2.dp,
+    /** ArtistList row thumbnail (iOS ArtistRow thumb 62×78). */
+    val listThumbW: Dp = 62.dp,
+    val listThumbH: Dp = 78.dp,
 )
 
 /** width : height ratios for media containers. */

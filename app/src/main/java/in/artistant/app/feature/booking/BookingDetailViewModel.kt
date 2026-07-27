@@ -69,6 +69,9 @@ class BookingDetailViewModel @Inject constructor(
 
     fun cancelBooking() = mutateRequest { bookingsRepository.cancel(bookingId, reason = null) }
 
+    fun reportActionError(message: String) =
+        _state.update { it.copy(actionError = message) }
+
     private fun mutateRequest(block: suspend () -> Booking) {
         if (_state.value.isActing) return
         viewModelScope.launch {

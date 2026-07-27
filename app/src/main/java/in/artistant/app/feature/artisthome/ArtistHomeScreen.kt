@@ -190,7 +190,7 @@ fun ArtistHomeScreen(
                                     .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
                                     .background(if (busy) colors.brand.copy(alpha = 0.15f) else colors.bgSoft)
                                     .border(
-                                        width = 1.dp,
+                                        width = AppTheme.dimens.size.hairline,
                                         color = if (busy) colors.brand else colors.lineSoft,
                                         shape = RoundedCornerShape(AppTheme.dimens.radii.sm),
                                     )
@@ -284,7 +284,7 @@ private fun OpenQuotesSection(
     quotes.forEachIndexed { index, req ->
         BookingRailRow(
             title = req.raw.client.ifBlank { "Client" },
-            subtitle = "${req.raw.date} · ${req.status.dbValue}",
+            subtitle = "${req.raw.date} · ${req.status.label}",
             trailing = formatInr(req.counterAmount ?: req.raw.amount),
             accentDot = true,
             onClick = { onGigRequestClick(req.id) },

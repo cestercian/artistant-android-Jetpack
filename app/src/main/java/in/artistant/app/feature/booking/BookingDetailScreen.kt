@@ -195,7 +195,11 @@ fun BookingDetailScreen(
                     if (booking.status == BookingStatus.Confirmed) {
                         PrimaryButton(
                             text = "Add to calendar",
-                            onClick = { launchAddToCalendar(context, booking) },
+                            onClick = {
+                                launchAddToCalendar(context, booking)?.let { err ->
+                                    viewModel.reportActionError(err)
+                                }
+                            },
                             variant = ButtonVariant.Ghost,
                             fullWidth = true,
                         )
@@ -220,8 +224,9 @@ fun BookingDetailScreen(
  * Zero-permission calendar handoff — mirrors iOS BOOK-06. Prefills title/location/
  * window; the system Calendar app owns the compose UI (we never read the store).
  */
-private fun launchAddToCalendar(context: android.content.Context, booking: Booking) {
-    val startMs = parseIsoEpochMs(booking.startDatetimeIso) ?: return
+private fun launchAddToCalendar(context: android.content.Context, booking: Booking): String? {
+    val startMs = parseIsoEpochMs(booking.startDatetimeIso)
+        ?: return "Couldn't add to calendar — missing show time."
     val endMs = parseIsoEpochMs(booking.endDatetimeIso) ?: (startMs + 2L * 60 * 60 * 1000)
     val intent = Intent(Intent.ACTION_INSERT)
         .setData(CalendarContract.Events.CONTENT_URI)
@@ -232,7 +237,8 @@ private fun launchAddToCalendar(context: android.content.Context, booking: Booki
     booking.venueNotes?.takeIf { it.isNotBlank() }?.let {
         intent.putExtra(CalendarContract.Events.DESCRIPTION, it)
     }
-    runCatching { context.startActivity(intent) }
+    return runCatching { context.startActivity(intent); null }
+        .getOrElse { "Couldn't open a calendar app on this device." }
 }
 
 private fun parseIsoEpochMs(iso: String?): Long? =

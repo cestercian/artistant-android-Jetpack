@@ -30,7 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -180,8 +179,8 @@ private fun ArtistThumb(artist: Artist?) {
     val shape = RoundedCornerShape(AppTheme.dimens.radii.sm)
     Box(
         Modifier
-            .width(62.dp)
-            .height(78.dp)
+            .width(AppTheme.dimens.size.listThumbW)
+            .height(AppTheme.dimens.size.listThumbH)
             .clip(shape)
             .background(
                 Brush.linearGradient(

@@ -113,34 +113,48 @@ fun ArtistGigsScreen(
                         )
                         Spacer(Modifier.height(space.md))
                     }
-                    val rows = if (selectedDay == null) {
-                        viewModel.groupedByMonth()
+                    val selectedRows = if (selectedDay == null) {
+                        null
                     } else {
-                        listOf(
-                            "Selected" to state.items.filter {
-                                dayOfMonthInMonth(it.booking.date, year, month) == selectedDay
-                            },
-                        )
+                        state.items.filter {
+                            dayOfMonthInMonth(it.booking.date, year, month) == selectedDay
+                        }
                     }
-                    rows.forEach { (month, group) ->
-                        if (selectedDay == null) MonthCalendarHeader(monthLabel = month)
-                        group.forEach { item ->
-                            val b = item.booking
-                            Column(
-                                Modifier
-                                    .clickable { onBookingClick(b.id) }
-                                    .padding(horizontal = space.lg, vertical = space.md),
-                            ) {
-                                Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
-                                Spacer(Modifier.height(space.xs))
-                                Text(item.clientName, style = AppTheme.type.headline, color = colors.ink)
-                                Text(
-                                    "${b.time} · ${b.status.label}",
-                                    style = AppTheme.type.footnote,
-                                    color = colors.ink2,
-                                )
+                    if (selectedRows != null && selectedRows.isEmpty()) {
+                        Text(
+                            "No gigs on this day",
+                            style = AppTheme.type.footnote,
+                            color = colors.ink3,
+                            modifier = Modifier
+                                .padding(horizontal = space.lg)
+                                .clickable { selectedDay = null },
+                        )
+                    } else {
+                        val rows = if (selectedRows == null) {
+                            viewModel.groupedByMonth()
+                        } else {
+                            listOf("Selected" to selectedRows)
+                        }
+                        rows.forEach { (month, group) ->
+                            if (selectedDay == null) MonthCalendarHeader(monthLabel = month)
+                            group.forEach { item ->
+                                val b = item.booking
+                                Column(
+                                    Modifier
+                                        .clickable { onBookingClick(b.id) }
+                                        .padding(horizontal = space.lg, vertical = space.md),
+                                ) {
+                                    Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
+                                    Spacer(Modifier.height(space.xs))
+                                    Text(item.clientName, style = AppTheme.type.headline, color = colors.ink)
+                                    Text(
+                                        "${b.time} · ${b.status.label}",
+                                        style = AppTheme.type.footnote,
+                                        color = colors.ink2,
+                                    )
+                                }
+                                HRule(modifier = Modifier.padding(horizontal = space.lg))
                             }
-                            HRule(modifier = Modifier.padding(horizontal = space.lg))
                         }
                     }
                     Spacer(Modifier.height(space.xxl))

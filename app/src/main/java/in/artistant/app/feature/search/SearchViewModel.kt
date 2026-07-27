@@ -288,12 +288,14 @@ class SearchViewModel @Inject constructor(
                     )
                 }
                 // Persist successful text queries as recents (iOS SearchStore).
+                // Isolated from the search catch so a prefs write failure never
+                // masquerades as a failed search.
                 val q = live.query.trim()
                 if (reset && q.isNotEmpty()) {
                     val next = (listOf(q) + live.recents.filter { !it.equals(q, ignoreCase = true) })
                         .take(8)
-                    searchRecents.save(next)
-                    _state.update { it.copy(recents = next) }
+                    runCatching { searchRecents.save(next) }
+                        .onSuccess { _state.update { it.copy(recents = next) } }
                 }
             } catch (t: Throwable) {
                 if (gen != generation) return@launch

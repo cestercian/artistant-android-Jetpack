@@ -325,14 +325,20 @@ fun ProfileScreen(
 
     if (state.showHelp) {
         Box(
-            Modifier
-                .fillMaxSize()
-                .background(colors.bg.copy(alpha = 0.72f))
-                .clickable(onClick = viewModel::dismissHelp),
+            Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter,
         ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.bg.copy(alpha = 0.72f))
+                    .clickable(onClick = viewModel::dismissHelp),
+            )
             HelpFeedbackSheet(
-                bookingsRepository = viewModel.bookingsRepository,
+                sending = state.feedbackSending,
+                status = state.feedbackStatus,
+                statusOk = state.feedbackOk,
+                onSubmit = viewModel::submitFeedback,
                 onDismiss = viewModel::dismissHelp,
             )
         }

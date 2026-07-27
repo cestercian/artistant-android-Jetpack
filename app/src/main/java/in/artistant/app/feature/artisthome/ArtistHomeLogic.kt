@@ -50,9 +50,14 @@ internal fun artistClientDisplayName(booking: Booking): String =
  * Confirmed + completed only — pending money isn't "earned" yet (matchmaker posture).
  * Buckets by `createdAt` (iOS earnings sparkline contract).
  */
-internal fun earningsSparkline(bookings: List<Booking>, days: Int = 7): List<Int> {
+internal fun earningsSparkline(
+    bookings: List<Booking>,
+    days: Int = 7,
+    nowEpochMs: Long = System.currentTimeMillis(),
+): List<Int> {
     val ist = TimeZone.getTimeZone("Asia/Kolkata")
     val today = Calendar.getInstance(ist).apply {
+        timeInMillis = nowEpochMs
         set(Calendar.HOUR_OF_DAY, 0)
         set(Calendar.MINUTE, 0)
         set(Calendar.SECOND, 0)

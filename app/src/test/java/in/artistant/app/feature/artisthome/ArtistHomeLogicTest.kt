@@ -69,23 +69,18 @@ class ArtistHomeLogicTest {
 
     @Test
     fun earningsSparkline_bucketsByCreatedAt() {
-        val ist = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-        val today = java.util.Calendar.getInstance(ist).apply {
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }
-        val twoDaysAgo = today.timeInMillis - 2L * 24 * 60 * 60 * 1000
+        val now = 1_800_000_000_000L // fixed clock — avoid midnight flake
+        val twoDaysAgo = now - 2L * 24 * 60 * 60 * 1000
         val series = earningsSparkline(
             listOf(
                 booking(BookingStatus.Confirmed).copy(fee = 1000, createdAtEpochMs = twoDaysAgo),
-                booking(BookingStatus.Completed).copy(fee = 500, createdAtEpochMs = today.timeInMillis),
+                booking(BookingStatus.Completed).copy(fee = 500, createdAtEpochMs = now),
             ),
             days = 7,
+            nowEpochMs = now,
         )
         assertEquals(7, series.size)
-        assertEquals(1000, series[4]) // today-2 → index 4 in a 7-day oldest→newest series
+        assertEquals(1000, series[4])
         assertEquals(500, series[6])
     }
 

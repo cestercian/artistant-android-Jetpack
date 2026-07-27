@@ -13,26 +13,27 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
-import kotlinx.coroutines.launch
 
 /**
  * Help + feedback sheet — port of iOS Profile HelpCenter / FeedbackSheet.
- * FAQ is static copy; feedback posts to `app_feedback` via [BookingsRepository.submitFeedback].
+ * FAQ is static; submit is owned by [ProfileViewModel] so dismissal can't cancel it.
  */
 @Composable
 fun HelpFeedbackSheet(
-    bookingsRepository: BookingsRepository,
+    sending: Boolean,
+    status: String?,
+    statusOk: Boolean,
+    onSubmit: (body: String, isBug: Boolean) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -40,14 +41,16 @@ fun HelpFeedbackSheet(
     val space = AppTheme.dimens.space
     var body by remember { mutableStateOf("") }
     var isBug by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf<String?>(null) }
-    var sending by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(statusOk, status) {
+        if (statusOk && status != null) body = ""
+    }
 
     Column(
         modifier
             .fillMaxWidth()
             .background(colors.bgElev)
+            .clickable(enabled = false) {}
             .padding(space.lg),
     ) {
         Text("Help", style = AppTheme.type.headline, color = colors.ink)
@@ -102,7 +105,7 @@ fun HelpFeedbackSheet(
             Text(
                 it,
                 style = AppTheme.type.footnote,
-                color = if (it.startsWith("Thanks")) colors.ink2 else colors.hot,
+                color = if (statusOk) colors.ink2 else colors.hot,
             )
         }
         Spacer(Modifier.height(space.lg))
@@ -110,17 +113,7 @@ fun HelpFeedbackSheet(
             text = if (sending) "Sending…" else "Send",
             onClick = {
                 if (sending || body.isBlank()) return@PrimaryButton
-                scope.launch {
-                    sending = true
-                    val ok = bookingsRepository.submitFeedback(body, isBug)
-                    status = if (ok) {
-                        body = ""
-                        "Thanks — we got it."
-                    } else {
-                        "Couldn't send — check your connection and try again."
-                    }
-                    sending = false
-                }
+                onSubmit(body.trim(), isBug)
             },
             fullWidth = true,
             enabled = !sending && body.isNotBlank(),

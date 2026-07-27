@@ -29,7 +29,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.dp
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -125,7 +124,7 @@ private fun PledgeBody(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(AppTheme.dimens.size.controlMin)
-                .border(1.dp, colors.line, RoundedCornerShape(AppTheme.dimens.radii.lg))
+                .border(AppTheme.dimens.size.hairline, colors.line, RoundedCornerShape(AppTheme.dimens.radii.lg))
                 .clickable(onClick = onDecline)
                 .padding(vertical = space.md)
                 .semantics { testTag = "community.decline" },

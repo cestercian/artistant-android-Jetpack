@@ -115,6 +115,7 @@ object BookingDateFormat {
     const val PATTERN = "EEE, MMM d, yyyy"
 
     private val posix = Locale.US
+    private val datePatterns = listOf(PATTERN, "MMM d, yyyy", "yyyy-MM-dd")
 
     fun weekdayString(epochMs: Long): String {
         val f = SimpleDateFormat(PATTERN, posix)
@@ -122,14 +123,38 @@ object BookingDateFormat {
         return f.format(Date(epochMs))
     }
 
-    /** Parse a stored date label into a Calendar (local wall clock). */
+    /** Strict full-string parse of a stored date label into a Calendar. */
     fun parseLabel(dateLabel: String): java.util.Calendar? {
-        val formats = listOf(PATTERN, "MMM d, yyyy", "yyyy-MM-dd")
-        for (p in formats) {
-            val d = runCatching { SimpleDateFormat(p, posix).parse(dateLabel) }.getOrNull() ?: continue
-            return java.util.Calendar.getInstance().apply { time = d }
+        val trimmed = dateLabel.trim()
+        if (trimmed.isEmpty()) return null
+        for (p in datePatterns) {
+            parseStrict(trimmed, p, TimeZone.getDefault())?.let { d ->
+                return java.util.Calendar.getInstance().apply { time = d }
+            }
         }
         return null
+    }
+
+    /** Strict parse of date + wall-clock time (IST), trying every date pattern. */
+    fun parseDateAndTime(dateLabel: String, timeLabel: String): Long? {
+        val combined = "${dateLabel.trim()} ${timeLabel.trim()}"
+        if (dateLabel.isBlank() || timeLabel.isBlank()) return null
+        val ist = TimeZone.getTimeZone("Asia/Kolkata")
+        for (p in datePatterns) {
+            parseStrict(combined, "$p h:mm a", ist)?.time?.let { return it }
+        }
+        return null
+    }
+
+    private fun parseStrict(input: String, pattern: String, zone: TimeZone): Date? {
+        val f = SimpleDateFormat(pattern, posix).apply {
+            isLenient = false
+            timeZone = zone
+        }
+        val pos = java.text.ParsePosition(0)
+        val d = f.parse(input, pos) ?: return null
+        if (pos.index != input.length) return null
+        return d
     }
 }
 
@@ -146,18 +171,16 @@ fun Booking.resolvedStartEpochMs(): Long? {
             "yyyy-MM-dd'T'HH:mm:ss",
         )
         for (pattern in formats) {
-            runCatching {
-                val f = SimpleDateFormat(pattern, Locale.US)
-                f.timeZone = TimeZone.getTimeZone("UTC")
-                f.parse(raw)?.time
-            }.getOrNull()?.let { return it }
+            val f = SimpleDateFormat(pattern, Locale.US).apply {
+                isLenient = false
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val pos = java.text.ParsePosition(0)
+            val d = f.parse(raw, pos)
+            if (d != null && pos.index == raw.length) return d.time
         }
     }
-    if (date.isNotBlank() && time.isNotBlank()) {
-        val f = SimpleDateFormat("EEE, MMM d, yyyy h:mm a", Locale.US)
-        f.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-        runCatching { f.parse("$date $time")?.time }.getOrNull()?.let { return it }
-    }
+    BookingDateFormat.parseDateAndTime(date, time)?.let { return it }
     return BookingDateFormat.parseLabel(date)?.apply {
         set(java.util.Calendar.HOUR_OF_DAY, 0)
         set(java.util.Calendar.MINUTE, 0)

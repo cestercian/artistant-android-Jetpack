@@ -103,11 +103,12 @@ class ArtistListViewModel @Inject constructor(
             }
         }
         return sorted.map { booking ->
-            val artist = artists.ensureFull(booking.artistId) ?: artists.find(booking.artistId)
+            val artistId = booking.artistId.lowercase()
+            val artist = artists.ensureFull(artistId) ?: artists.find(artistId)
             ArtistListRow(
-                id = booking.id,
-                artistId = booking.artistId,
-                bookingId = booking.id,
+                id = booking.id.lowercase(),
+                artistId = artistId,
+                bookingId = booking.id.lowercase(),
                 artist = artist,
                 fallbackTitle = booking.venue,
                 pills = pillsFor(booking),
