@@ -112,6 +112,7 @@ fun ArtistTabsScaffold() {
             composable(ArtistTab.Home.route) {
                 ArtistHomeScreen(
                     onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    onGigRequestClick = { id -> nav.navigate(ArtistNavRoutes.gigRequest(id)) },
                     onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
                     onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
                     onScoreExplainer = { nav.navigate(ArtistNavRoutes.SCORE_EXPLAINER) },
@@ -166,6 +167,7 @@ fun ArtistTabsScaffold() {
                 BookingDetailScreen(
                     isArtistViewer = true,
                     onBack = { nav.popBackStack() },
+                    onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
                 )
             }
             composable(

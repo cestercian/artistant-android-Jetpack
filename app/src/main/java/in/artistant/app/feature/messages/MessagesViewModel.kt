@@ -13,12 +13,24 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** Inbox segment chips — port of iOS MessagesView All / Bookings / Inquiries. */
+enum class MessagesFilter { All, Bookings, Inquiries }
+
 data class ThreadListItem(val thread: Thread, val counterpartName: String)
+
 data class MessagesUiState(
     val threads: List<ThreadListItem> = emptyList(),
+    val filter: MessagesFilter = MessagesFilter.All,
     val isLoading: Boolean = true,
     val error: String? = null,
-)
+) {
+    val visibleThreads: List<ThreadListItem>
+        get() = when (filter) {
+            MessagesFilter.All -> threads
+            MessagesFilter.Bookings -> threads.filter { it.thread.bookingId != null }
+            MessagesFilter.Inquiries -> threads.filter { it.thread.bookingId == null }
+        }
+}
 
 @HiltViewModel
 class MessagesViewModel @Inject constructor(
@@ -29,6 +41,10 @@ class MessagesViewModel @Inject constructor(
     val state: StateFlow<MessagesUiState> = _state.asStateFlow()
 
     init { refresh() }
+
+    fun setFilter(filter: MessagesFilter) {
+        _state.update { it.copy(filter = filter) }
+    }
 
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }

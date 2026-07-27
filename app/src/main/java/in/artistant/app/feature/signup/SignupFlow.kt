@@ -94,11 +94,20 @@ fun SignupFlow(
                     onGetStarted = viewModel::startSignup,
                     onLogin = viewModel::startLogin,
                 )
-                SignupStep.Role -> RoleScreen(
-                    onPick = viewModel::pickRole,
-                    onAdvance = viewModel::advance,
-                    testMode = testMode,
-                )
+                SignupStep.Role -> {
+                    if (state.communityAgreed) {
+                        RoleScreen(
+                            onPick = viewModel::pickRole,
+                            onAdvance = viewModel::advance,
+                            testMode = testMode,
+                        )
+                    } else {
+                        CommunityCommitmentScreen(
+                            onAgree = viewModel::agreeCommunity,
+                            onBack = viewModel::back,
+                        )
+                    }
+                }
                 SignupStep.Auth -> SignupAuthScreen(
                     mode = state.mode,
                     authNotice = state.authNotice,

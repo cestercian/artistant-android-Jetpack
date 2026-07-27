@@ -17,8 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -44,6 +44,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.repository.ExportResult
+import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -58,6 +59,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 fun ProfileScreen(
     onNavigateToPaywall: () -> Unit = {},
     onManageAvailability: (() -> Unit)? = null,
+    onArtistList: ((ArtistListKind) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
@@ -148,19 +150,11 @@ fun ProfileScreen(
                             style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
                             color = colors.ink3,
                         )
-                        Box(
-                            Modifier
-                                .size(size.avatarXl)
-                                .clip(CircleShape)
-                                .background(colors.bgCard),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                state.displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                                style = AppTheme.type.title,
-                                color = colors.brand,
-                            )
-                        }
+                        Avatar(
+                            name = state.displayName,
+                            size = size.avatarXl,
+                            ring = true,
+                        )
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(state.displayName, style = AppTheme.type.displayTitle, color = colors.ink)
                             state.handleLabel?.let {
@@ -168,6 +162,15 @@ fun ProfileScreen(
                             }
                             Text(state.subtitle, style = AppTheme.type.footnote, color = colors.ink2)
                         }
+                    }
+
+                    if (state.role == AppRole.Client && onArtistList != null) {
+                        ProfileStatsRow(
+                            bookings = state.bookingsCount,
+                            saved = state.savedCount,
+                            completed = state.completedCount,
+                            onClick = onArtistList,
+                        )
                     }
 
                     HRule()
@@ -228,11 +231,7 @@ fun ProfileScreen(
                             HRule()
                             SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
                             HRule()
-                            SettingsRow("Get help") {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, "mailto:${AppEnvironment.supportEmail}".toUri()),
-                                )
-                            }
+                            SettingsRow("Get help", onClick = viewModel::showHelp)
                             HRule()
                             SettingsRow("Sign out", tint = colors.warm, onClick = viewModel::showSignOutConfirm)
                             HRule()
@@ -321,6 +320,90 @@ fun ProfileScreen(
                     Text("Cancel")
                 }
             },
+        )
+    }
+
+    if (state.showHelp) {
+        Box(
+            Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.bg.copy(alpha = 0.72f))
+                    .clickable(onClick = viewModel::dismissHelp),
+            )
+            HelpFeedbackSheet(
+                sending = state.feedbackSending,
+                status = state.feedbackStatus,
+                statusOk = state.feedbackOk,
+                onSubmit = viewModel::submitFeedback,
+                onDismiss = viewModel::dismissHelp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileStatsRow(
+    bookings: Int,
+    saved: Int,
+    completed: Int,
+    onClick: (ArtistListKind) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = space.xl),
+    ) {
+        StatCol("Bookings", bookings, Modifier.weight(1f)) {
+            onClick(ArtistListKind.Bookings)
+        }
+        Box(
+            Modifier
+                .width(1.dp)
+                .height(40.dp)
+                .align(Alignment.CenterVertically)
+                .background(colors.lineSoft),
+        )
+        StatCol("Saved", saved, Modifier.weight(1f)) {
+            onClick(ArtistListKind.Saved)
+        }
+        Box(
+            Modifier
+                .width(1.dp)
+                .height(40.dp)
+                .align(Alignment.CenterVertically)
+                .background(colors.lineSoft),
+        )
+        StatCol("Completed", completed, Modifier.weight(1f)) {
+            onClick(ArtistListKind.Completed)
+        }
+    }
+}
+
+@Composable
+private fun StatCol(
+    title: String,
+    value: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    Column(
+        modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = AppTheme.dimens.space.sm),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("$value", style = AppTheme.type.monoLarge, color = colors.ink)
+        Text(
+            title.uppercase(),
+            style = AppTheme.type.caption,
+            color = colors.ink3,
         )
     }
 }

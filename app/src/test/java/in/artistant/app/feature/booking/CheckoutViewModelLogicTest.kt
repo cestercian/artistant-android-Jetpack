@@ -6,8 +6,7 @@ import `in`.artistant.app.data.model.PaymentMethod
 import `in`.artistant.app.data.payments.MockPaymentsService
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
-import `in`.artistant.app.feature.booking.BookingDraftStore
-import `in`.artistant.app.feature.booking.CheckoutViewModel
+import `in`.artistant.app.feature.paywall.EntitlementStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -62,6 +61,7 @@ class CheckoutViewModelLogicTest {
             artistsRepository = FakeArtistsRepository(),
             bookingsRepository = bookings,
             paymentsService = payments,
+            entitlements = EntitlementStore(),
         )
 
         advanceUntilIdle()

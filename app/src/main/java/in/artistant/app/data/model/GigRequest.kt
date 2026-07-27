@@ -13,6 +13,15 @@ enum class GigRequestStatus(val dbValue: String) {
     Declined("declined"),
     Expired("expired");
 
+    val label: String
+        get() = when (this) {
+            Open -> "Awaiting response"
+            Countered -> "Counter offer"
+            Accepted -> "Accepted"
+            Declined -> "Declined"
+            Expired -> "Expired"
+        }
+
     companion object {
         fun fromDb(raw: String?): GigRequestStatus =
             entries.firstOrNull { it.dbValue == raw } ?: Open

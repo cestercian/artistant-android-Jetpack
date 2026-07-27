@@ -55,6 +55,36 @@ class ArtistHomeLogicTest {
     }
 
     @Test
+    fun upcomingConfirmed_excludesPastShows() {
+        val pastIso = "2020-01-15T18:00:00Z"
+        val futureIso = "2030-06-01T18:00:00Z"
+        val all = listOf(
+            booking(BookingStatus.Confirmed).copy(id = "past", startDatetimeIso = pastIso),
+            booking(BookingStatus.Confirmed).copy(id = "future", startDatetimeIso = futureIso),
+            booking(BookingStatus.PendingConfirm).copy(id = "pending", startDatetimeIso = futureIso),
+        )
+        val upcoming = upcomingConfirmed(all, nowEpochMs = 1_700_000_000_000L)
+        assertEquals(listOf("future"), upcoming.map { it.id })
+    }
+
+    @Test
+    fun earningsSparkline_bucketsByCreatedAt() {
+        val now = 1_800_000_000_000L // fixed clock — avoid midnight flake
+        val twoDaysAgo = now - 2L * 24 * 60 * 60 * 1000
+        val series = earningsSparkline(
+            listOf(
+                booking(BookingStatus.Confirmed).copy(fee = 1000, createdAtEpochMs = twoDaysAgo),
+                booking(BookingStatus.Completed).copy(fee = 500, createdAtEpochMs = now),
+            ),
+            days = 7,
+            nowEpochMs = now,
+        )
+        assertEquals(7, series.size)
+        assertEquals(1000, series[4])
+        assertEquals(500, series[6])
+    }
+
+    @Test
     fun fakeListForArtist_pendingCount() = runTest {
         val repo = FakeBookingsRepository(
             seed = listOf(

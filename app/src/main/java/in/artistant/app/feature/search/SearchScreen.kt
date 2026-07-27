@@ -133,6 +133,7 @@ fun SearchScreen(
                     onCity = viewModel::selectCity,
                     onCategory = viewModel::toggleCategory,
                     onSort = viewModel::setSort,
+                    onRecent = viewModel::applyRecent,
                 )
             }
             state.isLoading && state.results.isEmpty() -> {
@@ -231,6 +232,7 @@ private fun FacetBrowse(
     onCity: (String?) -> Unit,
     onCategory: (String) -> Unit,
     onSort: (SearchSort) -> Unit,
+    onRecent: (String) -> Unit,
 ) {
     val space = AppTheme.dimens.space
     LazyColumn(
@@ -239,6 +241,18 @@ private fun FacetBrowse(
     ) {
         item {
             Text("Browse", style = AppTheme.type.headline, color = AppTheme.colors.ink)
+        }
+        if (state.recents.isNotEmpty()) {
+            item {
+                Text("Recent", style = AppTheme.type.footnote, color = AppTheme.colors.ink3)
+                val gap = Modifier.height(space.sm)
+                Spacer(gap)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                    items(state.recents, key = { it }) { term ->
+                        Chip(label = term, selected = false, onClick = { onRecent(term) })
+                    }
+                }
+            }
         }
         if (state.facets.cities.isNotEmpty()) {
             item {

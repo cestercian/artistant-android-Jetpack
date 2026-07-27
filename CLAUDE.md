@@ -142,18 +142,18 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0–M1 merged; **M2–M7 + polish wave on `feature/m2-browse`**
-(PR #44 → `main`). Product truth aligned with Jul-2026 iOS: redaction retired,
-booking = request→accept, Airbnb chat trust. Latest polish: ScoreRing/Sparkline/
-ScoreHistorySheet; UploadQueue JSON snapshot + WorkManager drain; wizard camera
-TakePicture + Media3 VideoTrimmer; EPK photo grid + `reorder_artist_media`;
-calendar clash/busy + calendar picker; Play Billing Client (flag-gated).
-**Unit tests green** (`assembleDevDebug` + `testDevDebugUnitTest`).
+**Current state:** M0–M7 on `main` (PR #44). Follow-up **`feature/parity-polish`**
+closes remaining partials: BookingDetail Message/Getting there/calendar/review;
+Artist Home earnings + busy strip + quote requests; Messages All/Bookings/
+Inquiries filters; MonthDayGrid on Bookings/Gigs; Help/Feedback → `app_feedback`;
+SearchRecents; checkout entitlement gate; dead DeepLinkRouter removed (TabRouter
+is the live push path). Product truth: redaction retired, request→accept,
+Airbnb chat trust. **Unit tests green**.
 
-**Still operator / follow-ups:** CameraX live preview (still capture works),
-ExoPlayer AutoplayVideo/SamplePlayer, brand `.ttf`, `google-services.json` +
-backend `send-push` FCM path, Google/Apple OAuth dashboard (#12/#15), flip
-`subscriptionsEnabled` for live Play Billing, M8 instrumented UI / Play upload.
+**Still operator / follow-ups:** ExoPlayer sample/Spotify embeds, brand `.ttf`,
+`google-services.json` + `send-push` FCM, OAuth dashboard config, flip
+`subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.
+(Profile stats + community pledge shipped on `feature/parity-polish`.)
 
 ---
 

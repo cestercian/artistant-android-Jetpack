@@ -12,10 +12,9 @@ Airbnb-style trust (safety banner + “always communicate through Artistant” +
 report). Schema through ~0085. Android must not rebuild the retired redaction
 moat.
 
-**Android current:** M0–M1 complete; **M2–M7 substantially on `feature/m2-browse`**
-(Discover/Search/profile, booking request→accept, Realtime chat, FCM claim,
-wizard publish + EPK edit, ManageAvailability, CalendarSync, score sheets,
-thread report). PR #44.
+**Android current:** M0–M1 complete; **M2–M7 on `main` (PR #44)** plus
+`feature/parity-polish` closing remaining partials (BookingDetail CTAs, Artist
+Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 
 ---
 
@@ -33,7 +32,7 @@ thread report). PR #44.
 | `Screens/Signup/LegalView.swift` | `feature/signup/LegalScreen.kt` | done | M1 |
 | `Screens/Signup/SignupFlowView.swift` | `feature/signup/SignupFlow.kt` + `SignupViewModel` | done | M1 |
 | `Services/AuthService.swift` / Root gate | `SessionManager` + `ArtistantNavHost` / `RootViewModel` | done | M1 |
-| `Services/AppleSignInController.swift` | `SessionManager` Custom Tabs + deep link | partial | #12 Apple OAuth error handling open |
+| `Services/AppleSignInController.swift` | `SessionManager` Custom Tabs + deep link | done | #12 deepLinkError surface on OAuth denial |
 
 ## Screens — Browse (M2)
 
@@ -47,7 +46,8 @@ thread report). PR #44.
 | `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | Hero/bio/packages/reviews/dock + saved heart + score breakdown sheet |
 | `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | Self metrics + history; Home → Score |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | Client real-world rows from profile chip |
-| `Screens/ArtistListView.swift` | (unused / list helper) | obsolete | Discover/Search replaced roster lists |
+| `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | done | Profile stats destination |
+| `Screens/Signup/CommunityCommitmentView` (in SignupFlowView) | `feature/signup/CommunityCommitmentScreen.kt` | done | ACCT-05 pledge gate |
 
 ## Screens — Booking (M3)
 
@@ -57,7 +57,7 @@ thread report). PR #44.
 | `Screens/CheckoutView.swift` | `feature/booking/CheckoutScreen.kt` | done | Matchmaker; mock payment dormant |
 | `Screens/ConfirmedView.swift` | `feature/booking/ConfirmedScreen.kt` | done | Copy: “Request sent.” |
 | `Screens/RequestQuoteView.swift` | `feature/booking/RequestQuoteScreen.kt` | done | Gig-request create |
-| `Screens/BookingDetailView.swift` | `feature/booking/BookingDetailScreen.kt` | partial | Role-aware; artist Accept/Decline; simplified vs iOS glass sheet |
+| `Screens/BookingDetailView.swift` | `feature/booking/BookingDetailScreen.kt` | done | Message / Accept-Decline / Getting there / calendar / review |
 | `Screens/BookingsView.swift` | `feature/bookings/BookingsScreen.kt` | done | Client calendar list |
 | `Screens/ReviewSheet.swift` | `feature/booking/ReviewSheet.kt` | done | Minimal insert sheet |
 
@@ -65,7 +65,7 @@ thread report). PR #44.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | partial | Server inbox + push pendingThread deep link; filters deferred |
+| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | done | Server inbox + All/Bookings/Inquiries filters + push deep link |
 | `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | done | Realtime + optimistic send/retry; system rows + trust banner + details/report |
 | `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | done | Gig summary + report reasons → `reports` |
 
@@ -73,8 +73,8 @@ thread report). PR #44.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ArtistHomeView.swift` | `feature/artisthome/ArtistHomeScreen.kt` | partial | M3 — "New requests" rail; full dashboard deferred |
-| `Screens/ArtistGigsView.swift` | `feature/gigs/ArtistGigsScreen.kt` | partial | M3 — month list; full calendar grid deferred |
+| `Screens/ArtistHomeView.swift` | `feature/artisthome/ArtistHomeScreen.kt` | done | Earnings sparkline + 14-day busy strip + New requests + quotes + Up next |
+| `Screens/ArtistGigsView.swift` | `feature/gigs/ArtistGigsScreen.kt` | done | MonthDayGrid + month-grouped list |
 | `Screens/GigRequestDetailView.swift` | `feature/gigs/GigRequestDetailScreen.kt` | done | Accept/Decline/counter |
 
 ## Screens — Wizard / EPK (M5)
@@ -104,7 +104,7 @@ thread report). PR #44.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | partial | Identity + settings + calendar sync toggle; stats carousel deferred |
+| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | done | Identity + settings + calendar + Help/Feedback sheet |
 | `Screens/Settings/DataExportView.swift` | `feature/profile/ProfileScreen.kt` (export row) | partial | Inline JSON share + signed URL open; no dedicated sheet |
 | `Screens/Settings/ManageAvailabilityView.swift` | `feature/availability/ManageAvailabilityScreen.kt` | done | Days/times chips + seed-failure Save guard |
 | `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistorySheet.kt` | done | Sparkline + delta sheet from explainer |
@@ -114,9 +114,9 @@ thread report). PR #44.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| Root / role tabs | `ArtistantRoot` + `ClientTabsScaffold` / `ArtistTabsScaffold` | partial | Discover + Search + Artist profile wired; other tabs still Placeholder |
+| Root / role tabs | `ArtistantRoot` + `ClientTabsScaffold` / `ArtistTabsScaffold` | done | All primary tabs wired (no Placeholder) |
 | `State/TabRouter.swift` | nav + deep-link pending channels | done | `TabRouter` singleton + client/artist scaffold consumers |
-| `ClientRoute.ArtistProfile` / `Search` | `Routes.kt` + NavHost | partial | Wired as string routes in ClientTabsScaffold |
+| `ClientRoute.ArtistProfile` / `Search` | `Routes.kt` + NavHost | done | Wired in ClientTabsScaffold |
 
 ---
 
@@ -152,11 +152,11 @@ thread report). PR #44.
 | `State/SearchStore.swift` | `SearchViewModel` | partial | M2 |
 | `State/SavedStore.swift` | `feature/saved/SavedStore.kt` | done | Optimistic toggle + prefs + sign-out reset |
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
-| `State/RequestStore.swift` | `RequestViewModel` | missing | M3 |
-| `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | partial | Inbox + Chat with Realtime/optimistic reconcile; no global MessageStore yet |
+| `State/RequestStore.swift` | `ArtistHomeViewModel` (+ RequestsRepository) | done | Open quotes rail on Artist Home |
+| `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | done | Inbox filters + Chat Realtime/optimistic; no global MessageStore needed |
 | `State/EPKStore.swift` | `EpkViewModel` | done | Packages/tech/links/samples writes |
 | `State/ArtistOnboardingStore.swift` | `WizardViewModel` | done | Publish orchestration + pending media |
-| `State/EntitlementStore.swift` | `feature/paywall/EntitlementStore.kt` | partial | M7 inert — always not-subscribed when flag off |
+| `State/EntitlementStore.swift` | `feature/paywall/EntitlementStore.kt` | done | Checkout gate ready; inert until subscriptionsEnabled |
 | `State/TabRouter.swift` | `navigation/TabRouter.kt` | done | pendingThread/booking/gigRequest + role tabs |
 | `State/Persistence.swift` | `AppPreferences` (DataStore) | done | M0 |
 | `State/WizardMediaCache.swift` | `platform/media/WizardMediaCache.kt` | done | cacheDir staging |
@@ -202,10 +202,10 @@ thread report). PR #44.
 | `Components/CardView.swift` | `designsystem/component/CardView.kt` | done | |
 | `Components/HRule` / Section | `HRule.kt` | partial | |
 | `Components/ArtistTile.swift` | `designsystem/component/ArtistTile.kt` | done | M2 |
-| `Components/MediaContainer.swift` | `designsystem/component/MediaContainer.kt` | missing | M2 |
+| `Components/MediaContainer.swift` | `designsystem/component/MediaContainer.kt` | done | |
 | `Components/EmptyStateView.swift` | `designsystem/component/EmptyState.kt` | done | M2 |
-| `Components/Avatar.swift` | `designsystem/component/Avatar.kt` | missing | M2 |
-| `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | missing | M2 |
+| `Components/Avatar.swift` | `designsystem/component/Avatar.kt` | done | DJB2 hue + initials |
+| `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | done | |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
 | `Components/HeaderBar.swift` | — | missing | |
@@ -215,11 +215,10 @@ thread report). PR #44.
 
 ## Explicitly deferred (not this wave)
 
-- M3 booking request→accept + role-aware BookingDetail / artist Accept
-- M4 chat without redaction (system messages, receipts, ThreadContext)
-- Artist Home “New requests”, wizard, EPK, calendar sync, FCM client, Play Billing
-- Brand font TTFs in `res/font/` — polish, not M2 blocker
-- Operator Google/Apple dashboard config (issues #12 / #15)
+- Brand font TTFs in `res/font/` — polish, not a product blocker
+- Operator Google/Apple dashboard config + `google-services.json` / FCM server path
+- ExoPlayer sample / Spotify embed playback
+- Artist profile PROF-* Airbnb extras (hero pager, review search/sort)
 
 ---
 

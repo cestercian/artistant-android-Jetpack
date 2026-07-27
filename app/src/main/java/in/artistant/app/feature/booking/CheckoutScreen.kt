@@ -36,6 +36,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 fun CheckoutScreen(
     onBack: () -> Unit,
     onConfirmed: (bookingId: String) -> Unit,
+    onPaywall: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: CheckoutViewModel = hiltViewModel(),
 ) {
@@ -47,6 +48,12 @@ fun CheckoutScreen(
         state.confirmedBookingId?.let { id ->
             onConfirmed(id)
             viewModel.clearNavigation()
+        }
+    }
+    LaunchedEffect(state.needsPaywall) {
+        if (state.needsPaywall) {
+            onPaywall()
+            viewModel.consumePaywall()
         }
     }
 

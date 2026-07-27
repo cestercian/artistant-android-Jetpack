@@ -50,6 +50,12 @@ interface BookingsRepository {
     suspend fun cancel(id: String, reason: String?): Booking
     suspend fun accept(id: String): Booking
     suspend fun declineByArtist(id: String, reason: String?): Booking
+    /**
+     * ACCT-12 — insert into `app_feedback` (mig 0073).
+     * @return true when the row landed; false on empty body / signed-out / network failure
+     * so the Help sheet can show failure copy instead of a false "Thanks".
+     */
+    suspend fun submitFeedback(body: String, isBug: Boolean): Boolean
 }
 
 @Singleton
@@ -187,6 +193,21 @@ class SupabaseBookingsRepository @Inject constructor(
     override suspend fun declineByArtist(id: String, reason: String?): Booking =
         cancelViaEdgeFunction(id, reason, cancelledBy = "artist")
 
+    /**
+     * ACCT-12 — insert into `app_feedback`. Returns false on empty / unsigned /
+     * transport failure so the UI never pretends a dropped note was received.
+     */
+    override suspend fun submitFeedback(body: String, isBug: Boolean): Boolean {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) return false
+        val userId = currentUserId() ?: return false
+        return runCatching {
+            client.from("app_feedback").insert(
+                FeedbackInsert(userId = userId, body = trimmed, isBug = isBug),
+            )
+        }.isSuccess
+    }
+
     private suspend fun cancelViaEdgeFunction(
         id: String,
         reason: String?,
@@ -285,6 +306,13 @@ private data class CancelBody(
 )
 
 @Serializable
+private data class FeedbackInsert(
+    @SerialName("user_id") val userId: String,
+    val body: String,
+    @SerialName("is_bug") val isBug: Boolean,
+)
+
+@Serializable
 private data class CancelEdgeResponse(val cancelled: Boolean)
 
 @Serializable
@@ -354,7 +382,9 @@ private data class DbBooking(
             escrowStatus = EscrowStatus.fromDb(escrowStatus),
             paymentMethod = PaymentMethod.fromDb(paymentMethod),
             protectionEnabled = protectionEnabled,
-            createdAtEpochMs = System.currentTimeMillis(),
+            createdAtEpochMs = createdAt
+                ?.let { `in`.artistant.app.common.util.SupabaseISO8601.parse(it)?.toEpochMilli() }
+                ?: System.currentTimeMillis(),
             clientFullName = clientFullName ?: stamped,
             startDatetimeIso = startDatetime,
             endDatetimeIso = endDatetime,
@@ -474,6 +504,11 @@ class FakeBookingsRepository(
 
     override suspend fun declineByArtist(id: String, reason: String?): Booking =
         cancel(id, reason)
+
+    override suspend fun submitFeedback(body: String, isBug: Boolean): Boolean {
+        if (body.trim().isEmpty() || !signedIn) return false
+        return true
+    }
 
     private fun mutate(id: String, transform: (Booking) -> Booking): Booking {
         if (!signedIn) throw BookingRepositoryError.NotSignedIn

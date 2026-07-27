@@ -9,6 +9,7 @@ import `in`.artistant.app.data.model.HandleRules
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.platform.observability.Analytics
+import `in`.artistant.app.platform.storage.CommunityPledgeStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
@@ -44,6 +45,8 @@ data class SignupUiState(
     val saveError: String? = null,
     /** "Sign in again" banner shown on the auth screen after a session-lost bounce. */
     val authNotice: String? = null,
+    /** ACCT-05 — community pledge agreed (persisted). Gates Role → RoleScreen. */
+    val communityAgreed: Boolean = false,
 ) {
     val firstName: String get() = name.trim().substringBefore(' ').ifBlank { name.trim() }
 
@@ -78,6 +81,7 @@ sealed interface SignupEvent {
 class SignupViewModel @Inject constructor(
     private val users: UsersRepository,
     private val analytics: Analytics,
+    private val prefs: CommunityPledgeStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SignupUiState())
@@ -87,6 +91,11 @@ class SignupViewModel @Inject constructor(
     val events = _events.receiveAsFlow()
 
     init {
+        viewModelScope.launch {
+            prefs.communityAgreed.collect { agreed ->
+                _state.update { it.copy(communityAgreed = agreed) }
+            }
+        }
         // Live handle availability: debounce the handle field, drop anything that isn't a valid
         // format synchronously (no RPC for those), then check the rest. `distinctUntilChanged`
         // so re-emitting the same handle (e.g. an unrelated state copy) doesn't re-hit the RPC.
@@ -155,6 +164,12 @@ class SignupViewModel @Inject constructor(
     fun pickRole(role: AppRole) {
         _state.update { it.copy(role = role) }
         viewModelScope.launch { _events.send(SignupEvent.SelectionHaptic) }
+    }
+
+    /** ACCT-05 — persist pledge; step stays `.Role` and re-renders the role picker. */
+    fun agreeCommunity() = viewModelScope.launch {
+        prefs.setCommunityAgreed(true)
+        _events.send(SignupEvent.SelectionHaptic)
     }
 
     /**
