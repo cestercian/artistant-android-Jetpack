@@ -76,4 +76,31 @@ class CheckoutViewModelLogicTest {
         assertEquals(BookingStatus.PendingConfirm, stored?.status)
         assertEquals(null, draftStore.draft.value)
     }
+
+    @Test
+    fun sendRequest_gatesToPaywallWhenSubscriptionsOnAndNotEntitled() = runTest {
+        val draftStore = BookingDraftStore()
+        draftStore.setDraft(draft())
+        val bookings = FakeBookingsRepository()
+
+        val entitlements = object : EntitlementStore() {
+            override val subscriptionsActive: Boolean get() = true
+        }
+
+        val vm = CheckoutViewModel(
+            draftStore = draftStore,
+            artistsRepository = FakeArtistsRepository(),
+            bookingsRepository = bookings,
+            paymentsService = MockPaymentsService(),
+            entitlements = entitlements,
+        )
+        advanceUntilIdle()
+
+        vm.sendRequest()
+        advanceUntilIdle()
+
+        assertEquals(true, vm.state.value.needsPaywall)
+        assertEquals(null, vm.state.value.confirmedBookingId)
+        assertEquals(0, bookings.listForClient().size)
+    }
 }

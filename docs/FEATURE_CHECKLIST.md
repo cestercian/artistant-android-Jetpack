@@ -167,24 +167,25 @@ socials/bio) can be built before F8 lands.*
 
 ## F11 — Bookings list + detail  *(SHARED)*
 
-- [x] **BookingsViewModel + BookingsScreen** (CLIENT) — schedule list;
+- [x] **BookingsViewModel + BookingsScreen** (CLIENT) — schedule list + MonthDayGrid;
   `pendingBookingDetail` deep link via TabRouter. **M.**
-- [ ] **ArtistGigsScreen** (ARTIST) — `MonthCalendar` of gigs. **S.**
-- [x] **BookingDetailScreen** (SHARED) — timeline, KV, actions (cancel/accept/decline);
-  message/review/calendar deferred. **M.**
-- [ ] **MonthCalendar / MiniMonthCalendar / DateScroller** components. **partial** —
-  `MonthCalendarHeader` + date chips shipped; full grid deferred. **L.**
+- [x] **ArtistGigsScreen** (ARTIST) — MonthDayGrid + month-grouped list. **S.**
+- [x] **BookingDetailScreen** (SHARED) — Accept/Decline, Message, Getting there,
+  Add to calendar, Leave a review. **M.**
+- [x] **MonthDayGrid** — year-month scoped busy/filter day cells. **M.**
 
 ---
 
 ## F12 — Artist home + EPK  *(ARTIST)*
 
-- [ ] **ArtistHomeViewModel + Screen** — earnings `Sparkline`, bookability card,
-  14-day availability strip, requests, upcoming, upload banner, subscribe banner.
-  **partial:** New requests rail + Score CTA shipped; sparkline/busy strip deferred.
+- [x] **ArtistHomeViewModel + Screen** — earnings Sparkline, 14-day busy strip,
+  New requests, open quotes, Up next (+ Score CTA). **L.**
 - [x] **EpkViewModel + EpkScreen** — packages replace, tech, links CRUD, samples
   add/delete. **partial:** photo grid reorder / share-link deferred.
 - [x] **ManageAvailabilityScreen** — days/times chips + save. **S.**
+- [x] **CommunityCommitmentScreen** — ACCT-05 pledge before Role. **S.**
+- [x] **Avatar + HeaderBar** design components. **S.**
+- [x] **Messages filters** — All / Bookings / Inquiries. **S.**
 
 ## F13 — Bookability score  *(mostly ARTIST)*
 
@@ -204,7 +205,7 @@ socials/bio) can be built before F8 lands.*
 
 ## F15 — Profile, settings, DPDP, calendar sync
 
-- [x] **ProfileScreen** — identity header + settings rows (sign out, delete, export, privacy/help) + calendar sync toggle. **M.** Stats/saved carousel deferred.
+- [x] **ProfileScreen** — identity header + settings rows (sign out, delete, export, privacy/help) + calendar sync toggle + Bookings/Saved/Completed stats → ArtistList. **M.**
 - [x] **Sign out** — `SessionManager.signOut` + prefs wipe; RootViewModel routes to auth. **S.**
 - [x] **Data export** — `data-export` EF → share sheet (inline) or browser (signed URL). **S.**
 - [x] **Delete account** — confirm dialog → `delete-account` EF → calendar wipe + signOut. **S.**

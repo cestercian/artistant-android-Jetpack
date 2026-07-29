@@ -12,9 +12,8 @@ Airbnb-style trust (safety banner + “always communicate through Artistant” +
 report). Schema through ~0085. Android must not rebuild the retired redaction
 moat.
 
-**Android current:** M0–M1 complete; **M2–M7 on `main` (PR #44)** plus
-`feature/parity-polish` closing remaining partials (BookingDetail CTAs, Artist
-Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
+**Android current:** M0–M7 + parity polish on `main` (PR #44 + PR #45). Product
+truth: redaction retired, request→accept, Airbnb chat trust.
 
 ---
 
@@ -208,7 +207,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | done | |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
-| `Components/HeaderBar.swift` | — | missing | |
+| `Components/HeaderBar.swift` | `designsystem/component/HeaderBar.kt` | done | |
 | Theme tokens | `designsystem/theme/*` | done | Brand fonts TTF drop still operator (#15) |
 
 ---
@@ -219,6 +218,9 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 - Operator Google/Apple dashboard config + `google-services.json` / FCM server path
 - ExoPlayer sample / Spotify embed playback
 - Artist profile PROF-* Airbnb extras (hero pager, review search/sort)
+- M8 instrumented UI / Play upload / release packaging
+- Flip `subscriptionsEnabled` + Play RTDN when IAP goes live
+- Observability keys (PostHog / Sentry) when ready to go live
 
 ---
 

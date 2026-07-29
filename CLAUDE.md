@@ -142,18 +142,14 @@ Milestones M0–M8 (see `docs/IMPLEMENTATION_ROADMAP.md`). Each is an issue.
 
 Update this section's "current state" line as phases land.
 
-**Current state:** M0–M7 on `main` (PR #44). Follow-up **`feature/parity-polish`**
-closes remaining partials: BookingDetail Message/Getting there/calendar/review;
-Artist Home earnings + busy strip + quote requests; Messages All/Bookings/
-Inquiries filters; MonthDayGrid on Bookings/Gigs; Help/Feedback → `app_feedback`;
-SearchRecents; checkout entitlement gate; dead DeepLinkRouter removed (TabRouter
-is the live push path). Product truth: redaction retired, request→accept,
-Airbnb chat trust. **Unit tests green**.
+**Current state:** M0–M7 + parity polish on `main` (PR #44 + **PR #45**). Product
+truth: redaction retired, request→accept, Airbnb chat trust. BookingDetail CTAs,
+Artist Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents,
+community pledge, Avatar, Profile stats → ArtistList shipped. **Unit tests green**.
 
 **Still operator / follow-ups:** ExoPlayer sample/Spotify embeds, brand `.ttf`,
 `google-services.json` + `send-push` FCM, OAuth dashboard config, flip
 `subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.
-(Profile stats + community pledge shipped on `feature/parity-polish`.)
 
 ---
 

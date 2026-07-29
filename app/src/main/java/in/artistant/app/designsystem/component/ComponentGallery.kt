@@ -29,6 +29,7 @@ fun ComponentGallery() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Component gallery", style = AppTheme.type.displaySub, color = AppTheme.colors.ink)
+        HeaderBar(title = "HeaderBar", subtitle = "optional subtitle")
         PrimaryButton(text = "Filled", onClick = {}, fullWidth = true)
         PrimaryButton(text = "Ghost", onClick = {}, variant = ButtonVariant.Ghost, fullWidth = true)
         PrimaryButton(text = "Subtle", onClick = {}, variant = ButtonVariant.Subtle, fullWidth = true)

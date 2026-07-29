@@ -13,7 +13,7 @@ import javax.inject.Singleton
  * Queries Play Billing when [AppEnvironment.subscriptionsEnabled]; otherwise inert.
  */
 @Singleton
-class EntitlementStore {
+open class EntitlementStore {
     private val billing: PlayBillingService?
 
     @Inject
@@ -29,7 +29,7 @@ class EntitlementStore {
     private val _isEntitled = MutableStateFlow(false)
     val isEntitled: StateFlow<Boolean> = _isEntitled.asStateFlow()
 
-    val subscriptionsActive: Boolean get() = AppEnvironment.subscriptionsEnabled
+    open val subscriptionsActive: Boolean get() = AppEnvironment.subscriptionsEnabled
 
     fun isEntitled(productId: String): Boolean =
         subscriptionsActive && _isEntitled.value
