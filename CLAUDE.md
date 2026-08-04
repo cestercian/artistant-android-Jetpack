@@ -150,10 +150,26 @@ SearchRecents; checkout entitlement gate; dead DeepLinkRouter removed (TabRouter
 is the live push path). Product truth: redaction retired, request→accept,
 Airbnb chat trust. **Unit tests green**.
 
+**Aug 5, 2026 — post-merge hardening wave (PRs #47–#50, all merged, bot-reviewed):**
+#47 unknown booking statuses decode to a non-actionable `Unknown` ("Unavailable",
+iOS #111 parity) + calendar retracts a mirrored event when its booking turns
+Unknown; #48 R8 re-enabled for release (minify + shrink; #44 had regressed the
+flag AND left the DTO keep rule pointing at the old `data.model` package —
+repointed); #49 rebuilt the unit coverage the #44 prefer-ours merge deleted
+(suite 129 → 277, including a mutation-tested chat realtime in-flight race test);
+#50 month grouping on Bookings/Gigs no longer renders one header per row
+(`monthLabelFromDateLabel` could never match its own parse). **277 unit tests,
+0 failures.**
+
 **Still operator / follow-ups:** ExoPlayer sample/Spotify embeds, brand `.ttf`,
 `google-services.json` + `send-push` FCM, OAuth dashboard config, flip
 `subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.
 (Profile stats + community pledge shipped on `feature/parity-polish`.)
+Small parked findings from the Aug-5 wave: `BookingStatusTimeline` is
+dead design-system code (no call site); `ProfileViewModel.bookingsCount`
+counts cancelled bookings; `PushPayloadRouter` maps an id-less push to
+`OpenThread(null)` and drops an unconsumed earlier deep link; ship
+`mapping.txt` with every Play release (see RELEASE.md §0).
 
 ---
 

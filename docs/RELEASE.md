@@ -22,13 +22,18 @@ cmdline-tools/AVD, and no signing identity**. So:
 
 ### ✅ Verified in this repo (compile + JVM unit only)
 - `./gradlew :app:assembleDebug` — green, all flavors (dev/staging/prod).
-- `./gradlew :app:testDevDebugUnitTest` — green, **210 unit tests, 0 failures**
-  (repositories, ViewModels, stores, calendar planner, observability allowlist,
-  billing/entitlement).
+- `./gradlew :app:testDevDebugUnitTest` — green, **277 unit tests, 0 failures**
+  (Aug 5, 2026, post PRs #47–#50: booking request→accept flow, chat realtime
+  in-flight race, account-erasure seams, calendar planner, entitlement gate,
+  push-payload routing, month grouping. The earlier "210" figure described the
+  pre-#44 tree; the #44 prefer-ours merge dropped the suite to 129 and PR #49
+  rebuilt the lost coverage against the new architecture).
 - `./gradlew :app:assembleProdRelease` — green **with R8 on** (minify +
-  resource-shrink). R8's static pass succeeds; the mapping `seeds.txt` shows
-  **895 `$$serializer` classes kept, 0 removed** — the serialization + type-safe
-  nav surface survives shrinking (see §5).
+  resource-shrink, re-enabled by PR #48 after #44 regressed the flag). The
+  mapping `seeds.txt` shows **931 `$$serializer` entries kept, 0 of ours
+  removed** — the serialization + type-safe nav surface survives shrinking
+  (see §5). ⚠️ Ship `app/build/outputs/mapping/prodRelease/mapping.txt` with
+  every Play release — Play needs it to de-obfuscate crash stacktraces.
 
 ### ⏳ Pending — requires a device or the operator (CANNOT be done from CI)
 - **Any on-device / emulator run.** No screen has been rendered on a real Android.
