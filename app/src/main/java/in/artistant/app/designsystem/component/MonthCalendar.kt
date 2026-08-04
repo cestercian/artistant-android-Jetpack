@@ -140,17 +140,67 @@ fun MonthDayGrid(
     }
 }
 
-/** Format "April 2026" from a booking date label or epoch. */
-fun monthLabelFromDateLabel(dateLabel: String): String {
-    // dateLabel is "EEE, MMM d, yyyy" — extract month + year.
-    val parts = dateLabel.split(", ")
-    return if (parts.size >= 2) {
-        val dayPart = parts[1] // "May 16, 2026"
-        val tokens = dayPart.split(" ")
-        if (tokens.size >= 3) "${tokens[0]} ${tokens[2]}" else dateLabel
-    } else {
-        dateLabel
+private val monthNames = listOf(
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+/**
+ * Lowercased month token → the full name we render. Holds both spellings a
+ * label can legitimately carry: the "MMM" abbreviation the app writes ("Sep")
+ * and the spelled-out month another client could send ("September").
+ *
+ * Lookup is an EXACT match on the whole token — deliberately not a prefix
+ * match. Matching on the first three letters fabricated months out of any
+ * lookalike word that happened to sit next to a plausible year ("Maybe, 2026"
+ * → "May 2026", "Mars 3, 2026" → "March 2026"), which invented a header and
+ * collapsed unrelated unreadable rows under it. `take(3)` here only *derives*
+ * the abbreviation key at construction — it matches `SimpleDateFormat("MMM",
+ * Locale.US)` output for all twelve months.
+ */
+private val monthsByToken: Map<String, String> = buildMap {
+    monthNames.forEach { name ->
+        put(name.lowercase(), name)
+        put(name.take(3).lowercase(), name)
     }
+}
+
+/**
+ * Format "April 2026" from a booking date label — the group key behind
+ * `groupedByMonth()` on the Bookings and Gigs lists.
+ *
+ * Labels arrive as `BookingDateFormat.PATTERN` ("EEE, MMM d, yyyy" →
+ * "Sat, May 16, 2026"); `Booking.date` is the `date_label` column verbatim, and
+ * the reader also tolerates the weekday-less "MMM d, yyyy". Splitting either on
+ * ", " leaves the month-and-day part second-to-last and the year last, so we
+ * read off the TAIL. The previous version indexed `parts[1]` and expected three
+ * space-separated tokens there, but on the canonical shape `parts[1]` is
+ * "May 16" — only ever two tokens — so the check could never pass and every
+ * label fell through to the `dateLabel` return. That handed each booking its
+ * own monthKey and rendered one month header per row.
+ *
+ * Anything we can't read confidently (ISO "2026-05-16", an empty `date_label`,
+ * garbage) is returned unchanged: grouping under the raw label is wrong-ish but
+ * stable, and the row still renders rather than throwing.
+ */
+fun monthLabelFromDateLabel(dateLabel: String): String {
+    val parts = dateLabel.split(", ")
+    if (parts.size >= 2) {
+        val year = parts.last().trim()
+        // "May 16" → "May". substringBefore is safe on a token with no space.
+        val monthToken = parts[parts.size - 2].trim().substringBefore(' ')
+        val month = monthsByToken[monthToken.lowercase()]
+        // Both guards are load-bearing: the token must BE a month (not merely
+        // start like one) and the tail must be a 4-digit year, so a comma-bearing
+        // non-date ("TBD, soon", "Maybe, 2026") keeps its raw label.
+        if (month != null && year.length == 4 && year.all { it.isDigit() }) {
+            // Full month name, not the "MMM" abbreviation: the day grid above
+            // these group headers renders `monthLabelFromEpoch` ("MMMM yyyy"),
+            // so "Apr 2026" under "April 2026" would read as two months.
+            return "$month $year"
+        }
+    }
+    return dateLabel
 }
 
 fun monthLabelFromEpoch(epochMs: Long): String {
