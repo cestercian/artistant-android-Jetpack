@@ -140,17 +140,53 @@ fun MonthDayGrid(
     }
 }
 
-/** Format "April 2026" from a booking date label or epoch. */
+/**
+ * First three letters of a month name → the full name we render. Keyed by
+ * prefix so both the "MMM" the app writes ("Sep") and a spelled-out month that
+ * could arrive from another client ("September") resolve to the same entry.
+ */
+private val monthNamesByPrefix = mapOf(
+    "jan" to "January", "feb" to "February", "mar" to "March",
+    "apr" to "April", "may" to "May", "jun" to "June",
+    "jul" to "July", "aug" to "August", "sep" to "September",
+    "oct" to "October", "nov" to "November", "dec" to "December",
+)
+
+/**
+ * Format "April 2026" from a booking date label — the group key behind
+ * `groupedByMonth()` on the Bookings and Gigs lists.
+ *
+ * Labels arrive as `BookingDateFormat.PATTERN` ("EEE, MMM d, yyyy" →
+ * "Sat, May 16, 2026"); `Booking.date` is the `date_label` column verbatim, and
+ * the reader also tolerates the weekday-less "MMM d, yyyy". Splitting either on
+ * ", " leaves the month-and-day part second-to-last and the year last, so we
+ * read off the TAIL. The previous version indexed `parts[1]` and expected three
+ * space-separated tokens there, but on the canonical shape `parts[1]` is
+ * "May 16" — only ever two tokens — so the check could never pass and every
+ * label fell through to the `dateLabel` return. That handed each booking its
+ * own monthKey and rendered one month header per row.
+ *
+ * Anything we can't read confidently (ISO "2026-05-16", an empty `date_label`,
+ * garbage) is returned unchanged: grouping under the raw label is wrong-ish but
+ * stable, and the row still renders rather than throwing.
+ */
 fun monthLabelFromDateLabel(dateLabel: String): String {
-    // dateLabel is "EEE, MMM d, yyyy" — extract month + year.
     val parts = dateLabel.split(", ")
-    return if (parts.size >= 2) {
-        val dayPart = parts[1] // "May 16, 2026"
-        val tokens = dayPart.split(" ")
-        if (tokens.size >= 3) "${tokens[0]} ${tokens[2]}" else dateLabel
-    } else {
-        dateLabel
+    if (parts.size >= 2) {
+        val year = parts.last().trim()
+        // "May 16" → "May". substringBefore is safe on a token with no space.
+        val monthToken = parts[parts.size - 2].trim().substringBefore(' ')
+        val month = monthNamesByPrefix[monthToken.take(3).lowercase()]
+        // The year guard keeps a comma-bearing non-date ("TBD, soon") from being
+        // coerced into a month just because a word starts with "may"/"mar".
+        if (month != null && year.length == 4 && year.all { it.isDigit() }) {
+            // Full month name, not the "MMM" abbreviation: the day grid above
+            // these group headers renders `monthLabelFromEpoch` ("MMMM yyyy"),
+            // so "Apr 2026" under "April 2026" would read as two months.
+            return "$month $year"
+        }
     }
+    return dateLabel
 }
 
 fun monthLabelFromEpoch(epochMs: Long): String {
