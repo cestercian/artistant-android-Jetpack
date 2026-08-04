@@ -86,6 +86,9 @@ class BookingStatusTest {
     @Test
     fun `an unrecognised status is never mirrored into the device calendar`() {
         val rows = listOf(booking("b-unknown", BookingStatus.fromDb("some_future_status")))
+        // Never *created*. The other half — an already-mirrored booking that turns
+        // Unknown must be RETRACTED — is pinned in CalendarSyncPlannerTest, which
+        // owns the map-bearing cases.
         assertTrue(CalendarSyncPlanner.plan(rows, emptyMap()).isEmpty())
     }
 
