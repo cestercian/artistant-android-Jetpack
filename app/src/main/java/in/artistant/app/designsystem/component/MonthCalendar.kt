@@ -140,17 +140,30 @@ fun MonthDayGrid(
     }
 }
 
-/**
- * First three letters of a month name → the full name we render. Keyed by
- * prefix so both the "MMM" the app writes ("Sep") and a spelled-out month that
- * could arrive from another client ("September") resolve to the same entry.
- */
-private val monthNamesByPrefix = mapOf(
-    "jan" to "January", "feb" to "February", "mar" to "March",
-    "apr" to "April", "may" to "May", "jun" to "June",
-    "jul" to "July", "aug" to "August", "sep" to "September",
-    "oct" to "October", "nov" to "November", "dec" to "December",
+private val monthNames = listOf(
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
 )
+
+/**
+ * Lowercased month token → the full name we render. Holds both spellings a
+ * label can legitimately carry: the "MMM" abbreviation the app writes ("Sep")
+ * and the spelled-out month another client could send ("September").
+ *
+ * Lookup is an EXACT match on the whole token — deliberately not a prefix
+ * match. Matching on the first three letters fabricated months out of any
+ * lookalike word that happened to sit next to a plausible year ("Maybe, 2026"
+ * → "May 2026", "Mars 3, 2026" → "March 2026"), which invented a header and
+ * collapsed unrelated unreadable rows under it. `take(3)` here only *derives*
+ * the abbreviation key at construction — it matches `SimpleDateFormat("MMM",
+ * Locale.US)` output for all twelve months.
+ */
+private val monthsByToken: Map<String, String> = buildMap {
+    monthNames.forEach { name ->
+        put(name.lowercase(), name)
+        put(name.take(3).lowercase(), name)
+    }
+}
 
 /**
  * Format "April 2026" from a booking date label — the group key behind
@@ -176,9 +189,10 @@ fun monthLabelFromDateLabel(dateLabel: String): String {
         val year = parts.last().trim()
         // "May 16" → "May". substringBefore is safe on a token with no space.
         val monthToken = parts[parts.size - 2].trim().substringBefore(' ')
-        val month = monthNamesByPrefix[monthToken.take(3).lowercase()]
-        // The year guard keeps a comma-bearing non-date ("TBD, soon") from being
-        // coerced into a month just because a word starts with "may"/"mar".
+        val month = monthsByToken[monthToken.lowercase()]
+        // Both guards are load-bearing: the token must BE a month (not merely
+        // start like one) and the tail must be a 4-digit year, so a comma-bearing
+        // non-date ("TBD, soon", "Maybe, 2026") keeps its raw label.
         if (month != null && year.length == 4 && year.all { it.isDigit() }) {
             // Full month name, not the "MMM" abbreviation: the day grid above
             // these group headers renders `monthLabelFromEpoch` ("MMMM yyyy"),
