@@ -11,6 +11,8 @@ import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -49,6 +51,14 @@ class ChatViewModelTest {
         private var listener: ((Message) -> Unit)? = null
         var cancelCount: Int = 0
 
+        /**
+         * When set, `send()` parks here until the test completes it. That's the
+         * only way to hold the write genuinely in flight — optimistic bubble on
+         * screen, server row not back yet — which is the window the Realtime
+         * echo actually races.
+         */
+        var sendGate: CompletableDeferred<Unit>? = null
+
         fun emit(message: Message) = listener?.invoke(message)
 
         override suspend fun listThreadsForUser(): List<Thread> = listOfNotNull(thread)
@@ -57,6 +67,7 @@ class ChatViewModelTest {
 
         override suspend fun send(threadId: String, body: String): Message {
             sendCount++
+            sendGate?.await()
             if (failSend) throw IllegalStateException("network down")
             return Message(
                 id = nextServerId,
@@ -129,16 +140,67 @@ class ChatViewModelTest {
         assertTrue(messages.single().isMine)
     }
 
+    /**
+     * The real race: the Realtime INSERT lands while `send()` is still in flight,
+     * so the echo has to collapse into the `.sending` placeholder rather than
+     * append beside it.
+     *
+     * The assertion that matters is the one taken BEFORE the gate opens. If the
+     * in-flight collapse in `receiveRealtimeMessage` regressed, the echo would
+     * append and the user would see a duplicated bubble for the whole network
+     * round-trip — but `reconcileSendSuccess` cleans the list up afterwards, so
+     * a final-state-only assertion stays green through that bug. This is
+     * exactly what the earlier version of this test missed.
+     */
     @Test
-    fun aRealtimeEchoThatBeatsTheSendReturnDoesNotDuplicateTheBubble() = runTest {
-        val repo = ScriptedMessages()
+    fun aRealtimeEchoDuringAnInFlightSendCollapsesIntoTheOptimisticBubble() = runTest {
+        val repo = ScriptedMessages().apply { sendGate = CompletableDeferred() }
         val model = vm(repo)
-        // Echo arrives first, carrying the id send() is about to return.
-        repo.emit(serverMessage("server-1", "Meet at 8?"))
+        val now = System.currentTimeMillis()
 
         model.send("Meet at 8?")
 
+        // In flight: one optimistic bubble, write parked inside the repository.
+        val inFlight = model.state.value.messages.single()
+        assertTrue(inFlight.id.startsWith("optimistic-"))
+        assertEquals(MessageDelivery.Sending, inFlight.delivery)
+        assertEquals(1, repo.sendCount)
+
+        // Echo arrives before the write returns.
+        repo.emit(serverMessage("server-1", "Meet at 8?", at = now))
+
+        val duringFlight = model.state.value.messages
+        assertEquals("echo must collapse in place, not append", 1, duringFlight.size)
+        assertEquals("server-1", duringFlight.single().id)
+        assertEquals(MessageDelivery.Sent, duringFlight.single().delivery)
+
+        // Now let the write return; the RETURNING row must not re-add itself.
+        repo.sendGate!!.complete(Unit)
+        advanceUntilIdle()
+
         assertEquals(listOf("server-1"), model.state.value.messages.map { it.id })
+        assertEquals(MessageDelivery.Sent, model.state.value.messages.single().delivery)
+    }
+
+    @Test
+    fun anOlderEchoWithTheSameTextDoesNotSwallowTheInFlightBubble() = runTest {
+        // Same body, but far outside the 15s collapse window — a *different*
+        // message that happens to repeat the text. Stealing the placeholder here
+        // would lose the user's send.
+        val repo = ScriptedMessages().apply { sendGate = CompletableDeferred() }
+        val model = vm(repo)
+
+        model.send("Meet at 8?")
+        repo.emit(serverMessage("server-old", "Meet at 8?", at = System.currentTimeMillis() - 60_000))
+
+        val duringFlight = model.state.value.messages
+        assertEquals(2, duringFlight.size)
+        assertTrue(duringFlight.any { it.delivery == MessageDelivery.Sending })
+
+        repo.sendGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(listOf("server-old", "server-1"), model.state.value.messages.map { it.id })
     }
 
     @Test
@@ -224,9 +286,10 @@ class ChatViewModelTest {
         val model = vm(repo)
         model.send("Meet at 8?")
 
-        // Counterpart happens to say the same words; the failed bubble must
-        // survive so the user can still retry their own send.
-        repo.emit(serverMessage("server-9", "Meet at 8?", at = 6_000L))
+        // Same body AND inside the 15s collapse window, so the ONLY thing
+        // standing between the echo and the failed bubble is the `.sending`
+        // predicate. The bubble must survive, or the user loses their retry.
+        repo.emit(serverMessage("server-9", "Meet at 8?", at = System.currentTimeMillis()))
 
         assertEquals(2, model.state.value.messages.size)
         assertTrue(model.state.value.messages.any { it.delivery == MessageDelivery.Failed })
