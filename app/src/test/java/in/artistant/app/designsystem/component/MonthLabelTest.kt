@@ -108,6 +108,18 @@ class MonthLabelTest {
     }
 
     @Test
+    fun `a word that merely starts like a month is not read as that month`() {
+        // Regression: a three-letter PREFIX match fabricated a month out of any
+        // lookalike word paired with a plausible year — "Maybe, 2026" grouped
+        // under an invented "May 2026" header, silently collapsing unrelated
+        // unreadable rows together. Only exact month tokens may match.
+        assertEquals("Maybe, 2026", monthLabelFromDateLabel("Maybe, 2026"))
+        assertEquals("Mars 3, 2026", monthLabelFromDateLabel("Mars 3, 2026"))
+        assertEquals("Augustine, 2026", monthLabelFromDateLabel("Augustine, 2026"))
+        assertEquals("Sat, Marching 16, 2026", monthLabelFromDateLabel("Sat, Marching 16, 2026"))
+    }
+
+    @Test
     fun `an ISO label degrades to the raw label`() {
         // "yyyy-MM-dd" is tolerated by the parser but carries no ", " separator,
         // so it groups under itself rather than being mis-read as a month.
