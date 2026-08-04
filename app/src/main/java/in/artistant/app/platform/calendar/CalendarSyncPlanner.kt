@@ -38,12 +38,29 @@ object CalendarSyncPlanner {
                         actions += Action.Create(b.id.lowercase())
                     }
                 }
-                BookingStatus.Cancelled -> {
+                // Neither belongs in the user's calendar, and "doesn't belong" has
+                // to mean RETRACT an existing mirror, not merely decline to create
+                // one: a booking that was Confirmed (event written, entry in `map`)
+                // and now reads Cancelled — or decodes as Unknown because the server
+                // moved it to a status this build predates — would otherwise strand
+                // the event on the device forever. Delete is the only action
+                // `CalendarSyncService.reconcileNow` prunes the map on, so skipping
+                // it leaks the mapping too. Self-healing in the Unknown case: the
+                // entry is gone, so a later build that understands the status plans
+                // a fresh Create.
+                BookingStatus.Cancelled, BookingStatus.Unknown -> {
                     if (entry != null) {
                         actions += Action.Delete(b.id.lowercase(), entry.eventId)
                     }
                 }
-                BookingStatus.PendingConfirm -> Unit // never mirror tentative noise
+                // Tentative noise — never mirrored in the first place, so there is
+                // normally no entry to retract. Left as a pure no-op deliberately:
+                // a confirmed→pending regression would strand an event the same
+                // way, but no client or server path performs that transition today
+                // (create inserts pending_confirm, accept PATCHes confirmed,
+                // decline/cancel route through the cancel-booking Edge Function),
+                // and widening this branch is a behaviour change out of scope here.
+                BookingStatus.PendingConfirm -> Unit
             }
         }
         return actions

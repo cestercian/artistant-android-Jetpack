@@ -18,7 +18,27 @@ enum class BookingStatus(val dbValue: String) {
     Confirmed("confirmed"),
     Completed("completed"),
     Cancelled("cancelled"),
-    Disputed("disputed");
+    Disputed("disputed"),
+
+    /**
+     * A status this build doesn't recognise — i.e. the server has moved ahead of
+     * the client (some future `refunded` / `expired` / …).
+     *
+     * Decode-only. [dbValue] is a sentinel that is NOT in the `bookings.status`
+     * check constraint, and no write path serializes a variable status: create
+     * sends `PendingConfirm.dbValue`, accept sends `Confirmed.dbValue`, and
+     * cancel/decline go through the `cancel-booking` Edge Function without a
+     * status string at all. So this case can never round-trip to the server.
+     *
+     * It exists because the decoder previously fell back to [PendingConfirm],
+     * which is the opposite of neutral: it is the one state that renders the
+     * artist's Accept/Decline CTAs, the client's cancel affordance and the
+     * artist Home "New requests" bucket. An unrecognised status therefore
+     * showed up as a live, actionable request, and Accept fired a status PATCH
+     * against a booking the client cannot reason about. Everything keyed on
+     * this case renders read-only and neutrally tinted (iOS PR #111 parity).
+     */
+    Unknown("unknown");
 
     val label: String
         get() = when (this) {
@@ -27,11 +47,20 @@ enum class BookingStatus(val dbValue: String) {
             Completed -> "Completed"
             Cancelled -> "Cancelled"
             Disputed -> "Disputed"
+            // Deliberately NOT "Unknown": iOS (Booking.swift) shows "Unavailable"
+            // for the same case, and a booking that reads differently on the two
+            // clients is a support call. The case name stays `Unknown` because it
+            // describes the decode outcome; this string is the user-facing copy.
+            Unknown -> "Unavailable"
         }
 
     companion object {
+        /**
+         * Null / unrecognised → [Unknown]. Never [PendingConfirm]: a booking the
+         * client can't interpret must not be handed an Accept button.
+         */
         fun fromDb(raw: String?): BookingStatus =
-            entries.firstOrNull { it.dbValue == raw } ?: PendingConfirm
+            entries.firstOrNull { it.dbValue == raw } ?: Unknown
     }
 }
 

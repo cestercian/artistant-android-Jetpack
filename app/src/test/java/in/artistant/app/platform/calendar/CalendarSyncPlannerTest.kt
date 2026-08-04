@@ -24,6 +24,39 @@ class CalendarSyncPlannerTest {
         assertTrue(actions.any { it is CalendarSyncPlanner.Action.Delete && it.bookingId == "b3" })
     }
 
+    /**
+     * The regression the bot reviews caught: "never mirror Unknown" has to mean
+     * REMOVE an existing mirror, not just decline to create one. A booking that
+     * was Confirmed (so an event exists and `map` holds its entry) and now
+     * decodes as Unknown previously hit a no-op branch — the obsolete gig stayed
+     * in the user's device calendar forever, and the map entry with it, since
+     * Delete is the only action `CalendarSyncService.reconcileNow` prunes on.
+     */
+    @Test
+    fun plan_deletesAnAlreadyMirroredBookingThatNowDecodesAsUnknown() {
+        val wasConfirmed = sample(id = "b1", status = BookingStatus.Unknown)
+        val map = mapOf(
+            "b1" to CalendarSyncPlanner.SyncedEvent(
+                "evt-1",
+                // fingerprint from back when it was confirmed and got mirrored
+                CalendarSyncPlanner.fingerprint(wasConfirmed.copy(status = BookingStatus.Confirmed)),
+            ),
+        )
+        val actions = CalendarSyncPlanner.plan(listOf(wasConfirmed), map)
+        assertEquals(1, actions.size)
+        val delete = actions.first()
+        assertTrue("an unknown status must retract its mirrored event", delete is CalendarSyncPlanner.Action.Delete)
+        assertEquals("evt-1", (delete as CalendarSyncPlanner.Action.Delete).eventId)
+        assertEquals("b1", delete.bookingId)
+    }
+
+    /** Retraction only — an unknown status that was never mirrored stays absent. */
+    @Test
+    fun plan_neverCreatesAnEventForAnUnknownStatus() {
+        val unknown = sample(id = "b1", status = BookingStatus.Unknown)
+        assertTrue(CalendarSyncPlanner.plan(listOf(unknown), emptyMap()).isEmpty())
+    }
+
     @Test
     fun plan_updatesOnFingerprintChange() {
         val booking = sample(id = "b1", status = BookingStatus.Confirmed, venue = "New venue")
