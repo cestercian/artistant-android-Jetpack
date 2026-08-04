@@ -47,7 +47,11 @@ enum class BookingStatus(val dbValue: String) {
             Completed -> "Completed"
             Cancelled -> "Cancelled"
             Disputed -> "Disputed"
-            Unknown -> "Unknown"
+            // Deliberately NOT "Unknown": iOS (Booking.swift) shows "Unavailable"
+            // for the same case, and a booking that reads differently on the two
+            // clients is a support call. The case name stays `Unknown` because it
+            // describes the decode outcome; this string is the user-facing copy.
+            Unknown -> "Unavailable"
         }
 
     companion object {

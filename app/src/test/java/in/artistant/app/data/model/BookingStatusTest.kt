@@ -49,7 +49,9 @@ class BookingStatusTest {
     fun `the unknown case is decode-only and never a db value`() {
         // Its sentinel is not in the `bookings.status` check constraint, and the
         // only statuses ever written are the two literal cases below.
-        assertEquals("Unknown", BookingStatus.Unknown.label)
+        // Copy parity with iOS `Booking.swift`, which labels this case
+        // "Unavailable" — the two clients must not name the same state differently.
+        assertEquals("Unavailable", BookingStatus.Unknown.label)
         assertTrue(
             BookingStatus.Unknown.dbValue !in
                 listOf("pending_confirm", "confirmed", "completed", "cancelled", "disputed"),
