@@ -135,6 +135,10 @@ fun BookingStatusTimeline(status: BookingStatus, modifier: Modifier = Modifier) 
         BookingStatus.Confirmed -> 2
         BookingStatus.Completed -> 3
         BookingStatus.Cancelled, BookingStatus.Disputed -> 0
+        // A status this build doesn't know: -1 marks no step Done or Current, so
+        // every row renders in the neutral Pending style (hairline ring, ink3).
+        // Parking it at 0 like cancelled would instead assert "Booked is live".
+        BookingStatus.Unknown -> -1
     }
     StatusTimeline(steps = steps, currentIndex = idx, modifier = modifier)
 }

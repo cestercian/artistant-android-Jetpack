@@ -43,7 +43,10 @@ object CalendarSyncPlanner {
                         actions += Action.Delete(b.id.lowercase(), entry.eventId)
                     }
                 }
-                BookingStatus.PendingConfirm -> Unit // never mirror tentative noise
+                // Never mirror tentative noise — nor a status we can't interpret,
+                // which could be a terminal state we'd be writing into the user's
+                // real calendar as a live gig.
+                BookingStatus.PendingConfirm, BookingStatus.Unknown -> Unit
             }
         }
         return actions

@@ -122,6 +122,8 @@ class ArtistListViewModel @Inject constructor(
             BookingStatus.PendingConfirm -> PillTone.Warm
             BookingStatus.Completed -> PillTone.Good
             BookingStatus.Cancelled, BookingStatus.Disputed -> PillTone.Hot
+            // Neutral on purpose — a colour would imply a meaning we don't have.
+            BookingStatus.Unknown -> PillTone.Neutral
         }
         val out = mutableListOf(booking.status.label.uppercase() to tone)
         booking.date.trim().takeIf { it.isNotEmpty() }?.let {
