@@ -69,7 +69,17 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 on — shrink + obfuscate + resource-strip. Keep rules for the
+            // serialization/nav surfaces R8 could otherwise break live in
+            // proguard-rules.pro (a green assemble proves the static pass; the release
+            // build still MUST be device-smoke-tested before Play submission — the
+            // runtime survival of generated serializers can't be seen at build time).
+            // Originally landed in M8 (f51a8ea); the flag regressed to `false` in the
+            // #44 rewrite while proguard-rules.pro survived, leaving the keep rules
+            // inert and release APKs unshrunk. Re-landed here — do not flip back off
+            // without also deleting the rules file, or the two will silently disagree.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

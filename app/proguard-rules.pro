@@ -54,7 +54,12 @@
 # Data models + DTOs, the DataStore state, and every type-safe nav route. Keeping
 # the classes + their generated $$serializer removes any doubt about the -if rules
 # above resolving our specific packages.
--keep @kotlinx.serialization.Serializable class in.artistant.app.data.model.** { *; }
+# `data.**`, not `data.model.**`: the #44 rewrite moved every @Serializable wire
+# DTO out of `data.model` (those are plain domain types now) and into
+# `data.repository`, which left the old model-scoped keep matching zero classes.
+# Still annotation-scoped, so it only touches @Serializable DTOs — not the
+# repository implementations that now sit in the same package.
+-keep @kotlinx.serialization.Serializable class in.artistant.app.data.** { *; }
 -keep @kotlinx.serialization.Serializable class in.artistant.app.navigation.** { *; }
 -keep @kotlinx.serialization.Serializable class in.artistant.app.platform.** { *; }
 -keepclassmembers class in.artistant.app.** {
