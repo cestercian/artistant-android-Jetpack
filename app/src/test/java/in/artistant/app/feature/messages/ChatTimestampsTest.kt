@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.messages
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -94,6 +95,46 @@ class ChatTimestampsTest {
             DaySeparator.Earlier,
             ChatTimestamps.daySeparator(at(2026, 8, 2, 23), now, zone),
         )
+    }
+
+    // --- day rollover -------------------------------------------------------
+
+    /**
+     * The relative labels above are only correct for the day they were computed
+     * on. A thread left open across midnight has to be told when to recompute, and
+     * this is the interval it sleeps for — so it must land exactly on the next
+     * local midnight, not 24h after whenever the screen happened to open.
+     */
+    @Test
+    fun theRolloverDelayLandsOnTheNextLocalMidnight() {
+        val now = at(2026, 8, 4, 23, 50)
+
+        val delay = ChatTimestamps.millisUntilNextDay(now, zone)
+
+        assertEquals(10 * 60 * 1000L, delay)
+        assertEquals(
+            DaySeparator.Today,
+            ChatTimestamps.daySeparator(now, now + delay - 1, zone),
+        )
+        assertEquals(
+            DaySeparator.Yesterday,
+            ChatTimestamps.daySeparator(now, now + delay, zone),
+        )
+    }
+
+    @Test
+    fun theRolloverDelayIsAFullDayWhenTheClockIsExactlyAtMidnight() {
+        assertEquals(
+            24 * 60 * 60 * 1000L,
+            ChatTimestamps.millisUntilNextDay(at(2026, 8, 4, 0), zone),
+        )
+    }
+
+    /** A backwards clock adjustment must not yield a zero/negative sleep (spin). */
+    @Test
+    fun theRolloverDelayIsAlwaysPositive() {
+        listOf(at(2026, 8, 4, 0), at(2026, 8, 4, 12), at(2026, 8, 4, 23, 59))
+            .forEach { assertTrue(ChatTimestamps.millisUntilNextDay(it, zone) > 0L) }
     }
 
     // --- incoming runs ------------------------------------------------------

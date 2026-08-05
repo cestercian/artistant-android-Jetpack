@@ -95,6 +95,28 @@ object ChatTimestamps {
     }
 
     /**
+     * How long until the local calendar day rolls over, from [nowMs] in [zone].
+     *
+     * The relative labels below are only correct for the day they were computed
+     * on, so a screen left open has to be told when "today" stops being today.
+     * This is that interval — the UI sleeps exactly this long rather than polling
+     * the clock, so a thread open overnight costs one wake-up, not a loop.
+     *
+     * Uses `atStartOfDay(zone)` rather than adding 24h so a DST transition (or a
+     * zone whose midnight doesn't exist on a given date) still lands on the real
+     * first instant of the next day. Floored at 1ms: a backwards clock adjustment
+     * could otherwise produce a non-positive delay, which would spin.
+     */
+    fun millisUntilNextDay(nowMs: Long, zone: ZoneId = ZoneId.systemDefault()): Long {
+        val nextMidnight = dayOf(nowMs, zone)
+            .plusDays(1)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        return (nextMidnight - nowMs).coerceAtLeast(1L)
+    }
+
+    /**
      * Which label a day separator should use. [nowMs] is injected rather than
      * read from the clock so the relative buckets are testable and so a long-lived
      * screen recomposes against a single consistent "now".
