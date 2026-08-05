@@ -168,7 +168,16 @@ fun ArtistProfileScreen(
                 // exists). `artist.price` survives only as the empty-set
                 // fallback. iOS does the same thing via `cheapestPackage`.
                 val fromPrice = PackagePricing.fromPrice(artist.packages, fallback = artist.price)
-                ActionDock(fromPrice = fromPrice, onBook = { onBook(artist.id) })
+                ActionDock(
+                    fromPrice = fromPrice,
+                    // Hand the tapped tier over BEFORE navigating — the route
+                    // carries only the artist id, so the booking screen reads the
+                    // selection from the shared draft store on the way in.
+                    onBook = {
+                        viewModel.startBooking()
+                        onBook(artist.id)
+                    },
+                )
             }
             if (state.showScoreSheet) {
                 ScoreBreakdownSheet(

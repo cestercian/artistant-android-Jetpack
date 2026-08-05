@@ -10,6 +10,7 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.ScoreRepository
+import `in`.artistant.app.feature.booking.BookingDraftStore
 import `in`.artistant.app.feature.saved.SavedStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,7 @@ class ArtistProfileViewModel @Inject constructor(
     private val reviewsRepository: ReviewsRepository,
     private val scoreRepository: ScoreRepository,
     private val savedStore: SavedStore,
+    private val draftStore: BookingDraftStore,
 ) : ViewModel() {
 
     private val artistId: String = checkNotNull(savedStateHandle["artistId"])
@@ -96,6 +98,20 @@ class ArtistProfileViewModel @Inject constructor(
 
     fun selectPackage(index: Int) {
         _state.update { it.copy(selectedPackageIndex = index) }
+    }
+
+    /**
+     * Hand the tapped tier to the booking screen, called as the client leaves via
+     * "Check availability". The booking route carries only the artist id (same as
+     * iOS `Route.booking(artist.id)`), so the selection travels through the shared
+     * [BookingDraftStore] instead — iOS seeds its booking store in a
+     * `simultaneousGesture` on the same CTA for exactly this reason. Seeding
+     * unconditionally is safe: [ArtistProfileUiState.selectedPackageIndex] is
+     * initialised with the same popular-first rule the booking screen falls back
+     * to, so an untouched profile hands over the value booking would have picked.
+     */
+    fun startBooking() {
+        draftStore.seedPackageIndex(artistId, _state.value.selectedPackageIndex)
     }
 
     fun toggleSaved() {

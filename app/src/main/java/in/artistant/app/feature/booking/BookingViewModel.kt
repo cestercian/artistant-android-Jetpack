@@ -58,11 +58,19 @@ class BookingViewModel @Inject constructor(
             val firstAvailable = chips.firstOrNull { it.available } ?: chips.first()
             val slots = resolveTimeSlots(full.timeSlots)
             val popularIdx = full.packages.indexOfFirst { it.popular }.takeIf { it >= 0 } ?: 0
+            // Open on the tier the client tapped on the profile, if they came
+            // that way. Without this the selection there was cosmetic: the route
+            // carries only the artist id, so this screen re-derived its own
+            // default and silently dropped the choice. The bounds check covers
+            // the artist republishing between the two reads — a stale index must
+            // never reach `packages[packageIndex]`.
+            val handedOver = draftStore.pendingPackageIndex(artistId)
+                ?.takeIf { it in full.packages.indices }
             _state.update {
                 it.copy(
                     artist = full,
                     isLoading = false,
-                    packageIndex = popularIdx,
+                    packageIndex = handedOver ?: popularIdx,
                     dateChips = chips,
                     selectedDateEpochMs = firstAvailable.epochMs,
                     selectedDateLabel = firstAvailable.label,

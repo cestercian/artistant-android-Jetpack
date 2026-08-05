@@ -47,6 +47,21 @@ class BookingComposeViewModelTest {
         ),
     )
 
+    /** Three tiers so a handed-over index can differ from the popular default (1). */
+    private fun threeTierArtist() = FakeArtistsRepository(
+        listOf(
+            artist(
+                price = 25_000,
+                packages = listOf(
+                    pkg("p0", "Acoustic hour", 12_000, duration = "1h"),
+                    pkg("p1", "Evening set", 20_000, duration = "2h", popular = true),
+                    pkg("p2", "Headline set", 35_000, duration = "3h"),
+                ),
+                timeSlots = listOf("7:30 PM", "8:30 PM"),
+            ),
+        ),
+    )
+
     @Test
     fun refresh_selectsThePopularPackageAndAnAvailableDate() = runTest {
         val model = vm(seededArtists())
@@ -81,6 +96,51 @@ class BookingComposeViewModelTest {
 
         assertEquals(0, s.packageIndex)
         assertTrue(s.canContinue)
+    }
+
+    /**
+     * The regression these three pin: the profile's package selection was purely
+     * cosmetic. Tapping "Headline set" then Check availability landed on the
+     * popular tier, because the route carries only the artist id and this screen
+     * re-derived its own default. `ArtistProfileViewModel.startBooking()` now
+     * hands the tapped index over through [BookingDraftStore] — the same call
+     * these tests make — mirroring how iOS `ArtistView` seeds the booking store
+     * before its NavigationLink pushes.
+     */
+    @Test
+    fun refresh_opensOnThePackageTheProfileHandedOver() = runTest {
+        val store = BookingDraftStore()
+        // What ArtistProfileViewModel.startBooking() does when the client taps
+        // "Headline set" (index 2) and then Check availability.
+        store.seedPackageIndex(ARTIST_ID, 2)
+
+        val s = vm(threeTierArtist(), store).state.value
+
+        assertEquals(2, s.packageIndex)
+    }
+
+    @Test
+    fun refresh_ignoresAHandoverLeftBehindByADifferentArtist() = runTest {
+        // Seeds outlive one navigation, so a stale one from another profile must
+        // not decide this artist's opening tier — it falls back to the default.
+        val store = BookingDraftStore()
+        store.seedPackageIndex("some-other-artist", 2)
+
+        val s = vm(threeTierArtist(), store).state.value
+
+        assertEquals(1, s.packageIndex) // the popular tier, not the stale seed
+    }
+
+    @Test
+    fun refresh_ignoresAHandoverThatNoLongerAddressesARealPackage() = runTest {
+        // The artist can republish between the profile read and this one, so an
+        // index that is now out of range must not reach `packages[index]`.
+        val store = BookingDraftStore()
+        store.seedPackageIndex(ARTIST_ID, 7)
+
+        val s = vm(threeTierArtist(), store).state.value
+
+        assertEquals(1, s.packageIndex)
     }
 
     @Test
