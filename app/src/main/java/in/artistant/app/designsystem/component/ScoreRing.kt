@@ -10,7 +10,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -36,12 +38,20 @@ fun ScoreRing(
     stroke: Dp = 6.dp,
     showLabel: Boolean = true,
     totalGigs: Int? = null,
+    /**
+     * Colour for the New/unscored state. Defaults to `ink4`, the muted ink the
+     * tier map uses — which is tuned for the `bg` surface ladder and disappears
+     * on top of a photo. A caller rendering the ring over media must pass an
+     * on-media ink, or the whole ring and its "NEW" centre vanish. Scored tiers
+     * are unaffected: their tier colours are bright enough to carry themselves.
+     */
+    mutedTint: Color? = null,
 ) {
     val colors = AppTheme.colors
     val isNew = value == null || (totalGigs != null && totalGigs < ScoreBands.MIN_GIGS_FOR_RANK)
     val numeric = if (isNew) 0 else value!!.coerceIn(0, 100)
     val tier = if (isNew) ScoreTier.New else ScoreBands.tier(numeric, totalGigs)
-    val arcColor = if (isNew) colors.ink4 else tierColor(tier, colors)
+    val arcColor = if (isNew) (mutedTint ?: colors.ink4) else tierColor(tier, colors)
     val pct = numeric / 100f
     val a11y = if (isNew) {
         "Bookability score New, not enough completed gigs yet"
@@ -60,13 +70,24 @@ fun ScoreRing(
             Canvas(Modifier.size(size)) {
                 val strokeWidth = stroke.toPx()
                 val style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                // Inset by half the stroke. `drawArc` centres the stroke on the
+                // ellipse it is given, so passing the full canvas size put the
+                // outer half of every ring outside the Canvas — where it was
+                // clipped away. The ring rendered at half its declared weight,
+                // with a flat outer edge, at every call site.
+                val inset = Offset(strokeWidth / 2f, strokeWidth / 2f)
+                val arcSize = Size(
+                    this.size.width - strokeWidth,
+                    this.size.height - strokeWidth,
+                )
                 drawArc(
                     color = colors.ink.copy(alpha = 0.08f),
                     startAngle = 0f,
                     sweepAngle = 360f,
                     useCenter = false,
                     style = style,
-                    size = Size(this.size.width, this.size.height),
+                    topLeft = inset,
+                    size = arcSize,
                 )
                 rotate(-90f) {
                     drawArc(
@@ -75,7 +96,8 @@ fun ScoreRing(
                         sweepAngle = 360f * pct,
                         useCenter = false,
                         style = style,
-                        size = Size(this.size.width, this.size.height),
+                        topLeft = inset,
+                        size = arcSize,
                     )
                 }
             }

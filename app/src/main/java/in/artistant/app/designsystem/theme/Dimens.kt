@@ -49,6 +49,53 @@ data class Size(
     /** ArtistList row thumbnail (iOS ArtistRow thumb 62×78). */
     val listThumbW: Dp = 62.dp,
     val listThumbH: Dp = 78.dp,
+
+    // ── Artist hero / booking funnel ──────────────────────────────────────
+    /**
+     * Floating hero control: a 40dp disc inside a 44dp tap target. The disc is
+     * the visible circle and the extra 4dp is hit slop, so the buttons can sit
+     * close to the screen edge without shrinking below the touch-target floor.
+     */
+    val heroControl: Dp = 40.dp,
+    /** The mini score ring that rides in the hero identity row, and its stroke. */
+    val ringXs: Dp = 34.dp,
+    val ringXsStroke: Dp = 3.dp,
+    /**
+     * Date card. Portrait on purpose (56×76): the weekday, the day numeral and
+     * the availability dot stack, which is what makes a run of them scan as a
+     * calendar strip rather than a row of buttons.
+     */
+    val dateCellW: Dp = 56.dp,
+    val dateCellH: Dp = 76.dp,
+    /** Availability dot — on a date card and in its Free/Busy legend. */
+    val dot: Dp = 6.dp,
+    /** Package-row radio: 20dp ring, 10dp filled core. */
+    val radio: Dp = 20.dp,
+    val radioCore: Dp = 10.dp,
+    /** Full-width pinned CTA (taller than `controlMin` — it is the only action). */
+    val ctaTall: Dp = 52.dp,
+)
+
+/**
+ * Sizes expressed as a share of the viewport rather than a fixed Dp.
+ *
+ * Kept apart from [Size] because they are unitless: a hero measured in Dp is a
+ * different fraction of a 5" phone than of a foldable, and this hero's whole
+ * point is the proportion it holds on screen.
+ */
+data class Fractions(
+    /**
+     * Artist-profile hero height. Tall for a detail screen, deliberately — the
+     * photo IS the product on this surface.
+     */
+    val artistHero: Float = 0.48f,
+    /**
+     * Bottom share of the hero over which the media dissolves into the page.
+     * The gradient ends on the page background rather than on black: ramping to
+     * black would bottom out darker than `bg` and leave a visible step exactly
+     * where the seam is supposed to disappear.
+     */
+    val heroFade: Float = 0.45f,
 )
 
 /**
@@ -145,6 +192,7 @@ data class Dimens(
     val radii: Radii = Radii(),
     val size: Size = Size(),
     val aspect: AspectRatios = AspectRatios(),
+    val fraction: Fractions = Fractions(),
     val chrome: Chrome = Chrome(),
     val hero: Hero = Hero(),
 )

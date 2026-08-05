@@ -302,7 +302,24 @@ internal data class DbArtist(
         samples: List<Sample>,
         coverUrl: String?,
     ): Artist {
-        val primary = packages.firstOrNull { it.popular } ?: packages.firstOrNull()
+        // `Artist.price`/`duration` are the artist's **"from" figures — the
+        // cheapest tier**, not the headline one. Every consumer reads them that
+        // way: the tile renders the price under a "from" framing, the profile
+        // dock uses it as the fallback before a package list has loaded, and the
+        // search projection fills the same field from the server's `min_price`.
+        //
+        // This used to take the *popular* package, falling back to the *first* —
+        // both ordering facts, neither a pricing one. An artist who leads with
+        // their most expensive tier (an ordinary way to sell: full band up top,
+        // cheap acoustic set below) had every surface backed by this field
+        // advertising their dearest tier as their "from" price, while the profile
+        // — which computes the minimum live from the loaded packages — quoted the
+        // real one. Two paths filling one field with two different meanings.
+        //
+        // Duration comes from the SAME package as the price. Quoting one tier's
+        // price beside another's duration is the subtler lie, because nothing on
+        // screen looks wrong.
+        val cheapest = packages.minByOrNull { it.price }
         return Artist(
             id = id.lowercase(),
             name = stageName,
@@ -310,8 +327,8 @@ internal data class DbArtist(
             category = category,
             genre = genre.orEmpty(),
             city = baseCity,
-            price = primary?.price ?: 0,
-            duration = primary?.duration ?: "set",
+            price = cheapest?.price ?: 0,
+            duration = cheapest?.duration ?: "set",
             score = score,
             gradient = ArtistGradient.palette(coverGradientIndex),
             bio = bio.orEmpty(),
