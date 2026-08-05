@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.messages
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,6 +41,7 @@ import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.MessageKind
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
+import java.util.Date
 
 /** M4 chat: Realtime + optimistic send, system notices, Airbnb-style trust copy. */
 @Composable
@@ -51,6 +55,21 @@ fun ChatScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     var draft by remember { mutableStateOf("") }
+
+    // Grouping is pure and only changes when the transcript does, so it is
+    // computed once per message-list identity rather than per recomposition.
+    val dayStarts = remember(state.messages) { ChatTimestamps.dayStartIds(state.messages) }
+    val incomingStarts = remember(state.messages) { ChatTimestamps.incomingRunStartIds(state.messages) }
+    val outgoingEnds = remember(state.messages) { ChatTimestamps.outgoingRunEndIds(state.messages) }
+    // One consistent "now" per transcript load, so two separators can't disagree
+    // about which day is Today mid-scroll.
+    val now = remember(state.messages) { System.currentTimeMillis() }
+    // The platform formatters honour the user's locale AND their 24-hour setting.
+    // iOS explicitly moved off a hardcoded "h:mm a" for this reason — don't
+    // reintroduce a fixed pattern here.
+    val context = LocalContext.current
+    val timeFormat = remember(context) { DateFormat.getTimeFormat(context) }
+    val dateFormat = remember(context) { DateFormat.getMediumDateFormat(context) }
 
     Column(modifier.fillMaxSize().background(colors.bg)) {
         Row(
@@ -77,11 +96,27 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(space.sm),
             ) {
                 items(state.messages, key = { it.id }) { message ->
+                    // Boundary lookups, not per-row formatting: a day change gets a
+                    // centered separator, a run of incoming messages gets one caption
+                    // above it, a run of my own gets one time below it.
+                    if (message.id in dayStarts) {
+                        DaySeparatorRow(sentAtEpochMs = message.sentAtEpochMs, nowMs = now, dateFormat = dateFormat)
+                    }
+                    if (message.id in incomingStarts) {
+                        SenderCaption(
+                            name = state.title,
+                            role = ThreadCounterpart.counterpartRole(state.viewerIsArtist),
+                            time = timeFormat.format(Date(message.sentAtEpochMs)),
+                        )
+                    }
                     MessageRow(
                         message = message,
                         onBookingClick = onBookingClick,
                         onRetry = { viewModel.retryFailedMessage(message.id) },
                     )
+                    if (message.id in outgoingEnds) {
+                        OutgoingTimeCaption(timeFormat.format(Date(message.sentAtEpochMs)))
+                    }
                 }
                 if (state.error != null) {
                     item { Text(state.error.orEmpty(), style = AppTheme.type.caption, color = colors.hot) }
@@ -126,6 +161,65 @@ fun ChatScreen(
             onDismiss = viewModel::dismissDetails,
         )
     }
+}
+
+/**
+ * Centered "Today / Yesterday / 4 Aug 2026" rule between days. Relative labels
+ * for the two recent buckets because that's how people actually read a
+ * transcript; anything older gets the locale's medium date.
+ */
+@Composable
+private fun DaySeparatorRow(sentAtEpochMs: Long, nowMs: Long, dateFormat: java.text.DateFormat) {
+    val colors = AppTheme.colors
+    val label = when (ChatTimestamps.daySeparator(sentAtEpochMs, nowMs)) {
+        DaySeparator.Today -> "Today"
+        DaySeparator.Yesterday -> "Yesterday"
+        DaySeparator.Earlier -> dateFormat.format(Date(sentAtEpochMs))
+    }
+    Text(
+        label,
+        style = AppTheme.type.monoSmall,
+        color = colors.ink3,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = AppTheme.dimens.space.sm),
+    )
+}
+
+/**
+ * "Asha Rao · CLIENT · 9:14 am" above the first bubble of an incoming run.
+ * Marked decorative for a11y: the bubble itself carries the readable content, so
+ * a screen reader shouldn't announce the attribution twice.
+ */
+@Composable
+private fun SenderCaption(name: String, role: String, time: String) {
+    val colors = AppTheme.colors
+    Text(
+        "$name · ${role.uppercase()} · $time",
+        style = AppTheme.type.monoSmall,
+        color = colors.ink3,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = AppTheme.dimens.space.xs)
+            .clearAndSetSemantics {},
+    )
+}
+
+/** Bare time under the last bubble of one of my own runs, trailing-aligned. */
+@Composable
+private fun OutgoingTimeCaption(time: String) {
+    val colors = AppTheme.colors
+    Text(
+        time,
+        style = AppTheme.type.monoSmall,
+        color = colors.ink3,
+        textAlign = TextAlign.End,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = AppTheme.dimens.space.xs)
+            .clearAndSetSemantics {},
+    )
 }
 
 @Composable
