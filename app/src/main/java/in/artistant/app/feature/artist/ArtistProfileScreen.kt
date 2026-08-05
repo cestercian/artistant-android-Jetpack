@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -277,7 +279,19 @@ private fun Hero(
  * occluded — Compose's equivalent of the `safeAreaInset(edge: .bottom)` iOS uses
  * for the same bar. The page also carries `space.xxl` of trailing air so the last
  * row never sits flush against the lid.
+ *
+ * `FlowRow`, not `Row`, because the bar has to survive accessibility text scales.
+ * A `Row` measures its non-weighted children first, so the intrinsic-width CTA
+ * claimed the whole bar before a weighted price column was measured: at 18sp
+ * headline the label needs ~213dp of a 360dp phone's 328dp row, and by fontScale
+ * 1.5 it needs ~296dp, leaving the price ~32dp to render ₹51,000 in — squeezed,
+ * then clipped. FlowRow measures both at their intrinsic width and moves the CTA
+ * onto its own line when they no longer share one, so neither is ever truncated
+ * and the CTA keeps its `controlMin` tap target. No breakpoint constant is
+ * involved — the wrap is decided by what actually fits, which is also how the
+ * chip grids in BookingScreen/WizardScreen handle the same problem.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ActionDock(fromPrice: Int, onBook: () -> Unit) {
     val colors = AppTheme.colors
@@ -286,15 +300,26 @@ private fun ActionDock(fromPrice: Int, onBook: () -> Unit) {
         // Hairline lid — honest about where the bar begins, instead of a slab of
         // elevated fill doing the same job with 10x the ink.
         HRule()
-        Row(
-            Modifier
+        FlowRow(
+            modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = space.lg, vertical = space.md),
-            verticalAlignment = Alignment.CenterVertically,
+            // The gap IS the design while both fit on one line; once the CTA
+            // wraps, SpaceBetween leaves each line start-aligned, which is what
+            // a stacked dock should look like anyway.
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.spacedBy(space.md),
         ) {
             Column(
+                // No weight: a weighted child is measured with whatever the CTA
+                // left over, which is exactly how the price got squeezed.
+                // Intrinsic width + SpaceBetween gives the same look and lets
+                // FlowRow see the real width when it decides to wrap.
                 modifier = Modifier
-                    .weight(1f)
+                    // Per-item alignment: this Compose version has no
+                    // `itemVerticalAlignment` on FlowRow, so each child centres
+                    // itself against the taller one on the shared line.
+                    .align(Alignment.CenterVertically)
                     // Read as one phrase; the two stacked lines are typography,
                     // not two separate facts for a screen reader to announce.
                     .semantics(mergeDescendants = true) {
@@ -304,9 +329,13 @@ private fun ActionDock(fromPrice: Int, onBook: () -> Unit) {
                 Text(formatInr(fromPrice), style = AppTheme.type.monoMedium, color = colors.ink)
                 Text("FROM", style = AppTheme.type.caption, color = colors.ink3)
             }
-            // Intrinsic width (no fullWidth) so the weighted price column above
-            // supplies the gap — a stretched CTA would eat it.
-            PrimaryButton(text = "Check availability", onClick = onBook)
+            // Intrinsic width (no fullWidth) so the CTA hugs its label and the
+            // space between the two is air rather than button.
+            PrimaryButton(
+                text = "Check availability",
+                onClick = onBook,
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
         }
     }
 }
