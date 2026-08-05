@@ -23,11 +23,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
 import java.time.Instant
@@ -64,10 +64,15 @@ fun DateScroller(
         contentPadding = contentPadding,
     ) {
         items(days.size) { i ->
-            DayCell(
-                date = days[i],
+            val free = isFree(days[i], daysAvailable)
+            DateCell(
+                lines = dateChipLines(days[i]),
                 isSelected = days[i] == selected,
-                isFree = isFree(days[i], daysAvailable),
+                isFree = free,
+                // A busy day is dimmed AND inert. Dimming alone leaves a live
+                // control, so a client could still select — and then request —
+                // a date the artist marked unavailable.
+                enabled = free,
                 onClick = { onSelect(days[i]) },
             )
         }
@@ -131,24 +136,57 @@ fun dateChipLines(date: LocalDate): DateChipLines = DateChipLines(
     day = date.dayOfMonth.toString(),
 )
 
+/**
+ * One date card — a portrait 56×76 tile: uppercase weekday over a big mono day
+ * numeral over an availability dot. Selected fills brand and springs its scale.
+ *
+ * Public because the booking funnel builds its own strip from server-supplied
+ * chips (each carrying an epoch and an availability flag) rather than from a
+ * plain run of dates, and the two strips must not drift. The alternative — the
+ * funnel hand-rolling a lookalike — is what previously produced a squat two-line
+ * chip there whose day line was carved out of a rendered label with
+ * `substringAfter`/`take`. Taking [DateChipLines] (never a raw label) keeps that
+ * closed: a caller has to go through a formatter to build one.
+ *
+ * A busy cell dims the WHOLE tile rather than recolouring each line, so the
+ * weekday, the numeral and the dot all recede together and "unavailable" reads
+ * as one state instead of three shades.
+ */
 @Composable
-private fun DayCell(date: LocalDate, isSelected: Boolean, isFree: Boolean, onClick: () -> Unit) {
-    val lines = dateChipLines(date)
+fun DateCell(
+    lines: DateChipLines,
+    isSelected: Boolean,
+    isFree: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
     val colors = AppTheme.colors
-    val shape = RoundedCornerShape(AppTheme.dimens.radii.sm)
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.md)
     // Spring the selected cell (iOS `.spring(duration: 0.25)`).
     val scale by animateFloatAsState(if (isSelected) 1.06f else 1f, spring(), label = "dayScale")
     val interaction = remember { MutableInteractionSource() }
 
     Column(
-        Modifier
+        modifier
             .scale(scale)
-            .width(56.dp)
-            .height(76.dp)
+            .alpha(if (enabled) 1f else BUSY_CELL_ALPHA)
+            .width(dimens.size.dateCellW)
+            .height(dimens.size.dateCellH)
             .clip(shape)
             .background(if (isSelected) colors.brand else colors.bgCard)
-            .border(1.dp, if (isSelected) Color.Transparent else colors.lineSoft, shape)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            .border(
+                dimens.size.hairline,
+                if (isSelected) Color.Transparent else colors.lineSoft,
+                shape,
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -159,18 +197,25 @@ private fun DayCell(date: LocalDate, isSelected: Boolean, isFree: Boolean, onCli
         )
         Text(
             lines.day,
-            style = AppTheme.type.monoMedium.copy(fontWeight = FontWeight.Bold),
+            style = AppTheme.type.monoStat,
             color = if (isSelected) colors.brandInk else colors.ink,
         )
         Box(
             Modifier
-                .padding(top = 4.dp)
-                .size(6.dp)
+                .padding(top = AppTheme.dimens.space.xs)
+                .size(dimens.size.dot)
                 .clip(CircleShape)
                 .background(if (isFree) colors.good else colors.ink4),
         )
     }
 }
+
+/**
+ * How far a busy date card recedes. Not full transparency: the day still has to
+ * be readable so the strip reads as a calendar with gaps, not a calendar with
+ * holes.
+ */
+private const val BUSY_CELL_ALPHA = 0.45f
 
 // EEE abbreviation match against days_available (same Locale.US key the wizard
 // writes + availabilityKicker reads). Empty/null → free (no-signal default).
