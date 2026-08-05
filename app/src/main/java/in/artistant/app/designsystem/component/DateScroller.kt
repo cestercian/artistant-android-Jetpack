@@ -28,9 +28,13 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.TextStyle
+import java.util.Calendar
 import java.util.Locale
 
 /**
@@ -70,8 +74,66 @@ fun DateScroller(
     }
 }
 
+/**
+ * The two lines a date chip renders: an uppercase weekday abbreviation over the
+ * bare day of the month — "WED" over "5". Same anatomy as iOS
+ * `DateScroller.swift`, which shows only the day number (the month reads off the
+ * run of surrounding cells; a month name in a 56dp chip is what forces the
+ * truncation this type exists to prevent).
+ *
+ * A value type, not a formatted string, precisely so a caller can't reach for
+ * `substringAfter`/`take` on a rendered date again. Both fields are already
+ * chip-sized: nothing here needs clipping, and neither line can carry a
+ * separator, because they're formatted from a parsed date rather than sliced out
+ * of the source label.
+ */
+data class DateChipLines(val weekday: String, val day: String)
+
+/**
+ * Chip lines for a stored booking date label.
+ *
+ * Parsing delegates to [BookingDateFormat.parseLabel] — the single reader for
+ * the canonical `"EEE, MMM d, yyyy"` shape and its tolerated variants
+ * ("MMM d, yyyy", ISO) — so this shares one definition of "a date label" with
+ * `monthLabelFromDateLabel` rather than growing a second, drifting one.
+ *
+ * The weekday is derived from the parsed DATE, not echoed from the label's own
+ * weekday token: the date is the fact and the token is a copy, so a stale copy
+ * self-corrects instead of rendering a lie.
+ *
+ * An unreadable label degrades to itself on the day line with a blank weekday —
+ * the same "return the raw label" contract `monthLabelFromDateLabel` uses. The
+ * chip still renders; it just doesn't invent a date it can't read.
+ */
+fun dateChipLines(dateLabel: String): DateChipLines {
+    val parsed = BookingDateFormat.parseLabel(dateLabel)
+        ?: return DateChipLines(weekday = "", day = dateLabel.trim())
+    return dateChipLines(
+        LocalDate.of(
+            parsed.get(Calendar.YEAR),
+            parsed.get(Calendar.MONTH) + 1, // Calendar.MONTH is 0-based, LocalDate's is 1-based
+            parsed.get(Calendar.DAY_OF_MONTH),
+        ),
+    )
+}
+
+/**
+ * Chip lines for an epoch — the shape the booking funnel's chips carry. Resolved
+ * in the device zone, matching [BookingDateFormat]'s reader, so the same day
+ * can't render as two different chips depending on which side produced it.
+ */
+fun dateChipLines(epochMs: Long): DateChipLines =
+    dateChipLines(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate())
+
+/** The one place either line is actually formatted. */
+fun dateChipLines(date: LocalDate): DateChipLines = DateChipLines(
+    weekday = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US).uppercase(Locale.US),
+    day = date.dayOfMonth.toString(),
+)
+
 @Composable
 private fun DayCell(date: LocalDate, isSelected: Boolean, isFree: Boolean, onClick: () -> Unit) {
+    val lines = dateChipLines(date)
     val colors = AppTheme.colors
     val shape = RoundedCornerShape(AppTheme.dimens.radii.sm)
     // Spring the selected cell (iOS `.spring(duration: 0.25)`).
@@ -91,12 +153,12 @@ private fun DayCell(date: LocalDate, isSelected: Boolean, isFree: Boolean, onCli
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US).uppercase(Locale.US),
+            lines.weekday,
             style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
             color = if (isSelected) colors.brandInk else colors.ink3,
         )
         Text(
-            "${date.dayOfMonth}",
+            lines.day,
             style = AppTheme.type.monoMedium.copy(fontWeight = FontWeight.Bold),
             color = if (isSelected) colors.brandInk else colors.ink,
         )
