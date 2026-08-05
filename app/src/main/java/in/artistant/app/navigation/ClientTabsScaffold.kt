@@ -32,6 +32,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.hilt.navigation.compose.hiltViewModel
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artist.ArtistProfileScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.booking.BookingScreen
@@ -110,6 +112,14 @@ fun ClientTabsScaffold() {
         .firstOrNull { tab -> current?.destination?.hierarchy?.any { it.route == tab.route } == true }
         ?.route
 
+    // Graph-wide motion, resolved here because Navigation's transition slots are
+    // non-composable lambdas and cannot read the theme themselves. Search counts
+    // as a tab root for transition purposes even though it renders outside the
+    // pill — moving to it is still a lateral move, not a push.
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val tabRoutes = remember { ClientTab.entries.map { it.route }.toSet() }
+
     Scaffold(
         // Transparent so the ambient wash below shows through. The wash paints
         // the background colour itself, so nothing is lost.
@@ -137,6 +147,10 @@ fun ClientTabsScaffold() {
             navController = nav,
             startDestination = ClientTab.Discover.route,
             modifier = Modifier.fillMaxSize(),
+            enterTransition = navEnter(motion, reduceMotion, tabRoutes),
+            exitTransition = navExit(motion, reduceMotion, tabRoutes),
+            popEnterTransition = navPopEnter(motion, reduceMotion, tabRoutes),
+            popExitTransition = navPopExit(motion, reduceMotion, tabRoutes),
         ) {
             // Discover is the ONE full-bleed destination: its hero photo runs
             // under the status bar and its rails scroll behind the floating tab
