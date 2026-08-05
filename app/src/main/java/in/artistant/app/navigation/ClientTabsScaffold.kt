@@ -1,5 +1,8 @@
 package `in`.artistant.app.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -7,17 +10,18 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import `in`.artistant.app.designsystem.component.AmbientRoleWash
+import `in`.artistant.app.designsystem.component.FloatingTabAction
+import `in`.artistant.app.designsystem.component.FloatingTabBar
+import `in`.artistant.app.designsystem.component.FloatingTabItem
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavType
@@ -45,7 +49,15 @@ import `in`.artistant.app.feature.profile.ArtistListScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
-// Client bottom nav: Discover · Bookings · Messages · Profile · Search.
+/**
+ * Client navigation: four peer destinations in the floating pill, plus Search.
+ *
+ * Search is intentionally NOT one of the four. It renders as the detached circle
+ * beside the pill because it is an action on the catalogue rather than a place
+ * you go — the same reason Discover no longer carries an inline search field.
+ * It stays in this enum only so the deep-link router and `showBottomBar` can
+ * still treat it as a top-level route.
+ */
 private enum class ClientTab(val route: String, val label: String, val icon: ImageVector) {
     Discover("discover", "Discover", Icons.Filled.Explore),
     Bookings("bookings", "Bookings", Icons.Filled.CalendarMonth),
@@ -53,6 +65,11 @@ private enum class ClientTab(val route: String, val label: String, val icon: Ima
     Profile("profile", "Profile", Icons.Filled.Person),
     Search("search", "Search", Icons.Filled.Search),
 }
+
+/** The four that live inside the pill, in bar order. */
+private val PILL_TABS = listOf(
+    ClientTab.Discover, ClientTab.Bookings, ClientTab.Messages, ClientTab.Profile,
+)
 
 private const val ARTIST_PROFILE_ROUTE = "artist/{artistId}"
 
@@ -89,151 +106,184 @@ fun ClientTabsScaffold() {
         nav.navigate(ClientNavRoutes.bookingDetail(id))
     }
 
+    val selectedTabRoute = ClientTab.entries
+        .firstOrNull { tab -> current?.destination?.hierarchy?.any { it.route == tab.route } == true }
+        ?.route
+
     Scaffold(
-        containerColor = AppTheme.colors.bg,
+        // Transparent so the ambient wash below shows through. The wash paints
+        // the background colour itself, so nothing is lost.
+        containerColor = Color.Transparent,
+        modifier = Modifier.ambientBackdrop(),
         bottomBar = {
             if (!showBottomBar) return@Scaffold
-            NavigationBar(containerColor = AppTheme.colors.bgElev) {
-                ClientTab.entries.forEach { tab ->
-                    val selected = current?.destination?.hierarchy?.any { it.route == tab.route } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { navigateToTab(nav, tab.route) },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label, style = AppTheme.type.caption) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = AppTheme.colors.brandInk,
-                            indicatorColor = AppTheme.colors.brand,
-                            unselectedIconColor = AppTheme.colors.ink3,
-                            selectedTextColor = AppTheme.colors.ink,
-                            unselectedTextColor = AppTheme.colors.ink3,
-                        ),
-                    )
-                }
-            }
+            FloatingTabBar(
+                items = remember {
+                    PILL_TABS.map { FloatingTabItem(it.route, it.label, it.icon) }
+                },
+                selectedRoute = selectedTabRoute,
+                onSelect = { route -> navigateToTab(nav, route) },
+                trailing = FloatingTabAction(
+                    route = ClientTab.Search.route,
+                    label = ClientTab.Search.label,
+                    icon = ClientTab.Search.icon,
+                    selected = selectedTabRoute == ClientTab.Search.route,
+                    onClick = { navigateToTab(nav, ClientTab.Search.route) },
+                ),
+            )
         },
     ) { inner ->
         NavHost(
             navController = nav,
             startDestination = ClientTab.Discover.route,
-            modifier = Modifier.padding(inner),
+            modifier = Modifier.fillMaxSize(),
         ) {
+            // Discover is the ONE full-bleed destination: its hero photo runs
+            // under the status bar and its rails scroll behind the floating tab
+            // bar, so it takes no scaffold insets and reserves its own tailroom.
+            // Every other destination gets the normal inset pane via [TabPane].
             composable(ClientTab.Discover.route) {
                 DiscoverScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
             }
             composable(ClientTab.Bookings.route) {
-                BookingsScreen(
-                    onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
-                )
+                TabPane(inner) {
+                    BookingsScreen(
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                    )
+                }
             }
             composable(ClientTab.Messages.route) {
-                MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
+                TabPane(inner) {
+                    MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
+                }
             }
             composable(ClientTab.Profile.route) {
-                ProfileScreen(
-                    onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
-                    onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
-                )
+                TabPane(inner) {
+                    ProfileScreen(
+                        onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
+                        onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.ARTIST_LIST,
                 arguments = listOf(navArgument("kind") { type = NavType.StringType }),
             ) {
-                ArtistListScreen(
-                    onBack = { nav.popBackStack() },
-                    onArtistClick = { id -> nav.navigate("artist/$id") },
-                    onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
-                )
+                TabPane(inner) {
+                    ArtistListScreen(
+                        onBack = { nav.popBackStack() },
+                        onArtistClick = { id -> nav.navigate("artist/$id") },
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                    )
+                }
             }
             composable(ClientNavRoutes.PAYWALL) {
-                PaywallScreen(
-                    role = AppRole.Client,
-                    onClose = { nav.popBackStack() },
-                )
+                TabPane(inner) {
+                    PaywallScreen(
+                        role = AppRole.Client,
+                        onClose = { nav.popBackStack() },
+                    )
+                }
             }
             composable(ClientTab.Search.route) {
-                SearchScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
+                TabPane(inner) {
+                    SearchScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
+                }
             }
             composable(
                 route = ARTIST_PROFILE_ROUTE,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
                 val chatOpen: ChatOpenViewModel = hiltViewModel()
-                ArtistProfileScreen(
-                    onBack = { nav.popBackStack() },
-                    onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
-                    onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
-                    onMessage = { artistId ->
-                        chatOpen.open(artistId, bookingId = null) { threadId ->
-                            nav.navigate(ClientNavRoutes.chat(threadId))
-                        }
-                    },
-                )
+                TabPane(inner) {
+                    ArtistProfileScreen(
+                        onBack = { nav.popBackStack() },
+                        onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
+                        onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
+                        onMessage = { artistId ->
+                            chatOpen.open(artistId, bookingId = null) { threadId ->
+                                nav.navigate(ClientNavRoutes.chat(threadId))
+                            }
+                        },
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.CHAT,
                 arguments = listOf(navArgument("threadId") { type = NavType.StringType }),
             ) {
-                ChatScreen(
-                    onBack = { nav.popBackStack() },
-                    onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
-                )
+                TabPane(inner) {
+                    ChatScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.BOOKING,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
-                BookingScreen(
-                    onBack = { nav.popBackStack() },
-                    onContinue = { nav.navigate(ClientNavRoutes.CHECKOUT) },
-                )
+                TabPane(inner) {
+                    BookingScreen(
+                        onBack = { nav.popBackStack() },
+                        onContinue = { nav.navigate(ClientNavRoutes.CHECKOUT) },
+                    )
+                }
             }
             composable(ClientNavRoutes.CHECKOUT) {
-                CheckoutScreen(
-                    onBack = { nav.popBackStack() },
-                    onConfirmed = { bookingId ->
-                        nav.navigate(ClientNavRoutes.confirmed(bookingId)) {
-                            popUpTo(ClientNavRoutes.CHECKOUT) { inclusive = true }
-                        }
-                    },
-                    onPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
-                )
+                TabPane(inner) {
+                    CheckoutScreen(
+                        onBack = { nav.popBackStack() },
+                        onConfirmed = { bookingId ->
+                            nav.navigate(ClientNavRoutes.confirmed(bookingId)) {
+                                popUpTo(ClientNavRoutes.CHECKOUT) { inclusive = true }
+                            }
+                        },
+                        onPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.CONFIRMED,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) { entry ->
                 val bookingId = entry.arguments?.getString("bookingId").orEmpty()
-                ConfirmedScreen(
-                    bookingId = bookingId,
-                    onViewBooking = { id ->
-                        nav.navigate(ClientNavRoutes.bookingDetail(id)) {
-                            popUpTo(ClientTab.Discover.route) { inclusive = false }
-                        }
-                    },
-                    onBackToDiscover = {
-                        nav.popBackStack(ClientTab.Discover.route, inclusive = false)
-                    },
-                )
+                TabPane(inner) {
+                    ConfirmedScreen(
+                        bookingId = bookingId,
+                        onViewBooking = { id ->
+                            nav.navigate(ClientNavRoutes.bookingDetail(id)) {
+                                popUpTo(ClientTab.Discover.route) { inclusive = false }
+                            }
+                        },
+                        onBackToDiscover = {
+                            nav.popBackStack(ClientTab.Discover.route, inclusive = false)
+                        },
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.BOOKING_DETAIL,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) {
-                BookingDetailScreen(
-                    isArtistViewer = false,
-                    onBack = { nav.popBackStack() },
-                    onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
-                )
+                TabPane(inner) {
+                    BookingDetailScreen(
+                        isArtistViewer = false,
+                        onBack = { nav.popBackStack() },
+                        onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.REQUEST_QUOTE,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
-                RequestQuoteScreen(
-                    onBack = { nav.popBackStack() },
-                    onSuccess = { nav.popBackStack() },
-                )
+                TabPane(inner) {
+                    RequestQuoteScreen(
+                        onBack = { nav.popBackStack() },
+                        onSuccess = { nav.popBackStack() },
+                    )
+                }
             }
         }
     }

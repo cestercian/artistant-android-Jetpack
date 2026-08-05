@@ -33,6 +33,29 @@ data class AppColors(
     val brand: Color = Color(0xFFC8FF00),
     val brandInk: Color = Color(0xFF0A0A0A),
     val brandSoft: Color = Color(0xFF1D2309),
+
+    // ── Translucent "glass" stand-ins ────────────────────────────────────────
+    // iOS renders the floating tab bar and the Discover hero controls on a
+    // blurred system material. Blur is deliberately OUT on Android (design
+    // owner's call), so each of those surfaces is approximated by TWO flat
+    // layers painted in order: a black scrim, then a white veil.
+    //
+    // Why two and not one: a single translucent fill cannot both darken a photo
+    // backdrop AND lift the near-black page background — it can only move in one
+    // direction. The scrim does the darkening over photos; the veil re-lifts the
+    // result so the shape still reads against `bg`. The alphas are calibrated so
+    // a chrome surface over `bg` (#0A0A0A) lands on ~#1F1F1F, which is where the
+    // iOS tab bar measures over the same background.
+    /** 42% black — chrome scrim (floating tab bar / search circle). */
+    val glassScrim: Color = Color(0x6B000000),
+    /** 10% white — chrome veil, painted over [glassScrim]. */
+    val glassVeil: Color = Color(0x1AFFFFFF),
+    /** 14% white — the selected-tab capsule's lift, painted over the chrome. */
+    val glassSelected: Color = Color(0x24FFFFFF),
+    /** 30% black — softer scrim for controls floating on the hero photo. */
+    val glassSoftScrim: Color = Color(0x4D000000),
+    /** 5% white — softer veil, painted over [glassSoftScrim]. */
+    val glassSoftVeil: Color = Color(0x0DFFFFFF),
 )
 
 /** Apply a role's accent trio onto the fixed base. */
