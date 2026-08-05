@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -35,8 +36,19 @@ data class SearchUiState(
     val sort: SearchSort = SearchSort.Bookability,
     val minPrice: Int = SearchTuning.PRICE_FLOOR,
     val maxPrice: Int = SearchTuning.PRICE_CEILING,
+    // Placeholders until the `price_histogram` load lands — they describe the
+    // tuning constants, NOT the roster. See [priceBoundsLoaded].
     val priceDataMin: Int = SearchTuning.PRICE_FLOOR,
     val priceDataMax: Int = SearchTuning.PRICE_CEILING,
+    /**
+     * True once `price_histogram` returned buckets and [priceDataMin]/
+     * [priceDataMax] describe the real roster span. Everything about the price
+     * filter is meaningless before this: comparing the selection against the
+     * ₹10k/₹80k placeholders can't distinguish "user narrowed it" from "nobody
+     * has touched it yet", which is what put a phantom "1" on the filter badge
+     * of a cold Search tab.
+     */
+    val priceBoundsLoaded: Boolean = false,
     val minScore: Int = 0,
     val eventType: String? = null,
     val services: Set<String> = emptySet(),
@@ -54,6 +66,19 @@ data class SearchUiState(
     val hasActiveQuery: Boolean
         get() = query.isNotBlank() || activeFilterCount > 0 || categories.isNotEmpty()
 
+    /**
+     * The `p_min_price` / `p_max_price` actually worth posting, or null when the
+     * end sits on the data bound (or the bounds aren't known yet). Single source
+     * of truth for BOTH the badge and the RPC arguments — when these two drifted
+     * apart, the badge could read 0 while `runSearch` still posted a ceiling that
+     * dropped every artist above it.
+     */
+    val activePriceFloor: Int? get() = minPrice.takeIf { priceBoundsLoaded && it > priceDataMin }
+    val activePriceCeiling: Int? get() = maxPrice.takeIf { priceBoundsLoaded && it < priceDataMax }
+
+    /** The user has moved an end of the price range off the loaded data span. */
+    val isPriceNarrowed: Boolean get() = activePriceFloor != null || activePriceCeiling != null
+
     /** Badge count for the filter button — excludes category rails (iOS sheet count). */
     val activeFilterCount: Int
         get() {
@@ -62,7 +87,7 @@ data class SearchUiState(
             if (dateIso != null) n++
             if (eventType != null) n++
             if (services.isNotEmpty()) n++
-            if (minPrice > priceDataMin || maxPrice < priceDataMax) n++
+            if (isPriceNarrowed) n++
             if (minScore > 0) n++
             return n
         }
@@ -195,37 +220,102 @@ class SearchViewModel @Inject constructor(
 
     fun retry() = runSearch(reset = true)
 
+    /**
+     * Load the price facet for [city] (null = all cities).
+     *
+     * The RPC is wrapped rather than trusted: the real repository swallows its own
+     * errors into an empty list today, but this talks to the interface, and an
+     * uncaught throw here would take `viewModelScope` down with it. A failed load
+     * and a city with no priced artists are the same thing to this screen — we
+     * don't know the span — so both arrive as "no buckets".
+     */
     private fun loadHistogram(city: String?) {
         val key = city.orEmpty()
         histogramCache[key]?.let { cached ->
-            applyHistogram(cached)
+            applyHistogram(cached, city)
             return
         }
         viewModelScope.launch {
-            val buckets = searchRepository.priceHistogram(city)
+            val buckets = runCatching { searchRepository.priceHistogram(city) }.getOrDefault(emptyList())
             if (buckets.isNotEmpty()) histogramCache[key] = buckets
-            applyHistogram(buckets)
+            applyHistogram(buckets, city)
         }
     }
 
-    private fun applyHistogram(buckets: List<PriceBucket>) {
-        if (buckets.isEmpty()) {
-            _state.update { it.copy(histogram = emptyList()) }
-            return
-        }
-        val dataMin = buckets.minOf { it.bucketMin }
-        val dataMax = buckets.maxOf { it.bucketMax }
-        _state.update {
-            // Widen span; keep current selection if still inside, else reset to full span.
-            val min = it.minPrice.coerceIn(dataMin, dataMax)
-            val max = it.maxPrice.coerceIn(dataMin, dataMax)
-            it.copy(
+    /**
+     * Adopt [buckets] as the price facet for [forCity].
+     *
+     * [forCity] is carried through the async hop so a slow response can't land on
+     * a scope it doesn't describe: two quick city taps race, and without this the
+     * loser's response would overwrite the winner's bounds.
+     */
+    private fun applyHistogram(buckets: List<PriceBucket>, forCity: String?) {
+        val before = _state.value
+        val after = _state.updateAndGet { s ->
+            // A response for a city we've already navigated away from describes
+            // someone else's roster. Drop it.
+            if (s.city != forCity) return@updateAndGet s
+
+            if (buckets.isEmpty()) {
+                // No facet data for THIS scope — a city with no priced artists, a
+                // fresh project, or a failed load. Revert to exactly the cold-start
+                // shape rather than keeping the previous city's numbers: bounds are
+                // a claim about the roster being searched, and the honest state for
+                // "we don't know this city's span" is the same one we hold before
+                // looking at all. Keeping them stale left a narrowing from the last
+                // city still posted as p_min/p_max here, cutting results under a
+                // badge whose "1" pointed at a budget section with no bars.
+                //
+                // The selection reverts with the span because the sheet feeds the
+                // RangeSlider `value = minPrice..maxPrice` inside
+                // `valueRange = priceDataMin..priceDataMax` — reverting one without
+                // the other puts the thumbs outside their own track.
+                return@updateAndGet s.copy(
+                    histogram = emptyList(),
+                    priceBoundsLoaded = false,
+                    priceDataMin = SearchTuning.PRICE_FLOOR,
+                    priceDataMax = SearchTuning.PRICE_CEILING,
+                    minPrice = SearchTuning.PRICE_FLOOR,
+                    maxPrice = SearchTuning.PRICE_CEILING,
+                )
+            }
+
+            val dataMin = buckets.minOf { it.bucketMin }
+            val dataMax = buckets.maxOf { it.bucketMax }
+            // An untouched selection SNAPS to the newly-learned span. It used to be
+            // merely coerced into it, which left the pre-load ₹10k/₹80k placeholder
+            // selection in place — so any roster reaching outside that window (an
+            // artist under ₹10k or over ₹80k, both ordinary) looked permanently
+            // "narrowed": phantom filter badge, and a real price predicate posted
+            // to `search_artists` that silently cut results nobody asked to cut.
+            //
+            // A selection made BEFORE the bounds landed also counts as untouched:
+            // the slider's range was the placeholders, so those numbers described
+            // nothing, and the badge correctly reported them as no filter at all.
+            val narrowed = s.isPriceNarrowed
+            val min = s.minPrice.coerceIn(dataMin, dataMax)
+            val max = s.maxPrice.coerceIn(dataMin, dataMax)
+            s.copy(
                 histogram = buckets,
                 priceDataMin = dataMin,
                 priceDataMax = dataMax,
-                minPrice = if (min >= max) dataMin else min,
-                maxPrice = if (min >= max) dataMax else max,
+                priceBoundsLoaded = true,
+                // Degenerate coercions (span moved entirely past the old selection)
+                // collapse min onto max — fall back to the full span there too.
+                minPrice = if (!narrowed || min >= max) dataMin else min,
+                maxPrice = if (!narrowed || min >= max) dataMax else max,
             )
+        }
+
+        // The facet load is async, so `selectCity`'s own search has usually already
+        // gone out with the OLD price predicate by the time this lands. If applying
+        // the facet changed what we'd post, the results on screen were fetched with
+        // arguments the UI no longer claims — refetch. `runSearch` cancels the
+        // in-flight job and bumps `generation`, so a redundant call is cheap.
+        if (after.activePriceFloor != before.activePriceFloor ||
+            after.activePriceCeiling != before.activePriceCeiling
+        ) {
+            runSearch(reset = true)
         }
     }
 
@@ -257,14 +347,13 @@ class SearchViewModel @Inject constructor(
             }
             try {
                 val live = _state.value
-                val narrowedMin = live.minPrice.takeIf { it > live.priceDataMin }
-                val narrowedMax = live.maxPrice.takeIf { it < live.priceDataMax }
                 val filters = SearchFilters(
                     text = live.query,
                     city = live.city,
                     categories = live.categories.toList(),
-                    minPrice = narrowedMin,
-                    maxPrice = narrowedMax,
+                    // Same predicate the badge counts — see `activePriceFloor`.
+                    minPrice = live.activePriceFloor,
+                    maxPrice = live.activePriceCeiling,
                     minScore = live.minScore.takeIf { it > 0 },
                     eventType = live.eventType,
                     sort = live.sort,

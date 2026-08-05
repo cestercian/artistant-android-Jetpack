@@ -25,10 +25,10 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
 import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.theme.AppTheme
-import java.util.Calendar
 
 /** Client bookings tab — month day grid + upcoming/pending list. */
 @Composable
@@ -41,9 +41,18 @@ fun BookingsScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     var selectedDay by remember { mutableStateOf<Int?>(null) }
-    val cal = remember { Calendar.getInstance() }
-    val year = cal.get(Calendar.YEAR)
-    val month = cal.get(Calendar.MONTH)
+    // The grid used to be pinned to `Calendar.getInstance()`, so a booking in any
+    // other month was listed below but could never be shown on the grid.
+    var displayedMonth by remember { mutableStateOf(currentCalendarMonth()) }
+    val year = displayedMonth.year
+    val month = displayedMonth.month
+    // Stepping clears the day selection: `selectedDay` is a bare day-of-month, so
+    // carrying "16" into the next month would silently re-filter the list to a
+    // different date than the one the user picked.
+    val stepMonth: (Int) -> Unit = { delta ->
+        displayedMonth = displayedMonth.stepped(delta)
+        selectedDay = null
+    }
     val busyDays = remember(state.items, year, month) {
         state.items.mapNotNull { dayOfMonthInMonth(it.booking.date, year, month) }.toSet()
     }
@@ -85,7 +94,11 @@ fun BookingsScreen(
                     color = colors.ink,
                     modifier = Modifier.padding(space.lg),
                 )
-                MonthCalendarHeader(monthLabel = monthLabelFromEpoch(cal.timeInMillis))
+                MonthCalendarHeader(
+                    monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
+                    onPrevMonth = { stepMonth(-1) },
+                    onNextMonth = { stepMonth(1) },
+                )
                 MonthDayGrid(
                     year = year,
                     month = month,

@@ -27,10 +27,10 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
 import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.theme.AppTheme
-import java.util.Calendar
 
 /**
  * Artist gigs tab — calendar-style list of bookings from `listForArtist()`.
@@ -47,9 +47,17 @@ fun ArtistGigsScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     var selectedDay by remember { mutableStateOf<Int?>(null) }
-    val cal = remember { Calendar.getInstance() }
-    val year = cal.get(Calendar.YEAR)
-    val month = cal.get(Calendar.MONTH)
+    // Was pinned to `Calendar.getInstance()`: a gig in any other month showed in
+    // the list but its month was unreachable on the grid.
+    var displayedMonth by remember { mutableStateOf(currentCalendarMonth()) }
+    val year = displayedMonth.year
+    val month = displayedMonth.month
+    // Clear the day selection when the month changes — `selectedDay` is a bare
+    // day-of-month, so keeping it would filter to that day of the NEW month.
+    val stepMonth: (Int) -> Unit = { delta ->
+        displayedMonth = displayedMonth.stepped(delta)
+        selectedDay = null
+    }
     val busyDays = remember(state.items, year, month) {
         state.items.mapNotNull { dayOfMonthInMonth(it.booking.date, year, month) }.toSet()
     }
@@ -93,7 +101,11 @@ fun ArtistGigsScreen(
                         color = colors.ink,
                         modifier = Modifier.padding(space.lg),
                     )
-                    MonthCalendarHeader(monthLabel = monthLabelFromEpoch(cal.timeInMillis))
+                    MonthCalendarHeader(
+                        monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
+                        onPrevMonth = { stepMonth(-1) },
+                        onNextMonth = { stepMonth(1) },
+                    )
                     MonthDayGrid(
                         year = year,
                         month = month,
@@ -135,8 +147,11 @@ fun ArtistGigsScreen(
                         } else {
                             listOf("Selected" to selectedRows)
                         }
-                        rows.forEach { (month, group) ->
-                            if (selectedDay == null) MonthCalendarHeader(monthLabel = month)
+                        // Named `groupLabel`, not `month`: `month` is now the
+                        // grid's 0-based Calendar.MONTH in this scope, and the
+                        // two are very different things to shadow.
+                        rows.forEach { (groupLabel, group) ->
+                            if (selectedDay == null) MonthCalendarHeader(monthLabel = groupLabel)
                             group.forEach { item ->
                                 val b = item.booking
                                 Column(
