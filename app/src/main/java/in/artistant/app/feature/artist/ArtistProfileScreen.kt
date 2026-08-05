@@ -45,6 +45,7 @@ import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.feature.score.ScoreBreakdownSheet
@@ -116,10 +117,16 @@ fun ArtistProfileScreen(
                             Spacer(Modifier.height(space.xl))
                             Text("Packages", style = AppTheme.type.headline, color = colors.ink)
                             Spacer(Modifier.height(space.md))
+                            // Asked once per set, not per row: existing server rows
+                            // carry `popular = true` on every package, and a badge
+                            // every row shares distinguishes nothing.
+                            val badgesMeanSomething =
+                                PackagePricing.popularBadgeIsMeaningful(artist.packages)
                             artist.packages.forEachIndexed { index, pkg ->
                                 PackageRow(
                                     pkg = pkg,
                                     selected = index == state.selectedPackageIndex,
+                                    showPopularBadge = badgesMeanSomething && pkg.popular,
                                     onClick = { viewModel.selectPackage(index) },
                                 )
                                 Spacer(Modifier.height(space.sm))
@@ -238,7 +245,12 @@ private fun ScoreChip(score: Int, gigs: Int, onClick: () -> Unit = {}) {
 }
 
 @Composable
-private fun PackageRow(pkg: ArtistPackage, selected: Boolean, onClick: () -> Unit) {
+private fun PackageRow(
+    pkg: ArtistPackage,
+    selected: Boolean,
+    showPopularBadge: Boolean,
+    onClick: () -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     // Hairline border — selected uses brand ink as the single accent signal.
@@ -258,7 +270,7 @@ private fun PackageRow(pkg: ArtistPackage, selected: Boolean, onClick: () -> Uni
             Text(formatInr(pkg.price), style = AppTheme.type.monoSmall, color = colors.ink)
         }
         Text(pkg.duration, style = AppTheme.type.caption, color = colors.ink3)
-        if (pkg.popular) {
+        if (showPopularBadge) {
             Spacer(Modifier.height(space.xs))
             Pill("Popular", tone = PillTone.Brand)
         }

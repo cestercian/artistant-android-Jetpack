@@ -61,6 +61,29 @@ class BookingComposeViewModelTest {
     }
 
     @Test
+    fun refresh_withNoPopularPackage_fallsBackToTheFirstPackage() = runTest {
+        // `popular` is now false on everything the wizard/EPK publish, so this is
+        // the ordinary path, not an edge case: `indexOfFirst` returns -1 and the
+        // selection must land on a real package (0), never on -1.
+        val artists = FakeArtistsRepository(
+            listOf(
+                artist(
+                    packages = listOf(
+                        pkg("p0", "Acoustic hour", 12_000, duration = "1h"),
+                        pkg("p1", "Evening set", 20_000, duration = "2h"),
+                    ),
+                    timeSlots = listOf("7:30 PM"),
+                ),
+            ),
+        )
+
+        val s = vm(artists).state.value
+
+        assertEquals(0, s.packageIndex)
+        assertTrue(s.canContinue)
+    }
+
+    @Test
     fun refresh_unknownArtist_surfacesLoadErrorAndBlocksContinue() = runTest {
         val model = vm(FakeArtistsRepository(emptyList()))
 

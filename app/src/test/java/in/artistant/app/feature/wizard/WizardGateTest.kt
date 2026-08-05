@@ -171,7 +171,10 @@ class WizardGateTest {
     }
 
     @Test
-    fun previewShowsTheTypedPackageAsThePopularTier() {
+    fun previewShowsTheTypedPackage_andNeverSelfDeclaresItPopular() {
+        // `popular` is a comparison against other packages; the wizard publishes
+        // exactly one, so it must ship the iOS default (false). Hardcoding true
+        // here is what put a "Popular" pill on every package in the app.
         val ui = WizardUiState(packageName = "Late set", packageDuration = "90m", packagePrice = "18000")
 
         val preview = ui.previewPackages.single()
@@ -179,7 +182,7 @@ class WizardGateTest {
         assertEquals("Late set", preview.name)
         assertEquals("90m", preview.duration)
         assertEquals(18_000, preview.price)
-        assertTrue(preview.popular)
+        assertFalse(preview.popular)
     }
 
     @Test

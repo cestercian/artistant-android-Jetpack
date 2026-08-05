@@ -72,7 +72,12 @@ data class WizardUiState(
                 duration = packageDuration,
                 price = packagePrice.toIntOrNull() ?: 0,
                 includes = emptyList(),
-                popular = true,
+                // `false`, matching the iOS default (`Models/Artist.swift` —
+                // `popular: Bool = false`, set only by the wizard's per-package
+                // toggle). The wizard publishes ONE package, so flagging it
+                // popular compared it to nothing and simply badged every row on
+                // every profile. See PackagePricing.popularBadgeIsMeaningful.
+                popular = false,
             ),
         )
 }
@@ -224,7 +229,11 @@ class WizardViewModel @Inject constructor(
                                     name = snap.packageName,
                                     durationLabel = snap.packageDuration,
                                     priceInr = snap.packagePrice.toIntOrNull() ?: 0,
-                                    popular = true,
+                                    // Server-side default is false (PackagesRepository
+                                    // + iOS). Publishing a lone package as "popular"
+                                    // put an unearned badge on every artist's only
+                                    // tier; explicit here so the intent is readable.
+                                    popular = false,
                                 ),
                             ),
                         )
