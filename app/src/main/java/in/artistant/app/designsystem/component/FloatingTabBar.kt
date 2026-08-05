@@ -1,9 +1,14 @@
 package `in`.artistant.app.designsystem.component
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +17,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,11 +27,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -33,8 +43,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.max
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.MotionSpecs
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.reduceMotion
+import kotlin.math.roundToInt
 
 /**
  * One entry in the [FloatingTabBar] pill.
@@ -108,20 +123,34 @@ fun FloatingTabBar(
             ),
         verticalAlignment = Alignment.Bottom,
     ) {
-        Row(
+        // The pill is a stack, not just a Row: one selection capsule slides
+        // beneath the cells rather than each cell painting its own. See
+        // [SelectionCapsule] for why that distinction matters.
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .height(chrome.tabBarHeight)
                 .glassSurface(CircleShape),
-            verticalAlignment = Alignment.CenterVertically,
+            contentAlignment = Alignment.CenterStart,
         ) {
-            items.forEach { item ->
-                TabCell(
-                    item = item,
-                    selected = item.route == selectedRoute,
-                    onClick = { onSelect(item.route) },
-                    modifier = Modifier.weight(1f),
-                )
+            val selectedIndex = items.indexOfFirst { it.route == selectedRoute }
+            SelectionCapsule(
+                selectedIndex = selectedIndex,
+                cellWidth = maxWidth / items.size.coerceAtLeast(1),
+                height = chrome.tabSelectionHeight,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items.forEach { item ->
+                    TabCell(
+                        item = item,
+                        selected = item.route == selectedRoute,
+                        onClick = { onSelect(item.route) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
         trailing?.let { action ->
@@ -132,11 +161,75 @@ fun FloatingTabBar(
 }
 
 /**
- * A single tab. Selection is carried by a capsule behind the content plus a
- * brand-tinted glyph and label — NOT by dimming the unselected ones. The
- * reference design keeps every unselected tab at full-strength ink and moves
- * only the accent; the Material default recedes them to a grey that reads as
- * disabled.
+ * The travelling selection capsule.
+ *
+ * This is the app's one piece of *continuity* motion: the highlight is a single
+ * object that moves between tabs, rather than one capsule switching off while
+ * another switches on. The difference is the whole point — a moving highlight
+ * says "you are still in the same bar, now over here", which is what makes four
+ * peer destinations feel like one control instead of four.
+ *
+ * Positioned by translating a single cell-width box. Cells are equal-width
+ * (`weight(1f)` each), so the capsule's left edge is exactly `index × cellWidth`
+ * and no measurement of the individual cells is needed.
+ *
+ * `Modifier.offset {}` takes a lambda so the animated position is read in the
+ * LAYOUT phase: sliding the capsule re-lays-out one box and skips recomposition
+ * entirely. The alpha rides in the same deferred way via [graphicsLayer].
+ *
+ * @param selectedIndex index into the pill's items, or -1 when the active
+ *   destination is not in the pill at all (the client's Search circle) — the
+ *   capsule then fades out in place rather than sliding to a wrong tab.
+ */
+@Composable
+private fun BoxScope.SelectionCapsule(
+    selectedIndex: Int,
+    cellWidth: Dp,
+    height: Dp,
+) {
+    val colors = AppTheme.colors
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val spec = tween<Float>(
+        durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
+        easing = motion.emphasized,
+    )
+
+    // Hold the last in-pill position so leaving for Search fades the capsule out
+    // where it stood; without this it would animate to index 0 on the way out
+    // and back from index 0 on the way in — motion describing a journey the user
+    // never took.
+    var lastIndex by remember { mutableIntStateOf(selectedIndex.coerceAtLeast(0)) }
+    if (selectedIndex >= 0) lastIndex = selectedIndex
+
+    val position by animateFloatAsState(lastIndex.toFloat(), spec, label = "tabIndicator")
+    val alpha by animateFloatAsState(
+        targetValue = if (selectedIndex >= 0) 1f else 0f,
+        animationSpec = spec,
+        label = "tabIndicatorAlpha",
+    )
+
+    Box(
+        Modifier
+            .align(Alignment.CenterStart)
+            .offset { IntOffset(x = (position * cellWidth.toPx()).roundToInt(), y = 0) }
+            .width(cellWidth)
+            .height(height)
+            .graphicsLayer { this.alpha = alpha }
+            .clip(CircleShape)
+            .background(colors.glassSelected),
+    )
+}
+
+/**
+ * A single tab. Selection is carried by the shared [SelectionCapsule] behind the
+ * content plus a brand-tinted glyph and label — NOT by dimming the unselected
+ * ones. The reference design keeps every unselected tab at full-strength ink and
+ * moves only the accent; the Material default recedes them to a grey that reads
+ * as disabled.
+ *
+ * The tint cross-fades rather than switching, so the colour change lands on the
+ * same beat as the capsule's arrival instead of a frame ahead of it.
  */
 @Composable
 private fun TabCell(
@@ -147,15 +240,24 @@ private fun TabCell(
 ) {
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
-    val tint = if (selected) colors.brand else colors.ink
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val interaction = remember { MutableInteractionSource() }
+    val tint by animateColorAsState(
+        targetValue = if (selected) colors.brand else colors.ink,
+        animationSpec = tween(
+            durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
+            easing = motion.standard,
+        ),
+        label = "tabTint",
+    )
     Box(
         modifier = modifier
             .height(chrome.tabSelectionHeight)
             .clip(CircleShape)
-            .then(if (selected) Modifier.background(colors.glassSelected) else Modifier)
             .selectable(
                 selected = selected,
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = ripple(bounded = true, color = colors.brand),
                 role = Role.Tab,
                 onClick = onClick,
@@ -166,6 +268,9 @@ private fun TabCell(
         contentAlignment = Alignment.Center,
     ) {
         Column(
+            // Only the glyph+label scale on press, never the cell box — scaling
+            // the box would drag the selection capsule's geometry with it.
+            modifier = Modifier.pressScale(interaction),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(chrome.tabIconLabelGap),
         ) {
@@ -189,13 +294,27 @@ private fun TabCell(
 private fun TrailingCircle(action: FloatingTabAction) {
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val interaction = remember { MutableInteractionSource() }
+    // No travelling capsule out here — the circle stands alone, so selection is
+    // carried by the glyph tint. Cross-faded on the same curve and duration the
+    // pill uses, so the two halves of the bar stay in step.
+    val tint by animateColorAsState(
+        targetValue = if (action.selected) colors.brand else colors.ink,
+        animationSpec = tween(
+            durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
+            easing = motion.standard,
+        ),
+        label = "searchTint",
+    )
     Box(
         modifier = Modifier
             .size(chrome.tabSearchSize)
             .glassSurface(CircleShape)
             .selectable(
                 selected = action.selected,
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = ripple(bounded = true, color = colors.brand),
                 role = Role.Tab,
                 onClick = action.onClick,
@@ -206,8 +325,10 @@ private fun TrailingCircle(action: FloatingTabAction) {
         Icon(
             imageVector = action.icon,
             contentDescription = null,
-            tint = if (action.selected) colors.brand else colors.ink,
-            modifier = Modifier.size(chrome.tabSearchIconSize),
+            tint = tint,
+            modifier = Modifier
+                .size(chrome.tabSearchIconSize)
+                .pressScale(interaction),
         )
     }
 }

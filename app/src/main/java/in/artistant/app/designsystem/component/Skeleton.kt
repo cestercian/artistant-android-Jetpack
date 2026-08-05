@@ -18,8 +18,10 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.MotionSpecs
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.reduceMotion
 
 /**
  * A shimmering placeholder block — the `Skeleton` port (iOS `Skeleton`). A
@@ -34,16 +36,27 @@ fun Skeleton(
     cornerRadius: Dp = AppTheme.dimens.radii.md,
 ) {
     val colors = AppTheme.colors
+    val motion = AppTheme.motion
+    // Reduce-motion turns the shimmer OFF rather than merely speeding it up.
+    // An `infiniteRepeatable` handed a zero duration doesn't stop — it completes
+    // and restarts every frame, which is both a busy loop and a strobe. A
+    // loading placeholder is precisely where a motion-sensitive user is stuck
+    // staring at the screen, so this one gets a hard switch: the block still
+    // renders, just as a flat `bgCard` plate.
+    val animate = MotionSpecs.shouldShimmer(AppTheme.reduceMotion)
     // One shared infinite clock drives the sweep phase 0→1 and back.
     val transition = rememberInfiniteTransition(label = "skeleton")
     val phase by transition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Restart),
+        targetValue = if (animate) 1f else 0f,
+        animationSpec = infiniteRepeatable(tween(motion.shimmer), RepeatMode.Restart),
         label = "sweep",
     )
     val base = colors.bgCard
-    val highlight = colors.bgSoft
+    // Collapsing the highlight onto the base makes the (still-running but
+    // static) gradient paint a uniform fill, so nothing sweeps and nothing
+    // flickers.
+    val highlight = if (animate) colors.bgSoft else colors.bgCard
     // The caller owns sizing (fixed width/height for a rail tile, fillMaxWidth +
     // height for a hero block) — Skeleton only paints the shimmer.
     Box(

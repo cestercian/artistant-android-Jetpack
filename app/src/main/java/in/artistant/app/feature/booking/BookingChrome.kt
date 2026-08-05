@@ -1,8 +1,12 @@
 package `in`.artistant.app.feature.booking
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,10 +23,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -31,7 +38,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.MotionSpecs
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.reduceMotion
 
 /**
  * A floating circular control — the flat read of the glass discs the funnel and
@@ -250,36 +261,62 @@ fun PackageOptionRow(
     val dimens = AppTheme.dimens
     val space = dimens.space
     val shape = RoundedCornerShape(dimens.radii.lg)
-    // Selected: brand rim + the brand's dark wash. Unselected: hairline only,
-    // no fill — card chrome is reserved for the row that has been chosen.
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val interaction = remember { MutableInteractionSource() }
+    // Selection is a colour change on two surfaces (the rim and the wash), so
+    // both cross-fade rather than switching. Switching them made picking a tier
+    // read as the row being *replaced* — the eye reads an instant fill change as
+    // new content, not as the same row changing state.
+    val stateSpec = tween<Color>(
+        durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
+        easing = motion.standard,
+    )
+    val fill by animateColorAsState(
+        targetValue = if (selected) colors.brandSoft else Color.Transparent,
+        animationSpec = stateSpec,
+        label = "packageFill",
+    )
+    val rim by animateColorAsState(
+        targetValue = if (selected) colors.brand else colors.lineSoft,
+        animationSpec = stateSpec,
+        label = "packageRim",
+    )
     Row(
         modifier
             .fillMaxWidth()
+            .pressScale(interaction)
             .clip(shape)
-            .background(if (selected) colors.brandSoft else Color.Transparent)
-            .border(dimens.size.hairline, if (selected) colors.brand else colors.lineSoft, shape)
-            .clickable(onClick = onClick)
+            .background(fill)
+            .border(dimens.size.hairline, rim, shape)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .padding(space.lg),
         horizontalArrangement = Arrangement.spacedBy(space.md),
     ) {
         Box(
             Modifier
                 .size(dimens.size.radio)
-                .border(
-                    dimens.size.stroke,
-                    if (selected) colors.brand else colors.lineSoft,
-                    CircleShape,
-                ),
+                .border(dimens.size.stroke, rim, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (selected) {
-                Box(
-                    Modifier
-                        .size(dimens.size.radioCore)
-                        .clip(CircleShape)
-                        .background(colors.brand),
-                )
-            }
+            // The core scales in from nothing, so the radio fills rather than
+            // blinking — the one moment of motion that confirms the tap landed
+            // on THIS row and not the one above it.
+            val core by animateFloatAsState(
+                targetValue = if (selected) 1f else 0f,
+                animationSpec = tween(
+                    durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
+                    easing = motion.emphasizedDecelerate,
+                ),
+                label = "radioCore",
+            )
+            Box(
+                Modifier
+                    .size(dimens.size.radioCore)
+                    .graphicsLayer { scaleX = core; scaleY = core; alpha = core }
+                    .clip(CircleShape)
+                    .background(colors.brand),
+            )
         }
         Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
             Row(

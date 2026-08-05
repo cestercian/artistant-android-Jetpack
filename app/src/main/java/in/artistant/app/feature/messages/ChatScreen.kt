@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.MessageKind
+import androidx.compose.ui.draw.clip
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.delay
@@ -142,6 +143,12 @@ fun ChatScreen(
                 modifier = Modifier.weight(1f),
                 textStyle = AppTheme.type.body.copy(color = colors.ink),
                 maxLines = 4,
+                // Material's default text-field corner is ~4dp, which read as a
+                // hard-edged box sitting directly beneath fully-rounded chat
+                // bubbles. Capsule instead: this composer is a single-line
+                // control most of the time, and it is the most-looked-at input
+                // in the app.
+                shape = RoundedCornerShape(AppTheme.dimens.radii.xl),
             )
             IconButton(
                 onClick = {
@@ -278,9 +285,18 @@ private fun OutgoingTimeCaption(time: String) {
 @Composable
 private fun SafetyBanner() {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     Row(
-        Modifier.fillMaxWidth().background(colors.bgElev).padding(horizontal = space.lg, vertical = space.sm),
+        Modifier
+            .fillMaxWidth()
+            // Inset and rounded rather than a full-bleed slab. This banner sits
+            // mid-scroll between rounded bubbles, so a square-cornered elevated
+            // strip was the one hard edge in the thread.
+            .padding(horizontal = space.md, vertical = space.xs)
+            .clip(RoundedCornerShape(dimens.radii.md))
+            .background(colors.bgElev)
+            .padding(horizontal = space.lg, vertical = space.sm),
         horizontalArrangement = Arrangement.spacedBy(space.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {

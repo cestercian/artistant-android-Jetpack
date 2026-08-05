@@ -1,6 +1,8 @@
 package `in`.artistant.app.feature.discover
 
-import android.provider.Settings
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,8 +70,12 @@ import `in`.artistant.app.common.util.formatInrShort
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.designsystem.component.ArtistTile
 import `in`.artistant.app.designsystem.component.EmptyState
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.heroGlass
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.MotionSpecs
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.tierColor
 import kotlinx.coroutines.delay
@@ -143,7 +149,7 @@ fun DiscoverScreen(
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
-            else -> {
+            else -> RevealOnAppear {
                 // No content padding: the hero owns the status-bar area and
                 // the tailroom item below clears the floating tab bar.
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -209,17 +215,10 @@ private fun HeroCarousel(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val heroHeight = screenHeight * hero.heightFraction
 
-    // "Reduce motion" on Android is expressed as a zeroed animator duration
-    // scale; there is no dedicated flag. Read once — the user is not going to
-    // change it mid-scroll, and polling it per frame would be silly.
-    val context = LocalContext.current
-    val animationsEnabled = remember(context) {
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) != 0f
-    }
+    // Auto-advance is motion the user did not ask for, so it is the first thing
+    // reduce-motion takes away. Resolved from the theme now rather than re-read
+    // here — the setting is read once at the theme root for the whole app.
+    val animationsEnabled = !AppTheme.reduceMotion
 
     if (DiscoverHeroLogic.shouldAutoAdvance(artists.size, animationsEnabled)) {
         // Keyed on the settled page so a manual swipe restarts the dwell timer
@@ -546,11 +545,25 @@ private fun MastheadAvatar(initial: String, size: Dp) {
     }
 }
 
-/** Page dots — the active one stretches into a capsule rather than growing. */
+/**
+ * Page dots — the active one stretches into a capsule rather than growing.
+ *
+ * The stretch is animated, and that is the point: watching one dot elongate
+ * while its neighbour contracts reads as *the same indicator moving*, which
+ * matches what the pager underneath actually did. Swapping two static widths
+ * instead makes the row flicker and tells the eye nothing about direction.
+ *
+ * Both the width and the fill animate on the same curve so the shape and the
+ * colour arrive together — staggering them makes a lime stub appear before it
+ * has finished growing.
+ */
 @Composable
 private fun HeroDots(count: Int, selected: Int, modifier: Modifier = Modifier) {
     val hero = AppTheme.dimens.hero
     val colors = AppTheme.colors
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val duration = MotionSpecs.durationMillis(motion.indicator, reduceMotion)
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(hero.pageDotGap),
@@ -558,16 +571,29 @@ private fun HeroDots(count: Int, selected: Int, modifier: Modifier = Modifier) {
     ) {
         repeat(count) { i ->
             val active = i == selected
+            val width by animateDpAsState(
+                targetValue = if (active) hero.pageDotActiveWidth else hero.pageDot,
+                animationSpec = tween(duration, easing = motion.emphasized),
+                label = "dotWidth",
+            )
+            val fill by animateColorAsState(
+                targetValue = if (active) colors.brand else Color.White.copy(alpha = INACTIVE_DOT_ALPHA),
+                animationSpec = tween(duration, easing = motion.standard),
+                label = "dotFill",
+            )
             Box(
                 Modifier
-                    .width(if (active) hero.pageDotActiveWidth else hero.pageDot)
+                    .width(width)
                     .height(hero.pageDot)
                     .clip(CircleShape)
-                    .background(if (active) colors.brand else Color.White.copy(alpha = 0.3f)),
+                    .background(fill),
             )
         }
     }
 }
+
+/** How far an inactive page dot recedes against the hero photo behind it. */
+private const val INACTIVE_DOT_ALPHA = 0.3f
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rails

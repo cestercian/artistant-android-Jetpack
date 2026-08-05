@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.data.model.SearchSort
+import androidx.compose.ui.draw.clip
 import `in`.artistant.app.designsystem.component.ArtistTile
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -315,14 +316,22 @@ private fun SortRow(sort: SearchSort, onSort: (SearchSort) -> Unit) {
 @Composable
 private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    // Capsule, matching every other chip in the app. Note the `clip` before the
+    // fill: previously the border was rounded but the background was not, so a
+    // selected chip painted square lime corners OUTSIDE its own rounded stroke.
+    // A shaped `background` alone would not have been enough either — the
+    // clickable's ripple would still have spilled into the corners.
+    val shape = RoundedCornerShape(dimens.radii.sm)
     Text(
         text = label,
         style = AppTheme.type.caption,
         color = if (selected) colors.brandInk else colors.ink2,
         modifier = Modifier
-            .border(1.dp, if (selected) colors.brand else colors.line, RoundedCornerShape(AppTheme.dimens.radii.sm))
+            .clip(shape)
             .background(if (selected) colors.brand else colors.bg)
+            .border(dimens.size.hairline, if (selected) colors.brand else colors.line, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = space.md, vertical = space.sm),
     )

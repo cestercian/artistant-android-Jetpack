@@ -3,11 +3,11 @@ package `in`.artistant.app.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
+import `in`.artistant.app.designsystem.theme.rememberReduceMotion
 import `in`.artistant.app.feature.signup.SignupFlow
 import `in`.artistant.app.feature.signup.SignupMode
 import `in`.artistant.app.feature.signup.SignupStep
@@ -41,7 +41,10 @@ fun ArtistantNavHost() {
     }
 
     val hydrationError by viewModel.profileHydrationError.collectAsStateWithLifecycle()
-    val reduceMotion = isReduceMotionOn()
+    // Read directly rather than through `AppTheme.reduceMotion`: this sits ABOVE
+    // every `ArtistantTheme` call below, so the CompositionLocal the theme
+    // provides is not in scope yet. Same helper, same answer.
+    val reduceMotion = rememberReduceMotion()
 
     when (val g = gate) {
         // While the persisted session restores, theme with the client accent and show nothing
@@ -89,18 +92,4 @@ fun ArtistantNavHost() {
                 }
             }
     }
-}
-
-/** Read the system "remove animations" a11y setting so the auth lineup can freeze (iOS
- *  reduce-motion parity). Cheap enough to read on each recomposition of the gate. */
-@Composable
-private fun isReduceMotionOn(): Boolean {
-    val context = LocalContext.current
-    // Settings.Global.ANIMATOR_DURATION_SCALE == 0 means the user disabled animations.
-    val scale = android.provider.Settings.Global.getFloat(
-        context.contentResolver,
-        android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
-        1f,
-    )
-    return scale == 0f
 }

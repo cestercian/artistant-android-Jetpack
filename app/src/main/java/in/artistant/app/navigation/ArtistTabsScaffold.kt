@@ -30,6 +30,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
@@ -87,6 +89,11 @@ fun ArtistTabsScaffold() {
         .firstOrNull { tab -> current?.destination?.hierarchy?.any { it.route == tab.route } == true }
         ?.route
 
+    // See [ClientTabsScaffold] — same reason these are resolved out here.
+    val motion = AppTheme.motion
+    val reduceMotion = AppTheme.reduceMotion
+    val tabRoutes = remember { ArtistTab.entries.map { it.route }.toSet() }
+
     Scaffold(
         // Transparent so the ambient wash below shows through; the wash paints
         // the background colour itself.
@@ -108,6 +115,10 @@ fun ArtistTabsScaffold() {
         NavHost(
             navController = nav,
             startDestination = ArtistTab.Home.route,
+            enterTransition = navEnter(motion, reduceMotion, tabRoutes),
+            exitTransition = navExit(motion, reduceMotion, tabRoutes),
+            popEnterTransition = navPopEnter(motion, reduceMotion, tabRoutes),
+            popExitTransition = navPopExit(motion, reduceMotion, tabRoutes),
             modifier = Modifier.fillMaxSize(),
         ) {
             composable(ArtistTab.Home.route) {

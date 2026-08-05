@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.signup.EditorialHeadline
@@ -128,7 +129,7 @@ fun RequestQuoteScreen(
             }
         }
         Column(
-            Modifier.fillMaxWidth().background(colors.bgElev).padding(space.lg),
+            Modifier.dockSurface().padding(space.lg),
         ) {
             if (state.isSubmitting) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

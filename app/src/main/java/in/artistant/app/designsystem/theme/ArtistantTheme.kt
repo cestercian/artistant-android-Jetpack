@@ -40,10 +40,16 @@ fun ArtistantTheme(
         surface = colors.bgCard,
         onSurface = colors.ink,
     )
+    // Resolved here, at the single root every surface sits under, so no screen
+    // has to remember to read the accessibility setting for itself. (Two screens
+    // previously each rolled their own read of it; both now defer to this.)
+    val reduceMotion = rememberReduceMotion()
     CompositionLocalProvider(
         LocalAppColors provides colors,
         LocalAppType provides AppType(),
         LocalDimens provides Dimens(),
+        LocalMotion provides Motion(),
+        LocalReduceMotion provides reduceMotion,
     ) {
         MaterialTheme(colorScheme = material, typography = BrandTypography, content = content)
     }

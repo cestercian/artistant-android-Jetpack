@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.designsystem.component.ButtonVariant
+import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
@@ -129,8 +130,7 @@ fun GigRequestDetailScreen(
                 if (viewModel.showActions()) {
                     Column(
                         Modifier
-                            .fillMaxWidth()
-                            .background(colors.bgElev)
+                            .dockSurface()
                             .padding(space.lg),
                         verticalArrangement = Arrangement.spacedBy(space.sm),
                     ) {
@@ -166,6 +166,7 @@ fun GigRequestDetailScreen(
 
     if (confirmingDecline) {
         AlertDialog(
+            shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
             onDismissRequest = { confirmingDecline = false },
             title = { Text("Decline this request?") },
             text = { Text("The client is notified and this request closes.") },
@@ -239,6 +240,7 @@ private fun CounterDialog(
     val parsed = amount.toIntOrNull() ?: 0
 
     AlertDialog(
+        shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
         onDismissRequest = onDismiss,
         title = { Text("Counter offer") },
         text = {

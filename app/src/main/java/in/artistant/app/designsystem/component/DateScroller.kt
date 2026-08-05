@@ -1,6 +1,7 @@
 package `in`.artistant.app.designsystem.component
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,11 +26,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.reduceMotion
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -164,13 +166,24 @@ fun DateCell(
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val shape = RoundedCornerShape(dimens.radii.md)
-    // Spring the selected cell (iOS `.spring(duration: 0.25)`).
-    val scale by animateFloatAsState(if (isSelected) 1.06f else 1f, spring(), label = "dayScale")
+    val reduceMotion = AppTheme.reduceMotion
+    // Spring the selected cell (the reference build uses `.spring(duration:
+    // 0.25)`). Under reduce-motion the cell still grows — the size difference is
+    // the *state* readout, not decoration, and losing it would leave selection
+    // signalled by colour alone — but it arrives instantly instead of springing.
+    val scale by animateFloatAsState(
+        targetValue = if (isSelected) SELECTED_CELL_SCALE else 1f,
+        animationSpec = if (reduceMotion) snap() else spring(),
+        label = "dayScale",
+    )
     val interaction = remember { MutableInteractionSource() }
 
     Column(
         modifier
-            .scale(scale)
+            // Draw-phase read: selecting a date re-draws this cell rather than
+            // recomposing the strip.
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .pressScale(interaction)
             .alpha(if (enabled) 1f else BUSY_CELL_ALPHA)
             .width(dimens.size.dateCellW)
             .height(dimens.size.dateCellH)
@@ -216,6 +229,12 @@ fun DateCell(
  * holes.
  */
 private const val BUSY_CELL_ALPHA = 0.45f
+
+/**
+ * How much the selected date card grows. Enough to lift it out of the strip's
+ * rhythm without overlapping its neighbours (the strip's gap is `space.sm`).
+ */
+private const val SELECTED_CELL_SCALE = 1.06f
 
 // EEE abbreviation match against days_available (same Locale.US key the wizard
 // writes + availabilityKicker reads). Empty/null → free (no-signal default).
