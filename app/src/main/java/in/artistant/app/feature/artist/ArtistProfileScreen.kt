@@ -354,6 +354,17 @@ private fun MediaChip(text: String, icon: ImageVector? = null) {
  * paints without it — the breakdown fetch only feeds the sheet. A New-tier
  * artist gets the ring's "NEW" state (an honest "no data yet"), and the label
  * names the metric instead of echoing "NEW" twice.
+ *
+ * **Contrast is the constraint here, not decoration.** This capsule is the only
+ * place small text sits directly on an artist-supplied photo, and it has to hold
+ * for every tier over every cover. Two things make that true: a darkening
+ * backdrop (a lightening wash leaves the result at the mercy of the image — over
+ * this hero's mid-tone gradient it landed on the *same luminance* as the muted
+ * New-tier ink, rendering the label at 1.2:1 against its own fill), and, for the
+ * New state, an on-media ink instead of the tier map's `ink4`. That grey is
+ * correct on the `bg` ladder and invisible on a photo. Nothing here overrides a
+ * SCORED tier's colour: those are the signal, and they are bright enough to
+ * carry themselves against the dark backdrop.
  */
 @Composable
 private fun ScoreChip(score: Int, gigs: Int, tier: ScoreTier, onClick: () -> Unit) {
@@ -363,7 +374,7 @@ private fun ScoreChip(score: Int, gigs: Int, tier: ScoreTier, onClick: () -> Uni
     Row(
         Modifier
             .clip(CircleShape)
-            .background(colors.glass)
+            .background(colors.glassDark)
             .border(dimens.size.hairline, colors.glassLine, CircleShape)
             .clickable(onClick = onClick)
             .padding(start = dimens.space.sm, end = dimens.space.md, top = dimens.space.xs, bottom = dimens.space.xs)
@@ -383,12 +394,17 @@ private fun ScoreChip(score: Int, gigs: Int, tier: ScoreTier, onClick: () -> Uni
             stroke = dimens.size.ringXsStroke,
             showLabel = false,
             totalGigs = gigs,
+            mutedTint = colors.inkOnMedia,
         )
         Column {
             Text(
                 if (isNew) "BOOKABILITY" else tier.label.uppercase(Locale.US),
                 style = AppTheme.type.monoMicro,
-                color = tierColor(tier, colors),
+                // For a scored tier this word IS the tier, so it carries the tier
+                // colour. For New it reads "BOOKABILITY" — the name of the
+                // metric, not a tier — so tinting it with the tier map's grey was
+                // a category error on top of a contrast failure.
+                color = if (isNew) colors.inkOnMedia else tierColor(tier, colors),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Details", style = AppTheme.type.monoMicroSoft, color = colors.inkOnMediaSoft)

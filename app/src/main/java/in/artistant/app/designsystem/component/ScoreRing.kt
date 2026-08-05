@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -37,12 +38,20 @@ fun ScoreRing(
     stroke: Dp = 6.dp,
     showLabel: Boolean = true,
     totalGigs: Int? = null,
+    /**
+     * Colour for the New/unscored state. Defaults to `ink4`, the muted ink the
+     * tier map uses — which is tuned for the `bg` surface ladder and disappears
+     * on top of a photo. A caller rendering the ring over media must pass an
+     * on-media ink, or the whole ring and its "NEW" centre vanish. Scored tiers
+     * are unaffected: their tier colours are bright enough to carry themselves.
+     */
+    mutedTint: Color? = null,
 ) {
     val colors = AppTheme.colors
     val isNew = value == null || (totalGigs != null && totalGigs < ScoreBands.MIN_GIGS_FOR_RANK)
     val numeric = if (isNew) 0 else value!!.coerceIn(0, 100)
     val tier = if (isNew) ScoreTier.New else ScoreBands.tier(numeric, totalGigs)
-    val arcColor = if (isNew) colors.ink4 else tierColor(tier, colors)
+    val arcColor = if (isNew) (mutedTint ?: colors.ink4) else tierColor(tier, colors)
     val pct = numeric / 100f
     val a11y = if (isNew) {
         "Bookability score New, not enough completed gigs yet"
