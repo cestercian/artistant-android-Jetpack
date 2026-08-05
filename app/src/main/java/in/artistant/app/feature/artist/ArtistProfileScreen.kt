@@ -522,6 +522,14 @@ private fun AboutBlock(bio: String) {
  * belongs to trailing it on the same baseline. It restates the dock's price
  * deliberately — the dock is a control the eye skips, this is the page saying
  * what booking this artist costs.
+ *
+ * With no published packages there is no minimum, so the figure is omitted
+ * rather than back-filled from the artist row's own price. That value is the
+ * server's denormalized `min_price`, which is confirmed stale on dev — the dock
+ * keeps it as a last-resort fallback because a control with no number at all is
+ * worse, but this line is the page *stating* a price, and stating a known-stale
+ * one as a headline is the exact bug the "from means minimum" fix was about.
+ * "Pricing on request" is true, and the quote row below acts on it.
  */
 @Composable
 private fun BookingBlock(artist: Artist) {
@@ -530,20 +538,28 @@ private fun BookingBlock(artist: Artist) {
     val cheapest = artist.packages.minByOrNull { it.price }
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
         Text("Booking", style = AppTheme.type.displaySmall, color = colors.ink)
-        Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+        if (cheapest != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                Text(
+                    formatInr(cheapest.price),
+                    style = AppTheme.type.monoHero,
+                    color = colors.ink,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                Text(
+                    "from · ${cheapest.name}",
+                    style = AppTheme.type.footnote,
+                    color = colors.ink3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.alignByBaseline(),
+                )
+            }
+        } else {
             Text(
-                formatInr(cheapest?.price ?: artist.price),
-                style = AppTheme.type.monoHero,
-                color = colors.ink,
-                modifier = Modifier.alignByBaseline(),
-            )
-            Text(
-                if (cheapest != null) "from · ${cheapest.name}" else "from",
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.alignByBaseline(),
+                "Pricing on request",
+                style = AppTheme.type.body,
+                color = colors.ink2,
             )
         }
         // Quiet, deliberately NOT lime: it is a note, and the neighbouring
@@ -558,6 +574,16 @@ private fun BookingBlock(artist: Artist) {
     }
 }
 
+/**
+ * The tiers, and under them the way out of the tiers.
+ *
+ * The heading and rows are conditional; **the quote row is not**. An artist with
+ * no published packages is an ordinary state — the wizard publishes one, but an
+ * artist can have none, and every artist has none until they finish the wizard.
+ * Guarding the whole block on a non-empty list took the negotiation entry down
+ * with it, so the client left with the least to go on got the fewest ways to
+ * start a conversation. The quote row is what that client needs MOST.
+ */
 @Composable
 private fun PackagesBlock(
     artist: Artist,
@@ -565,22 +591,23 @@ private fun PackagesBlock(
     onSelect: (Int) -> Unit,
     onRequestQuote: () -> Unit,
 ) {
-    if (artist.packages.isEmpty()) return
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    // Asked once per set, not per row: existing server rows carry
-    // `popular = true` on every package, and a badge every row shares
-    // distinguishes nothing.
-    val badgesMeanSomething = PackagePricing.popularBadgeIsMeaningful(artist.packages)
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("Packages", style = AppTheme.type.displaySmall, color = colors.ink)
-        artist.packages.forEachIndexed { index, pkg ->
-            PackageOptionRow(
-                pkg = pkg,
-                selected = index == selectedIndex,
-                showPopularBadge = badgesMeanSomething && pkg.popular,
-                onClick = { onSelect(index) },
-            )
+        if (artist.packages.isNotEmpty()) {
+            Text("Packages", style = AppTheme.type.displaySmall, color = colors.ink)
+            // Asked once per set, not per row: existing server rows carry
+            // `popular = true` on every package, and a badge every row shares
+            // distinguishes nothing.
+            val badgesMeanSomething = PackagePricing.popularBadgeIsMeaningful(artist.packages)
+            artist.packages.forEachIndexed { index, pkg ->
+                PackageOptionRow(
+                    pkg = pkg,
+                    selected = index == selectedIndex,
+                    showPopularBadge = badgesMeanSomething && pkg.popular,
+                    onClick = { onSelect(index) },
+                )
+            }
         }
         // The negotiation entry sits HERE, with the pricing context, rather than
         // in the dock — collapsing the bar to one row is the point of the layout.
