@@ -36,6 +36,7 @@ data class MessagesUiState(
 class MessagesViewModel @Inject constructor(
     private val messagesRepository: MessagesRepository,
     private val artistsRepository: ArtistsRepository,
+    private val viewer: ViewerIdentity,
 ) : ViewModel() {
     private val _state = MutableStateFlow(MessagesUiState())
     val state: StateFlow<MessagesUiState> = _state.asStateFlow()
@@ -50,11 +51,19 @@ class MessagesViewModel @Inject constructor(
         _state.update { it.copy(isLoading = true, error = null) }
         runCatching { messagesRepository.listThreadsForUser() }
             .onSuccess { threads ->
+                // Read the seat once per refresh, not per row: every row in this
+                // inbox belongs to the same viewer, and re-reading mid-map could
+                // straddle a sign-out and label two rows from different seats.
+                val viewerId = viewer.currentUserId()
                 val rows = threads.map { thread ->
-                    val name = thread.clientName?.takeIf { it.isNotBlank() }
-                        ?: artistsRepository.find(thread.artistId)?.name
-                        ?: "Artist"
-                    ThreadListItem(thread, name)
+                    ThreadListItem(
+                        thread = thread,
+                        counterpartName = ThreadCounterpart.name(
+                            thread = thread,
+                            viewerId = viewerId,
+                            artistName = artistsRepository.find(thread.artistId)?.name,
+                        ),
+                    )
                 }
                 _state.update { it.copy(threads = rows, isLoading = false) }
             }

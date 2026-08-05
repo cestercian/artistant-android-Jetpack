@@ -26,6 +26,12 @@ data class ChatUiState(
     val error: String? = null,
     val counterpartLastReadAt: Long? = null,
     val showDetails: Boolean = false,
+    /**
+     * Which side of the thread the viewer sits on. Drives the participant role
+     * labels in the details sheet and the "Name · Role · time" caption on
+     * incoming runs — both of which are the opposite of the viewer's own role.
+     */
+    val viewerIsArtist: Boolean = false,
 )
 
 /**
@@ -38,6 +44,7 @@ class ChatViewModel @Inject constructor(
     private val messagesRepository: MessagesRepository,
     private val artistsRepository: ArtistsRepository,
     private val reports: ReportsRepository,
+    private val viewer: ViewerIdentity,
 ) : ViewModel() {
     private val threadId: String = checkNotNull(savedStateHandle["threadId"])
     private val _state = MutableStateFlow(ChatUiState())
@@ -59,13 +66,26 @@ class ChatViewModel @Inject constructor(
             val messages = messagesRepository.listMessages(threadId)
             thread to messages
         }.onSuccess { (thread, serverMessages) ->
-            val title = thread?.clientName?.takeIf { it.isNotBlank() }
-                ?: thread?.let { artistsRepository.find(it.artistId)?.name }
-                ?: "Chat"
+            // Same seat-aware rule as the inbox row — see ThreadCounterpart. The
+            // title also feeds the details sheet's `counterpartLabel`, so fixing
+            // it here fixes the Participants list that used to print the viewer's
+            // own name directly above "You".
+            val viewerId = viewer.currentUserId()
+            val viewerIsArtist = thread != null && ThreadCounterpart.viewerIsArtist(thread, viewerId)
+            // No thread row (load failed / not a participant) means no seat to
+            // resolve from, so stay on the neutral header rather than guessing.
+            val title = thread?.let {
+                ThreadCounterpart.name(
+                    thread = it,
+                    viewerId = viewerId,
+                    artistName = artistsRepository.find(it.artistId)?.name,
+                )
+            } ?: "Chat"
             _state.update { state ->
                 state.copy(
                     thread = thread,
                     title = title,
+                    viewerIsArtist = viewerIsArtist,
                     messages = ChatRealtimeLogic.mergePreservingOptimistic(
                         server = serverMessages,
                         existing = state.messages,

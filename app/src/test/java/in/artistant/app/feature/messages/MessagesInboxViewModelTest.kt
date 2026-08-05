@@ -7,6 +7,7 @@ import `in`.artistant.app.data.repository.FakeMessagesRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
+import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
 import kotlinx.coroutines.test.runTest
@@ -18,11 +19,14 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Inbox segmentation + the counterpart-name ladder.
+ * Inbox segmentation + the counterpart-name resolution.
  *
- * The name shown per row is `client_name` (server-stamped, artist side) →
- * cached artist name (client side) → "Artist". Getting that ladder wrong is how
- * an artist ends up looking at their own name in their own inbox.
+ * A thread has a client side and an artist side, and the row must name *the other
+ * one from the viewer's seat*: a CLIENT viewer sees the artist, an ARTIST viewer
+ * sees `client_name` (the denormalized column migration 0080 added precisely
+ * because the users embed is RLS-nulled for the counterparty). Resolving without
+ * consulting the viewer is how every client ended up reading their own name as
+ * the person they were talking to.
  */
 class MessagesInboxViewModelTest {
 
@@ -56,7 +60,12 @@ class MessagesInboxViewModelTest {
     private fun vm(
         messages: MessagesRepository,
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
-    ) = MessagesViewModel(messagesRepository = messages, artistsRepository = artists)
+        viewerId: String? = CLIENT_ID,
+    ) = MessagesViewModel(
+        messagesRepository = messages,
+        artistsRepository = artists,
+        viewer = { viewerId },
+    )
 
     /** Seeds two threads: one attached to a booking, one bare inquiry. */
     private suspend fun seeded(): FakeMessagesRepository {
@@ -119,19 +128,72 @@ class MessagesInboxViewModelTest {
         assertTrue(model.state.value.threads.all { it.counterpartName == "Artist" })
     }
 
+    // --- counterpart resolution, from the viewer's side ----------------------
+
+    /**
+     * The reported bug, exactly: signed in as a client, on a thread the server has
+     * stamped with the client's OWN name. Preferring `client_name` unconditionally
+     * makes the row say "you are talking to yourself".
+     */
     @Test
-    fun aServerStampedClientNameWinsOverTheArtistCache() = runTest {
+    fun aClientViewerSeesTheArtistNotTheirOwnStampedClientName() = runTest {
         val model = vm(
             StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientName = "Asha Rao"))),
+            viewerId = CLIENT_ID,
+        )
+
+        assertEquals("Nova Beats", model.state.value.threads.single().counterpartName)
+    }
+
+    /** The mirror seat: the artist's counterpart IS the client, so client_name wins. */
+    @Test
+    fun anArtistViewerSeesTheClientName() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientName = "Asha Rao"))),
+            viewerId = ARTIST_ID,
         )
 
         assertEquals("Asha Rao", model.state.value.threads.single().counterpartName)
     }
 
+    /**
+     * An artist viewer with no `client_name` must NOT fall through to the artist
+     * cache — that cache entry is the artist themself. Placeholder, never a name
+     * belonging to the viewer and never a raw uuid.
+     */
     @Test
-    fun aBlankClientNameIsIgnoredAndTheLadderContinues() = runTest {
+    fun anArtistViewerWithNoClientNameGetsThePlaceholderNotTheirOwnName() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientName = null))),
+            viewerId = ARTIST_ID,
+        )
+
+        val name = model.state.value.threads.single().counterpartName
+        assertEquals("Client", name)
+        assertFalse("must never render a raw id", name.contains(ARTIST_ID))
+    }
+
+    /** Blank is as good as missing on the artist seat (server writes "" not null). */
+    @Test
+    fun anArtistViewerTreatsABlankClientNameAsMissing() = runTest {
         val model = vm(
             StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientName = "  "))),
+            viewerId = ARTIST_ID,
+        )
+
+        assertEquals("Client", model.state.value.threads.single().counterpartName)
+    }
+
+    /**
+     * Signed out mid-list (session dropped between load and render): we cannot
+     * prove the viewer is the artist, so degrade to the client seat — that shows
+     * the artist's name, which is never the viewer's own.
+     */
+    @Test
+    fun anUnknownViewerDegradesToTheArtistSeatRatherThanGuessing() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientName = "Asha Rao"))),
+            viewerId = null,
         )
 
         assertEquals("Nova Beats", model.state.value.threads.single().counterpartName)
