@@ -33,6 +33,25 @@ data class AppColors(
     val brand: Color = Color(0xFFC8FF00),
     val brandInk: Color = Color(0xFF0A0A0A),
     val brandSoft: Color = Color(0xFF1D2309),
+
+    // ── Over-media chrome ─────────────────────────────────────────────────
+    // Controls that float on a photo can't use the surface ladder above: those
+    // are opaque, and an opaque disc on a hero reads as a sticker. These are
+    // translucent white instead, so whatever is behind them still shows and the
+    // control belongs to the image. They are the flat stand-in for the blurred
+    // material iOS uses in the same spots — Compose has no cheap live blur, and
+    // a fake blur costs a render pass per frame for chrome this small.
+    /** Floating hero control (back / message / share discs, the score capsule). */
+    val glass: Color = Color(0x33FFFFFF),
+    /** Rim on a glass control — reads the edge without a hard outline. */
+    val glassLine: Color = Color(0x24FFFFFF),
+    /** Quiet chip resting ON media (category, city) — fill and its rim. */
+    val chipOnMedia: Color = Color(0x0FFFFFFF),
+    val chipOnMediaLine: Color = Color(0x14FFFFFF),
+    /** Secondary text on media — dimmer than `ink2`, which is tuned for `bg`. */
+    val inkOnMedia: Color = Color(0xBFFFFFFF),
+    /** Tertiary text on media (the score chip's "Details ›"). */
+    val inkOnMediaSoft: Color = Color(0x99FFFFFF),
 )
 
 /** Apply a role's accent trio onto the fixed base. */

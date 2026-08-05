@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -60,13 +61,24 @@ fun ScoreRing(
             Canvas(Modifier.size(size)) {
                 val strokeWidth = stroke.toPx()
                 val style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                // Inset by half the stroke. `drawArc` centres the stroke on the
+                // ellipse it is given, so passing the full canvas size put the
+                // outer half of every ring outside the Canvas — where it was
+                // clipped away. The ring rendered at half its declared weight,
+                // with a flat outer edge, at every call site.
+                val inset = Offset(strokeWidth / 2f, strokeWidth / 2f)
+                val arcSize = Size(
+                    this.size.width - strokeWidth,
+                    this.size.height - strokeWidth,
+                )
                 drawArc(
                     color = colors.ink.copy(alpha = 0.08f),
                     startAngle = 0f,
                     sweepAngle = 360f,
                     useCenter = false,
                     style = style,
-                    size = Size(this.size.width, this.size.height),
+                    topLeft = inset,
+                    size = arcSize,
                 )
                 rotate(-90f) {
                     drawArc(
@@ -75,7 +87,8 @@ fun ScoreRing(
                         sweepAngle = 360f * pct,
                         useCenter = false,
                         style = style,
-                        size = Size(this.size.width, this.size.height),
+                        topLeft = inset,
+                        size = arcSize,
                     )
                 }
             }
