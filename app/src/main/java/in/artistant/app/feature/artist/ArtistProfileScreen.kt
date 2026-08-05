@@ -294,7 +294,7 @@ private fun Hero(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(space.xs)) {
                     Text(
                         artist.name,
-                        style = AppTheme.type.heroName,
+                        style = AppTheme.type.profileHeroName,
                         color = Color.White,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

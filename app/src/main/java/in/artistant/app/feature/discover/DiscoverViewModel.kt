@@ -9,6 +9,8 @@ import `in`.artistant.app.data.model.SearchCursor
 import `in`.artistant.app.data.model.SearchSort
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.SearchRepository
+import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.saved.SavedStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,19 +35,56 @@ data class DiscoverUiState(
     val comedy: List<Artist> = emptyList(),
     val isLoading: Boolean = false,
     val loadError: String? = null,
-)
+    /**
+     * The user's city, driving the masthead headline. Loaded separately from the
+     * rails and never allowed to fail the screen — a missing city downgrades the
+     * headline to the national fallback, it does not blank Discover.
+     */
+    val city: String? = null,
+    /** The user's name, for the masthead avatar monogram. */
+    val displayName: String? = null,
+) {
+    /** "Tonight in <X>." — see [DiscoverHeroLogic.mastheadPlace]. */
+    val mastheadPlace: String get() = DiscoverHeroLogic.mastheadPlace(city)
+
+    /** Masthead avatar monogram; empty when the user has no name yet. */
+    val avatarInitial: String get() = DiscoverHeroLogic.avatarInitial(displayName)
+}
 
 @HiltViewModel
 class DiscoverViewModel @Inject constructor(
     private val searchRepository: SearchRepository,
     private val artistsRepository: ArtistsRepository,
+    private val usersRepository: UsersRepository,
+    private val savedStore: SavedStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DiscoverUiState())
     val state: StateFlow<DiscoverUiState> = _state.asStateFlow()
 
+    /** Saved-heart ids, straight off the shared optimistic store. */
+    val savedIds: StateFlow<Set<String>> = savedStore.ids
+
     init {
         refresh()
+        loadIdentity()
+    }
+
+    /** Optimistic save/unsave for the hero's heart. */
+    fun toggleSaved(artistId: String) = savedStore.toggle(artistId)
+
+    /**
+     * Masthead personalisation. Deliberately a separate coroutine from
+     * [refresh]: the headline is cosmetic, so a failed profile read must not
+     * surface as a roster error or retry the rails. On failure we simply keep
+     * the national fallback.
+     */
+    private fun loadIdentity() {
+        viewModelScope.launch {
+            val profile = runCatching { usersRepository.fetchSelfProfile() }.getOrNull()
+                ?: return@launch
+            _state.update { it.copy(city = profile.city, displayName = profile.fullName) }
+        }
     }
 
     fun refresh() {

@@ -1,22 +1,25 @@
 package `in`.artistant.app.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.WorkOutline
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import `in`.artistant.app.designsystem.component.FloatingTabBar
+import `in`.artistant.app.designsystem.component.FloatingTabItem
+import `in`.artistant.app.designsystem.component.ambientRoleWash
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -80,101 +83,123 @@ fun ArtistTabsScaffold() {
         nav.navigate(ArtistNavRoutes.gigRequest(id))
     }
 
+    val selectedTabRoute = ArtistTab.entries
+        .firstOrNull { tab -> current?.destination?.hierarchy?.any { it.route == tab.route } == true }
+        ?.route
+
     Scaffold(
-        containerColor = AppTheme.colors.bg,
+        // Transparent so the ambient wash below shows through; the wash paints
+        // the background colour itself.
+        containerColor = Color.Transparent,
+        modifier = Modifier.ambientBackdrop(),
         bottomBar = {
             if (!showBottomBar) return@Scaffold
-            NavigationBar(containerColor = AppTheme.colors.bgElev) {
-                ArtistTab.entries.forEach { tab ->
-                    val selected = current?.destination?.hierarchy?.any { it.route == tab.route } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { navigateToTab(nav, tab.route) },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label, style = AppTheme.type.caption) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = AppTheme.colors.brandInk,
-                            indicatorColor = AppTheme.colors.brand,
-                            unselectedIconColor = AppTheme.colors.ink3,
-                            selectedTextColor = AppTheme.colors.ink,
-                            unselectedTextColor = AppTheme.colors.ink3,
-                        ),
-                    )
-                }
-            }
+            // No trailing action on the artist side — the artist has no catalogue
+            // to search, so the pill takes the full width on its own.
+            FloatingTabBar(
+                items = remember {
+                    ArtistTab.entries.map { FloatingTabItem(it.route, it.label, it.icon) }
+                },
+                selectedRoute = selectedTabRoute,
+                onSelect = { route -> navigateToTab(nav, route) },
+            )
         },
     ) { inner ->
         NavHost(
             navController = nav,
             startDestination = ArtistTab.Home.route,
-            modifier = Modifier.padding(inner),
+            modifier = Modifier.fillMaxSize(),
         ) {
             composable(ArtistTab.Home.route) {
-                ArtistHomeScreen(
-                    onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                    onGigRequestClick = { id -> nav.navigate(ArtistNavRoutes.gigRequest(id)) },
-                    onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
-                    onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
-                    onScoreExplainer = { nav.navigate(ArtistNavRoutes.SCORE_EXPLAINER) },
-                )
+                TabPane(inner) {
+                    ArtistHomeScreen(
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onGigRequestClick = { id -> nav.navigate(ArtistNavRoutes.gigRequest(id)) },
+                        onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                        onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
+                        onScoreExplainer = { nav.navigate(ArtistNavRoutes.SCORE_EXPLAINER) },
+                    )
+                }
             }
             composable(ArtistTab.Gigs.route) {
-                ArtistGigsScreen(
-                    onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                )
+                TabPane(inner) {
+                    ArtistGigsScreen(
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    )
+                }
             }
             composable(ArtistNavRoutes.PROFILE) {
-                ProfileScreen(
-                    onBack = { nav.popBackStack() },
-                    onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
-                    onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
-                )
+                TabPane(inner) {
+                    ProfileScreen(
+                        onBack = { nav.popBackStack() },
+                        onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
+                        onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                    )
+                }
             }
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {
-                ManageAvailabilityScreen(onBack = { nav.popBackStack() })
+                TabPane(inner) {
+                    ManageAvailabilityScreen(onBack = { nav.popBackStack() })
+                }
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
-                ScoreExplainerScreen(onBack = { nav.popBackStack() })
+                TabPane(inner) {
+                    ScoreExplainerScreen(onBack = { nav.popBackStack() })
+                }
             }
             composable(ArtistNavRoutes.PAYWALL) {
-                PaywallScreen(
-                    role = AppRole.Artist,
-                    onClose = { nav.popBackStack() },
-                )
+                TabPane(inner) {
+                    PaywallScreen(
+                        role = AppRole.Artist,
+                        onClose = { nav.popBackStack() },
+                    )
+                }
             }
             composable(ArtistTab.Messages.route) {
-                MessagesScreen(onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) })
+                TabPane(inner) {
+                    MessagesScreen(onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) })
+                }
             }
             composable(ArtistTab.Epk.route) {
-                EpkScreen(onEditInWizard = { nav.navigate(ArtistNavRoutes.WIZARD) })
+                TabPane(inner) {
+                    EpkScreen(onEditInWizard = { nav.navigate(ArtistNavRoutes.WIZARD) })
+                }
             }
             composable(ArtistNavRoutes.WIZARD) {
-                WizardScreen(onFinished = { nav.popBackStack() })
+                TabPane(inner) {
+                    WizardScreen(onFinished = { nav.popBackStack() })
+                }
             }
             composable(
                 route = ArtistNavRoutes.CHAT,
                 arguments = listOf(navArgument("threadId") { type = NavType.StringType }),
             ) {
-                ChatScreen(
-                    onBack = { nav.popBackStack() },
-                    onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                )
+                TabPane(inner) {
+                    ChatScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    )
+                }
             }
             composable(
                 route = ArtistNavRoutes.BOOKING_DETAIL,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) {
-                BookingDetailScreen(
-                    isArtistViewer = true,
-                    onBack = { nav.popBackStack() },
-                    onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
-                )
+                TabPane(inner) {
+                    BookingDetailScreen(
+                        isArtistViewer = true,
+                        onBack = { nav.popBackStack() },
+                        onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
+                    )
+                }
             }
             composable(
                 route = ArtistNavRoutes.GIG_REQUEST,
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
             ) {
-                GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                TabPane(inner) {
+                    GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                }
             }
         }
     }
@@ -190,4 +215,35 @@ internal fun navigateToTab(nav: androidx.navigation.NavController, route: String
         launchSingleTop = true
         restoreState = true
     }
+}
+
+/**
+ * The standard inset pane for a destination.
+ *
+ * The tab bar floats now, so the `NavHost` itself is full-bleed and each
+ * destination opts into the scaffold insets instead of inheriting them. Screens
+ * that want the chrome to overlap them (Discover) simply skip this wrapper —
+ * which is the whole reason the padding moved down a level.
+ *
+ * [inner] carries the status-bar inset on top and, on a tab route, the floating
+ * bar's full footprint on the bottom, so a screen wrapped here reserves exactly
+ * the space the bar occupies.
+ */
+@Composable
+internal fun TabPane(inner: PaddingValues, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(inner)) { content() }
+}
+
+/**
+ * Role-tinted atmosphere painted behind every destination in a scaffold.
+ *
+ * Screens that paint their own opaque `colors.bg` (most of them today) sit on
+ * top of this and are unaffected; drop that fill from a screen and it inherits
+ * the wash. Kept at the scaffold level so the glow is continuous across a tab
+ * switch rather than restarting per screen.
+ */
+@Composable
+internal fun Modifier.ambientBackdrop(): Modifier {
+    val colors = AppTheme.colors
+    return this.ambientRoleWash(brand = colors.brand, background = colors.bg)
 }

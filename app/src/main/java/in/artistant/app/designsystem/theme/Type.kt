@@ -54,7 +54,10 @@ data class AppType(
     // ─────────────────────────────────────────────────────────────────────
 
     /** Artist hero name — the editorial serif, tightened. */
-    val heroName: TextStyle = displayTitle.copy(letterSpacing = (-0.8).sp),
+    /** Artist-PROFILE hero name. Distinct from [heroName], the larger 40sp Discover
+     *  hero: the profile name sits on a 48%-height hero, Discover on a 74% one, so
+     *  they are different steps of the ramp rather than a duplicate. */
+    val profileHeroName: TextStyle = displayTitle.copy(letterSpacing = (-0.8).sp),
 
     /** "from ₹75,000" hero figure in the profile's Booking block. */
     val monoHero: TextStyle = TextStyle(
@@ -105,4 +108,58 @@ data class AppType(
      * label, and iOS sets its dock CTA at the body step for the same reason.
      */
     val ctaLabel: TextStyle = body.copy(fontWeight = FontWeight.Bold),
+    // ── Chrome + Discover hero ───────────────────────────────────────────────
+    // These are ramp steps that carry per-site optical tuning (negative tracking
+    // on the editorial serif, a hand-set leading on the two-line masthead, a
+    // sub-caption tab label). They live on the token rather than at the call
+    // site so the values stay reviewable in one place — the house rule is that
+    // no screen inlines a raw sp.
+    /**
+     * Two-line editorial masthead ("Tonight in / <City>."). The tight leading is
+     * deliberate: the serif's default line box is far too airy for a stacked
+     * headline, and iOS pulls it in by 5pt. 37sp is the resulting line pitch,
+     * set explicitly so it survives the Serif fallback until the brand .ttf lands.
+     */
+    val masthead: TextStyle = TextStyle(
+        fontFamily = SerifFamily,
+        fontSize = 28.sp,
+        lineHeight = 37.sp,
+        letterSpacing = (-0.8).sp,
+    ),
+    /** Hero artist name — the largest editorial moment in the app. */
+    val heroName: TextStyle = TextStyle(
+        fontFamily = SerifFamily,
+        fontSize = 40.sp,
+        letterSpacing = (-1).sp,
+    ),
+    /** "Featured this week" frame name — one ramp step down from [heroName]. */
+    val frameName: TextStyle = TextStyle(
+        fontFamily = SerifFamily,
+        fontSize = 28.sp,
+        letterSpacing = (-0.6).sp,
+    ),
+    /** Hero metadata strip: `INDIE BAND · BANGALORE · 82 TRUSTED · FROM ₹75K`. */
+    val heroMeta: TextStyle = TextStyle(
+        fontFamily = MonoFamily,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    /** Same strip inside a featured frame — one point tighter to fit 300dp. */
+    val frameMeta: TextStyle = TextStyle(
+        fontFamily = MonoFamily,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    /** "● AVAILABLE FRI" capsule. */
+    val heroStatus: TextStyle = TextStyle(
+        fontFamily = MonoFamily,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+    ),
+    /** Floating tab-bar label — below the caption step, matching iOS's tab type. */
+    val tabLabel: TextStyle = TextStyle(
+        fontFamily = SansFamily,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+    ),
 )
