@@ -118,7 +118,11 @@ class EpkViewModel @Inject constructor(
                             name = snap.packageName.ifBlank { "Set" },
                             durationLabel = snap.packageDuration.ifBlank { "2h" },
                             priceInr = price,
-                            popular = true,
+                            // Matches the iOS default and PackagesRepository's own
+                            // `popular = false`. The EPK saves a single package, so
+                            // `true` here badged every artist's only tier "Popular"
+                            // — a comparison against an empty field.
+                            popular = false,
                         ),
                     ),
                 )

@@ -42,6 +42,7 @@ import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.artist.PackagePricing
 
 /**
  * Booking compose — package, date chips, time grid, venue/guests.
@@ -113,10 +114,16 @@ fun BookingScreen(
                             color = colors.ink2,
                         )
                     } else {
+                        // Whole-set question, asked once: rows already on the
+                        // server carry `popular = true` on every package, and a
+                        // badge every row shares distinguishes nothing.
+                        val badgesMeanSomething =
+                            PackagePricing.popularBadgeIsMeaningful(artist.packages)
                         artist.packages.forEachIndexed { index, pkg ->
                             PackagePickerRow(
                                 pkg = pkg,
                                 selected = index == state.packageIndex,
+                                showPopularBadge = badgesMeanSomething && pkg.popular,
                                 onClick = { viewModel.selectPackage(index) },
                             )
                             Spacer(Modifier.height(space.sm))
@@ -255,7 +262,12 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun PackagePickerRow(pkg: ArtistPackage, selected: Boolean, onClick: () -> Unit) {
+private fun PackagePickerRow(
+    pkg: ArtistPackage,
+    selected: Boolean,
+    showPopularBadge: Boolean,
+    onClick: () -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(
@@ -276,7 +288,7 @@ private fun PackagePickerRow(pkg: ArtistPackage, selected: Boolean, onClick: () 
             Text(formatInr(pkg.price), style = AppTheme.type.monoSmall, color = colors.ink)
         }
         Text(pkg.duration, style = AppTheme.type.caption, color = colors.ink3)
-        if (pkg.popular) {
+        if (showPopularBadge) {
             Spacer(Modifier.height(space.xs))
             Pill("Popular", tone = PillTone.Brand)
         }
