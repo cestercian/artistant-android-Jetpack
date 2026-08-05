@@ -108,6 +108,16 @@ data class Hero(
     val pageDotGap: Dp = 7.dp,
     /** Clearance under the CTA row so the page dots never collide with it. */
     val ctaBottomGap: Dp = 46.dp,
+    /** Glyph↔label gap inside the status capsule and the "Book →" pill. */
+    val labelGap: Dp = 6.dp,
+    /** Signal-dot↔score gap in the metadata strip. */
+    val scoreGap: Dp = 5.dp,
+    /** Section title↔chevron gap. */
+    val headerChevronGap: Dp = 5.dp,
+    /** Field gap in a featured frame's metadata strip (tighter than the hero's). */
+    val frameMetaGap: Dp = 7.dp,
+    /** Drop shadow under a featured frame. */
+    val frameShadow: Dp = 10.dp,
     /** "Featured this week" frame. */
     val frameWidth: Dp = 300.dp,
     val frameHeight: Dp = 452.dp,
