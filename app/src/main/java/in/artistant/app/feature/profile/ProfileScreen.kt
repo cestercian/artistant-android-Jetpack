@@ -92,9 +92,14 @@ fun ProfileScreen(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colors.bg),
+        // NOT an opaque `background(colors.bg)`: Profile is the one tab that
+        // carries the role-tinted ambient wash behind its header, and an opaque
+        // fill here would paint straight over the scaffold's. The scaffold owns
+        // the wash rather than this screen so it spans the whole window —
+        // including the strip behind the floating tab bar, which this pane is
+        // inset out of. Every other tab keeps its flat fill; the glow is Profile's
+        // alone, and spraying it everywhere would spend the accent on nothing.
+        modifier = modifier.fillMaxSize(),
     ) {
         when {
             state.isLoading && state.profile == null -> {

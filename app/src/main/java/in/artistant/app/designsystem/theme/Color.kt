@@ -35,25 +35,49 @@ data class AppColors(
     val brandSoft: Color = Color(0xFF1D2309),
 
     // ── Translucent "glass" stand-ins ────────────────────────────────────────
-    // iOS renders the floating tab bar and the Discover hero controls on a
-    // blurred system material. Blur is deliberately OUT on Android (design
+    // The floating tab bar and the Discover hero controls sit on a blurred
+    // material in the reference design. Blur is deliberately OUT here (design
     // owner's call), so each of those surfaces is approximated by TWO flat
     // layers painted in order: a black scrim, then a white veil.
     //
     // Why two and not one: a single translucent fill cannot both darken a photo
     // backdrop AND lift the near-black page background — it can only move in one
-    // direction. The scrim does the darkening over photos; the veil re-lifts the
-    // result so the shape still reads against `bg`. The alphas are calibrated so
-    // a chrome surface over `bg` (#0A0A0A) lands on ~#1F1F1F, which is where the
-    // iOS tab bar measures over the same background.
-    /** 42% black — chrome scrim (floating tab bar / search circle). */
-    val glassScrim: Color = Color(0x6B000000),
+    // direction. The scrim darkens over photos; the veil re-lifts the result so
+    // the shape still reads against `bg`.
+    //
+    // How the split is chosen. Over `bg` (#0A0A0A) the scrim has almost nothing
+    // left to darken, so the veil alone sets the resting appearance — which
+    // means the scrim can be strong WITHOUT changing how chrome looks on an
+    // ordinary dark screen. That is the whole trick, and it is why the first
+    // calibration was wrong: at 42% the bar held its own against the page
+    // background but let a bright hero flood through, reading as a tinted pane
+    // rather than as chrome. Measured composites, page background → bright
+    // magenta media (202,96,174):
+    //
+    //   scrim   over bg   selected   over bright media   white label contrast
+    //    42%      #1F1F      #3E3E      (131, 76,116)            5.9 : 1
+    //    70%      #1C1C      #3C3C      ( 80, 51, 72)           10.1 : 1
+    //
+    // Reference chrome measures #1C1C1C / #3D3D3D over the same background, so
+    // the stronger scrim is not a trade — it matches the resting appearance
+    // BETTER while taming bright media. It also desaturates (0.42 → 0.36 on that
+    // magenta), which is the other thing a real blurred material does for free.
+    // Above ~78% the bar stops reading as translucent at all.
+    /** 70% black — chrome scrim (floating tab bar / search circle). */
+    val glassScrim: Color = Color(0xB2000000),
     /** 10% white — chrome veil, painted over [glassScrim]. */
     val glassVeil: Color = Color(0x1AFFFFFF),
     /** 14% white — the selected-tab capsule's lift, painted over the chrome. */
     val glassSelected: Color = Color(0x24FFFFFF),
-    /** 30% black — softer scrim for controls floating on the hero photo. */
-    val glassSoftScrim: Color = Color(0x4D000000),
+    /**
+     * 50% black — softer scrim for controls floating directly on the hero photo.
+     * Lighter than the chrome pair because these sit ON the subject rather than
+     * over it, but strengthened on the same reasoning: the reference sample was
+     * taken over a DARK photo region, where 30% and 50% are indistinguishable
+     * (23 vs 20 against a measured 21), so the stronger value is free insurance
+     * for the bright hero we have no reference sample for.
+     */
+    val glassSoftScrim: Color = Color(0x80000000),
     /** 5% white — softer veil, painted over [glassSoftScrim]. */
     val glassSoftVeil: Color = Color(0x0DFFFFFF),
 )
