@@ -20,7 +20,11 @@ val LocalDimens: ProvidableCompositionLocal<Dimens> =
  * Single theme wrapper. Dark-only. [role] drives the role-reactive brand accent
  * (client lime / artist violet) — a single-role session recomposes the tree on
  * change, which is cheap and correct. We also feed a Material3 dark scheme so
- * stray Material components (ripples, text-field defaults) look right.
+ * stray Material components (ripples, text-field defaults) look right, and
+ * [BrandTypography] so the type they default to is Geist rather than Roboto —
+ * `MaterialTheme` publishes `typography.bodyLarge` as the ambient text style, so
+ * without it every style-less `Text()` and every self-typing Material component
+ * would sit in the system font next to the brand ramp.
  */
 @Composable
 fun ArtistantTheme(
@@ -41,7 +45,7 @@ fun ArtistantTheme(
         LocalAppType provides AppType(),
         LocalDimens provides Dimens(),
     ) {
-        MaterialTheme(colorScheme = material, content = content)
+        MaterialTheme(colorScheme = material, typography = BrandTypography, content = content)
     }
 }
 

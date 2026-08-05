@@ -1,5 +1,6 @@
 package `in`.artistant.app.designsystem.theme
 
+import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -142,6 +143,19 @@ class BrandFontsTest {
                 "${strays.map { it.first }}",
             strays.isEmpty(),
         )
+    }
+
+    @Test
+    fun `the Material fallback scale is on Geist too`() {
+        // MaterialTheme publishes bodyLarge as the ambient LocalTextStyle, so a
+        // style-less Text() and every self-typing Material component reads from
+        // here. A stray FontFamily.Default in this scale is the system font
+        // leaking back in beside the ramp.
+        val strays = Typography::class.java.methods
+            .filter { it.parameterCount == 0 && it.returnType == TextStyle::class.java && it.name.startsWith("get") }
+            .map { it.name.removePrefix("get").replaceFirstChar(Char::lowercaseChar) to it.invoke(BrandTypography) as TextStyle }
+            .filterNot { (_, style) -> style.fontFamily == SansFamily }
+        assertTrue("Material scale styles still on a platform font: ${strays.map { it.first }}", strays.isEmpty())
     }
 
     @Test

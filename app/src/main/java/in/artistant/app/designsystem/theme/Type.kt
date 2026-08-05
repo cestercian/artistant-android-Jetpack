@@ -1,5 +1,6 @@
 package `in`.artistant.app.designsystem.theme
 
+import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -267,3 +268,39 @@ data class AppType(
         fontWeight = FontWeight.Medium,
     ),
 )
+
+/**
+ * Material3's own type scale, re-based onto Geist.
+ *
+ * [AppType] covers everything the app styles deliberately, but it is not the only
+ * type on screen. `MaterialTheme` publishes `typography.bodyLarge` as the ambient
+ * `LocalTextStyle`, so any `Text()` written without an explicit `style` — the
+ * Avatar monogram, the wordmark disc, the OAuth provider initial — plus every
+ * Material component that types itself (TextButton, TextField, AlertDialog) picks
+ * up whatever family the M3 default carries. That default is `FontFamily.Default`
+ * → Roboto, which would have left a visible seam: brand faces everywhere the ramp
+ * reaches and the system font everywhere it does not.
+ *
+ * Only the family is swapped. M3's sizes, line heights and tracking are kept as-is
+ * — this is a fallback layer, not a second ramp, and anything that needs real
+ * design attention should be reaching for [AppType] instead.
+ */
+val BrandTypography: Typography = Typography().run {
+    Typography(
+        displayLarge = displayLarge.copy(fontFamily = SansFamily),
+        displayMedium = displayMedium.copy(fontFamily = SansFamily),
+        displaySmall = displaySmall.copy(fontFamily = SansFamily),
+        headlineLarge = headlineLarge.copy(fontFamily = SansFamily),
+        headlineMedium = headlineMedium.copy(fontFamily = SansFamily),
+        headlineSmall = headlineSmall.copy(fontFamily = SansFamily),
+        titleLarge = titleLarge.copy(fontFamily = SansFamily),
+        titleMedium = titleMedium.copy(fontFamily = SansFamily),
+        titleSmall = titleSmall.copy(fontFamily = SansFamily),
+        bodyLarge = bodyLarge.copy(fontFamily = SansFamily),
+        bodyMedium = bodyMedium.copy(fontFamily = SansFamily),
+        bodySmall = bodySmall.copy(fontFamily = SansFamily),
+        labelLarge = labelLarge.copy(fontFamily = SansFamily),
+        labelMedium = labelMedium.copy(fontFamily = SansFamily),
+        labelSmall = labelSmall.copy(fontFamily = SansFamily),
+    )
+}
