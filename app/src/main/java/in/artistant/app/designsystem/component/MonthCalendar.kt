@@ -11,13 +11,20 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -30,23 +37,98 @@ import java.util.Calendar
 import java.util.Locale
 
 /**
- * Lightweight month header for bookings lists — not a full calendar grid.
- * Port slice of iOS `MonthCalendarView` (header + event rows only).
+ * The month a calendar grid is showing: a year plus a `Calendar.MONTH` (0-based,
+ * so it can be handed straight to [MonthDayGrid] and `Calendar.set`).
+ *
+ * Exists so month navigation is arithmetic on a value rather than mutation of a
+ * shared `Calendar` — a `Calendar` in Compose state is a mutable object whose
+ * identity never changes, so `add(MONTH, 1)` on it wouldn't recompose anything.
+ */
+data class CalendarMonth(val year: Int, val month: Int) {
+
+    /**
+     * The month [delta] months away (negative steps back).
+     *
+     * Done in absolute months (`year * 12 + month`) rather than by nudging the
+     * month field, because the year boundary is exactly where the naive version
+     * breaks: `month + 1` off December yields an out-of-range 12, and `month - 1`
+     * off January yields -1. `floorDiv`/`mod` (not `/` and `%`) carry the sign
+     * correctly for backwards steps — plain `%` would hand back a negative month.
+     */
+    fun stepped(delta: Int): CalendarMonth {
+        val absoluteMonths = year * 12 + month + delta
+        return CalendarMonth(year = absoluteMonths.floorDiv(12), month = absoluteMonths.mod(12))
+    }
+
+    /** Midnight on the 1st — what [monthLabelFromEpoch] formats for the header. */
+    val firstDayEpochMs: Long
+        get() = Calendar.getInstance().apply {
+            clear()
+            set(year, month, 1)
+        }.timeInMillis
+}
+
+/** The month containing [nowMs] — where a grid starts before anyone steps it. */
+fun currentCalendarMonth(nowMs: Long = System.currentTimeMillis()): CalendarMonth {
+    val cal = Calendar.getInstance().apply { timeInMillis = nowMs }
+    return CalendarMonth(year = cal.get(Calendar.YEAR), month = cal.get(Calendar.MONTH))
+}
+
+/**
+ * Month header. Used two ways: as the grid's title (with [onPrevMonth] /
+ * [onNextMonth] wired, which draws the stepper chevrons) and as a plain group
+ * header above each month's rows in the list below (both null → title only).
+ *
+ * Chevrons mirror iOS `MonthCalendarView`'s header steppers: trailing edge, bare
+ * glyphs in the hairline header style (no bordered chrome, no accent), and NOT
+ * clamped to a date range — past gigs and far-future holds are both legitimate
+ * destinations there, so they are here too.
  */
 @Composable
 fun MonthCalendarHeader(
     monthLabel: String,
     modifier: Modifier = Modifier,
+    onPrevMonth: (() -> Unit)? = null,
+    onNextMonth: (() -> Unit)? = null,
 ) {
-    Text(
-        text = monthLabel,
-        style = AppTheme.type.displaySmall,
-        color = AppTheme.colors.ink,
-        modifier = modifier.padding(
-            horizontal = AppTheme.dimens.space.lg,
-            vertical = AppTheme.dimens.space.md,
-        ),
-    )
+    val space = AppTheme.dimens.space
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = space.lg, vertical = space.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = monthLabel,
+            style = AppTheme.type.displaySmall,
+            color = AppTheme.colors.ink,
+            modifier = Modifier.weight(1f),
+        )
+        onPrevMonth?.let {
+            MonthStepButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous month", it)
+        }
+        onNextMonth?.let {
+            MonthStepButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next month", it)
+        }
+    }
+}
+
+/**
+ * One stepper glyph. Sized to `size.rowMin` (44dp) so the tap target clears the
+ * a11y minimum even though the glyph itself is small — the same trade iOS makes
+ * with its 44pt frame around a footnote-weight chevron.
+ */
+@Composable
+private fun MonthStepButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val size = AppTheme.dimens.size
+    IconButton(onClick = onClick, modifier = Modifier.size(size.rowMin)) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = AppTheme.colors.ink3,
+            modifier = Modifier.size(size.iconLg),
+        )
+    }
 }
 
 /**
