@@ -8,9 +8,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -19,10 +23,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import `in`.artistant.app.data.repository.ReportReasons
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -120,12 +124,29 @@ fun ThreadDetailsSheet(
                         )
                     }
                 }
-                else -> {
-                    PrimaryButton(
-                        text = "Report conversation",
-                        onClick = { reporting = true },
-                        fullWidth = true,
+                // Reporting is a rare, serious action -- but it is NOT the sheet's
+                // primary action, and lime is this system's single "do the positive
+                // thing" signal. A full-width brand button made Report the loudest
+                // element on the sheet, inverting the hierarchy and reading as
+                // encouragement. Presented as a quiet neutral row instead (matching
+                // iOS ThreadDetailsSheet's untinted `actionRow`): a flag glyph gives
+                // it weight without alarm, and it opens the reason picker rather
+                // than filing anything, so it can't be a one-tap accident.
+                else -> Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { reporting = true }
+                        .padding(vertical = space.md),
+                    horizontalArrangement = Arrangement.spacedBy(space.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.Flag,
+                        contentDescription = null,
+                        tint = colors.ink,
+                        modifier = Modifier.size(AppTheme.dimens.size.iconLg),
                     )
+                    Text("Report conversation", style = AppTheme.type.body, color = colors.ink)
                 }
             }
         }
