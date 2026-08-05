@@ -9,6 +9,7 @@ import `in`.artistant.app.data.repository.FakeReportsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
+import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
 import kotlinx.coroutines.CompletableDeferred
@@ -93,11 +94,15 @@ class ChatViewModelTest {
         }
     }
 
-    private fun vm(messages: MessagesRepository) = ChatViewModel(
+    private fun vm(
+        messages: MessagesRepository,
+        viewerId: String? = CLIENT_ID,
+    ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
         artistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
         reports = FakeReportsRepository(),
+        viewer = { viewerId },
     )
 
     private fun serverMessage(id: String, body: String, at: Long = 5_000L, mine: Boolean = true) =
@@ -122,6 +127,48 @@ class ChatViewModelTest {
         assertEquals("Nova Beats", model.state.value.title)
         assertTrue(repo.markedRead > 0)
         assertEquals(9_000L, model.state.value.counterpartLastReadAt)
+    }
+
+    // --- title: the counterpart, from the viewer's seat ----------------------
+
+    /**
+     * Same bug as the inbox row, on the second surface: the chat header must name
+     * the other party. A client viewer whose own name is stamped on the thread was
+     * seeing themself in the title bar (and, via `counterpartLabel`, in the details
+     * sheet's Participants list right above "You").
+     */
+    @Test
+    fun theTitleShowsTheArtistToAClientViewerEvenWhenClientNameIsStamped() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientName = "Asha Rao"),
+        )
+
+        val model = vm(repo, viewerId = CLIENT_ID)
+
+        assertEquals("Nova Beats", model.state.value.title)
+        assertEquals(false, model.state.value.viewerIsArtist)
+    }
+
+    @Test
+    fun theTitleShowsTheClientToAnArtistViewer() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientName = "Asha Rao"),
+        )
+
+        val model = vm(repo, viewerId = ARTIST_ID)
+
+        assertEquals("Asha Rao", model.state.value.title)
+        assertEquals(true, model.state.value.viewerIsArtist)
+    }
+
+    /** No client_name on the artist seat → placeholder, never the artist's own name. */
+    @Test
+    fun anArtistViewerWithNoClientNameGetsThePlaceholderTitle() = runTest {
+        val repo = ScriptedMessages(thread = Thread(id = threadId, artistId = ARTIST_ID))
+
+        val model = vm(repo, viewerId = ARTIST_ID)
+
+        assertEquals("Client", model.state.value.title)
     }
 
     // --- optimistic send ----------------------------------------------------
@@ -332,6 +379,7 @@ class ChatViewModelTest {
             messagesRepository = ScriptedMessages(),
             artistsRepository = FakeArtistsRepository(),
             reports = reports,
+            viewer = { CLIENT_ID },
         )
 
         model.reportConversation("Harassment")

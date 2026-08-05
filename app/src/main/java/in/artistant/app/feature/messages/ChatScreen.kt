@@ -120,6 +120,7 @@ fun ChatScreen(
             bookingId = thread?.bookingId,
             bookingSummary = thread?.bookingId?.let { "Open booking" },
             counterpartLabel = state.title,
+            viewerIsArtist = state.viewerIsArtist,
             onBookingClick = onBookingClick,
             onReport = viewModel::reportConversation,
             onDismiss = viewModel::dismissDetails,

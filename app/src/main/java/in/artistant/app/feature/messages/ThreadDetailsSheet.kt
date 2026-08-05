@@ -36,6 +36,7 @@ fun ThreadDetailsSheet(
     bookingId: String?,
     bookingSummary: String?,
     counterpartLabel: String,
+    viewerIsArtist: Boolean,
     onBookingClick: (String) -> Unit,
     onReport: (reason: String) -> Unit,
     onDismiss: () -> Unit,
@@ -82,8 +83,14 @@ fun ThreadDetailsSheet(
 
             Text("Participants", style = AppTheme.type.caption, color = colors.ink3)
             Spacer(Modifier.height(space.sm))
-            Text(counterpartLabel, style = AppTheme.type.callout, color = colors.ink)
-            Text("You", style = AppTheme.type.callout, color = colors.ink2)
+            // Each row carries its seat, so "who is who" no longer rests on name
+            // recognition alone — the roles are always opposites (iOS
+            // ThreadDetailsSheet.participants does the same).
+            ParticipantRow(
+                name = counterpartLabel,
+                role = ThreadCounterpart.counterpartRole(viewerIsArtist),
+            )
+            ParticipantRow(name = "You", role = ThreadCounterpart.viewerRole(viewerIsArtist))
 
             Spacer(Modifier.height(space.lg))
             HRule()
@@ -122,5 +129,19 @@ fun ThreadDetailsSheet(
                 }
             }
         }
+    }
+}
+
+/**
+ * One participant: name over an uppercased role caption. The role is what makes
+ * the two rows unambiguous when both names are unfamiliar — iOS renders the same
+ * pairing (`participantRow`, subtitle uppercased at render time).
+ */
+@Composable
+private fun ParticipantRow(name: String, role: String) {
+    val colors = AppTheme.colors
+    Column(Modifier.padding(vertical = AppTheme.dimens.space.xs)) {
+        Text(name, style = AppTheme.type.callout, color = colors.ink, maxLines = 1)
+        Text(role.uppercase(), style = AppTheme.type.monoSmall, color = colors.ink3, maxLines = 1)
     }
 }
