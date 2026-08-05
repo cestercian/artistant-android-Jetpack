@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import `in`.artistant.app.data.repository.ReviewRepositoryError
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.designsystem.component.ButtonVariant
+import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.launch
@@ -48,10 +49,11 @@ fun ReviewSheet(
     var submitting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // Rounded top only — this is a bottom sheet, so its lower edge is the screen
+    // edge and has no corner to soften.
     Column(
         modifier
-            .fillMaxWidth()
-            .background(colors.bgElev)
+            .dockSurface()
             .padding(space.lg),
     ) {
         Text("Leave a review", style = AppTheme.type.headline, color = colors.ink)

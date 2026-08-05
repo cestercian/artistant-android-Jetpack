@@ -14,8 +14,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
  * Fixed-aspect media surface with a never-empty gradient floor (iOS
@@ -33,7 +33,11 @@ fun MediaContainer(
     remoteUrl: String?,
     fallbackGradient: List<Color>,
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 0.dp,
+    // Rounded by default. A media surface that squares its corners unless the
+    // caller remembers to say otherwise gets the default wrong for every case
+    // except a full-bleed hero — and a full-bleed hero is the one caller that
+    // will definitely notice and pass `0.dp` explicitly.
+    cornerRadius: Dp = AppTheme.dimens.radii.md,
     contentDescription: String? = null,
     overlay: @Composable BoxScope.() -> Unit = {},
 ) {

@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import `in`.artistant.app.designsystem.component.ButtonVariant
+import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -46,10 +47,13 @@ fun HelpFeedbackSheet(
         if (statusOk && status != null) body = ""
     }
 
+    // Hosted in a hand-rolled scrim rather than a Material `ModalBottomSheet`,
+    // so it does not inherit Material's rounded sheet top — it has to bring its
+    // own. The inert `clickable` swallows taps so they don't reach the scrim
+    // behind and dismiss the sheet.
     Column(
         modifier
-            .fillMaxWidth()
-            .background(colors.bgElev)
+            .dockSurface()
             .clickable(enabled = false) {}
             .padding(space.lg),
     ) {

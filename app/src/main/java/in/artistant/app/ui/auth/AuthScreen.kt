@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -49,8 +50,11 @@ fun EmailAuthSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppTheme.dimens.space.xl)
+                .padding(bottom = AppTheme.dimens.space.xxl),
+            verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.md),
         ) {
             Text(
                 if (signUpMode) "Create your account" else "Sign in",
@@ -58,6 +62,10 @@ fun EmailAuthSheet(
                 color = colors.ink,
             )
 
+            // Material's default text-field corner is ~4dp — effectively square,
+            // and out of step with every other surface in this app. One shape
+            // for all three fields so the stack reads as a single form.
+            val fieldShape = RoundedCornerShape(AppTheme.dimens.radii.md)
             if (signUpMode) {
                 OutlinedTextField(
                     value = fullName,
@@ -65,6 +73,7 @@ fun EmailAuthSheet(
                     label = { Text("Full name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                    shape = fieldShape,
                 )
             }
             OutlinedTextField(
@@ -73,6 +82,7 @@ fun EmailAuthSheet(
                 label = { Text("Email") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+                shape = fieldShape,
             )
             OutlinedTextField(
                 value = password,
@@ -81,6 +91,7 @@ fun EmailAuthSheet(
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
+                shape = fieldShape,
             )
 
             if (state.confirmationRequired) {

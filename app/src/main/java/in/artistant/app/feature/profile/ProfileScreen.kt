@@ -270,6 +270,7 @@ fun ProfileScreen(
 
     if (state.showSignOutConfirm) {
         AlertDialog(
+            shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
             onDismissRequest = viewModel::dismissSignOutConfirm,
             title = { Text("Sign out?") },
             text = {
@@ -293,6 +294,7 @@ fun ProfileScreen(
 
     if (state.showDeleteConfirm) {
         AlertDialog(
+            shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
             onDismissRequest = {
                 if (!state.isDeleting) viewModel.dismissDeleteConfirm()
             },

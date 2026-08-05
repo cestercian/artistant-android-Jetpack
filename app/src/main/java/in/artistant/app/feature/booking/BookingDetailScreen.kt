@@ -34,6 +34,7 @@ import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.designsystem.component.ButtonVariant
+import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
@@ -147,8 +148,7 @@ fun BookingDetailScreen(
                 // no thread yet until accept). Otherwise Message is primary.
                 Column(
                     Modifier
-                        .fillMaxWidth()
-                        .background(colors.bgElev)
+                        .dockSurface()
                         .padding(space.lg),
                     verticalArrangement = Arrangement.spacedBy(space.sm),
                 ) {

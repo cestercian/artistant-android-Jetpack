@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -110,8 +111,7 @@ fun CheckoutScreen(
             }
             Column(
                 Modifier
-                    .fillMaxWidth()
-                    .background(colors.bgElev)
+                    .dockSurface()
                     .padding(space.lg),
             ) {
                 if (state.isSubmitting) {
