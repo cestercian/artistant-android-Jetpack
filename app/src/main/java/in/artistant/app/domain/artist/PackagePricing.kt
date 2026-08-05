@@ -34,4 +34,27 @@ object PackagePricing {
      */
     fun popularBadgeIsMeaningful(packages: List<ArtistPackage>): Boolean =
         packages.any { it.popular } && packages.any { !it.popular }
+
+    /**
+     * The figure a "from ₹X" label may honestly quote: the MINIMUM over the
+     * packages actually loaded, falling back to [fallback] (the artist row's own
+     * price) only when the set is empty.
+     *
+     * Two things it deliberately does not do:
+     *
+     *  - it does not quote the *selected* package. "from" means minimum, and the
+     *    shipped dock read `selected?.price ?: artist.price`, so picking the
+     *    dearest tier made the page advertise "from ₹83,000".
+     *  - it does not trust [fallback] as the minimum. That value comes from the
+     *    server's denormalized `artists.min_price`, which is confirmed stale on
+     *    dev — one artist's row says ₹51,000 while a ₹22,000 package exists — so
+     *    computing from the loaded packages client-side is the robust choice.
+     *    The fallback only covers profiles rendered before/without packages.
+     *
+     * Matches iOS `Screens/ArtistView.swift`'s `cheapestPackage`, which is shared
+     * by its Booking section and its bottom dock so the two surfaces can never
+     * quote different figures for the same artist.
+     */
+    fun fromPrice(packages: List<ArtistPackage>, fallback: Int): Int =
+        packages.minOfOrNull { it.price } ?: fallback
 }

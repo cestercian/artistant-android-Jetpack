@@ -137,8 +137,14 @@ fun ArtistProfileScreen(
                         Spacer(Modifier.height(space.xxl))
                     }
                 }
-                val selected = artist.packages.getOrNull(state.selectedPackageIndex)
-                val price = selected?.price ?: artist.price
+                // "from" means MINIMUM, so it is computed over the packages we
+                // actually loaded — not the selected row (which made the page
+                // advertise the dearest tier) and not `artist.price`, the
+                // server's denormalized `artists.min_price`, which is confirmed
+                // stale on dev (a row reading ₹51,000 while a ₹22,000 package
+                // exists). `artist.price` survives only as the empty-set
+                // fallback. iOS does the same thing via `cheapestPackage`.
+                val fromPrice = PackagePricing.fromPrice(artist.packages, fallback = artist.price)
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -146,7 +152,7 @@ fun ArtistProfileScreen(
                         .padding(space.lg),
                 ) {
                     Text(
-                        text = "from ${formatInr(price)}",
+                        text = "from ${formatInr(fromPrice)}",
                         style = AppTheme.type.monoMedium,
                         color = colors.ink,
                     )
