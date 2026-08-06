@@ -1,8 +1,6 @@
 package `in`.artistant.app.feature.booking
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,12 +23,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.designsystem.component.DateCell
+import `in`.artistant.app.designsystem.component.dateChipLines
 import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -47,7 +47,6 @@ fun RequestQuoteScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val radii = AppTheme.dimens.radii
 
     if (state.success) {
         Column(
@@ -95,23 +94,36 @@ fun RequestQuoteScreen(
             Spacer(Modifier.height(space.lg))
             Text("Date", style = AppTheme.type.caption, color = colors.ink3)
             Spacer(Modifier.height(space.sm))
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                viewModel.dateChips().forEach { chip ->
-                    val selected = chip.label == state.dateLabel
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(radii.sm))
-                            .background(if (selected) colors.brand else colors.bg)
-                            .border(1.dp, if (selected) colors.brand else colors.line, RoundedCornerShape(radii.sm))
-                            .clickable { viewModel.pickChip(chip) }
-                            .padding(horizontal = space.md, vertical = space.sm),
-                    ) {
-                        Text(
-                            chip.label.take(12),
-                            style = AppTheme.type.caption,
-                            color = if (selected) colors.brandInk else colors.ink,
-                        )
-                    }
+            // Same strip anatomy as the booking funnel: shared [DateCell] cards fed
+            // by [dateChipLines], never a local lookalike. This site used to render
+            // `chip.label.take(12)` inside a hand-rolled pill, which clipped the
+            // canonical "EEE, MMM d, yyyy" label mid-token — "Wed, Aug 5, 2026"
+            // reached the screen as "Wed, Aug 5, ", a dangling separator. Splitting
+            // the date into a weekday line over a day numeral is what removes the
+            // need to clip at all, so the bug can't come back by widening a count.
+            //
+            // Chips are remembered rather than re-derived per recomposition: the
+            // rendered day now comes from `chip.epochMs`, and `dateChips()` stamps
+            // each chip with `System.currentTimeMillis()` on every call, so an
+            // un-remembered list would rebuild its epochs under the user mid-screen.
+            val dateChips = remember(viewModel) { viewModel.dateChips() }
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(space.sm),
+            ) {
+                dateChips.forEach { chip ->
+                    DateCell(
+                        lines = dateChipLines(chip.epochMs),
+                        isSelected = chip.label == state.dateLabel,
+                        // This screen asks for a quote on any date — it carries no
+                        // per-artist availability, so every chip is selectable and
+                        // the dot reads free. No legend either: a legend over a
+                        // strip with a single state would explain a distinction
+                        // that isn't being drawn.
+                        isFree = chip.available,
+                        enabled = chip.available,
+                        onClick = { viewModel.pickChip(chip) },
+                    )
                 }
             }
             Spacer(Modifier.height(space.lg))

@@ -67,20 +67,12 @@ fun ArtistTile(
             ),
     ) {
         ArtistCoverBackground(artist = artist)
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to Color.Black.copy(alpha = 0.20f),
-                            0.30f to Color.Transparent,
-                            0.65f to Color.Black.copy(alpha = 0.45f),
-                            1.0f to Color.Black.copy(alpha = 0.85f),
-                        ),
-                    ),
-                ),
-        )
+        // Was a verbatim inline copy of BottomDarkenScrim's four stops. Same
+        // pixels, one definition — and `matchParentSize` (which the shared one
+        // uses) is the stricter fit here: unlike `fillMaxSize` it takes no part in
+        // measuring the Box, which is the invariant this tile's own doc comment
+        // is about.
+        BottomDarkenScrim()
         Column(
             Modifier
                 .fillMaxSize()

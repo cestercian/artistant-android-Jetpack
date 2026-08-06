@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.config.AppEnvironment
+import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.AccountRepository
@@ -42,7 +43,7 @@ data class ProfileUiState(
     val calendarHasPermission: Boolean = false,
     val calendarTitle: String = "Artistant",
     val calendars: List<CalendarSyncService.CalendarOption> = emptyList(),
-    /** Profile stats — Bookings = not-completed, Completed = past (iOS partition). */
+    /** Profile stats — Bookings = still live (see [liveBookingsCount]), Completed = finished. */
     val bookingsCount: Int = 0,
     val savedCount: Int = 0,
     val completedCount: Int = 0,
@@ -126,7 +127,7 @@ class ProfileViewModel @Inject constructor(
             .onSuccess { bookings ->
                 _state.update {
                     it.copy(
-                        bookingsCount = bookings.count { b -> b.status != BookingStatus.Completed },
+                        bookingsCount = liveBookingsCount(bookings),
                         completedCount = bookings.count { b -> b.status == BookingStatus.Completed },
                         savedCount = savedStore.ids.value.size,
                     )
@@ -238,6 +239,51 @@ class ProfileViewModel @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * How many of [bookings] are still LIVE — the number under the profile header's
+ * "Bookings" column, read beside "Completed".
+ *
+ * The shipped rule was `status != Completed`, i.e. "everything that hasn't
+ * finished". That put cancelled and disputed bookings — and `Unknown`, the
+ * decode fallback for a status this build can't interpret — in the same column a
+ * user reads as "work I have on". Cancel all three of your bookings and the
+ * header still said 3, next to a Completed column reading 0, which describes a
+ * user with three live bookings rather than one with none.
+ *
+ * So the stat means *in flight*: awaiting the artist's answer, or accepted and
+ * not yet played. Cancelled and disputed are terminal — the booking is over,
+ * it just didn't happen — and `Unknown` is by construction uninterpretable, so
+ * none of them can be asserted to be live.
+ *
+ * Written as an exhaustive `when` over an allow-list rather than a `!=` chain,
+ * for two reasons. The compiler fails the build when a case is added to
+ * [BookingStatus], so a new server status has to be classified here instead of
+ * being silently swept into "live" — which is exactly how `Unknown` ended up
+ * counted. And the safe default when someone does classify it is the one this
+ * shape encourages: not-live.
+ *
+ * A confirmed booking whose date has already passed still counts as live. The
+ * server flips it to `completed` on its own schedule, and the Completed column
+ * is keyed strictly on that status — so excluding it here would drop the booking
+ * out of BOTH columns until the server caught up. Better slightly stale than
+ * briefly invisible.
+ *
+ * Note this is deliberately narrower than the drill-down list the stat opens,
+ * which still shows cancelled bookings behind a red pill: the column answers
+ * "how much do I have going", the list is where a cancelled booking stays
+ * visible at all (the Bookings tab filters it out entirely).
+ */
+fun liveBookingsCount(bookings: List<Booking>): Int = bookings.count { it.status.isLive() }
+
+private fun BookingStatus.isLive(): Boolean = when (this) {
+    BookingStatus.PendingConfirm, BookingStatus.Confirmed -> true
+    BookingStatus.Completed,
+    BookingStatus.Cancelled,
+    BookingStatus.Disputed,
+    BookingStatus.Unknown,
+    -> false
 }
 
 /** Build a share intent for an inline JSON export. */

@@ -47,6 +47,7 @@ import `in`.artistant.app.designsystem.component.DateCell
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.dateChipLines
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
 
@@ -93,48 +94,50 @@ fun BookingScreen(
             val artist = state.artist!!
             val selectedPkg = artist.packages.getOrNull(state.packageIndex)
             val fee = selectedPkg?.price ?: artist.price
-            Column(modifier.fillMaxSize().background(colors.bg)) {
-                FunnelHeader(title = "Book ${artist.name}", onBack = onBack)
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(top = space.md, bottom = space.xl),
-                    verticalArrangement = Arrangement.spacedBy(space.xl),
-                ) {
-                    PackageSection(
-                        packages = artist.packages,
-                        fallbackPrice = artist.price,
-                        selectedIndex = state.packageIndex,
-                        onSelect = viewModel::selectPackage,
-                    )
-                    DateSection(
-                        chips = state.dateChips,
-                        selectedEpochMs = state.selectedDateEpochMs,
-                        onSelect = viewModel::selectDate,
-                    )
-                    TimeSection(
-                        slots = state.timeSlots,
-                        selected = state.selectedTime,
-                        onSelect = viewModel::selectTime,
-                    )
-                    VenueSection(
-                        venue = state.venue,
-                        onVenueChange = viewModel::setVenue,
-                        guests = state.guests,
-                        onGuestsChange = viewModel::setGuests,
-                        notes = state.venueNotes,
-                        onNotesChange = viewModel::setVenueNotes,
-                    )
-                    SummarySection(fee = fee)
-                }
-                CtaBar {
-                    FunnelCta(
-                        text = "Continue",
-                        onClick = { if (viewModel.onContinue()) onContinue() },
-                        fullWidth = true,
-                        enabled = state.canContinue && state.selectedTime.isNotBlank(),
-                    )
+            RevealOnAppear {
+                Column(modifier.fillMaxSize().background(colors.bg)) {
+                    FunnelHeader(title = "Book ${artist.name}", onBack = onBack)
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(top = space.md, bottom = space.xl),
+                        verticalArrangement = Arrangement.spacedBy(space.xl),
+                    ) {
+                        PackageSection(
+                            packages = artist.packages,
+                            fallbackPrice = artist.price,
+                            selectedIndex = state.packageIndex,
+                            onSelect = viewModel::selectPackage,
+                        )
+                        DateSection(
+                            chips = state.dateChips,
+                            selectedEpochMs = state.selectedDateEpochMs,
+                            onSelect = viewModel::selectDate,
+                        )
+                        TimeSection(
+                            slots = state.timeSlots,
+                            selected = state.selectedTime,
+                            onSelect = viewModel::selectTime,
+                        )
+                        VenueSection(
+                            venue = state.venue,
+                            onVenueChange = viewModel::setVenue,
+                            guests = state.guests,
+                            onGuestsChange = viewModel::setGuests,
+                            notes = state.venueNotes,
+                            onNotesChange = viewModel::setVenueNotes,
+                        )
+                        SummarySection(fee = fee)
+                    }
+                    CtaBar {
+                        FunnelCta(
+                            text = "Continue",
+                            onClick = { if (viewModel.onContinue()) onContinue() },
+                            fullWidth = true,
+                            enabled = state.canContinue && state.selectedTime.isNotBlank(),
+                        )
+                    }
                 }
             }
         }

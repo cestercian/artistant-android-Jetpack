@@ -45,6 +45,7 @@ import `in`.artistant.app.data.model.SearchSort
 import androidx.compose.ui.draw.clip
 import `in`.artistant.app.designsystem.component.ArtistTile
 import `in`.artistant.app.designsystem.component.EmptyState
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -167,37 +168,39 @@ fun SearchScreen(
                         .distinctUntilChanged()
                         .collect { nearEnd -> if (nearEnd) viewModel.loadMore() }
                 }
-                LazyColumn(
-                    state = listState,
-                    contentPadding = PaddingValues(space.lg),
-                    verticalArrangement = Arrangement.spacedBy(space.md),
-                ) {
-                    item {
-                        SortRow(sort = state.sort, onSort = viewModel::setSort)
-                    }
-                    items(state.results.chunked(2), key = { row -> row.joinToString { it.id } }) { row ->
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(space.md),
-                        ) {
-                            row.forEach { artist ->
-                                ArtistTile(
-                                    artist = artist,
-                                    onClick = { onArtistClick(artist.id) },
-                                    modifier = Modifier.weight(1f),
-                                    width = 160.dp,
-                                    height = 220.dp,
-                                )
-                            }
-                            if (row.size == 1) {
-                                Spacer(Modifier.weight(1f))
+                RevealOnAppear {
+                    LazyColumn(
+                        state = listState,
+                        contentPadding = PaddingValues(space.lg),
+                        verticalArrangement = Arrangement.spacedBy(space.md),
+                    ) {
+                        item {
+                            SortRow(sort = state.sort, onSort = viewModel::setSort)
+                        }
+                        items(state.results.chunked(2), key = { row -> row.joinToString { it.id } }) { row ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(space.md),
+                            ) {
+                                row.forEach { artist ->
+                                    ArtistTile(
+                                        artist = artist,
+                                        onClick = { onArtistClick(artist.id) },
+                                        modifier = Modifier.weight(1f),
+                                        width = 160.dp,
+                                        height = 220.dp,
+                                    )
+                                }
+                                if (row.size == 1) {
+                                    Spacer(Modifier.weight(1f))
+                                }
                             }
                         }
-                    }
-                    if (state.isLoadingMore) {
-                        item {
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(color = colors.brand)
+                        if (state.isLoadingMore) {
+                            item {
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = colors.brand)
+                                }
                             }
                         }
                     }
