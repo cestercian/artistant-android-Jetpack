@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -31,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.designsystem.component.BookingStatusTimeline
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
@@ -144,6 +146,25 @@ fun ConfirmedScreen(
                 style = AppTheme.type.callout,
                 color = colors.ink3,
             )
+        }
+        Spacer(Modifier.height(space.xxl))
+        // Where the booking actually IS, not just what it's called. The reference
+        // build puts this same four-step timeline on this screen, between the
+        // summary and the actions, on a card surface — the Android port shipped
+        // the screen without it, which is why BookingStatusTimeline had no caller
+        // despite being a finished port that was still being bug-fixed.
+        //
+        // It earns its place here specifically: this is the screen a client lands
+        // on right after sending a request, and the one question it has to answer
+        // is "what happens next". A status word alone doesn't.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
+                .background(colors.bgCard)
+                .padding(space.lg),
+        ) {
+            BookingStatusTimeline(status = ui.status)
         }
         Spacer(Modifier.height(space.xxl))
         HRule()
