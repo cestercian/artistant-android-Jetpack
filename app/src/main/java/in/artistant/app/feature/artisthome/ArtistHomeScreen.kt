@@ -42,6 +42,7 @@ import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.component.Sparkline
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -91,145 +92,147 @@ fun ArtistHomeScreen(
                 )
             }
             else -> {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Row(
+                RevealOnAppear {
+                    Column(
                         Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = space.lg, vertical = space.lg),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
                     ) {
-                        Text("Home", style = AppTheme.type.displaySub, color = colors.ink)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val ringValue = if (
-                                state.gigs < ScoreBands.MIN_GIGS_FOR_RANK ||
-                                    ScoreBands.tier(state.score ?: 0, state.gigs) == ScoreTier.New
-                            ) {
-                                null
-                            } else {
-                                state.score
-                            }
-                            ScoreRing(
-                                value = ringValue,
-                                size = AppTheme.dimens.size.ringMd,
-                                stroke = 5.dp,
-                                showLabel = false,
-                                totalGigs = state.gigs,
-                                modifier = Modifier
-                                    .clickable(onClick = onScoreExplainer)
-                                    .padding(end = space.sm),
-                            )
-                            IconButton(onClick = onProfileClick) {
-                                Icon(Icons.Filled.Settings, contentDescription = "Profile & settings", tint = colors.ink2)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = space.lg, vertical = space.lg),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Home", style = AppTheme.type.displaySub, color = colors.ink)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val ringValue = if (
+                                    state.gigs < ScoreBands.MIN_GIGS_FOR_RANK ||
+                                        ScoreBands.tier(state.score ?: 0, state.gigs) == ScoreTier.New
+                                ) {
+                                    null
+                                } else {
+                                    state.score
+                                }
+                                ScoreRing(
+                                    value = ringValue,
+                                    size = AppTheme.dimens.size.ringMd,
+                                    stroke = 5.dp,
+                                    showLabel = false,
+                                    totalGigs = state.gigs,
+                                    modifier = Modifier
+                                        .clickable(onClick = onScoreExplainer)
+                                        .padding(end = space.sm),
+                                )
+                                IconButton(onClick = onProfileClick) {
+                                    Icon(Icons.Filled.Settings, contentDescription = "Profile & settings", tint = colors.ink2)
+                                }
                             }
                         }
-                    }
-                    state.error?.let { msg ->
-                        Text(
-                            msg,
-                            style = AppTheme.type.footnote,
-                            color = colors.hot,
-                            modifier = Modifier.padding(horizontal = space.lg),
-                        )
-                        Spacer(Modifier.height(space.md))
-                    }
-                    if (state.showFinishProfileCta) {
-                        Column(Modifier.padding(horizontal = space.lg)) {
+                        state.error?.let { msg ->
                             Text(
-                                "Finish your profile so clients can find you.",
+                                msg,
                                 style = AppTheme.type.footnote,
-                                color = colors.warm,
+                                color = colors.hot,
+                                modifier = Modifier.padding(horizontal = space.lg),
                             )
-                            Spacer(Modifier.height(space.sm))
-                            PrimaryButton(
-                                text = "Finish your profile",
-                                onClick = onOpenWizard,
-                                fullWidth = true,
-                            )
+                            Spacer(Modifier.height(space.md))
                         }
-                        Spacer(Modifier.height(space.lg))
-                    }
-
-                    // Earnings hero — matchmaker counts bookings as ₹ fee (dormant escrow).
-                    Column(Modifier.padding(horizontal = space.lg)) {
-                        Text("Last 7 days", style = AppTheme.type.caption, color = colors.ink3)
-                        Text(
-                            formatInr(state.earningsTotal),
-                            style = AppTheme.type.displaySmall,
-                            color = colors.ink,
-                        )
-                        Spacer(Modifier.height(space.sm))
-                        Sparkline(values = state.earningsSeries)
-                    }
-                    Spacer(Modifier.height(space.xl))
-
-                    // 14-day busy strip
-                    Text(
-                        "Next 14 days",
-                        style = AppTheme.type.headline,
-                        color = colors.ink,
-                        modifier = Modifier.padding(horizontal = space.lg),
-                    )
-                    Spacer(Modifier.height(space.sm))
-                    Row(
-                        Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = space.lg),
-                        horizontalArrangement = Arrangement.spacedBy(space.sm),
-                    ) {
-                        state.dayStrip.forEach { (key, label) ->
-                            val busy = key in state.busyDayKeys
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .width(AppTheme.dimens.size.rowMin)
-                                    .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                                    .background(if (busy) colors.brand.copy(alpha = 0.15f) else colors.bgSoft)
-                                    .border(
-                                        width = AppTheme.dimens.size.hairline,
-                                        color = if (busy) colors.brand else colors.lineSoft,
-                                        shape = RoundedCornerShape(AppTheme.dimens.radii.sm),
-                                    )
-                                    .padding(vertical = space.sm),
-                            ) {
-                                Text(label, style = AppTheme.type.caption, color = colors.ink3, textAlign = TextAlign.Center)
-                                Spacer(Modifier.height(space.xs))
+                        if (state.showFinishProfileCta) {
+                            Column(Modifier.padding(horizontal = space.lg)) {
                                 Text(
-                                    if (busy) "Busy" else "Open",
-                                    style = AppTheme.type.monoSmall,
-                                    color = if (busy) colors.brand else colors.ink2,
-                                    textAlign = TextAlign.Center,
+                                    "Finish your profile so clients can find you.",
+                                    style = AppTheme.type.footnote,
+                                    color = colors.warm,
+                                )
+                                Spacer(Modifier.height(space.sm))
+                                PrimaryButton(
+                                    text = "Finish your profile",
+                                    onClick = onOpenWizard,
+                                    fullWidth = true,
                                 )
                             }
+                            Spacer(Modifier.height(space.lg))
                         }
-                    }
-                    Spacer(Modifier.height(space.xl))
 
-                    if (state.pendingRequests.isNotEmpty()) {
-                        NewRequestsSection(
-                            pending = state.pendingRequests,
-                            onBookingClick = onBookingClick,
+                        // Earnings hero — matchmaker counts bookings as ₹ fee (dormant escrow).
+                        Column(Modifier.padding(horizontal = space.lg)) {
+                            Text("Last 7 days", style = AppTheme.type.caption, color = colors.ink3)
+                            Text(
+                                formatInr(state.earningsTotal),
+                                style = AppTheme.type.displaySmall,
+                                color = colors.ink,
+                            )
+                            Spacer(Modifier.height(space.sm))
+                            Sparkline(values = state.earningsSeries)
+                        }
+                        Spacer(Modifier.height(space.xl))
+
+                        // 14-day busy strip
+                        Text(
+                            "Next 14 days",
+                            style = AppTheme.type.headline,
+                            color = colors.ink,
+                            modifier = Modifier.padding(horizontal = space.lg),
                         )
-                        Spacer(Modifier.height(space.lg))
+                        Spacer(Modifier.height(space.sm))
+                        Row(
+                            Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = space.lg),
+                            horizontalArrangement = Arrangement.spacedBy(space.sm),
+                        ) {
+                            state.dayStrip.forEach { (key, label) ->
+                                val busy = key in state.busyDayKeys
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .width(AppTheme.dimens.size.rowMin)
+                                        .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                                        .background(if (busy) colors.brand.copy(alpha = 0.15f) else colors.bgSoft)
+                                        .border(
+                                            width = AppTheme.dimens.size.hairline,
+                                            color = if (busy) colors.brand else colors.lineSoft,
+                                            shape = RoundedCornerShape(AppTheme.dimens.radii.sm),
+                                        )
+                                        .padding(vertical = space.sm),
+                                ) {
+                                    Text(label, style = AppTheme.type.caption, color = colors.ink3, textAlign = TextAlign.Center)
+                                    Spacer(Modifier.height(space.xs))
+                                    Text(
+                                        if (busy) "Busy" else "Open",
+                                        style = AppTheme.type.monoSmall,
+                                        color = if (busy) colors.brand else colors.ink2,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(space.xl))
+
+                        if (state.pendingRequests.isNotEmpty()) {
+                            NewRequestsSection(
+                                pending = state.pendingRequests,
+                                onBookingClick = onBookingClick,
+                            )
+                            Spacer(Modifier.height(space.lg))
+                        }
+                        if (state.openQuotes.isNotEmpty()) {
+                            OpenQuotesSection(
+                                quotes = state.openQuotes,
+                                onGigRequestClick = onGigRequestClick,
+                            )
+                            Spacer(Modifier.height(space.lg))
+                        }
+                        if (state.upcoming.isNotEmpty()) {
+                            UpcomingSection(
+                                upcoming = state.upcoming,
+                                onBookingClick = onBookingClick,
+                            )
+                        }
+                        Spacer(Modifier.height(space.xxl))
                     }
-                    if (state.openQuotes.isNotEmpty()) {
-                        OpenQuotesSection(
-                            quotes = state.openQuotes,
-                            onGigRequestClick = onGigRequestClick,
-                        )
-                        Spacer(Modifier.height(space.lg))
-                    }
-                    if (state.upcoming.isNotEmpty()) {
-                        UpcomingSection(
-                            upcoming = state.upcoming,
-                            onBookingClick = onBookingClick,
-                        )
-                    }
-                    Spacer(Modifier.height(space.xxl))
                 }
             }
         }

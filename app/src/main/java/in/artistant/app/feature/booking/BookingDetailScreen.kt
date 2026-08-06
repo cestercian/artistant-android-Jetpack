@@ -40,6 +40,7 @@ import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import java.time.Instant
@@ -86,133 +87,135 @@ fun BookingDetailScreen(
             }
         }
         else -> {
-            Column(modifier.fillMaxSize().background(colors.bg)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = space.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+            RevealOnAppear {
+                Column(modifier.fillMaxSize().background(colors.bg)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = space.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+                        }
+                        Text("Booking", style = AppTheme.type.headline, color = colors.ink)
                     }
-                    Text("Booking", style = AppTheme.type.headline, color = colors.ink)
-                }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(space.lg),
-                ) {
-                    Text(
-                        viewModel.counterpartyName(isArtistViewer),
-                        style = AppTheme.type.displaySmall,
-                        color = colors.ink,
-                    )
-                    Spacer(Modifier.height(space.sm))
-                    Pill(booking.status.label, tone = PillTone.Neutral)
-                    (state.actionError ?: chatError)?.let {
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(space.lg),
+                    ) {
+                        Text(
+                            viewModel.counterpartyName(isArtistViewer),
+                            style = AppTheme.type.displaySmall,
+                            color = colors.ink,
+                        )
                         Spacer(Modifier.height(space.sm))
-                        Text(it, style = AppTheme.type.footnote, color = colors.hot)
-                    }
-                    Spacer(Modifier.height(space.xl))
-                    DetailRow("Date", booking.date)
-                    HRule()
-                    DetailRow("Time", booking.time)
-                    HRule()
-                    DetailRow("Venue", booking.venue)
-                    HRule()
-                    DetailRow("Guests", "${booking.guests}")
-                    HRule()
-                    DetailRow("Fee", formatInr(booking.fee))
-
-                    // BOOK-07 — Getting there (venue_notes). Separate from Venue so load-in
-                    // instructions stay scannable; hidden when blank.
-                    booking.venueNotes?.trim()?.takeIf { it.isNotEmpty() }?.let { notes ->
+                        Pill(booking.status.label, tone = PillTone.Neutral)
+                        (state.actionError ?: chatError)?.let {
+                            Spacer(Modifier.height(space.sm))
+                            Text(it, style = AppTheme.type.footnote, color = colors.hot)
+                        }
                         Spacer(Modifier.height(space.xl))
-                        Text("Getting there", style = AppTheme.type.caption, color = colors.ink3)
-                        Spacer(Modifier.height(space.sm))
-                        Text(notes, style = AppTheme.type.body, color = colors.ink)
+                        DetailRow("Date", booking.date)
+                        HRule()
+                        DetailRow("Time", booking.time)
+                        HRule()
+                        DetailRow("Venue", booking.venue)
+                        HRule()
+                        DetailRow("Guests", "${booking.guests}")
+                        HRule()
+                        DetailRow("Fee", formatInr(booking.fee))
+
+                        // BOOK-07 — Getting there (venue_notes). Separate from Venue so load-in
+                        // instructions stay scannable; hidden when blank.
+                        booking.venueNotes?.trim()?.takeIf { it.isNotEmpty() }?.let { notes ->
+                            Spacer(Modifier.height(space.xl))
+                            Text("Getting there", style = AppTheme.type.caption, color = colors.ink3)
+                            Spacer(Modifier.height(space.sm))
+                            Text(notes, style = AppTheme.type.body, color = colors.ink)
+                        }
+
+                        if (showReview) {
+                            Spacer(Modifier.height(space.xl))
+                            ReviewSheet(
+                                bookingId = booking.id,
+                                reviewsRepository = viewModel.reviewsRepository,
+                                onDismiss = { showReview = false },
+                                onSubmitted = { showReview = false },
+                            )
+                        }
                     }
 
-                    if (showReview) {
-                        Spacer(Modifier.height(space.xl))
-                        ReviewSheet(
-                            bookingId = booking.id,
-                            reviewsRepository = viewModel.reviewsRepository,
-                            onDismiss = { showReview = false },
-                            onSubmitted = { showReview = false },
-                        )
-                    }
-                }
+                    // Dock: Accept/Decline replaces Message while artist+pending (iOS parity —
+                    // no thread yet until accept). Otherwise Message is primary.
+                    Column(
+                        Modifier
+                            .dockSurface()
+                            .padding(space.lg),
+                        verticalArrangement = Arrangement.spacedBy(space.sm),
+                    ) {
+                        if (viewModel.showAcceptDecline(isArtistViewer)) {
+                            PrimaryButton(
+                                text = if (state.isActing) "Accepting…" else "Accept request",
+                                onClick = viewModel::acceptRequest,
+                                fullWidth = true,
+                                enabled = !state.isActing,
+                            )
+                            PrimaryButton(
+                                text = if (state.isActing) "Declining…" else "Decline",
+                                onClick = viewModel::declineRequest,
+                                variant = ButtonVariant.Ghost,
+                                fullWidth = true,
+                                enabled = !state.isActing,
+                            )
+                        } else {
+                            PrimaryButton(
+                                text = when {
+                                    openingChat -> "Opening…"
+                                    isArtistViewer -> "Message client"
+                                    else -> "Message artist"
+                                },
+                                onClick = {
+                                    chatOpen.open(booking.artistId, booking.id, onOpenChat)
+                                },
+                                fullWidth = true,
+                                enabled = !openingChat,
+                            )
+                        }
 
-                // Dock: Accept/Decline replaces Message while artist+pending (iOS parity —
-                // no thread yet until accept). Otherwise Message is primary.
-                Column(
-                    Modifier
-                        .dockSurface()
-                        .padding(space.lg),
-                    verticalArrangement = Arrangement.spacedBy(space.sm),
-                ) {
-                    if (viewModel.showAcceptDecline(isArtistViewer)) {
-                        PrimaryButton(
-                            text = if (state.isActing) "Accepting…" else "Accept request",
-                            onClick = viewModel::acceptRequest,
-                            fullWidth = true,
-                            enabled = !state.isActing,
-                        )
-                        PrimaryButton(
-                            text = if (state.isActing) "Declining…" else "Decline",
-                            onClick = viewModel::declineRequest,
-                            variant = ButtonVariant.Ghost,
-                            fullWidth = true,
-                            enabled = !state.isActing,
-                        )
-                    } else {
-                        PrimaryButton(
-                            text = when {
-                                openingChat -> "Opening…"
-                                isArtistViewer -> "Message client"
-                                else -> "Message artist"
-                            },
-                            onClick = {
-                                chatOpen.open(booking.artistId, booking.id, onOpenChat)
-                            },
-                            fullWidth = true,
-                            enabled = !openingChat,
-                        )
-                    }
+                        if (viewModel.showClientCancel(isArtistViewer)) {
+                            PrimaryButton(
+                                text = if (state.isActing) "Cancelling…" else "Cancel request",
+                                onClick = viewModel::cancelBooking,
+                                variant = ButtonVariant.Ghost,
+                                fullWidth = true,
+                                enabled = !state.isActing,
+                            )
+                        }
 
-                    if (viewModel.showClientCancel(isArtistViewer)) {
-                        PrimaryButton(
-                            text = if (state.isActing) "Cancelling…" else "Cancel request",
-                            onClick = viewModel::cancelBooking,
-                            variant = ButtonVariant.Ghost,
-                            fullWidth = true,
-                            enabled = !state.isActing,
-                        )
-                    }
+                        // Confirmed → system calendar compose (zero-permission ACTION_INSERT).
+                        if (booking.status == BookingStatus.Confirmed) {
+                            PrimaryButton(
+                                text = "Add to calendar",
+                                onClick = {
+                                    launchAddToCalendar(context, booking)?.let { err ->
+                                        viewModel.reportActionError(err)
+                                    }
+                                },
+                                variant = ButtonVariant.Ghost,
+                                fullWidth = true,
+                            )
+                        }
 
-                    // Confirmed → system calendar compose (zero-permission ACTION_INSERT).
-                    if (booking.status == BookingStatus.Confirmed) {
-                        PrimaryButton(
-                            text = "Add to calendar",
-                            onClick = {
-                                launchAddToCalendar(context, booking)?.let { err ->
-                                    viewModel.reportActionError(err)
-                                }
-                            },
-                            variant = ButtonVariant.Ghost,
-                            fullWidth = true,
-                        )
-                    }
-
-                    // Completed → leave a review (client only; artists don't review themselves).
-                    if (!isArtistViewer && booking.status == BookingStatus.Completed && !showReview) {
-                        PrimaryButton(
-                            text = "Leave a review",
-                            onClick = { showReview = true },
-                            variant = ButtonVariant.Ghost,
-                            fullWidth = true,
-                        )
+                        // Completed → leave a review (client only; artists don't review themselves).
+                        if (!isArtistViewer && booking.status == BookingStatus.Completed && !showReview) {
+                            PrimaryButton(
+                                text = "Leave a review",
+                                onClick = { showReview = true },
+                                variant = ButtonVariant.Ghost,
+                                fullWidth = true,
+                            )
+                        }
                     }
                 }
             }

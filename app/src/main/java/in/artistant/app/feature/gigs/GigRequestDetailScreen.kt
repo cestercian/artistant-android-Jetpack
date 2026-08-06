@@ -43,6 +43,7 @@ import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -81,82 +82,84 @@ fun GigRequestDetailScreen(
             }
         }
         else -> {
-            Column(modifier.fillMaxSize().background(colors.bg)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = space.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+            RevealOnAppear {
+                Column(modifier.fillMaxSize().background(colors.bg)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = space.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+                        }
+                        Text("Gig request", style = AppTheme.type.headline, color = colors.ink)
                     }
-                    Text("Gig request", style = AppTheme.type.headline, color = colors.ink)
-                }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(space.lg),
-                    verticalArrangement = Arrangement.spacedBy(space.lg),
-                ) {
-                    Text(request.raw.client, style = AppTheme.type.displaySmall, color = colors.ink)
-                    Text(request.raw.date, style = AppTheme.type.footnote, color = colors.ink3)
-                    Pill(request.raw.packageLabel, tone = PillTone.Brand)
-                    if (state.clashes.isNotEmpty()) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
-                                .background(colors.bgSoft)
-                                .padding(space.md),
-                            verticalArrangement = Arrangement.spacedBy(space.xs),
-                        ) {
-                            Text("Calendar clash", style = AppTheme.type.caption, color = colors.warm)
-                            state.clashes.forEach { clash ->
-                                Text(clash.title, style = AppTheme.type.callout, color = colors.ink)
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(space.lg),
+                        verticalArrangement = Arrangement.spacedBy(space.lg),
+                    ) {
+                        Text(request.raw.client, style = AppTheme.type.displaySmall, color = colors.ink)
+                        Text(request.raw.date, style = AppTheme.type.footnote, color = colors.ink3)
+                        Pill(request.raw.packageLabel, tone = PillTone.Brand)
+                        if (state.clashes.isNotEmpty()) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
+                                    .background(colors.bgSoft)
+                                    .padding(space.md),
+                                verticalArrangement = Arrangement.spacedBy(space.xs),
+                            ) {
+                                Text("Calendar clash", style = AppTheme.type.caption, color = colors.warm)
+                                state.clashes.forEach { clash ->
+                                    Text(clash.title, style = AppTheme.type.callout, color = colors.ink)
+                                }
+                            }
+                        }
+                        state.actionError?.let {
+                            Text(it, style = AppTheme.type.footnote, color = colors.hot)
+                        }
+                        OfferBlock(request)
+                        if (request.raw.message.isNotBlank()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+                                Text("MESSAGE", style = AppTheme.type.caption, color = colors.ink3)
+                                Text(request.raw.message, style = AppTheme.type.body, color = colors.ink2)
                             }
                         }
                     }
-                    state.actionError?.let {
-                        Text(it, style = AppTheme.type.footnote, color = colors.hot)
-                    }
-                    OfferBlock(request)
-                    if (request.raw.message.isNotBlank()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                            Text("MESSAGE", style = AppTheme.type.caption, color = colors.ink3)
-                            Text(request.raw.message, style = AppTheme.type.body, color = colors.ink2)
-                        }
-                    }
-                }
-                if (viewModel.showActions()) {
-                    Column(
-                        Modifier
-                            .dockSurface()
-                            .padding(space.lg),
-                        verticalArrangement = Arrangement.spacedBy(space.sm),
-                    ) {
-                        PrimaryButton(
-                            text = if (state.isActing) "Accepting…" else "Accept",
-                            onClick = viewModel::accept,
-                            fullWidth = true,
-                            enabled = !state.isActing,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                    if (viewModel.showActions()) {
+                        Column(
+                            Modifier
+                                .dockSurface()
+                                .padding(space.lg),
+                            verticalArrangement = Arrangement.spacedBy(space.sm),
+                        ) {
                             PrimaryButton(
-                                text = if (state.isActing) "Declining…" else "Decline",
-                                onClick = { confirmingDecline = true },
-                                variant = ButtonVariant.Ghost,
+                                text = if (state.isActing) "Accepting…" else "Accept",
+                                onClick = viewModel::accept,
                                 fullWidth = true,
                                 enabled = !state.isActing,
-                                modifier = Modifier.weight(1f),
                             )
-                            PrimaryButton(
-                                text = "Counter",
-                                onClick = viewModel::showCounterSheet,
-                                variant = ButtonVariant.Subtle,
-                                fullWidth = true,
-                                enabled = !state.isActing,
-                                modifier = Modifier.weight(1f),
-                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                                PrimaryButton(
+                                    text = if (state.isActing) "Declining…" else "Decline",
+                                    onClick = { confirmingDecline = true },
+                                    variant = ButtonVariant.Ghost,
+                                    fullWidth = true,
+                                    enabled = !state.isActing,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                PrimaryButton(
+                                    text = "Counter",
+                                    onClick = viewModel::showCounterSheet,
+                                    variant = ButtonVariant.Subtle,
+                                    fullWidth = true,
+                                    enabled = !state.isActing,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                 }

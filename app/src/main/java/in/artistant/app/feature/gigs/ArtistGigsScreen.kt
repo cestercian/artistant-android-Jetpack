@@ -30,6 +30,7 @@ import `in`.artistant.app.designsystem.component.MonthDayGrid
 import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -90,89 +91,91 @@ fun ArtistGigsScreen(
                 )
             }
             else -> {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Text(
-                        "Gigs",
-                        style = AppTheme.type.displaySub,
-                        color = colors.ink,
-                        modifier = Modifier.padding(space.lg),
-                    )
-                    MonthCalendarHeader(
-                        monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
-                        onPrevMonth = { stepMonth(-1) },
-                        onNextMonth = { stepMonth(1) },
-                    )
-                    MonthDayGrid(
-                        year = year,
-                        month = month,
-                        busyDays = busyDays,
-                        selectedDay = selectedDay,
-                        onDayClick = { day ->
-                            selectedDay = if (selectedDay == day) null else day
-                        },
-                    )
-                    Spacer(Modifier.height(space.lg))
-                    state.error?.let { msg ->
+                RevealOnAppear {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
                         Text(
-                            msg,
-                            style = AppTheme.type.footnote,
-                            color = colors.hot,
-                            modifier = Modifier.padding(horizontal = space.lg),
+                            "Gigs",
+                            style = AppTheme.type.displaySub,
+                            color = colors.ink,
+                            modifier = Modifier.padding(space.lg),
                         )
-                        Spacer(Modifier.height(space.md))
-                    }
-                    val selectedRows = if (selectedDay == null) {
-                        null
-                    } else {
-                        state.items.filter {
-                            dayOfMonthInMonth(it.booking.date, year, month) == selectedDay
+                        MonthCalendarHeader(
+                            monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
+                            onPrevMonth = { stepMonth(-1) },
+                            onNextMonth = { stepMonth(1) },
+                        )
+                        MonthDayGrid(
+                            year = year,
+                            month = month,
+                            busyDays = busyDays,
+                            selectedDay = selectedDay,
+                            onDayClick = { day ->
+                                selectedDay = if (selectedDay == day) null else day
+                            },
+                        )
+                        Spacer(Modifier.height(space.lg))
+                        state.error?.let { msg ->
+                            Text(
+                                msg,
+                                style = AppTheme.type.footnote,
+                                color = colors.hot,
+                                modifier = Modifier.padding(horizontal = space.lg),
+                            )
+                            Spacer(Modifier.height(space.md))
                         }
-                    }
-                    if (selectedRows != null && selectedRows.isEmpty()) {
-                        Text(
-                            "No gigs on this day",
-                            style = AppTheme.type.footnote,
-                            color = colors.ink3,
-                            modifier = Modifier
-                                .padding(horizontal = space.lg)
-                                .clickable { selectedDay = null },
-                        )
-                    } else {
-                        val rows = if (selectedRows == null) {
-                            viewModel.groupedByMonth()
+                        val selectedRows = if (selectedDay == null) {
+                            null
                         } else {
-                            listOf("Selected" to selectedRows)
-                        }
-                        // Named `groupLabel`, not `month`: `month` is now the
-                        // grid's 0-based Calendar.MONTH in this scope, and the
-                        // two are very different things to shadow.
-                        rows.forEach { (groupLabel, group) ->
-                            if (selectedDay == null) MonthCalendarHeader(monthLabel = groupLabel)
-                            group.forEach { item ->
-                                val b = item.booking
-                                Column(
-                                    Modifier
-                                        .clickable { onBookingClick(b.id) }
-                                        .padding(horizontal = space.lg, vertical = space.md),
-                                ) {
-                                    Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
-                                    Spacer(Modifier.height(space.xs))
-                                    Text(item.clientName, style = AppTheme.type.headline, color = colors.ink)
-                                    Text(
-                                        "${b.time} · ${b.status.label}",
-                                        style = AppTheme.type.footnote,
-                                        color = colors.ink2,
-                                    )
-                                }
-                                HRule(modifier = Modifier.padding(horizontal = space.lg))
+                            state.items.filter {
+                                dayOfMonthInMonth(it.booking.date, year, month) == selectedDay
                             }
                         }
+                        if (selectedRows != null && selectedRows.isEmpty()) {
+                            Text(
+                                "No gigs on this day",
+                                style = AppTheme.type.footnote,
+                                color = colors.ink3,
+                                modifier = Modifier
+                                    .padding(horizontal = space.lg)
+                                    .clickable { selectedDay = null },
+                            )
+                        } else {
+                            val rows = if (selectedRows == null) {
+                                viewModel.groupedByMonth()
+                            } else {
+                                listOf("Selected" to selectedRows)
+                            }
+                            // Named `groupLabel`, not `month`: `month` is now the
+                            // grid's 0-based Calendar.MONTH in this scope, and the
+                            // two are very different things to shadow.
+                            rows.forEach { (groupLabel, group) ->
+                                if (selectedDay == null) MonthCalendarHeader(monthLabel = groupLabel)
+                                group.forEach { item ->
+                                    val b = item.booking
+                                    Column(
+                                        Modifier
+                                            .clickable { onBookingClick(b.id) }
+                                            .padding(horizontal = space.lg, vertical = space.md),
+                                    ) {
+                                        Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
+                                        Spacer(Modifier.height(space.xs))
+                                        Text(item.clientName, style = AppTheme.type.headline, color = colors.ink)
+                                        Text(
+                                            "${b.time} · ${b.status.label}",
+                                            style = AppTheme.type.footnote,
+                                            color = colors.ink2,
+                                        )
+                                    }
+                                    HRule(modifier = Modifier.padding(horizontal = space.lg))
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(space.xxl))
                     }
-                    Spacer(Modifier.height(space.xxl))
                 }
             }
         }

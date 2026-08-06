@@ -37,6 +37,7 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -82,41 +83,43 @@ fun ArtistListScreen(
                 )
             }
             else -> {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = space.xl),
-                ) {
-                    Text(
-                        kind.kicker(state.rows.size),
-                        style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                        color = colors.ink3,
-                    )
-                    Spacer(Modifier.height(space.sm))
-                    Text(kind.headline, style = AppTheme.type.displaySub, color = colors.ink)
-                    Spacer(Modifier.height(space.sm))
-                    Text(kind.sub, style = AppTheme.type.footnote, color = colors.ink2)
-                    Spacer(Modifier.height(space.xl))
+                RevealOnAppear {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = space.xl),
+                    ) {
+                        Text(
+                            kind.kicker(state.rows.size),
+                            style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
+                            color = colors.ink3,
+                        )
+                        Spacer(Modifier.height(space.sm))
+                        Text(kind.headline, style = AppTheme.type.displaySub, color = colors.ink)
+                        Spacer(Modifier.height(space.sm))
+                        Text(kind.sub, style = AppTheme.type.footnote, color = colors.ink2)
+                        Spacer(Modifier.height(space.xl))
 
-                    if (state.rows.isEmpty()) {
-                        EmptyState(title = kind.emptyTitle, body = kind.emptySub)
-                    } else {
-                        state.rows.forEach { row ->
-                            ArtistListRowUi(
-                                row = row,
-                                onClick = {
-                                    when {
-                                        row.bookingId != null -> onBookingClick(row.bookingId)
-                                        row.artistId != null -> onArtistClick(row.artistId)
-                                    }
-                                },
-                            )
-                            HRule()
+                        if (state.rows.isEmpty()) {
+                            EmptyState(title = kind.emptyTitle, body = kind.emptySub)
+                        } else {
+                            state.rows.forEach { row ->
+                                ArtistListRowUi(
+                                    row = row,
+                                    onClick = {
+                                        when {
+                                            row.bookingId != null -> onBookingClick(row.bookingId)
+                                            row.artistId != null -> onArtistClick(row.artistId)
+                                        }
+                                    },
+                                )
+                                HRule()
+                            }
+                            Spacer(Modifier.height(space.lg))
+                            Text(kind.footer, style = AppTheme.type.monoSmall, color = colors.ink3)
+                            Spacer(Modifier.height(space.xxl))
                         }
-                        Spacer(Modifier.height(space.lg))
-                        Text(kind.footer, style = AppTheme.type.monoSmall, color = colors.ink3)
-                        Spacer(Modifier.height(space.xxl))
                     }
                 }
             }

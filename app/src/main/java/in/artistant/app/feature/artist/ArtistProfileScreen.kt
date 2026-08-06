@@ -55,6 +55,7 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
@@ -120,58 +121,60 @@ fun ArtistProfileScreen(
         else -> {
             val artist = state.artist!!
             val tier = ScoreBands.tier(artist.score, artist.gigs)
-            Column(modifier.fillMaxSize().background(colors.bg)) {
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Hero(
-                        artist = artist,
-                        tier = tier,
-                        onBack = onBack,
-                        isSaved = state.isSaved,
-                        onToggleSaved = viewModel::toggleSaved,
-                        onMessage = { onMessage(artist.id) },
-                        onScoreClick = viewModel::openScoreSheet,
-                    )
-                    StatStrip(reviews = state.reviews, tier = tier)
+            RevealOnAppear {
+                Column(modifier.fillMaxSize().background(colors.bg)) {
                     Column(
-                        Modifier.padding(horizontal = space.lg, vertical = space.xl),
-                        verticalArrangement = Arrangement.spacedBy(space.xl),
+                        Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
                     ) {
-                        if (artist.bio.isNotBlank()) {
-                            AboutBlock(bio = artist.bio)
-                        }
-                        BookingBlock(artist = artist)
-                        PackagesBlock(
+                        Hero(
                             artist = artist,
-                            selectedIndex = state.selectedPackageIndex,
-                            onSelect = viewModel::selectPackage,
-                            onRequestQuote = { onRequestQuote(artist.id) },
+                            tier = tier,
+                            onBack = onBack,
+                            isSaved = state.isSaved,
+                            onToggleSaved = viewModel::toggleSaved,
+                            onMessage = { onMessage(artist.id) },
+                            onScoreClick = viewModel::openScoreSheet,
                         )
-                        ReviewsBlock(reviews = state.reviews)
-                        Spacer(Modifier.height(space.md))
+                        StatStrip(reviews = state.reviews, tier = tier)
+                        Column(
+                            Modifier.padding(horizontal = space.lg, vertical = space.xl),
+                            verticalArrangement = Arrangement.spacedBy(space.xl),
+                        ) {
+                            if (artist.bio.isNotBlank()) {
+                                AboutBlock(bio = artist.bio)
+                            }
+                            BookingBlock(artist = artist)
+                            PackagesBlock(
+                                artist = artist,
+                                selectedIndex = state.selectedPackageIndex,
+                                onSelect = viewModel::selectPackage,
+                                onRequestQuote = { onRequestQuote(artist.id) },
+                            )
+                            ReviewsBlock(reviews = state.reviews)
+                            Spacer(Modifier.height(space.md))
+                        }
                     }
+                    // "from" means MINIMUM, so it is computed over the packages we
+                    // actually loaded — not the selected row (which made the page
+                    // advertise the dearest tier) and not `artist.price`, the
+                    // server's denormalized `artists.min_price`, which is confirmed
+                    // stale on dev (a row reading ₹51,000 while a ₹22,000 package
+                    // exists). `artist.price` survives only as the empty-set
+                    // fallback. iOS does the same thing via `cheapestPackage`.
+                    val fromPrice = PackagePricing.fromPrice(artist.packages, fallback = artist.price)
+                    ActionDock(
+                        fromPrice = fromPrice,
+                        // Hand the tapped tier over BEFORE navigating — the route
+                        // carries only the artist id, so the booking screen reads the
+                        // selection from the shared draft store on the way in.
+                        onBook = {
+                            viewModel.startBooking()
+                            onBook(artist.id)
+                        },
+                    )
                 }
-                // "from" means MINIMUM, so it is computed over the packages we
-                // actually loaded — not the selected row (which made the page
-                // advertise the dearest tier) and not `artist.price`, the
-                // server's denormalized `artists.min_price`, which is confirmed
-                // stale on dev (a row reading ₹51,000 while a ₹22,000 package
-                // exists). `artist.price` survives only as the empty-set
-                // fallback. iOS does the same thing via `cheapestPackage`.
-                val fromPrice = PackagePricing.fromPrice(artist.packages, fallback = artist.price)
-                ActionDock(
-                    fromPrice = fromPrice,
-                    // Hand the tapped tier over BEFORE navigating — the route
-                    // carries only the artist id, so the booking screen reads the
-                    // selection from the shared draft store on the way in.
-                    onBook = {
-                        viewModel.startBooking()
-                        onBook(artist.id)
-                    },
-                )
             }
             if (state.showScoreSheet) {
                 ScoreBreakdownSheet(

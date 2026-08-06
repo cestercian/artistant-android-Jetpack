@@ -40,6 +40,7 @@ import `in`.artistant.app.data.repository.ScoreHistoryPoint
 import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.component.Sparkline
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -127,66 +128,71 @@ fun ScoreExplainerScreen(
                 Spacer(Modifier.height(space.md))
                 PrimaryButton(text = "Retry", onClick = viewModel::refresh)
             }
-            else -> Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = space.xl),
-            ) {
-                Text("Bookability Score", style = AppTheme.type.displaySub, color = colors.ink)
-                Spacer(Modifier.height(space.lg))
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    ScoreRing(
-                        value = b.numericScore,
-                        size = size.ringXl,
-                        stroke = 8.dp,
-                        showLabel = true,
-                    )
-                }
-                Spacer(Modifier.height(space.xl))
-                HRule()
-                Spacer(Modifier.height(space.lg))
-                Text("Tiers", style = AppTheme.type.caption, color = colors.ink3)
-                Spacer(Modifier.height(space.sm))
-                listOf(
-                    "New" to "0–60",
-                    "Rising" to "60–75",
-                    "Trusted" to "75–90",
-                    "Elite" to "90+",
-                ).forEach { (label, range) ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = space.xs),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(label, style = AppTheme.type.callout, color = colors.ink)
-                        Text(range, style = AppTheme.type.monoSmall, color = colors.ink3)
+            // The weight moves OUT to the wrapper: it is the wrapper that is now
+            // the Column's child, so it has to be the thing that claims the
+            // remaining height. The content then fills the slot it was handed.
+            else -> RevealOnAppear(Modifier.weight(1f)) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = space.xl),
+                ) {
+                    Text("Bookability Score", style = AppTheme.type.displaySub, color = colors.ink)
+                    Spacer(Modifier.height(space.lg))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        ScoreRing(
+                            value = b.numericScore,
+                            size = size.ringXl,
+                            stroke = 8.dp,
+                            showLabel = true,
+                        )
                     }
-                }
-                Spacer(Modifier.height(space.lg))
-                HRule()
-                Spacer(Modifier.height(space.lg))
-                Text("What goes into it", style = AppTheme.type.caption, color = colors.ink3)
-                Spacer(Modifier.height(space.md))
-                MetricBar("Show-up rate", 30, clamp(b.showUpRate))
-                MetricBar("Reviews", 25, clamp(b.reviewScore))
-                MetricBar("Reply speed", 20, clamp(b.replySpeed))
-                MetricBar("Cancellations", 15, clamp(100 - b.cancellationRate))
-                MetricBar("Social proof", 10, clamp(b.socialProof))
-                if (state.history.isNotEmpty()) {
                     Spacer(Modifier.height(space.xl))
                     HRule()
                     Spacer(Modifier.height(space.lg))
-                    Text("History", style = AppTheme.type.caption, color = colors.ink3)
+                    Text("Tiers", style = AppTheme.type.caption, color = colors.ink3)
                     Spacer(Modifier.height(space.sm))
-                    Sparkline(values = state.history.map { it.score })
+                    listOf(
+                        "New" to "0–60",
+                        "Rising" to "60–75",
+                        "Trusted" to "75–90",
+                        "Elite" to "90+",
+                    ).forEach { (label, range) ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = space.xs),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(label, style = AppTheme.type.callout, color = colors.ink)
+                            Text(range, style = AppTheme.type.monoSmall, color = colors.ink3)
+                        }
+                    }
+                    Spacer(Modifier.height(space.lg))
+                    HRule()
+                    Spacer(Modifier.height(space.lg))
+                    Text("What goes into it", style = AppTheme.type.caption, color = colors.ink3)
                     Spacer(Modifier.height(space.md))
-                    PrimaryButton(
-                        text = "Full history",
-                        onClick = { showHistory = true },
-                        fullWidth = true,
-                    )
+                    MetricBar("Show-up rate", 30, clamp(b.showUpRate))
+                    MetricBar("Reviews", 25, clamp(b.reviewScore))
+                    MetricBar("Reply speed", 20, clamp(b.replySpeed))
+                    MetricBar("Cancellations", 15, clamp(100 - b.cancellationRate))
+                    MetricBar("Social proof", 10, clamp(b.socialProof))
+                    if (state.history.isNotEmpty()) {
+                        Spacer(Modifier.height(space.xl))
+                        HRule()
+                        Spacer(Modifier.height(space.lg))
+                        Text("History", style = AppTheme.type.caption, color = colors.ink3)
+                        Spacer(Modifier.height(space.sm))
+                        Sparkline(values = state.history.map { it.score })
+                        Spacer(Modifier.height(space.md))
+                        PrimaryButton(
+                            text = "Full history",
+                            onClick = { showHistory = true },
+                            fullWidth = true,
+                        )
+                    }
+                    Spacer(Modifier.height(space.xxl))
                 }
-                Spacer(Modifier.height(space.xxl))
             }
         }
     }

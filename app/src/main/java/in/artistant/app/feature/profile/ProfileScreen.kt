@@ -46,6 +46,7 @@ import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -124,145 +125,147 @@ fun ProfileScreen(
                 }
             }
             else -> {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    if (onBack != null) {
-                        TextButton(onClick = onBack, modifier = Modifier.padding(space.sm)) {
-                            Text("Back", style = AppTheme.type.callout, color = colors.ink2)
-                        }
-                    }
-
-                    // Identity header
+                RevealOnAppear {
                     Column(
                         Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = space.xl)
-                            .padding(top = space.xxl, bottom = space.xl),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(space.lg),
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
                     ) {
-                        val roleLabel = when (state.role) {
-                            AppRole.Client -> "CLIENT"
-                            AppRole.Artist -> "ARTIST"
+                        if (onBack != null) {
+                            TextButton(onClick = onBack, modifier = Modifier.padding(space.sm)) {
+                                Text("Back", style = AppTheme.type.callout, color = colors.ink2)
+                            }
                         }
-                        val cityLabel = state.profile?.city?.trim()?.uppercase().orEmpty()
-                        val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
-                        Text(
-                            if (cityLabel.isBlank()) "$roleLabel · $year" else "$roleLabel · $cityLabel · $year",
-                            style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                            color = colors.ink3,
-                        )
-                        Avatar(
-                            name = state.displayName,
-                            size = size.avatarXl,
-                            ring = true,
-                        )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(state.displayName, style = AppTheme.type.displayTitle, color = colors.ink)
-                            state.handleLabel?.let {
-                                Text(it, style = AppTheme.type.monoSmall, color = colors.ink3)
+
+                        // Identity header
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = space.xl)
+                                .padding(top = space.xxl, bottom = space.xl),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(space.lg),
+                        ) {
+                            val roleLabel = when (state.role) {
+                                AppRole.Client -> "CLIENT"
+                                AppRole.Artist -> "ARTIST"
                             }
-                            Text(state.subtitle, style = AppTheme.type.footnote, color = colors.ink2)
-                        }
-                    }
-
-                    if (state.role == AppRole.Client && onArtistList != null) {
-                        ProfileStatsRow(
-                            bookings = state.bookingsCount,
-                            saved = state.savedCount,
-                            completed = state.completedCount,
-                            onClick = onArtistList,
-                        )
-                    }
-
-                    HRule()
-
-                    // Settings
-                    Column(
-                        Modifier.padding(horizontal = space.xl, vertical = space.xxl),
-                        verticalArrangement = Arrangement.spacedBy(space.md),
-                    ) {
-                        Text("Settings", style = AppTheme.type.displaySub, color = colors.ink)
-
-                        Column {
-                            HRule()
-                            if (state.subscriptionsEnabled) {
-                                SettingsRow("Subscription", onClick = onNavigateToPaywall)
-                                HRule()
-                            }
-                            if (state.role == AppRole.Artist) {
-                                SettingsRow(
-                                    "Manage availability",
-                                    onClick = {
-                                        onManageAvailability?.invoke()
-                                            ?: viewModel.manageAvailabilityMissingNav()
-                                    },
-                                )
-                                HRule()
-                            }
-                            CalendarSyncRow(
-                                enabled = state.calendarSyncEnabled,
-                                calendarTitle = state.calendarTitle,
-                                calendars = state.calendars,
-                                onToggle = { on ->
-                                    if (on && !state.calendarHasPermission) {
-                                        calendarPermission.launch(
-                                            arrayOf(
-                                                Manifest.permission.READ_CALENDAR,
-                                                Manifest.permission.WRITE_CALENDAR,
-                                            ),
-                                        )
-                                    } else {
-                                        viewModel.setCalendarSyncEnabled(on)
-                                    }
-                                },
-                                onSelectCalendar = viewModel::selectCalendar,
+                            val cityLabel = state.profile?.city?.trim()?.uppercase().orEmpty()
+                            val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                            Text(
+                                if (cityLabel.isBlank()) "$roleLabel · $year" else "$roleLabel · $cityLabel · $year",
+                                style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
+                                color = colors.ink3,
                             )
-                            HRule()
-                            SettingsRow("Notifications") {
-                                context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                })
+                            Avatar(
+                                name = state.displayName,
+                                size = size.avatarXl,
+                                ring = true,
+                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(state.displayName, style = AppTheme.type.displayTitle, color = colors.ink)
+                                state.handleLabel?.let {
+                                    Text(it, style = AppTheme.type.monoSmall, color = colors.ink3)
+                                }
+                                Text(state.subtitle, style = AppTheme.type.footnote, color = colors.ink2)
                             }
-                            HRule()
-                            SettingsRow("Privacy") {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
-                                )
-                            }
-                            HRule()
-                            SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
-                            HRule()
-                            SettingsRow("Get help", onClick = viewModel::showHelp)
-                            HRule()
-                            SettingsRow("Sign out", tint = colors.warm, onClick = viewModel::showSignOutConfirm)
-                            HRule()
-                            SettingsRow("Delete account", tint = colors.hot, onClick = viewModel::showDeleteConfirm)
-                            HRule()
                         }
-                    }
 
-                    state.actionMessage?.let { msg ->
-                        Text(
-                            msg,
-                            style = AppTheme.type.footnote,
-                            color = colors.ink2,
-                            modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
-                        )
-                    }
-                    state.actionError?.let { msg ->
-                        Text(
-                            msg,
-                            style = AppTheme.type.footnote,
-                            color = colors.hot,
-                            modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
-                        )
-                    }
+                        if (state.role == AppRole.Client && onArtistList != null) {
+                            ProfileStatsRow(
+                                bookings = state.bookingsCount,
+                                saved = state.savedCount,
+                                completed = state.completedCount,
+                                onClick = onArtistList,
+                            )
+                        }
 
-                    Spacer(Modifier.size(56.dp))
+                        HRule()
+
+                        // Settings
+                        Column(
+                            Modifier.padding(horizontal = space.xl, vertical = space.xxl),
+                            verticalArrangement = Arrangement.spacedBy(space.md),
+                        ) {
+                            Text("Settings", style = AppTheme.type.displaySub, color = colors.ink)
+
+                            Column {
+                                HRule()
+                                if (state.subscriptionsEnabled) {
+                                    SettingsRow("Subscription", onClick = onNavigateToPaywall)
+                                    HRule()
+                                }
+                                if (state.role == AppRole.Artist) {
+                                    SettingsRow(
+                                        "Manage availability",
+                                        onClick = {
+                                            onManageAvailability?.invoke()
+                                                ?: viewModel.manageAvailabilityMissingNav()
+                                        },
+                                    )
+                                    HRule()
+                                }
+                                CalendarSyncRow(
+                                    enabled = state.calendarSyncEnabled,
+                                    calendarTitle = state.calendarTitle,
+                                    calendars = state.calendars,
+                                    onToggle = { on ->
+                                        if (on && !state.calendarHasPermission) {
+                                            calendarPermission.launch(
+                                                arrayOf(
+                                                    Manifest.permission.READ_CALENDAR,
+                                                    Manifest.permission.WRITE_CALENDAR,
+                                                ),
+                                            )
+                                        } else {
+                                            viewModel.setCalendarSyncEnabled(on)
+                                        }
+                                    },
+                                    onSelectCalendar = viewModel::selectCalendar,
+                                )
+                                HRule()
+                                SettingsRow("Notifications") {
+                                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    })
+                                }
+                                HRule()
+                                SettingsRow("Privacy") {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
+                                    )
+                                }
+                                HRule()
+                                SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
+                                HRule()
+                                SettingsRow("Get help", onClick = viewModel::showHelp)
+                                HRule()
+                                SettingsRow("Sign out", tint = colors.warm, onClick = viewModel::showSignOutConfirm)
+                                HRule()
+                                SettingsRow("Delete account", tint = colors.hot, onClick = viewModel::showDeleteConfirm)
+                                HRule()
+                            }
+                        }
+
+                        state.actionMessage?.let { msg ->
+                            Text(
+                                msg,
+                                style = AppTheme.type.footnote,
+                                color = colors.ink2,
+                                modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
+                            )
+                        }
+                        state.actionError?.let { msg ->
+                            Text(
+                                msg,
+                                style = AppTheme.type.footnote,
+                                color = colors.hot,
+                                modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
+                            )
+                        }
+
+                        Spacer(Modifier.size(56.dp))
+                    }
                 }
             }
         }
