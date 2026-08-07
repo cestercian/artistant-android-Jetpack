@@ -23,7 +23,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.io.IOException
@@ -154,5 +157,96 @@ class ArtistHomeViewModelTest {
             listOf("new-1", "new-2"),
             model.state.value.pendingRequests.map { it.id },
         )
+    }
+
+    // ── A failed fetch is not a missing profile ─────────────────────────────
+    //
+    // The completeness banner is derived from two independent reads: the users
+    // row says whether the wizard was finished, the artist row carries genre and
+    // bio. When the artist read FAILS both come back null — and null-because-the
+    // -request-died reads exactly like null-because-the-artist-never-filled-it-in.
+    // Collapsing the two tells a complete artist their profile is thin and points
+    // them back at the wizard, on nothing more than a dropped connection.
+
+    @Test
+    fun failedDetailFetch_isNotReportedAsAnIncompleteProfile() = runTest {
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            artists = FakeArtistsRepository(listOf(artist(id = ARTIST_ID))).apply { failFetch = true },
+        )
+        advanceUntilIdle()
+
+        assertNull("a failed artist read must not read as a thin profile", model.state.value.profileGaps)
+        // Silence would be its own bug: the artist is looking at a screen whose
+        // profile half didn't load, so the existing refresh-failure banner says so.
+        assertNotNull("the failure banner must say the profile half didn't load", model.state.value.error)
+    }
+
+    @Test
+    fun failedDetailFetch_doesNotUndoWhatAnEarlierRefreshAlreadyLoaded() = runTest {
+        val artists = FakeArtistsRepository(listOf(artist(id = ARTIST_ID, name = "Nova Beats")))
+        val model = vm(bookings = FakeBookingsRepository(), artists = artists)
+        advanceUntilIdle()
+        assertEquals("Nova", model.state.value.greetingName)
+
+        // Second refresh, artist read blips.
+        artists.failFetch = true
+        model.refresh()
+        advanceUntilIdle()
+
+        assertEquals("Nova", model.state.value.greetingName)
+        // The last good refresh said nothing was missing; a blipped read is not
+        // new information, so the completeness banner must stay down.
+        assertFalse(
+            "a blipped read must not raise the completeness banner",
+            model.state.value.profileGaps?.needsWork == true,
+        )
+        assertNotNull("the failure banner must say the profile half didn't load", model.state.value.error)
+    }
+
+    @Test
+    fun thinProfile_stillGetsTheCompletenessBanner() = runTest {
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            artists = FakeArtistsRepository(
+                listOf(artist(id = ARTIST_ID).copy(genre = "", bio = "")),
+            ),
+        )
+        advanceUntilIdle()
+
+        val gaps = model.state.value.profileGaps
+        assertNotNull("a genuinely thin profile must still be flagged", gaps)
+        assertTrue(gaps!!.needsWork)
+        assertEquals(listOf("your genre", "a short bio"), gaps.strengthGaps)
+        assertNull(model.state.value.error)
+    }
+
+    @Test
+    fun unfinishedWizard_stillBlocksDiscovery_evenWhenTheDetailFetchFails() = runTest {
+        // Whether the wizard was finished is knowable from the users row alone, so
+        // suppressing the banner on a failed artist read must not suppress this one.
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            artists = FakeArtistsRepository(listOf(artist(id = ARTIST_ID))).apply { failFetch = true },
+            users = FakeUsersRepository(selfProfile = completeProfile.copy(artistSetupComplete = false)),
+        )
+        advanceUntilIdle()
+
+        assertTrue(
+            "an unfinished wizard is knowable without the artist row",
+            model.state.value.profileGaps?.blocksDiscovery == true,
+        )
+    }
+
+    @Test
+    fun failedProfileFetch_surfacesTheBanner_ratherThanGuessingAtCompleteness() = runTest {
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            users = FakeUsersRepository(selfProfile = completeProfile, failFetch = true),
+        )
+        advanceUntilIdle()
+
+        assertNull("no users row means nothing is knowable about gaps", model.state.value.profileGaps)
+        assertNotNull("the failure banner must say the profile half didn't load", model.state.value.error)
     }
 }

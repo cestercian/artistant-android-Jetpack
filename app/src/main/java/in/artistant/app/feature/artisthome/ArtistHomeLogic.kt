@@ -385,13 +385,28 @@ data class ProfileGaps(
  * Photos, packages and samples are deliberately not checked: packages and the
  * tech rider are wizard-required so they are always present by the time this
  * screen renders, and photos would need their own fetch to test.
+ *
+ * Returns **null** for "can't say" — see [detailUnknown]. The caller renders a
+ * null as no banner at all (or keeps whatever the last good refresh decided),
+ * which is the only honest answer when the inputs never arrived.
+ *
+ * @param detailUnknown true when the artist row could not be read at all — the
+ * fetch THREW, or there was no session to read it for. [genre] and [bio] live on
+ * that row, so their nulls then mean "unknown", not "the artist left them
+ * blank". Collapsing the two is what tells a complete artist their profile is
+ * thin and walks them back into the wizard on a dropped connection; the same
+ * distinction the returning-login router draws between a thrown fetch and a
+ * genuinely-absent row. Note the wizard blocker above is decided BEFORE this,
+ * because whether setup finished is knowable from the users row alone.
  */
 internal fun profileGaps(
     setupComplete: Boolean,
     genre: String?,
     bio: String?,
-): ProfileGaps {
+    detailUnknown: Boolean,
+): ProfileGaps? {
     if (!setupComplete) return ProfileGaps(blocksDiscovery = true, strengthGaps = emptyList())
+    if (detailUnknown) return null
     val gaps = buildList {
         if (genre.isNullOrBlank()) add("your genre")
         if (bio.isNullOrBlank()) add("a short bio")
