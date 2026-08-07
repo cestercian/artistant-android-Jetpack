@@ -129,6 +129,11 @@ fun ArtistTabsScaffold() {
                         onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
                         onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
                         onScoreExplainer = { nav.navigate(ArtistNavRoutes.SCORE_EXPLAINER) },
+                        // The dashboard's availability strip is the natural place
+                        // to change what days are offered; it previously had no
+                        // route, so the editor was reachable only from Profile.
+                        onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        onSubscribe = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                     )
                 }
             }
