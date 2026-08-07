@@ -1,0 +1,312 @@
+package `in`.artistant.app.feature.epk
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import `in`.artistant.app.designsystem.component.pressScale
+import `in`.artistant.app.designsystem.theme.AppTheme
+import java.util.Locale
+
+/**
+ * The editor's small parts.
+ *
+ * They live here rather than in `designsystem/component` because none of them
+ * is shared yet: a hairline inline field and a caps section rule are the EPK's
+ * house style, and promoting a component before a second caller exists is how a
+ * design system fills up with near-duplicates. If the artist home or the wizard
+ * grows the same need, this is the file to lift from.
+ */
+
+/**
+ * A section rule: caps label on the left, one optional text action on the right.
+ *
+ * A text action, not a button. The editor has eight sections and each one can
+ * add something; eight filled buttons down a page would read as eight equally
+ * urgent CTAs, which is exactly the "card chrome" the design language rejects.
+ */
+@Composable
+fun EpkSectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    actionEnabled: Boolean = true,
+    trailingNote: String? = null,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title.uppercase(Locale.US), style = AppTheme.type.caption, color = colors.ink3)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(space.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (trailingNote != null) {
+                Text(trailingNote, style = AppTheme.type.caption, color = colors.ink3)
+            }
+            if (actionLabel != null && onAction != null) {
+                Text(
+                    actionLabel,
+                    style = AppTheme.type.footnote,
+                    // Dimmed rather than hidden when disabled: a control that
+                    // vanishes reads as a bug, one that dims reads as "not yet".
+                    color = if (actionEnabled) colors.brand else colors.ink4,
+                    modifier = Modifier
+                        .heightIn(min = AppTheme.dimens.size.rowMin)
+                        .clickable(enabled = actionEnabled, onClick = onAction)
+                        .padding(vertical = space.md),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Inline text field: no Material container, one hairline under the text.
+ *
+ * `BasicTextField` rather than `TextField` because Material's version ships an
+ * indicator line, a container fill and a 56dp minimum that all have to be
+ * fought back to transparent — cheaper to draw the one rule we actually want.
+ *
+ * The rule lights up once the field holds something, which is the only state
+ * feedback the editor gives per-field; correctness feedback belongs to the save
+ * banner, not to a red underline the artist is still typing into.
+ */
+@Composable
+fun EpkField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    textStyle: TextStyle = AppTheme.type.body,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    textAlign: TextAlign = TextAlign.Start,
+    enabled: Boolean = true,
+    contentDescription: String? = null,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val resolved = textStyle.copy(
+        color = if (enabled) colors.ink else colors.ink3,
+        textAlign = textAlign,
+    )
+    Column(modifier) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            enabled = enabled,
+            singleLine = true,
+            textStyle = resolved,
+            cursorBrush = SolidColor(colors.brand),
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (contentDescription != null) {
+                        Modifier.semantics { this.contentDescription = contentDescription }
+                    } else {
+                        Modifier
+                    },
+                ),
+            decorationBox = { inner ->
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = dimens.size.rowMin)
+                        .padding(vertical = dimens.space.sm),
+                    contentAlignment = if (textAlign == TextAlign.End) {
+                        Alignment.CenterEnd
+                    } else {
+                        Alignment.CenterStart
+                    },
+                ) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, style = resolved, color = colors.ink4)
+                    }
+                    inner()
+                }
+            },
+        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(dimens.size.hairline)
+                .background(if (value.isBlank()) colors.line else colors.brand.copy(alpha = 0.4f)),
+        )
+    }
+}
+
+/**
+ * Capsule toggle — the tech rider and any future chip-select.
+ *
+ * Selected is a FILLED capsule in the role accent, unselected is a hairline
+ * outline. Two states that differ in fill rather than in tint, because a tinted
+ * outline and an untinted outline are indistinguishable at chip size on a phone.
+ */
+@Composable
+fun EpkChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        modifier
+            .clip(CircleShape)
+            .background(if (selected) colors.brand else Color.Transparent)
+            .border(
+                dimens.size.hairline,
+                if (selected) Color.Transparent else colors.line,
+                CircleShape,
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .pressScale(interaction)
+            .padding(horizontal = dimens.space.md, vertical = dimens.space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = AppTheme.type.footnote,
+            color = when {
+                !enabled -> colors.ink4
+                selected -> colors.brandInk
+                else -> colors.ink2
+            },
+        )
+    }
+}
+
+/** Error tone for [EpkBanner]. Load failures offer a retry; save failures do not. */
+enum class EpkBannerTone { Error, Warning }
+
+/**
+ * Inline notice with an optional action and an optional dismiss.
+ *
+ * Not a snackbar: a save failure has to stay on screen next to the edit that did
+ * not land, and a snackbar's whole contract is that it leaves. The artist must
+ * be able to see "your pricing didn't save" at the same time as the price.
+ */
+@Composable
+fun EpkBanner(
+    message: String,
+    modifier: Modifier = Modifier,
+    tone: EpkBannerTone = EpkBannerTone.Error,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    onDismiss: (() -> Unit)? = null,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val accent = when (tone) {
+        EpkBannerTone.Error -> colors.hot
+        EpkBannerTone.Warning -> colors.warm
+    }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.md))
+            .background(accent.copy(alpha = 0.10f))
+            .border(dimens.size.hairline, accent.copy(alpha = 0.25f), RoundedCornerShape(dimens.radii.md))
+            .padding(dimens.space.md),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(message, style = AppTheme.type.footnote, color = colors.ink, modifier = Modifier.weight(1f))
+            if (onDismiss != null) {
+                Spacer(Modifier.width(dimens.space.sm))
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Dismiss",
+                    tint = colors.ink3,
+                    modifier = Modifier
+                        .size(dimens.size.iconLg)
+                        .clickable(onClick = onDismiss),
+                )
+            }
+        }
+        if (actionLabel != null && onAction != null) {
+            Text(
+                actionLabel,
+                style = AppTheme.type.footnote,
+                color = colors.brand,
+                modifier = Modifier
+                    .heightIn(min = AppTheme.dimens.size.rowMin)
+                    .clickable(onClick = onAction)
+                    .padding(vertical = dimens.space.sm),
+            )
+        }
+    }
+}
+
+/**
+ * A destructive row action, rendered as a word.
+ *
+ * Word rather than a trash glyph: at this size a glyph needs a label for
+ * accessibility anyway, and "Remove" is unambiguous where a 16dp icon next to
+ * three other 16dp icons is not.
+ */
+@Composable
+fun EpkRowAction(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tone: Color? = null,
+    enabled: Boolean = true,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Text(
+        label,
+        style = AppTheme.type.footnote,
+        color = if (enabled) (tone ?: colors.ink3) else colors.ink4,
+        modifier = modifier
+            .heightIn(min = dimens.size.rowMin)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = dimens.space.md, horizontal = dimens.space.xs),
+    )
+}
