@@ -730,7 +730,6 @@ private fun PricingSection(
                     PackageEditorRow(
                         row = row,
                         enabled = hydrated,
-                        badgeMeansSomething = badgeMeansSomething,
                         onName = onName,
                         onDuration = onDuration,
                         onPrice = onPrice,
@@ -755,7 +754,6 @@ private fun PricingSection(
 private fun PackageEditorRow(
     row: PackageRow,
     enabled: Boolean,
-    badgeMeansSomething: Boolean,
     onName: (String, String) -> Unit,
     onDuration: (String, String) -> Unit,
     onPrice: (String, String) -> Unit,
