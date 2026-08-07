@@ -177,6 +177,48 @@ data class Hero(
     val autoAdvanceMillis: Long = 6_000L,
 )
 
+/**
+ * The artist dashboard's charts, strip and banners.
+ *
+ * Kept as its own group rather than folded into [Size] because these are the
+ * measurements of a *data display* — a chart's drawing box, a meter's thickness,
+ * a day cell — and they answer to legibility of the data rather than to the
+ * control/avatar ladder [Size] describes. Mixing them in would mean the next
+ * person tuning a bar height has to scan past twelve icon sizes to find it.
+ */
+data class Dashboard(
+    /** The hero trend chart's drawing box. Tall enough that a 30-bucket series
+     *  still has visible shape, short enough that the sections below stay on the
+     *  first screen. */
+    val chartHeight: Dp = 88.dp,
+    /** The 7-day bar cluster that rides beside the bookings count. */
+    val barsWidth: Dp = 86.dp,
+    val barsHeight: Dp = 32.dp,
+    /** Gap between bars in that cluster. */
+    val barGap: Dp = 3.dp,
+    /** A score-breakdown meter. A hairline would disappear; anything thicker
+     *  reads as a progress bar and pulls focus from the number beside it. */
+    val meterHeight: Dp = 3.dp,
+    /**
+     * Fixed gutter for a metric's label, so the four meters beside them start on
+     * the same x. Letting each row size to its own text would stagger the bars
+     * and destroy the only thing the set is for — comparing them at a glance.
+     */
+    val meterLabelWidth: Dp = 116.dp,
+    /**
+     * Availability-strip day cell. Narrower than [Size.dateCellW]: that card
+     * carries a price and belongs to the booking funnel, this one carries a
+     * weekday and a numeral, and fourteen of them have to be scannable in one
+     * horizontal sweep.
+     */
+    val dayCellW: Dp = 46.dp,
+    val dayCellH: Dp = 54.dp,
+    /** The "there's a gig here" dot inside a day cell. */
+    val dayDot: Dp = 3.dp,
+    /** Attention dot leading a banner headline. */
+    val bannerDot: Dp = 8.dp,
+)
+
 /** width : height ratios for media containers. */
 data class AspectRatios(
     val portrait: Float = 4f / 5f,
@@ -195,4 +237,5 @@ data class Dimens(
     val fraction: Fractions = Fractions(),
     val chrome: Chrome = Chrome(),
     val hero: Hero = Hero(),
+    val dashboard: Dashboard = Dashboard(),
 )
