@@ -14,8 +14,15 @@ private fun groupIndian(amount: Int): String {
     if (digits.length <= 3) return (if (neg) "-" else "") + digits
     val last3 = digits.takeLast(3)
     val rest = digits.dropLast(3)
-    // Chunk the remaining digits into groups of 2, from the right.
-    val head = rest.reversed().chunked(2).joinToString(",") { it.reversed() }.reversed()
+    // Chunk the remaining digits into groups of 2, from the RIGHT. Reversing the
+    // string is what makes chunked() group from the right; the chunks must then
+    // be joined AS-IS and the whole result reversed once.
+    //
+    // The bug this replaced reversed each chunk as well as the joined string, so
+    // every group came back swapped: a ₹60,000 tier rendered "₹06,000". It went
+    // unnoticed because the original tests only used 5_000 (single-digit head)
+    // and 100_000 (head survives by coincidence) — both no-ops under a reversal.
+    val head = rest.reversed().chunked(2).joinToString(",").reversed()
     return (if (neg) "-" else "") + "$head,$last3"
 }
 
