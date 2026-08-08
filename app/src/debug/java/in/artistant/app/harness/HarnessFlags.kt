@@ -28,7 +28,15 @@ import `in`.artistant.app.designsystem.theme.AppRole
  *   skip-signup-as-artist ....... boot signed-in as an artist, land on the artist tabs
  *   seed-fixture-data ........... swap the Supabase repositories for seeded in-memory fakes
  *   seed-pending-request ........ additionally seed one pending_confirm booking (artist side)
- *   land-in-wizard-at-<step> .... boot an artist into the EPK wizard at the named step
+ *   land-in-wizard-at-<step> .... boot an artist into the EPK wizard instead of the tabs
+ *
+ * ON `land-in-wizard-at-<step>`: this reports the artist's EPK setup as incomplete, which is
+ * the switch `RootViewModel.gateFor` reads to choose `RootGate.ArtistWizard` over the tab
+ * shell — so the flag reliably LANDS YOU IN THE WIZARD, with identity pre-filled from the
+ * fixture profile. It does not currently jump to an arbitrary step: the wizard owns its step
+ * cursor internally and seeking it would mean adding a debug seam to production code, which
+ * this harness deliberately avoids. The `<step>` suffix is parsed and carried so that a future
+ * seam can consume it without changing the command operators have already learned.
  *
  * Tokens are accepted bare (`seed-fixture-data`) or in the iOS spelling
  * (`-uitest-seed-fixture-data`) so a command copied from the iOS suite still works.
