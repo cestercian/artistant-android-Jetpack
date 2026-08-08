@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import `in`.artistant.app.designsystem.component.bookingStatusTone
 
 data class ArtistListRow(
     val id: String,
@@ -117,14 +118,9 @@ class ArtistListViewModel @Inject constructor(
     }
 
     private fun pillsFor(booking: Booking): List<Pair<String, PillTone>> {
-        val tone = when (booking.status) {
-            BookingStatus.Confirmed -> PillTone.Brand
-            BookingStatus.PendingConfirm -> PillTone.Warm
-            BookingStatus.Completed -> PillTone.Good
-            BookingStatus.Cancelled, BookingStatus.Disputed -> PillTone.Hot
-            // Neutral on purpose — a colour would imply a meaning we don't have.
-            BookingStatus.Unknown -> PillTone.Neutral
-        }
+        // Shared mapping — this used to be the only surface that varied by status;
+        // the bookings list and booking detail each had their own (wrong) idea.
+        val tone = bookingStatusTone(booking.status)
         val out = mutableListOf(booking.status.label.uppercase() to tone)
         booking.date.trim().takeIf { it.isNotEmpty() }?.let {
             out += it.uppercase() to PillTone.Neutral
