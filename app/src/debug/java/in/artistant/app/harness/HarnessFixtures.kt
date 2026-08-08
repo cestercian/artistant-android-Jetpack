@@ -8,11 +8,13 @@ import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.EscrowStatus
 import `in`.artistant.app.data.model.GigRequest
 import `in`.artistant.app.data.model.GigRequestStatus
+import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.PaymentMethod
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.model.StoredRequest
+import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.ScoreHistoryPoint
@@ -362,6 +364,160 @@ object HarnessFixtures {
             categories = mapOf("Punctuality" to 4, "Sound" to 5, "Communication" to 4),
         ),
     )
+
+    // --- Discover / search roster -----------------------------------------------------------
+
+    /**
+     * The roster Discover and Search page through. Six artists rather than one, because a
+     * single-card feed hides everything the client surfaces are actually made of: the rails
+     * group by category, the filter sheet builds its facets from the distinct categories and
+     * cities present, and the sort options are indistinguishable on a list of one. Prices,
+     * scores, cities and categories are all spread so sorting by price and by Bookability
+     * produce visibly different orders.
+     *
+     * [artist] is first so the fixture artist — the one every other fixture references — is the
+     * card an operator lands on without scrolling.
+     */
+    val roster: List<Artist> = listOf(
+        artist,
+        rosterArtist(
+            id = "d1000000-0000-0000-0000-000000000001",
+            name = "Kaavya Menon",
+            category = "Singer",
+            genre = "Carnatic fusion",
+            city = "Chennai",
+            price = 38_000,
+            score = 91,
+            gigs = 87,
+            paletteIndex = 1,
+        ),
+        rosterArtist(
+            id = "d1000000-0000-0000-0000-000000000002",
+            name = "Nova Beats",
+            category = "DJ",
+            genre = "House",
+            city = "Mumbai",
+            price = 125_000,
+            score = 76,
+            gigs = 23,
+            paletteIndex = 2,
+        ),
+        rosterArtist(
+            id = "d1000000-0000-0000-0000-000000000003",
+            name = "The Brass Republic",
+            category = "Band",
+            genre = "Funk / brass",
+            city = "Bangalore",
+            price = 210_000,
+            score = 88,
+            gigs = 54,
+            paletteIndex = 3,
+        ),
+        rosterArtist(
+            id = "d1000000-0000-0000-0000-000000000004",
+            name = "Ishaan Kapoor",
+            category = "Comedian",
+            genre = "Stand-up",
+            city = "Delhi",
+            price = 45_000,
+            score = 69,
+            gigs = 12,
+            paletteIndex = 4,
+        ),
+        rosterArtist(
+            id = "d1000000-0000-0000-0000-000000000005",
+            name = "Sitar & Static",
+            category = "Duo",
+            genre = "Electronic classical",
+            city = "Pune",
+            price = 72_000,
+            score = 83,
+            gigs = 31,
+            paletteIndex = 5,
+        ),
+    )
+
+    /**
+     * A Discover-tile-shaped artist. Lighter than [artist] on purpose — a tile only needs the
+     * headline fields, and giving every roster entry a full EPK would make it impossible to
+     * tell a hydrated profile from a partial one while looking at the app.
+     */
+    private fun rosterArtist(
+        id: String,
+        name: String,
+        category: String,
+        genre: String,
+        city: String,
+        price: Int,
+        score: Int,
+        gigs: Int,
+        paletteIndex: Int,
+    ) = Artist(
+        id = id,
+        name = name,
+        handle = name.lowercase().filter { it.isLetterOrDigit() },
+        category = category,
+        genre = genre,
+        city = city,
+        price = price,
+        duration = "60-min set",
+        score = score,
+        gradient = ArtistGradient.palette(paletteIndex),
+        bio = "$name — $genre out of $city. Fixture roster entry for the debug harness.",
+        followers = "${score}00",
+        response = "Replies in ~2h",
+        onTime = 90 + (score % 9),
+        gigs = gigs,
+        rating = 4.0 + (score % 10) / 10.0,
+    )
+
+    /** Saved-artists seed, so the client's Saved list has rows instead of an empty state. */
+    val savedArtistIds: List<String> = listOf(ARTIST_ID, roster[1].id)
+
+    // --- Messages ----------------------------------------------------------------------------
+
+    /**
+     * One thread against the fixture artist. `clientName` is set because the artist side of the
+     * inbox names the CLIENT while the client side names the artist — a thread missing it would
+     * render "TBD" on one side only, which is easy to miss when testing from just one role.
+     */
+    val thread = Thread(
+        id = THREAD_ID,
+        artistId = ARTIST_ID,
+        bookingId = BOOKING_ID,
+        clientName = "Meera Iyer",
+        lastPreview = "Perfect — see you on the day.",
+        lastMessageAtEpochMs = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(6),
+        unreadCount = 1,
+    )
+
+    /**
+     * A short two-sided transcript. Both sides matter: a thread where every bubble belongs to
+     * the viewer renders only one of the two bubble treatments, so a broken counterpart bubble
+     * would pass unnoticed. `senderId` drives which is which — [harnessMessages] resolves
+     * `isMine` against whichever role booted.
+     */
+    fun harnessMessages(viewerId: String): List<Message> {
+        val base = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(3)
+        fun at(minutes: Long) = base + TimeUnit.MINUTES.toMillis(minutes)
+        return listOf(
+            msg("m1", CLIENT_ID, "Hi! Are you free on the 20th for a rooftop set?", at(0), viewerId),
+            msg("m2", ARTIST_ID, "We are — 8:30 PM works. Is there a house PA?", at(4), viewerId),
+            msg("m3", CLIENT_ID, "There is, and we can cover backline too.", at(9), viewerId),
+            msg("m4", ARTIST_ID, "Great. I'll send the tech rider over tonight.", at(14), viewerId),
+            msg("m5", CLIENT_ID, "Perfect — see you on the day.", at(174), viewerId),
+        )
+    }
+
+    private fun msg(id: String, senderId: String, body: String, atMs: Long, viewerId: String) =
+        Message(
+            id = id,
+            threadId = THREAD_ID,
+            senderId = senderId,
+            body = body,
+            sentAtEpochMs = atMs,
+            isMine = senderId.equals(viewerId, ignoreCase = true),
+        )
 
     // --- Date helpers ----------------------------------------------------------------------
 

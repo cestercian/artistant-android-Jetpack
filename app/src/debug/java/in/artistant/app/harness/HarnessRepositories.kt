@@ -1,6 +1,8 @@
 package `in`.artistant.app.harness
 
+import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.ArtistLinksRepository
 import `in`.artistant.app.data.repository.ArtistMediaRepository
@@ -13,11 +15,15 @@ import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.data.repository.FakePackagesRepository
 import `in`.artistant.app.data.repository.FakeReportsRepository
+import `in`.artistant.app.data.repository.FakeReviewsRepository
 import `in`.artistant.app.data.repository.FakeRequestsRepository
+import `in`.artistant.app.data.repository.FakeSavedArtistsRepository
 import `in`.artistant.app.data.repository.FakeScoreRepository
+import `in`.artistant.app.data.repository.FakeSearchRepository
 import `in`.artistant.app.data.repository.FakeTechRiderRepository
 import `in`.artistant.app.data.repository.FakeUsersRepository
 import `in`.artistant.app.data.repository.MessagesRepository
+import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
@@ -150,12 +156,110 @@ object HarnessRepositories {
     val account: AccountRepository? get() = if (on) accountImpl else null
     val reports: ReportsRepository? get() = if (on) reportsImpl else null
 
-    // --- Not yet faked -------------------------------------------------------------------
-    // Null means "use the real Supabase repository". These land with the client path.
-    val search: SearchRepository? get() = null
-    val reviews: ReviewsRepository? get() = null
-    val savedArtists: SavedArtistsRepository? get() = null
-    val messages: MessagesRepository? get() = null
+    // --- Client path: Discover / search / profile / saved / messages -----------------------
+
+    // Pages the whole fixture roster rather than the single fixture artist: Discover's rails
+    // group by category and the filter sheet derives its facets from the distinct categories
+    // and cities present, so a one-card roster would render neither.
+    private val searchImpl: FakeSearchRepository by lazy {
+        FakeSearchRepository(HarnessFixtures.roster)
+    }
+
+    private val reviewsImpl: FakeReviewsRepository by lazy {
+        FakeReviewsRepository(byArtist = mapOf(HarnessFixtures.ARTIST_ID to HarnessFixtures.reviews))
+    }
+
+    private val savedArtistsImpl: FakeSavedArtistsRepository by lazy {
+        FakeSavedArtistsRepository().also { fake ->
+            seedBlocking { HarnessFixtures.savedArtistIds.forEach { fake.add(it) } }
+        }
+    }
+
+    // The shared FakeMessagesRepository can only be filled through `send`, which stamps every
+    // message as the viewer's own — so a thread seeded through it would render one bubble
+    // treatment and hide the counterpart's. This stand-in seeds a genuine two-sided transcript.
+    private val messagesImpl: MessagesRepository by lazy {
+        HarnessMessagesRepository(HarnessState.flags.skipSignupAs?.let(HarnessFixtures::selfUserId))
+    }
+
+    val search: SearchRepository? get() = if (on) searchImpl else null
+    val reviews: ReviewsRepository? get() = if (on) reviewsImpl else null
+    val savedArtists: SavedArtistsRepository? get() = if (on) savedArtistsImpl else null
+    val messages: MessagesRepository? get() = if (on) messagesImpl else null
+}
+
+/**
+ * In-memory [MessagesRepository] seeded with one two-sided thread.
+ *
+ * Exists rather than reusing the shared `FakeMessagesRepository` because that one has no seed
+ * path other than `send()`, which marks every message `isMine = true`. A transcript where the
+ * viewer sent everything exercises only one of the two bubble treatments, so a broken
+ * counterpart bubble — or a wrong-side alignment — would look fine in the harness.
+ *
+ * [viewerId] is the booted role's uid, so the same fixture transcript reads correctly from
+ * either side: what the artist sees as theirs, the client sees as the counterpart's.
+ */
+private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository {
+
+    private val viewer = viewerId ?: HarnessFixtures.CLIENT_ID
+    private val threads = mutableListOf(HarnessFixtures.thread)
+    private val messages = mutableMapOf(
+        HarnessFixtures.THREAD_ID to HarnessFixtures.harnessMessages(viewer).toMutableList(),
+    )
+
+    override suspend fun listThreadsForUser(): List<Thread> =
+        threads.sortedByDescending { it.lastMessageAtEpochMs ?: 0L }
+
+    override suspend fun listMessages(threadId: String, limit: Int): List<Message> =
+        messages[threadId]?.takeLast(limit)?.toList().orEmpty()
+
+    override suspend fun send(threadId: String, body: String): Message {
+        val text = body.trim()
+        require(text.isNotEmpty()) { "A message can't be empty." }
+        val message = Message(
+            id = "harness-sent-${System.nanoTime()}",
+            threadId = threadId,
+            senderId = viewer,
+            body = text,
+            sentAtEpochMs = System.currentTimeMillis(),
+            isMine = true,
+        )
+        messages.getOrPut(threadId) { mutableListOf() }.add(message)
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) {
+            threads[index] = threads[index].copy(
+                lastPreview = text,
+                lastMessageAtEpochMs = message.sentAtEpochMs,
+            )
+        }
+        return message
+    }
+
+    override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String {
+        threads.firstOrNull { it.artistId.equals(artistId, ignoreCase = true) }?.let { return it.id }
+        val thread = Thread(
+            id = "harness-thread-${threads.size + 1}",
+            artistId = artistId.lowercase(),
+            bookingId = bookingId,
+        )
+        threads += thread
+        return thread.id
+    }
+
+    override suspend fun markThreadRead(threadId: String) {
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
+    }
+
+    override suspend fun markThreadReadReceipt(threadId: String) = Unit
+
+    override suspend fun counterpartLastRead(threadId: String): Long? = null
+
+    /** No WebSocket in the harness — hand back a no-op cancel token. */
+    override suspend fun subscribeMessages(
+        threadId: String,
+        onInsert: (Message) -> Unit,
+    ): MessagesSubscription = MessagesSubscription {}
 }
 
 /**
