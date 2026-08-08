@@ -30,6 +30,8 @@ import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.component.bookingStatusTone
+import `in`.artistant.app.designsystem.component.Pill
 
 /** Client bookings tab — month day grid + upcoming/pending list. */
 @Composable
@@ -144,7 +146,10 @@ fun BookingsScreen(
                                         color = colors.ink2,
                                     )
                                     Spacer(Modifier.height(space.xs))
-                                    Text(b.status.label, style = AppTheme.type.caption, color = colors.brand)
+                                    // Status colour comes from the shared mapping, not a blanket
+                                    // brand tint: "Confirmed" and "Awaiting confirm" used to render
+                                    // in the same lime, so the label carried no signal.
+                                    Pill(b.status.label, tone = bookingStatusTone(b.status))
                                 }
                                 HRule(modifier = Modifier.padding(horizontal = space.lg))
                             }

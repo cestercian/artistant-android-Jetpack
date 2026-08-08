@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.data.model.BookingStatus
 
 /** Tone drives the capsule fill + text color. Neutral is the default chrome-free chip. */
 enum class PillTone { Neutral, Brand, Accent, Good, Warm, Hot }
@@ -35,4 +36,26 @@ fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.
             .background(bg)
             .padding(horizontal = AppTheme.dimens.space.md, vertical = AppTheme.dimens.space.xs),
     )
+}
+
+/**
+ * The one status→tone mapping for the whole app.
+ *
+ * Three surfaces each decided this independently and disagreed: the bookings
+ * list painted EVERY status with the brand accent (so "Confirmed" and "Awaiting
+ * confirm" were the same lime and the label carried no signal at all), booking
+ * detail painted every status Neutral, and only the artist-list drill-down
+ * actually varied by status. Spotted on-device.
+ *
+ * Semantics, not decoration: Warm = the reader has something to do, Brand = the
+ * happy live state, Good = finished well, Hot = ended badly. `Unknown` stays
+ * Neutral deliberately — it is the decode fallback for a status this build does
+ * not recognise, and any colour would assert a meaning we do not have.
+ */
+fun bookingStatusTone(status: BookingStatus): PillTone = when (status) {
+    BookingStatus.PendingConfirm -> PillTone.Warm
+    BookingStatus.Confirmed -> PillTone.Brand
+    BookingStatus.Completed -> PillTone.Good
+    BookingStatus.Cancelled, BookingStatus.Disputed -> PillTone.Hot
+    BookingStatus.Unknown -> PillTone.Neutral
 }

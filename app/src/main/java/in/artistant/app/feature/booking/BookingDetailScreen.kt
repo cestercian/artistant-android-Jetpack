@@ -44,6 +44,7 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import java.time.Instant
+import `in`.artistant.app.designsystem.component.bookingStatusTone
 
 /**
  * Booking detail — role-aware names + Accept/Decline (artist) or Cancel (client),
@@ -110,7 +111,7 @@ fun BookingDetailScreen(
                             color = colors.ink,
                         )
                         Spacer(Modifier.height(space.sm))
-                        Pill(booking.status.label, tone = PillTone.Neutral)
+                        Pill(booking.status.label, tone = bookingStatusTone(booking.status))
                         (state.actionError ?: chatError)?.let {
                             Spacer(Modifier.height(space.sm))
                             Text(it, style = AppTheme.type.footnote, color = colors.hot)
