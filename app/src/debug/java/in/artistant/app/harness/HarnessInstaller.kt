@@ -93,9 +93,14 @@ private class HarnessLifecycleCallbacks(
     private val app: Application,
 ) : Application.ActivityLifecycleCallbacks {
 
-    // Latch so a warm re-launch (onNewIntent) can't re-install flags after the DI graph has
-    // already resolved against the first set — that would be a lie about what's on screen.
-    // Pass flags on a cold start; `am start -S` force-stops first, which is what the docs use.
+    // Latches only once ACTIVE flags have been installed, so a second set can't contradict a
+    // DI graph that already resolved against the first — that would be a lie about what is on
+    // screen.
+    //
+    // Deliberately NOT latched on a flagless create. `adb install -r` triggers a package-update
+    // restart of the activity with no extras, which lands microseconds before the operator's own
+    // flagged `am start`; latching there would silently swallow the flags and boot the app as if
+    // the harness had never been asked for. Staying unlatched lets the real flagged launch win.
     private var installed = false
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -110,13 +115,13 @@ private class HarnessLifecycleCallbacks(
 
     private fun install(activity: Activity) {
         if (installed) return
-        installed = true
 
         val raw = runCatching { activity.intent?.getStringExtra(HarnessFlags.EXTRA) }.getOrNull()
         val flags = HarnessFlags.parse(raw)
-        HarnessState.install(flags)
-
         if (!flags.active) return
+
+        installed = true
+        HarnessState.install(flags)
         Timber.i("[harness] active: $flags")
         HarnessSession.bootstrap(app, flags)
     }
