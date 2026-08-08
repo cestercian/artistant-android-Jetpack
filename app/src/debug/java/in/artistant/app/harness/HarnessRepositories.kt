@@ -1,0 +1,298 @@
+package `in`.artistant.app.harness
+
+import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.data.model.Thread
+import `in`.artistant.app.data.repository.AccountRepository
+import `in`.artistant.app.data.repository.ArtistLinksRepository
+import `in`.artistant.app.data.repository.ArtistMediaRepository
+import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.data.repository.FakeAccountRepository
+import `in`.artistant.app.data.repository.FakeArtistLinksRepository
+import `in`.artistant.app.data.repository.FakeArtistMediaRepository
+import `in`.artistant.app.data.repository.FakeArtistsRepository
+import `in`.artistant.app.data.repository.FakeBookingsRepository
+import `in`.artistant.app.data.repository.FakePackagesRepository
+import `in`.artistant.app.data.repository.FakeReportsRepository
+import `in`.artistant.app.data.repository.FakeReviewsRepository
+import `in`.artistant.app.data.repository.FakeRequestsRepository
+import `in`.artistant.app.data.repository.FakeSavedArtistsRepository
+import `in`.artistant.app.data.repository.FakeScoreRepository
+import `in`.artistant.app.data.repository.FakeSearchRepository
+import `in`.artistant.app.data.repository.FakeTechRiderRepository
+import `in`.artistant.app.data.repository.FakeUsersRepository
+import `in`.artistant.app.data.repository.MessagesRepository
+import `in`.artistant.app.data.repository.MessagesSubscription
+import `in`.artistant.app.data.repository.PackagesRepository
+import `in`.artistant.app.data.repository.ReportsRepository
+import `in`.artistant.app.data.repository.RequestsRepository
+import `in`.artistant.app.data.repository.ReviewsRepository
+import `in`.artistant.app.data.repository.SamplesRepository
+import `in`.artistant.app.data.repository.SavedArtistsRepository
+import `in`.artistant.app.data.repository.ScoreRepository
+import `in`.artistant.app.data.repository.SearchRepository
+import `in`.artistant.app.data.repository.TechRiderRepository
+import `in`.artistant.app.data.repository.UsersRepository
+import kotlinx.coroutines.runBlocking
+import java.io.File
+
+/**
+ * Registry of the seeded in-memory repositories the DEBUG harness swaps in.
+ *
+ * Each accessor returns null when the harness is off — or when no fake has been written for
+ * that seam yet — and the debug `RepositoryModule` falls back to the real Supabase
+ * implementation. Two things follow from that shape:
+ *
+ *  1. A plain debug install with no `-e uitest` extra behaves EXACTLY as before. The fakes
+ *     only ever appear for a process that was launched asking for them.
+ *  2. Growing the harness is purely additive here and never touches the DI module.
+ *
+ * Instances are `by lazy` so a fake is only built when something asks for it, and so each is
+ * a process-wide singleton — mutable fixture state (an accepted booking, a sent message) has
+ * to survive navigation the way the real repositories do.
+ *
+ * Most of the fakes already existed in `main` for unit tests; the harness's contribution is
+ * the seed data and the wiring, not another parallel set of test doubles.
+ */
+object HarnessRepositories {
+
+    private val on: Boolean get() = HarnessState.useFakes
+
+    /**
+     * Several of the existing fakes only accept a seed through their `suspend` write methods
+     * (`replaceAll`, `upsert`) rather than a constructor. Those methods are pure in-memory map
+     * writes with no suspension point, so `runBlocking` here completes immediately and cannot
+     * deadlock — it is bridging a `suspend` signature, not waiting on I/O. Doing it inside the
+     * `lazy` block keeps each fake fully seeded before the first caller ever sees it.
+     */
+    private fun seedBlocking(block: suspend () -> Unit) = runBlocking { block() }
+
+    // --- Users: the seam the auth bypass depends on ---------------------------------------
+    // RootViewModel asks this for the signed-in profile the moment the synthetic session
+    // lands. Returning a COMPLETE profile is what moves the gate from Onboarding to the tab
+    // shell; a null or half-filled one would strand the harness in signup.
+    private val usersImpl: FakeUsersRepository by lazy {
+        FakeUsersRepository(selfProfile = HarnessFixtures.selfProfile(HarnessState.flags))
+    }
+
+    val users: UsersRepository? get() = if (on) usersImpl else null
+
+    // --- Artist dashboard / gigs / EPK ----------------------------------------------------
+
+    private val artistsImpl: FakeArtistsRepository by lazy {
+        // seedFull (not the constructor's plain seed) marks the row HYDRATED, so
+        // `fetchArtist` returns the full profile — packages, samples, tech rider and all —
+        // instead of a tile-shaped partial that would render a half-empty EPK.
+        FakeArtistsRepository().apply { seedFull(listOf(HarnessFixtures.artist)) }
+    }
+
+    private val bookingsImpl: FakeBookingsRepository by lazy {
+        // The baseline set spans every status the dashboard buckets on. `seed-pending-request`
+        // adds ONE more pending row so the artist accept/decline surface can be driven without
+        // disturbing the baseline the other flags produce (mirrors the iOS harness's split).
+        val rows = HarnessFixtures.bookings +
+            if (HarnessState.flags.seedPendingRequest) listOf(HarnessFixtures.pendingBooking) else emptyList()
+        FakeBookingsRepository(seed = rows)
+    }
+
+    private val requestsImpl: FakeRequestsRepository by lazy {
+        FakeRequestsRepository(seed = listOf(HarnessFixtures.gigRequest))
+    }
+
+    private val scoreImpl: FakeScoreRepository by lazy {
+        FakeScoreRepository(
+            self = HarnessFixtures.score,
+            byId = mapOf(HarnessFixtures.ARTIST_ID to HarnessFixtures.score),
+            history = HarnessFixtures.scoreHistory,
+        )
+    }
+
+    private val packagesImpl: FakePackagesRepository by lazy {
+        FakePackagesRepository().also { fake ->
+            seedBlocking { fake.replaceAll(HarnessFixtures.ARTIST_ID, HarnessFixtures.packageDrafts) }
+        }
+    }
+
+    private val techRiderImpl: FakeTechRiderRepository by lazy {
+        FakeTechRiderRepository().also { fake ->
+            seedBlocking { fake.replaceAll(HarnessFixtures.ARTIST_ID, HarnessFixtures.techRider) }
+        }
+    }
+
+    private val artistLinksImpl: FakeArtistLinksRepository by lazy {
+        FakeArtistLinksRepository().also { fake ->
+            seedBlocking {
+                fake.upsert(HarnessFixtures.ARTIST_ID, "Instagram", "https://instagram.com/fixtureartist")
+                fake.upsert(HarnessFixtures.ARTIST_ID, "Spotify", "https://open.spotify.com/artist/fixture")
+            }
+        }
+    }
+
+    // The media fake starts empty on purpose: seeding it would need real uploaded files, and
+    // an empty gallery is a legitimate state the EPK renders (gradient cover fallback). What
+    // matters is that it does NOT hit Storage with the synthetic token and surface an error.
+    private val artistMediaImpl: FakeArtistMediaRepository by lazy { FakeArtistMediaRepository() }
+
+    // FakeSamplesRepository can only be seeded through `upload(File, …)`, which would mean
+    // fabricating audio files on disk just to populate a list. This tiny read-only stand-in is
+    // simpler and lets the EPK's samples section render its populated state.
+    private val samplesImpl: SamplesRepository by lazy {
+        HarnessSamplesRepository(HarnessFixtures.samples)
+    }
+
+    private val accountImpl: FakeAccountRepository by lazy { FakeAccountRepository() }
+    private val reportsImpl: FakeReportsRepository by lazy { FakeReportsRepository() }
+
+    val artists: ArtistsRepository? get() = if (on) artistsImpl else null
+    val bookings: BookingsRepository? get() = if (on) bookingsImpl else null
+    val requests: RequestsRepository? get() = if (on) requestsImpl else null
+    val score: ScoreRepository? get() = if (on) scoreImpl else null
+    val packages: PackagesRepository? get() = if (on) packagesImpl else null
+    val techRider: TechRiderRepository? get() = if (on) techRiderImpl else null
+    val samples: SamplesRepository? get() = if (on) samplesImpl else null
+    val artistMedia: ArtistMediaRepository? get() = if (on) artistMediaImpl else null
+    val artistLinks: ArtistLinksRepository? get() = if (on) artistLinksImpl else null
+    val account: AccountRepository? get() = if (on) accountImpl else null
+    val reports: ReportsRepository? get() = if (on) reportsImpl else null
+
+    // --- Client path: Discover / search / profile / saved / messages -----------------------
+
+    // Pages the whole fixture roster rather than the single fixture artist: Discover's rails
+    // group by category and the filter sheet derives its facets from the distinct categories
+    // and cities present, so a one-card roster would render neither.
+    private val searchImpl: FakeSearchRepository by lazy {
+        FakeSearchRepository(HarnessFixtures.roster)
+    }
+
+    private val reviewsImpl: FakeReviewsRepository by lazy {
+        FakeReviewsRepository(byArtist = mapOf(HarnessFixtures.ARTIST_ID to HarnessFixtures.reviews))
+    }
+
+    private val savedArtistsImpl: FakeSavedArtistsRepository by lazy {
+        FakeSavedArtistsRepository().also { fake ->
+            seedBlocking { HarnessFixtures.savedArtistIds.forEach { fake.add(it) } }
+        }
+    }
+
+    // The shared FakeMessagesRepository can only be filled through `send`, which stamps every
+    // message as the viewer's own — so a thread seeded through it would render one bubble
+    // treatment and hide the counterpart's. This stand-in seeds a genuine two-sided transcript.
+    private val messagesImpl: MessagesRepository by lazy {
+        HarnessMessagesRepository(HarnessState.flags.skipSignupAs?.let(HarnessFixtures::selfUserId))
+    }
+
+    val search: SearchRepository? get() = if (on) searchImpl else null
+    val reviews: ReviewsRepository? get() = if (on) reviewsImpl else null
+    val savedArtists: SavedArtistsRepository? get() = if (on) savedArtistsImpl else null
+    val messages: MessagesRepository? get() = if (on) messagesImpl else null
+}
+
+/**
+ * In-memory [MessagesRepository] seeded with one two-sided thread.
+ *
+ * Exists rather than reusing the shared `FakeMessagesRepository` because that one has no seed
+ * path other than `send()`, which marks every message `isMine = true`. A transcript where the
+ * viewer sent everything exercises only one of the two bubble treatments, so a broken
+ * counterpart bubble — or a wrong-side alignment — would look fine in the harness.
+ *
+ * [viewerId] is the booted role's uid, so the same fixture transcript reads correctly from
+ * either side: what the artist sees as theirs, the client sees as the counterpart's.
+ */
+private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository {
+
+    private val viewer = viewerId ?: HarnessFixtures.CLIENT_ID
+    private val threads = mutableListOf(HarnessFixtures.thread)
+    private val messages = mutableMapOf(
+        HarnessFixtures.THREAD_ID to HarnessFixtures.harnessMessages(viewer).toMutableList(),
+    )
+
+    override suspend fun listThreadsForUser(): List<Thread> =
+        threads.sortedByDescending { it.lastMessageAtEpochMs ?: 0L }
+
+    override suspend fun listMessages(threadId: String, limit: Int): List<Message> =
+        messages[threadId]?.takeLast(limit)?.toList().orEmpty()
+
+    override suspend fun send(threadId: String, body: String): Message {
+        val text = body.trim()
+        require(text.isNotEmpty()) { "A message can't be empty." }
+        val message = Message(
+            id = "harness-sent-${System.nanoTime()}",
+            threadId = threadId,
+            senderId = viewer,
+            body = text,
+            sentAtEpochMs = System.currentTimeMillis(),
+            isMine = true,
+        )
+        messages.getOrPut(threadId) { mutableListOf() }.add(message)
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) {
+            threads[index] = threads[index].copy(
+                lastPreview = text,
+                lastMessageAtEpochMs = message.sentAtEpochMs,
+            )
+        }
+        return message
+    }
+
+    override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String {
+        threads.firstOrNull { it.artistId.equals(artistId, ignoreCase = true) }?.let { return it.id }
+        val thread = Thread(
+            id = "harness-thread-${threads.size + 1}",
+            artistId = artistId.lowercase(),
+            bookingId = bookingId,
+        )
+        threads += thread
+        return thread.id
+    }
+
+    override suspend fun markThreadRead(threadId: String) {
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
+    }
+
+    override suspend fun markThreadReadReceipt(threadId: String) = Unit
+
+    override suspend fun counterpartLastRead(threadId: String): Long? = null
+
+    /** No WebSocket in the harness — hand back a no-op cancel token. */
+    override suspend fun subscribeMessages(
+        threadId: String,
+        onInsert: (Message) -> Unit,
+    ): MessagesSubscription = MessagesSubscription {}
+}
+
+/**
+ * Read-only [SamplesRepository] over a fixed list. Exists because the shared
+ * `FakeSamplesRepository` is write-seeded (its only way in is `upload(File, …)`), and the
+ * harness needs a populated samples list without inventing audio files on disk.
+ *
+ * Writes are accepted so the EPK's add/delete affordances don't throw while an operator is
+ * poking at the screen; they mutate only this in-memory list.
+ */
+private class HarnessSamplesRepository(seed: List<Sample>) : SamplesRepository {
+    private val rows = seed.toMutableList()
+
+    override suspend fun list(artistId: String): List<Sample> = rows.toList()
+
+    override suspend fun upload(
+        audioFile: File,
+        title: String,
+        durationSeconds: Double,
+        artistId: String,
+    ): Sample {
+        val minutes = (durationSeconds / 60).toInt()
+        val seconds = (durationSeconds % 60).toInt()
+        val sample = Sample(
+            id = "harness-sample-${rows.size + 1}",
+            title = title,
+            duration = "%d:%02d".format(minutes, seconds),
+        )
+        rows += sample
+        return sample
+    }
+
+    override suspend fun delete(sampleId: String, storagePathOrUrl: String?) {
+        rows.removeAll { it.id == sampleId }
+    }
+}

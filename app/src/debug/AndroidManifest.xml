@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY manifest additions for the fixture harness.
+
+  The manifest merger only folds this file into `debug` build types, so the provider below
+  simply does not exist in a release APK — there is no exported surface, no flag, and no dead
+  code to strip. It is the manifest half of the guarantee that `app/src/debug/` makes.
+
+  HarnessInstaller is a no-op ContentProvider whose only purpose is to be constructed early
+  (before Application.onCreate) so it can register the lifecycle callback that reads the
+  launch intent's `uitest` extra. See HarnessInstaller.kt for why that timing matters.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <provider
+            android:name="in.artistant.app.harness.HarnessInstaller"
+            android:authorities="${applicationId}.harnessinstaller"
+            android:enabled="true"
+            android:exported="false"
+            android:initOrder="1000" />
+    </application>
+
+</manifest>

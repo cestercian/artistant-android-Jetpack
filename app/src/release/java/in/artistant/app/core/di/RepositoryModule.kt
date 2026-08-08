@@ -42,6 +42,19 @@ import `in`.artistant.app.data.repository.UsersRepository
 /**
  * Binds each repository interface → its Supabase impl. Repositories land here as their
  * screens ship (M1+). Abstract so `@Binds` has a home.
+ *
+ * WHY THIS FILE IS IN `src/release/` RATHER THAN `src/main/`
+ * ---------------------------------------------------------
+ * The debug fixture harness has to serve seeded in-memory fakes instead of these Supabase
+ * implementations, and Hilt cannot override an existing binding in a normal (non-test) build
+ * — the binding itself must differ per variant, which means the module must live in a variant
+ * source set. So this file (the unchanged original, bindings identical to before) is the
+ * release/production module, and `src/debug/.../RepositoryModule.kt` is its debug twin.
+ *
+ * Consequence, and the point of the split: a release build compiles ONLY this file. It never
+ * links against the harness, the fixtures, or the fakes — they are absent from the artifact
+ * rather than present-but-disabled. Keep the two files' real bindings in step; the debug twin
+ * falls through to exactly these implementations whenever the harness is off.
  */
 @Module
 @InstallIn(SingletonComponent::class)
