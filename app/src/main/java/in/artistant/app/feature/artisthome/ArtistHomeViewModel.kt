@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
@@ -11,8 +12,9 @@ import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.feature.paywall.EntitlementStore
-import `in`.artistant.app.platform.auth.SessionManager
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -89,7 +91,12 @@ class ArtistHomeViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val scoreRepository: ScoreRepository,
     private val entitlements: EntitlementStore,
-    private val session: SessionManager,
+    // The uid only, not the whole SessionManager: that class drags in a Context, the
+    // Supabase client, analytics and push, none of which a JVM unit test can build —
+    // and the refresh ordering below is only assertable from a test that can construct
+    // this ViewModel. Reuses the existing app-wide ViewerIdentity binding rather than
+    // adding a second seam for the same fact.
+    private val viewer: ViewerIdentity,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ArtistHomeUiState())
@@ -97,6 +104,26 @@ class ArtistHomeViewModel @Inject constructor(
 
     /** The bookings list every derived field projects from. */
     private var bookings: List<Booking> = emptyList()
+
+    /**
+     * Newest refresh wins, however the network resolves.
+     *
+     * Refreshes overlap routinely here — pull-to-refresh, a resume and the failure
+     * banner's Retry can all fire within a second — and the whole screen is a
+     * projection of ONE bookings list written in a single shot at the end of
+     * [refresh]. Without a guard, the request that finishes LAST wins even when it
+     * is the older one, and the counts, the request rail, the upcoming gigs and the
+     * booked days on the availability strip all snap back to a stale snapshot.
+     *
+     * Same shape SearchViewModel uses for its paged loads: cancel the in-flight job
+     * AND stamp each load with a generation. The cancel is the cheap part — it stops
+     * work nobody wants — but it is not sufficient on its own: a job that has already
+     * passed its last suspension point runs on to its state write regardless, and the
+     * four reads below can all be complete before the newer refresh even starts. The
+     * stamp is what actually orders the writes.
+     */
+    private var refreshJob: Job? = null
+    private var generation = 0
 
     init {
         refresh()
@@ -111,19 +138,27 @@ class ArtistHomeViewModel @Inject constructor(
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        val gen = ++generation
+        refreshJob = viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
                 // The four reads are independent, so one being slow shouldn't
                 // hold the others. Only the bookings read is allowed to fail the
                 // whole screen: an empty list rendered after a failed fetch is
                 // indistinguishable from a genuinely empty dashboard, and would
-                // paint booked days as open. The rest degrade to their own
-                // truthful defaults.
+                // paint booked days as open. The quote and score reads degrade to
+                // their own truthful defaults; the profile read carries its outcome
+                // forward instead, because "the read failed" and "the field is
+                // empty" are different answers and the banners below depend on which.
                 val loaded = coroutineScope {
                     val bookingsJob = async { bookingsRepository.listForArtist() }
                     val quotesJob = async { runCatching { requestsRepository.listForArtist() }.getOrDefault(emptyList()) }
-                    val profileJob = async { runCatching { usersRepository.fetchSelfProfile() }.getOrNull() }
+                    // Kept as a Result, not flattened to null: `fetchSelfProfile`
+                    // returns null for a genuinely-absent row and THROWS on a
+                    // network/RLS failure, and the completeness banner below means
+                    // something different in each case.
+                    val profileJob = async { runCatching { usersRepository.fetchSelfProfile() } }
                     val breakdownJob = async { runCatching { scoreRepository.breakdownForSelf() }.getOrNull() }
                     LoadedDashboard(
                         bookings = bookingsJob.await(),
@@ -134,8 +169,23 @@ class ArtistHomeViewModel @Inject constructor(
                 }
 
                 // Depends on the auth id, so it can't join the fan-out above.
-                val artistId = session.currentUserId
-                val artist = artistId?.let { runCatching { artistsRepository.fetchArtist(it) }.getOrNull() }
+                val artistId = viewer.currentUserId()
+                val artistResult = artistId?.let { runCatching { artistsRepository.fetchArtist(it) } }
+                val artist = artistResult?.getOrNull()
+                // "We could not read the artist row" — a thrown fetch, or no session
+                // to read it for. NOT the same as "we read it and the fields are
+                // empty", which is what a bare `getOrNull()` would collapse it into.
+                val detailUnknown = artistResult == null || artistResult.isFailure
+
+                // A read that failed is the artist's business: it's why half the
+                // screen looks thinner than it should. The existing refresh-failure
+                // banner already carries a Retry, so reuse it rather than inventing
+                // a second failure surface.
+                val partialFailure = if (loaded.profile.isFailure || artistResult?.isFailure == true) {
+                    "Couldn't load your profile details. Check your connection and try again."
+                } else {
+                    null
+                }
 
                 // Inert unless the operator has flipped subscriptions on; the
                 // store short-circuits to "not entitled" in that case, so the
@@ -143,28 +193,51 @@ class ArtistHomeViewModel @Inject constructor(
                 runCatching { entitlements.refresh() }
                 val showSubscribe = entitlements.subscriptionsActive && !entitlements.isEntitled.value
 
+                // Everything below WRITES. A load that has been superseded stops here:
+                // the shared `bookings` field is guarded too, not just the state, or
+                // the next range switch would re-derive the screen from the stale list.
+                if (gen != generation) return@launch
+
                 bookings = loaded.bookings
                 _state.update { prev ->
+                    // Null = "nothing can be said about completeness this time
+                    // round" (the artist row didn't arrive, or there's no users row
+                    // to check against). Fall back to what the last good refresh
+                    // decided rather than to a banner derived from absent fields.
+                    val gaps = loaded.profile.getOrNull()?.let {
+                        profileGaps(
+                            setupComplete = it.artistSetupComplete == true,
+                            genre = artist?.genre,
+                            bio = artist?.bio,
+                            detailUnknown = detailUnknown,
+                        )
+                    }
                     prev.copy(
-                        greetingName = greetingName(artist?.name),
-                        avatarName = artist?.name?.takeIf { it.isNotBlank() } ?: "Artist",
+                        // Same reasoning for the identity: a blipped read must not
+                        // reset a hydrated screen to the pre-hydration placeholders.
+                        greetingName = if (detailUnknown) prev.greetingName else greetingName(artist?.name),
+                        avatarName = if (detailUnknown) {
+                            prev.avatarName
+                        } else {
+                            artist?.name?.takeIf { it.isNotBlank() } ?: "Artist"
+                        },
                         todayLabel = todayLabel(),
                         openQuotes = openGigRequests(loaded.quotes),
                         breakdown = loaded.breakdown ?: ScoreBreakdown.NewArtist,
-                        profileGaps = loaded.profile?.let {
-                            profileGaps(
-                                setupComplete = it.artistSetupComplete == true,
-                                genre = artist?.genre,
-                                bio = artist?.bio,
-                            )
-                        },
+                        profileGaps = gaps ?: prev.profileGaps,
                         showSubscribeBanner = showSubscribe,
                         isLoading = false,
                         hasLoaded = true,
-                        error = null,
+                        error = partialFailure,
                     ).withDerived(loaded.bookings)
                 }
             } catch (e: Exception) {
+                // Guarded for the same reason as the success path, plus one more: a
+                // cancelled job lands here (CancellationException is an Exception), and
+                // an unguarded write would paint the failure banner over the very data
+                // the newer refresh just fetched.
+                if (gen != generation) return@launch
+
                 // Keep whatever was already on screen and surface a retry banner
                 // above it — a refresh failure shouldn't blank a working
                 // dashboard. The screen only falls back to a full-screen error
@@ -191,7 +264,8 @@ class ArtistHomeViewModel @Inject constructor(
     private data class LoadedDashboard(
         val bookings: List<Booking>,
         val quotes: List<StoredRequest>,
-        val profile: `in`.artistant.app.data.model.SelfProfile?,
+        /** success(null) = no users row; failure = the read threw. Not interchangeable. */
+        val profile: Result<SelfProfile?>,
         val breakdown: ScoreBreakdown?,
     )
 

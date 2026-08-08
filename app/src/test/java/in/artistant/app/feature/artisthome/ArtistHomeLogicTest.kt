@@ -401,7 +401,12 @@ class ArtistHomeLogicTest {
 
     @Test
     fun profileGaps_unfinishedSetupIsTheOnlyDiscoveryBlocker() {
-        val gaps = profileGaps(setupComplete = false, genre = "Indie", bio = "Bangalore four-piece")
+        val gaps = profileGaps(
+            setupComplete = false,
+            genre = "Indie",
+            bio = "Bangalore four-piece",
+            detailUnknown = false,
+        )!!
         assertTrue(gaps.blocksDiscovery)
         assertTrue(gaps.needsWork)
         assertTrue(gaps.headline.contains("required to appear in search"))
@@ -409,7 +414,7 @@ class ArtistHomeLogicTest {
 
     @Test
     fun profileGaps_thinButLiveProfileStaysNeutral() {
-        val gaps = profileGaps(setupComplete = true, genre = "  ", bio = null)
+        val gaps = profileGaps(setupComplete = true, genre = "  ", bio = null, detailUnknown = false)!!
         assertFalse(gaps.blocksDiscovery)
         assertTrue(gaps.needsWork)
         assertFalse(gaps.headline.contains("search"))
@@ -418,8 +423,29 @@ class ArtistHomeLogicTest {
 
     @Test
     fun profileGaps_completeProfileNeedsNothing() {
-        val gaps = profileGaps(setupComplete = true, genre = "Indie", bio = "Bangalore four-piece")
+        val gaps = profileGaps(
+            setupComplete = true,
+            genre = "Indie",
+            bio = "Bangalore four-piece",
+            detailUnknown = false,
+        )!!
         assertFalse(gaps.needsWork)
+    }
+
+    @Test
+    fun profileGaps_unreadableArtistRowIsNotAThinProfile() {
+        // The blank genre/bio here are the SAME values a thin profile produces —
+        // the only thing separating them is that the read didn't land, so this is
+        // exactly the case that must not turn into "add your genre".
+        assertNull(profileGaps(setupComplete = true, genre = null, bio = null, detailUnknown = true))
+    }
+
+    @Test
+    fun profileGaps_unfinishedSetupStillBlocks_whenTheArtistRowIsUnreadable() {
+        // Knowable from the users row alone, so an unreadable artist row must not
+        // suppress it — the artist genuinely isn't in search yet.
+        val gaps = profileGaps(setupComplete = false, genre = null, bio = null, detailUnknown = true)!!
+        assertTrue(gaps.blocksDiscovery)
     }
 
     // ── Greeting ────────────────────────────────────────────────────────────
