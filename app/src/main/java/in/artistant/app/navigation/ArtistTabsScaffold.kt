@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.WorkOutline
@@ -17,9 +17,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import `in`.artistant.app.designsystem.component.FloatingTabBar
-import `in`.artistant.app.designsystem.component.FloatingTabItem
-import `in`.artistant.app.designsystem.component.ambientRoleWash
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -29,28 +26,31 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import `in`.artistant.app.designsystem.component.FloatingTabBar
+import `in`.artistant.app.designsystem.component.FloatingTabItem
+import `in`.artistant.app.designsystem.component.ambientRoleWash
+import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
+import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
-import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.epk.EpkScreen
-import `in`.artistant.app.feature.wizard.WizardScreen
+import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
-import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
-import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
+import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
-import `in`.artistant.app.feature.paywall.PaywallScreen
+import `in`.artistant.app.feature.wizard.WizardScreen
 
 // Artist bottom nav: Home · Gigs · Messages · EPK.
 private enum class ArtistTab(val route: String, val label: String, val icon: ImageVector) {
     Home("home", "Home", Icons.Filled.Dashboard),
     Gigs("gigs", "Gigs", Icons.Filled.WorkOutline),
-    Messages("messages", "Messages", Icons.Filled.Chat),
+    Messages("messages", "Messages", Icons.AutoMirrored.Filled.Chat),
     Epk("epk", "EPK", Icons.Filled.LibraryMusic),
 }
 
@@ -96,7 +96,7 @@ fun ArtistTabsScaffold() {
 
     Scaffold(
         // Transparent so the ambient wash below shows through; the wash paints
-        // the background colour itself.
+        // the background color itself.
         containerColor = Color.Transparent,
         modifier = Modifier.ambientBackdrop(),
         bottomBar = {
@@ -222,7 +222,7 @@ fun ArtistTabsScaffold() {
 }
 
 /**
- * Shared bottom-nav click behaviour: single-top, restore state, and pop to the
+ * Shared bottom-nav click behavior: single-top, restore state, and pop to the
  * graph start so tabs don't stack. Used by both role scaffolds.
  */
 internal fun navigateToTab(nav: androidx.navigation.NavController, route: String) {
@@ -254,7 +254,7 @@ internal fun TabPane(inner: PaddingValues, content: @Composable () -> Unit) {
  * Role-tinted atmosphere painted behind every destination in a scaffold.
  *
  * Screens that paint their own opaque `colors.bg` (most of them today) sit on
- * top of this and are unaffected; drop that fill from a screen and it inherits
+ * top of this and are unaffected; drop that fill from a screen, and it inherits
  * the wash. Kept at the scaffold level so the glow is continuous across a tab
  * switch rather than restarting per screen.
  */
