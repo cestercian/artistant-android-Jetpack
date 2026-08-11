@@ -11,8 +11,18 @@ import androidx.compose.ui.graphics.Color
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.data.model.BookingStatus
 
-/** Tone drives the capsule fill + text color. Neutral is the default chrome-free chip. */
-enum class PillTone { Neutral, Brand, Accent, Good, Warm, Hot }
+/**
+ * Tone drives the capsule fill + text color. Neutral is the default chrome-free chip.
+ *
+ * [Brand] and [BrandSolid] are two different jobs, not two weights of one. Brand
+ * is the washed chip the status ladder uses, where lime means "live" alongside a
+ * warm, a good and a hot sibling and all four have to read as the same kind of
+ * object. BrandSolid is the reference build's brand pill: lime fill, dark ink,
+ * used where the chip is the only signal on the screen and is stating a fact
+ * rather than a state — a Bookability score beside the artist you are about to
+ * request. Washed, that badge lost against the row it sits in.
+ */
+enum class PillTone { Neutral, Brand, BrandSolid, Accent, Good, Warm, Hot }
 
 /** Small capsule label — the Pill port. Mono-ish caption text, no border. */
 @Composable
@@ -21,6 +31,7 @@ fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.
     val (bg, fg) = when (tone) {
         PillTone.Neutral -> colors.bgSoft to colors.ink2
         PillTone.Brand -> colors.brandSoft to colors.brand
+        PillTone.BrandSolid -> colors.brand to colors.brandInk
         // Fixed violet accent — distinct from the role-reactive brand (iOS `.accent`).
         PillTone.Accent -> colors.accentSoft to colors.accentInk
         PillTone.Good -> Color(0x1A5BE074) to colors.good

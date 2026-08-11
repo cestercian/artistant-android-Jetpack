@@ -100,6 +100,16 @@ data class Size(
     val radioCore: Dp = 10.dp,
     /** Full-width pinned CTA (taller than `controlMin` — it is the only action). */
     val ctaTall: Dp = 52.dp,
+    /**
+     * Air under a pinned CTA bar, on top of whatever the gesture bar claims.
+     *
+     * Deliberately off the [Space] ramp, which is why it lives here: the funnel's
+     * bottom bar is the one place the app wants MORE clearance than `xl` and less
+     * than `xxl`, so that the terminal action of a paid flow is never a thumb's
+     * width from the system gesture area. Measured off the reference build, where
+     * the same bar reserves this much above its home-indicator inset.
+     */
+    val ctaBarTailroom: Dp = 28.dp,
 )
 
 /**
