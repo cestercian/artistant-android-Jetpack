@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -71,7 +72,7 @@ fun ProfileScreen(
     val space = AppTheme.dimens.space
     var cityOpen by remember { mutableStateOf(false) }
 
-    Column(modifier = modifier.fillMaxSize().background(colors.bg)) {
+    Column(modifier = modifier.fillMaxSize().background(colors.bg).statusBarsPadding()) {
         // Top chrome: hairline back chevron + compact right-aligned 5-segment progress (step 4).
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = space.xl, end = space.xl, top = space.sm),
