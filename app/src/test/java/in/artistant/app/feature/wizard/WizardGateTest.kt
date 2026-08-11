@@ -204,6 +204,19 @@ class WizardGateTest {
     }
 
     @Test
+    fun `a draft never reopens on the celebration screen`() {
+        // Found on device: publish clears the draft and then moves the step, so
+        // the debounced writer landed afterwards and rewrote the draft it had
+        // just deleted, with step=Done in it. The next launch opened the wizard
+        // on "You're live" for a profile the artist had not published. The
+        // writer now skips Done; this is the second guard, on the read side.
+        assertEquals(WizardStep.Preview, wizardResumeStep("Done"))
+        assertEquals(WizardStep.Pricing, wizardResumeStep("Pricing"))
+        assertEquals(WizardStep.Identity, wizardResumeStep(null))
+        assertEquals(WizardStep.Identity, wizardResumeStep("nonsense"))
+    }
+
+    @Test
     fun `toggleInSet adds then removes`() {
         val once = toggleInSet("Fri", emptySet())
         assertEquals(setOf("Fri"), once)

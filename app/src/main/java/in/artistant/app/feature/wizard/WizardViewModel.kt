@@ -132,17 +132,30 @@ class WizardViewModel @Inject constructor(
 
         _state.update { current ->
             val restored = draft?.let { current.applyDraft(it) } ?: current
-            restored.copy(
+            val seeded = restored.copy(
                 stageName = restored.stageName.ifBlank { profile?.fullName.orEmpty() },
                 handle = restored.handle.ifBlank { profile?.handle.orEmpty() },
                 baseCity = restored.baseCity.ifBlank { profile?.city.orEmpty() },
+                // A draft saved before the artist reached pricing has a category
+                // but no tiers. Seeding here as well as in `onCategorySelected`
+                // means resuming never lands on an empty, gated pricing step with
+                // no explanation of what it wants.
+                packageRows = restored.packageRows.ifEmpty {
+                    if (restored.category.isBlank()) emptyList() else starterPackageRows(restored.category)
+                },
                 isRestoring = false,
-            ).let { seeded -> seeded.copy(handleStatus = wizardHandleSyncStatus(seeded.handle)) }
+            )
+            seeded.copy(handleStatus = wizardHandleSyncStatus(seeded.handle))
         }
     }
 
     private fun WizardUiState.applyDraft(draft: WizardDraft): WizardUiState = copy(
-        step = wizardStepFromName(draft.step) ?: WizardStep.Identity,
+        // Never resume into Done. A draft is a form in progress; if one ever
+        // names the celebration step — an older build, a write that raced the
+        // publish — restoring it would show "You're live" to an artist who is
+        // not. Preview is the honest place to land: everything they typed is
+        // there and one tap publishes it for real.
+        step = wizardResumeStep(draft.step),
         stageName = draft.stageName,
         handle = draft.handle,
         category = draft.category,
@@ -172,12 +185,19 @@ class WizardViewModel @Inject constructor(
      * write and short enough that a task-kill mid-form loses at most a word.
      * `drop(1)` skips the initial empty state so an immediate kill can't
      * overwrite a good draft with a blank one before [restore] has landed.
+     *
+     * Done is excluded, and that exclusion is load-bearing rather than tidy.
+     * Publish clears the draft and then moves the step, so a writer that still
+     * fired on Done would land 600ms later and rewrite the draft it had just
+     * deleted — with `step = Done` in it. The next launch would restore that and
+     * open the wizard on the celebration screen for a profile the artist had not
+     * published. Caught on device; the ordering is invisible from the code alone.
      */
     @OptIn(FlowPreview::class)
     private fun observeDraftWrites() {
         viewModelScope.launch {
             _state
-                .filter { !it.isRestoring }
+                .filter { !it.isRestoring && it.step != WizardStep.Done }
                 .drop(1)
                 .debounce(600)
                 .collect { snapshot ->

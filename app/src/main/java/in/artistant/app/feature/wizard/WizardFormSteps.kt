@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -449,7 +450,13 @@ fun WizardChipSection(
     }
 }
 
-/** A one-line labelled value, used by the preview's stats strip. */
+/**
+ * A one-line labelled value for the preview's stats strip.
+ *
+ * Ellipsised rather than clipped: a long handle cut mid-glyph at the cell edge
+ * reads as a rendering bug, where "@fixtureart…" reads as a value that did not
+ * fit.
+ */
 @Composable
 fun WizardStat(value: String, label: String, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
@@ -459,6 +466,7 @@ fun WizardStat(value: String, label: String, modifier: Modifier = Modifier) {
             style = AppTheme.type.monoStat,
             color = colors.ink,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(AppTheme.dimens.space.xs))
         Text(label.uppercase(), style = AppTheme.type.monoMicro, color = colors.ink3)

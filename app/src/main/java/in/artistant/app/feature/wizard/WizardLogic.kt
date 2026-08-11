@@ -91,6 +91,22 @@ fun wizardStepFromName(raw: String?): WizardStep? {
     return WizardFlowOrder.firstOrNull { it.name.equals(name, ignoreCase = true) }
 }
 
+/**
+ * Which step a saved draft should reopen on.
+ *
+ * Never Done. A draft is a form in progress; if one ever names the celebration
+ * step — an older build, or a debounced write that raced the publish that
+ * cleared it — restoring it verbatim would show "You're live" to an artist who
+ * is not. Preview is the honest landing: everything they typed is still there
+ * and one tap publishes it for real. An unrecognised name starts over.
+ */
+fun wizardResumeStep(rawStepName: String?): WizardStep =
+    when (val step = wizardStepFromName(rawStepName)) {
+        null -> WizardStep.Identity
+        WizardStep.Done -> WizardStep.Preview
+        else -> step
+    }
+
 // ── Catalogs ─────────────────────────────────────────────────────────────────
 
 /** The seven categories the server's `category` enum accepts. */
