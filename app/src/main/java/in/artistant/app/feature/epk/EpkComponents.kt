@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
 import java.util.Locale
@@ -48,6 +51,73 @@ import java.util.Locale
  * design system fills up with near-duplicates. If the artist home or the wizard
  * grows the same need, this is the file to lift from.
  */
+
+/**
+ * The page's own masthead: what this screen is, what it is for, and the way into
+ * the artist's account.
+ *
+ * The editor used to open straight onto a full-bleed cover, which made it look
+ * like the artist's public page rather than the form that produces it — the
+ * screen never said its own name, and the first thing under the status bar was a
+ * photo the artist could not edit from there. A title plus a subtitle costs one
+ * row and settles both questions before the first section.
+ *
+ * **The avatar is the account entry, and it is deliberately here.** It sits on
+ * the surface an artist opens to work on their own profile, which is where they
+ * come looking for "my account" — sign out, availability, data export, delete
+ * account. It is an avatar rather than a gear because a gear reads as app
+ * preferences and this is specifically *your* account; the monogram is the same
+ * one the dashboard greeting shows, at row-control size.
+ *
+ * Not a `ScreenTitleBar`: that draws a centred 44dp inline bar, which is the
+ * right chrome for the tab roots whose reference uses an inline title. This root
+ * uses a large left-aligned one, and rendering it centred and small would be a
+ * different screen wearing the same words.
+ */
+@Composable
+fun EpkTitleBar(
+    title: String,
+    subtitle: String,
+    avatarName: String,
+    onOpenAccount: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        modifier.fillMaxWidth(),
+        // Top, not centre: the title is two lines and the avatar belongs beside
+        // the first one. Centred, it drifts down against the subtitle and stops
+        // reading as a bar control.
+        verticalAlignment = Alignment.Top,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = AppTheme.type.pageTitle, color = colors.ink)
+            Text(subtitle, style = AppTheme.type.footnote, color = colors.ink3)
+        }
+        Spacer(Modifier.width(space.md))
+        Avatar(
+            name = avatarName,
+            size = dimens.size.avatarSm,
+            ring = true,
+            modifier = Modifier
+                // The 32dp disc sits inside a 44dp tap target rather than being
+                // grown to it — the touch floor is a hit area, not a size.
+                .sizeIn(minWidth = dimens.size.rowMin, minHeight = dimens.size.rowMin)
+                .wrapContentSize()
+                .pressScale(interaction)
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onOpenAccount,
+                )
+                .semantics { contentDescription = "Account and settings" },
+        )
+    }
+}
 
 /**
  * A section rule: caps label on the left, one optional text action on the right.

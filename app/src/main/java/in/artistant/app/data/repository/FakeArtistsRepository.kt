@@ -101,6 +101,37 @@ class FakeArtistsRepository(
         _cacheGeneration.value = _cacheGeneration.value + 1
     }
 
+    /**
+     * The narrow self-row edits, applied to whichever artist the fake holds.
+     *
+     * They mutate the cached row rather than only recording the call, because the
+     * thing worth testing about them is that a save is VISIBLE on the next read —
+     * the real repository's bug class here is a write that lands and then gets
+     * masked by a stale cache entry, and a fake that only records would pass
+     * whether or not the production code invalidated.
+     */
+    override suspend fun updateBio(bio: String) = mutateSelf { it.copy(bio = bio.trim()) }
+
+    override suspend fun updateCoverGradient(index: Int) = mutateSelf {
+        val clamped = ArtistGradient.clampIndex(index)
+        it.copy(coverGradientIndex = clamped, gradient = ArtistGradient.palette(clamped))
+    }
+
+    override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
+        mutateSelf {
+            it.copy(
+                instagramHandle = instagram?.trim()?.ifBlank { null },
+                spotifyArtistUrl = spotify?.trim()?.ifBlank { null },
+                youtubeChannelUrl = youtube?.trim()?.ifBlank { null },
+            )
+        }
+
+    private fun mutateSelf(transform: (Artist) -> Artist) {
+        val id = byId.keys.firstOrNull() ?: return
+        byId[id] = transform(byId.getValue(id))
+        _cacheGeneration.value = _cacheGeneration.value + 1
+    }
+
     fun seedFull(artists: List<Artist>) {
         for (a in artists) {
             val id = a.id.lowercase()

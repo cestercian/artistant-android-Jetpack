@@ -36,6 +36,15 @@ data class Artist(
     val timeSlots: List<String> = emptyList(),
     /** Public CDN URL for position-0 photo, or null → gradient fallback. */
     val coverUrl: String? = null,
+    /**
+     * Which palette [gradient] was resolved from.
+     *
+     * Carried alongside the resolved colours rather than instead of them: every
+     * reader wants the colours, and only the editor wants to know which entry is
+     * currently picked so it can ring that swatch. Deriving the index back out of
+     * a colour list would be fragile the moment two palettes share a stop.
+     */
+    val coverGradientIndex: Int = 0,
     val newArtistDiscountPct: Int = 0,
 )
 
@@ -78,6 +87,20 @@ object ArtistGradient {
         listOf(Color(0xFF7C5CFF), Color(0xFF22D3EE), Color(0xFF0F1014)),
     )
 
+    /** How many palettes the picker may offer. */
+    val count: Int get() = palettes.size
+
     fun palette(index: Int): List<Color> =
         palettes[index.coerceIn(0, palettes.lastIndex)]
+
+    /**
+     * Clamp an index onto the palette range.
+     *
+     * The read path coerces already, so this exists for the WRITE path: an index
+     * that is out of range here would persist a number the app cannot render, and
+     * every later read would silently show palette 0 while the column said
+     * otherwise. Refusing at the boundary keeps the stored value and the rendered
+     * cover the same fact.
+     */
+    fun clampIndex(index: Int): Int = index.coerceIn(0, palettes.lastIndex)
 }
