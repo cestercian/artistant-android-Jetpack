@@ -11,6 +11,7 @@ import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
+import androidx.media3.common.util.UnstableApi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
@@ -25,7 +26,25 @@ import kotlin.coroutines.resumeWithException
  * Takes the first [maxDurationMs] of [input] and writes an MP4 under the wizard cache.
  * Soft-fails to copying the original when Transformer isn't viable on-device.
  */
+/**
+ * Media3's Transformer surface is annotated `@UnstableApi`, so every reference to
+ * it raises `UnsafeOptInUsageError` and `lintDebug` failed on 28 counts in this
+ * one file. The opt-in is declared once on the class rather than per call site:
+ * this whole class IS the Transformer adapter, so a narrower annotation would
+ * repeat the same acknowledgement on every line.
+ *
+ * It has to be `androidx.annotation.OptIn`, not Kotlin's `@file:OptIn` — the
+ * latter satisfies the Kotlin compiler but androidx's lint check looks for its
+ * own annotation on the declaration, so the file compiled clean while lint still
+ * failed.
+ *
+ * Opting in is the correct response, not a suppression: the API works, it is
+ * simply not source-stable across Media3 releases. The real consequence is that a
+ * Media3 bump can break this file's compile — that is the signal to re-read the
+ * Transformer changelog, not to widen the annotation.
+ */
 @Singleton
+@androidx.annotation.OptIn(UnstableApi::class)
 class VideoTrimmer @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
