@@ -11,16 +11,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.PriceBucket
+import `in`.artistant.app.data.model.SearchTuning
+import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -87,7 +94,7 @@ fun SearchFilterSheet(
             }
             Spacer(Modifier.height(space.md))
 
-            AccordionHeader("City", open == FilterSection.City) { open = FilterSection.City }
+            AccordionHeader("City", open == FilterSection.City, state.city ?: "Any") { open = FilterSection.City }
             if (open == FilterSection.City) {
                 ChipRow(
                     options = listOf(null to "Any") + cityOptions.map { it to it },
@@ -96,7 +103,7 @@ fun SearchFilterSheet(
                 )
             }
 
-            AccordionHeader("Date", open == FilterSection.Date) { open = FilterSection.Date }
+            AccordionHeader("Date", open == FilterSection.Date, state.dateIso ?: "Any date") { open = FilterSection.Date }
             if (open == FilterSection.Date) {
                 Text(
                     "ISO date (yyyy-MM-dd) — tap Clear to unset",
@@ -133,7 +140,14 @@ fun SearchFilterSheet(
                 }
             }
 
-            AccordionHeader("What", open == FilterSection.What) { open = FilterSection.What }
+            AccordionHeader(
+                "What",
+                open == FilterSection.What,
+                // Count, not the slugs: the set holds server slugs, and a
+                // summary that printed one of them would show a different
+                // string than the chip the user actually tapped.
+                if (state.services.isEmpty()) "Anything" else "${state.services.size} selected",
+            ) { open = FilterSection.What }
             if (open == FilterSection.What) {
                 Text("Event type", style = AppTheme.type.caption, color = colors.ink3)
                 Spacer(Modifier.height(space.xs))
@@ -163,7 +177,17 @@ fun SearchFilterSheet(
                 }
             }
 
-            AccordionHeader("Budget", open == FilterSection.Budget) { open = FilterSection.Budget }
+            AccordionHeader(
+                "Budget",
+                open == FilterSection.Budget,
+                if (state.minPrice == SearchTuning.PRICE_FLOOR &&
+                    state.maxPrice == SearchTuning.PRICE_CEILING
+                ) {
+                    "Any"
+                } else {
+                    "${formatInr(state.minPrice)}–${formatInr(state.maxPrice)}"
+                },
+            ) { open = FilterSection.Budget }
             if (open == FilterSection.Budget) {
                 if (state.histogram.isNotEmpty()) {
                     PriceHistogram(state.histogram, state.minPrice, state.maxPrice)
@@ -181,7 +205,11 @@ fun SearchFilterSheet(
                 )
             }
 
-            AccordionHeader("Bookability", open == FilterSection.Score) { open = FilterSection.Score }
+            AccordionHeader(
+                "Bookability",
+                open == FilterSection.Score,
+                if (state.minScore <= 0) "Any" else "${state.minScore}+",
+            ) { open = FilterSection.Score }
             if (open == FilterSection.Score) {
                 Text("Min score ${state.minScore}", style = AppTheme.type.caption, color = colors.ink2)
                 Slider(
@@ -196,7 +224,12 @@ fun SearchFilterSheet(
                 text = when {
                     state.isLoading -> "Searching…"
                     state.results.isEmpty() && state.hasActiveQuery -> "No matches"
-                    else -> "Show ${state.results.size.coerceAtLeast(1)} artists"
+                    else -> {
+                        // "Show 1 artists" shipped for as long as the sheet has
+                        // existed. The count is the whole point of the label.
+                        val n = state.results.size.coerceAtLeast(1)
+                        if (n == 1) "Show 1 artist" else "Show $n artists"
+                    }
                 },
                 onClick = onApply,
                 fullWidth = true,
@@ -206,19 +239,56 @@ fun SearchFilterSheet(
     }
 }
 
+/**
+ * One filter section's header row.
+ *
+ * A collapsed section states what it is currently set to, on the trailing edge.
+ * Without that the sheet could tell you nothing about four of its five filters
+ * without opening each one in turn — and since only one section is open at a
+ * time, "what am I filtering by" took four taps to answer. The reference puts
+ * the same summary in the same place, and it is the reason its rows are taller
+ * than ours were (56 against 48.8).
+ *
+ * The disclosure marker moved from a text glyph on the LEADING edge to a real
+ * chevron on the trailing one: a leading marker pushed the section titles off
+ * the sheet's own gutter, so they no longer lined up with the chips underneath
+ * them.
+ */
 @Composable
-private fun AccordionHeader(title: String, open: Boolean, onClick: () -> Unit) {
+private fun AccordionHeader(
+    title: String,
+    open: Boolean,
+    summary: String? = null,
+    onClick: () -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    Text(
-        text = if (open) "▾ $title" else "▸ $title",
-        style = AppTheme.type.headline,
-        color = colors.ink,
-        modifier = Modifier
+    Row(
+        Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = space.md),
-    )
+            // `lg`, not `md`: with the summary and the rule in place the row
+            // measured 48.8 against the reference's 56, and the ramp step up
+            // lands it at 56.2. A filter row is a setting you read, not a
+            // heading you skim past.
+            .padding(vertical = space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = AppTheme.type.headline, color = colors.ink, modifier = Modifier.weight(1f))
+        if (!open && summary != null) {
+            Text(summary, style = AppTheme.type.callout, color = colors.ink3)
+            Spacer(Modifier.width(space.sm))
+        }
+        Icon(
+            imageVector = if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = colors.ink3,
+            modifier = Modifier.size(AppTheme.dimens.size.iconSm),
+        )
+    }
+    // A rule under every section, so the sheet reads as a list of settings rather
+    // than as five headings floating on the page.
+    HRule()
 }
 
 @Composable
