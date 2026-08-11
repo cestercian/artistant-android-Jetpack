@@ -256,8 +256,15 @@ data class Dashboard(
      * weekday and a numeral, and fourteen of them have to be scannable in one
      * horizontal sweep.
      */
-    val dayCellW: Dp = 46.dp,
-    val dayCellH: Dp = 54.dp,
+    val dayCellW: Dp = 42.dp,
+    val dayCellH: Dp = 50.dp,
+    /**
+     * The dashboard's own score ring — a ramp step above [Size.ringLg], which is
+     * the size the ring takes everywhere it accompanies something else. Here it
+     * IS the section: the artist's score with four meters hanging off it, and at
+     * the shared size it under-read against the four-row block beside it.
+     */
+    val scoreRing: Dp = 86.dp,
     /** The "there's a gig here" dot inside a day cell. */
     val dayDot: Dp = 3.dp,
     /** Attention dot leading a banner headline. */
