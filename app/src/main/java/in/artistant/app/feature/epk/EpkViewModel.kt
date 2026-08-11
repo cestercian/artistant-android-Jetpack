@@ -16,6 +16,7 @@ import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.SamplesRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
@@ -90,6 +91,16 @@ data class EpkUiState(
      * same reason [coverGradientIndex] is — one field to clear on failure.
      */
     val newArtistDiscountPct: Int? = null,
+
+    /**
+     * The services the artist has ticked, pending confirmation. Null means "show
+     * what the row says" — the same one-field-to-clear shape the two pricing
+     * modifiers use.
+     *
+     * Held as the whole set rather than as a diff because that is what the write
+     * sends, so a failed write has exactly one thing to discard.
+     */
+    val serviceTags: List<String>? = null,
 
     /**
      * The bio as it is being typed. Held apart from `artist.bio` — which stays
@@ -269,6 +280,7 @@ class EpkViewModel @Inject constructor(
                         identityHydrated = artist != null,
                         coverGradientIndex = null,
                         newArtistDiscountPct = null,
+                        serviceTags = null,
                         bioDraft = if (pendingBio) it.bioDraft else artist?.bio.orEmpty(),
                         socialDraft = if (pendingSocials) it.socialDraft else savedSocials(artist),
                     )
@@ -410,6 +422,59 @@ class EpkViewModel @Inject constructor(
                         it.copy(
                             newArtistDiscountPct = null,
                             saveError = "Couldn't change your new-artist offer — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── Services offered ─────────────────────────────────────────────────────
+
+    /**
+     * Tick or untick one service, optimistically.
+     *
+     * **Gated on [EpkUiState.identityHydrated] for the same reason the accounts
+     * write is.** `updateServiceTags` sends the complete array, so a tap that
+     * fired before [loadIdentity] returned would send a one-element list built on
+     * top of an empty local set — publishing "I only do DJ sets" over an artist
+     * who had ticked five services on another device. The gate is what makes the
+     * local set a copy of the server's rather than a guess at it.
+     *
+     * Undebounced like the palette and the offer: a chip tap is one decision, and
+     * the nine-chip group cannot produce a burst worth coalescing. A failure
+     * clears the pending set so the chips snap back to what is actually
+     * published — which here also decides whether clients can find this artist at
+     * all, since the same slugs back Discover's services filter.
+     */
+    fun onServiceTagToggled(slug: String) {
+        val current = _state.value
+        if (!current.identityHydrated) return
+        val shown = shownServiceTags(current.serviceTags, current.artist?.serviceTags.orEmpty())
+        val next = ServiceTags.toggle(shown, slug)
+        // At the cap, toggling ON is refused rather than silently truncated. Say
+        // so — a chip that does not light up on tap reads as a broken control.
+        if (next == shown) {
+            _state.update {
+                it.copy(saveError = "You can list up to ${ServiceTags.MAX_TAGS} services — untick one to add another.")
+            }
+            return
+        }
+        _state.update { it.copy(serviceTags = next, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateServiceTags(next) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            statusNote = "Services saved.",
+                            artist = it.artist?.copy(serviceTags = next),
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            serviceTags = null,
+                            saveError = "Couldn't save what you offer — check your connection and try again.",
                         )
                     }
                 }

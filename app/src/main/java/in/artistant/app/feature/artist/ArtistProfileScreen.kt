@@ -65,6 +65,7 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
@@ -155,6 +156,9 @@ fun ArtistProfileScreen(
                         ) {
                             if (artist.bio.isNotBlank()) {
                                 AboutBlock(bio = artist.bio)
+                            }
+                            if (artist.serviceTags.isNotEmpty()) {
+                                ServicesBlock(tags = artist.serviceTags)
                             }
                             BookingBlock(artist = artist)
                             PackagesBlock(
@@ -597,6 +601,45 @@ private fun AboutBlock(bio: String) {
     Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.lg)) {
         Text("About", style = AppTheme.type.displaySmall, color = colors.ink)
         Text(bio, style = AppTheme.type.body, color = colors.ink2)
+    }
+}
+
+/**
+ * What this artist plays, as the client's own filter vocabulary.
+ *
+ * The labels here are the same nine the search sheet offers, which is the point:
+ * a client who filtered for "Full band" should see the words they ticked on the
+ * profile they landed on, rather than having to infer the match from a bio.
+ *
+ * Hairline outline chips, never filled — a filled chip is the *selected* state in
+ * this app's chip language, and nothing on a read-only profile is selected. An
+ * unrecognised slug renders verbatim via [ServiceTags.label] rather than being
+ * dropped, so a tag written by another client still describes the artist.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ServicesBlock(tags: List<String>) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+        Text("What they play", style = AppTheme.type.displaySmall, color = colors.ink)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(space.sm),
+            verticalArrangement = Arrangement.spacedBy(space.sm),
+        ) {
+            ServiceTags.labels(tags).forEach { label ->
+                Text(
+                    label,
+                    style = AppTheme.type.footnote,
+                    color = colors.ink2,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .border(dimens.size.hairline, colors.line, CircleShape)
+                        .padding(horizontal = space.md, vertical = space.sm),
+                )
+            }
+        }
     }
 }
 

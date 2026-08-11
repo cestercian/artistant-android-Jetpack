@@ -2,6 +2,7 @@ package `in`.artistant.app.data.repository
 
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistGradient
+import `in`.artistant.app.domain.artist.ServiceTags
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -119,6 +120,13 @@ class FakeArtistsRepository(
 
     override suspend fun updateNewArtistDiscount(pct: Int) = mutateSelf {
         it.copy(newArtistDiscountPct = pct.coerceIn(0, 100))
+    }
+
+    override suspend fun updateServiceTags(tags: List<String>) = mutateSelf {
+        // Normalized here too, because the production repository normalizes on
+        // the way out — a fake that stored the raw list would let a test pass on
+        // a set the server would never have received.
+        it.copy(serviceTags = ServiceTags.normalize(tags))
     }
 
     override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =

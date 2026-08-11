@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.epk
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.feature.wizard.WIZARD_BIO_MAX
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -503,6 +504,47 @@ class EpkLogicTest {
     @Test
     fun newArtistOffer_labelsTheStandardFigureWhenOff() {
         assertTrue(newArtistDiscountLabel(0).startsWith("$NEW_ARTIST_DISCOUNT_PCT%"))
+    }
+
+    // ── Services offered ─────────────────────────────────────────────────────
+
+    /** Same optimistic contract as the offer and the palette. */
+    @Test
+    fun serviceTags_showThePendingSetOverThePublishedOne() {
+        assertEquals(
+            listOf("dj-set"),
+            shownServiceTags(pending = listOf("dj-set"), published = listOf("full-band")),
+        )
+        assertEquals(
+            listOf("full-band"),
+            shownServiceTags(pending = null, published = listOf("full-band")),
+        )
+    }
+
+    /**
+     * A pending EMPTY set is a real state — the artist unticking their last
+     * service — and must not be mistaken for "nothing pending". Null is the only
+     * thing that means that.
+     */
+    @Test
+    fun serviceTags_treatAnEmptyPendingSetAsAnEdit_notAsAbsent() {
+        assertTrue(shownServiceTags(pending = emptyList(), published = listOf("dj-set")).isEmpty())
+    }
+
+    /**
+     * The chips can never show a set the column would reject, so an over-cap or
+     * duplicated set read from the server is normalized before it is rendered.
+     */
+    @Test
+    fun serviceTags_normalizeWhatTheyShow() {
+        assertEquals(
+            listOf("dj-set"),
+            shownServiceTags(pending = null, published = listOf("dj-set", "dj-set", " ")),
+        )
+        assertEquals(
+            ServiceTags.MAX_TAGS,
+            shownServiceTags(pending = null, published = ServiceTags.catalog.map { it.first }).size,
+        )
     }
 
     // ── Connected accounts ───────────────────────────────────────────────────

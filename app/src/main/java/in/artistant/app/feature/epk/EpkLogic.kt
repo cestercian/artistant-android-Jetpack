@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.epk
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.PackageDraft
+import `in`.artistant.app.domain.artist.ServiceTags
 
 /**
  * Every decision the EPK editor makes, extracted from the Composables and the
@@ -302,6 +303,22 @@ fun newArtistDiscountToggleTarget(current: Int): Int =
  */
 fun newArtistDiscountLabel(pct: Int): String =
     "${if (pct > 0) pct else NEW_ARTIST_DISCOUNT_PCT}% off first bookings"
+
+// ── Services offered ─────────────────────────────────────────────────────────
+
+/**
+ * The service set to render, pending winning over the published one.
+ *
+ * Same optimistic shape as [shownNewArtistDiscount] and [shownCoverGradient]: the
+ * pending value is null until the artist touches a chip, so a failed write falls
+ * back to the truth by clearing one field rather than by reconstructing it.
+ *
+ * Normalized on the way out so the chips can never show a set the column would
+ * not accept — the artist should not see seven services selected and then be told
+ * six saved.
+ */
+fun shownServiceTags(pending: List<String>?, published: List<String>): List<String> =
+    ServiceTags.normalize(pending ?: published)
 
 // ── Whole-set write guard ────────────────────────────────────────────────────
 

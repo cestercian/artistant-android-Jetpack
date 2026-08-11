@@ -72,6 +72,7 @@ import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.domain.artist.ServiceTags
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -264,6 +265,14 @@ private fun EpkEditor(
                 bio = state.bioDraft,
                 canEdit = state.identityHydrated,
                 onBioChanged = viewModel::onBioChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
+        }
+        item(key = "services") {
+            ServicesSection(
+                selected = shownServiceTags(state.serviceTags, artist.serviceTags),
+                canEdit = state.identityHydrated,
+                onToggle = viewModel::onServiceTagToggled,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
@@ -943,6 +952,80 @@ private fun PricingSection(
  * A discount control that looked automatic would have artists discovering at
  * quote time that the number was theirs to absorb.
  */
+/**
+ * "What you offer" — the curated service chips.
+ *
+ * **This section is what makes Discover's services filter mean anything.** The
+ * filter has been sending these exact slugs to the server for a while, but no
+ * screen in this app could ever put one in the column, so ticking "Wedding /
+ * sangeet" as a client narrowed the results to whichever artists had set their
+ * tags on the other client. An artist can now answer the question the filter
+ * asks.
+ *
+ * The sub-line says so plainly rather than describing the chips, because the
+ * reason to spend thirty seconds here is not "a nicer profile" — it is being
+ * findable by clients who filter for exactly what you do.
+ *
+ * Chips, not a text field: the write vocabulary has to match the filter's
+ * vocabulary exactly (an overlap match has no fuzziness), and free text is how an
+ * artist types "DJ" and disappears from every search for "DJ set".
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ServicesSection(
+    selected: List<String>,
+    canEdit: Boolean,
+    onToggle: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
+        EpkSectionHeader(
+            title = "What you offer",
+            trailingNote = if (selected.isEmpty()) null else "${selected.size}/${ServiceTags.MAX_TAGS}",
+        )
+        Text(
+            "Clients filter by these. Pick the sets you actually play.",
+            style = AppTheme.type.footnote,
+            color = colors.ink3,
+        )
+        if (!canEdit) {
+            Text(
+                "Couldn't read your profile, so editing is off — pull to refresh to try again.",
+                style = AppTheme.type.footnote,
+                color = colors.warm,
+            )
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(space.sm),
+            verticalArrangement = Arrangement.spacedBy(space.sm),
+        ) {
+            ServiceTags.catalog.forEach { (slug, label) ->
+                EpkChip(
+                    label = label,
+                    selected = slug in selected,
+                    enabled = canEdit,
+                    onClick = { onToggle(slug) },
+                )
+            }
+            // Anything stored that this build's taxonomy does not know — another
+            // client's or an admin backfill's tag. Shown selected and tappable so
+            // the artist can see and withdraw a claim their profile is making,
+            // rather than having it silently absent from the editor that is
+            // supposed to show their whole profile.
+            selected.filterNot { it in ServiceTags.slugs }.forEach { slug ->
+                EpkChip(
+                    label = ServiceTags.label(slug),
+                    selected = true,
+                    enabled = canEdit,
+                    onClick = { onToggle(slug) },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun NewArtistOfferRow(
     pct: Int,
