@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -47,6 +49,8 @@ import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.RevealOnAppear
+import `in`.artistant.app.designsystem.component.ScreenTitleBar
+import `in`.artistant.app.feature.booking.FunnelHeader
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 
@@ -125,17 +129,25 @@ fun ProfileScreen(
                 }
             }
             else -> {
-                RevealOnAppear {
+                // The title band is OUTSIDE the scroll, because that is what it
+                // is on iOS: an inline navigation title pinned under the status
+                // bar, not a piece of content that scrolls away with the hero.
+                // The client reaches this as a tab root ("Profile"); the artist
+                // pushes it from their press kit, so they get the back control
+                // and the screen calls itself "Account" — the same split, and
+                // the same two words, the iOS build uses.
+                Column(Modifier.fillMaxSize()) {
+                    if (onBack != null) {
+                        FunnelHeader(title = "Account", onBack = onBack)
+                    } else {
+                        ScreenTitleBar("Profile")
+                    }
+                    RevealOnAppear {
                     Column(
                         Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        if (onBack != null) {
-                            TextButton(onClick = onBack, modifier = Modifier.padding(space.sm)) {
-                                Text("Back", style = AppTheme.type.callout, color = colors.ink2)
-                            }
-                        }
 
                         // Identity header
                         Column(
@@ -162,16 +174,26 @@ fun ProfileScreen(
                                 size = size.avatarXl,
                                 ring = true,
                             )
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // Name over subtitle, nothing between them. The
+                            // username used to sit here, but neither iOS identity
+                            // hero renders one — the handle belongs to the public
+                            // press kit, not to the private account page — and a
+                            // third line squeezed the pair into one dense block.
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(space.sm),
+                            ) {
                                 Text(state.displayName, style = AppTheme.type.displayTitle, color = colors.ink)
-                                state.handleLabel?.let {
-                                    Text(it, style = AppTheme.type.monoSmall, color = colors.ink3)
-                                }
                                 Text(state.subtitle, style = AppTheme.type.footnote, color = colors.ink2)
                             }
                         }
 
+                        // The stat triple is fenced by hairlines top AND bottom —
+                        // the rule above is what separates the counters from the
+                        // identity block, and without it the numbers read as part
+                        // of the hero rather than as their own band.
                         if (state.role == AppRole.Client && onArtistList != null) {
+                            HRule()
                             ProfileStatsRow(
                                 bookings = state.bookingsCount,
                                 saved = state.savedCount,
@@ -189,8 +211,30 @@ fun ProfileScreen(
                         ) {
                             Text("Settings", style = AppTheme.type.displaySub, color = colors.ink)
 
+                            // ROW ORDER IS THE iOS ORDER, and it is not arbitrary:
+                            // identity (email) → the role's own rows → the
+                            // preference rows (notifications, privacy, export) →
+                            // calendar sync → help → the two destructive exits.
+                            // Calendar sync used to lead the list, which put a
+                            // toggle for an optional device mirror above the
+                            // user's own account details.
                             Column {
                                 HRule()
+                                // Read-only identity, not an action — no chevron,
+                                // not clickable. Masked at render; see maskEmail.
+                                state.maskedEmail?.let { masked ->
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = space.lg),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text("Email", style = AppTheme.type.callout, color = colors.ink)
+                                        Text(masked, style = AppTheme.type.monoSmall, color = colors.ink3)
+                                    }
+                                    HRule()
+                                }
                                 if (state.subscriptionsEnabled) {
                                     SettingsRow("Subscription", onClick = onNavigateToPaywall)
                                     HRule()
@@ -205,6 +249,20 @@ fun ProfileScreen(
                                     )
                                     HRule()
                                 }
+                                SettingsRow("Notifications") {
+                                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    })
+                                }
+                                HRule()
+                                SettingsRow("Privacy") {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
+                                    )
+                                }
+                                HRule()
+                                SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
+                                HRule()
                                 CalendarSyncRow(
                                     enabled = state.calendarSyncEnabled,
                                     calendarTitle = state.calendarTitle,
@@ -223,20 +281,6 @@ fun ProfileScreen(
                                     },
                                     onSelectCalendar = viewModel::selectCalendar,
                                 )
-                                HRule()
-                                SettingsRow("Notifications") {
-                                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                    })
-                                }
-                                HRule()
-                                SettingsRow("Privacy") {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
-                                    )
-                                }
-                                HRule()
-                                SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
                                 HRule()
                                 SettingsRow("Get help", onClick = viewModel::showHelp)
                                 HRule()
@@ -264,7 +308,8 @@ fun ProfileScreen(
                             )
                         }
 
-                        Spacer(Modifier.size(56.dp))
+                        Spacer(Modifier.height(size.listTailroom))
+                    }
                     }
                 }
             }
@@ -362,37 +407,45 @@ private fun ProfileStatsRow(
     completed: Int,
     onClick: (ArtistListKind) -> Unit,
 ) {
-    val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    // IntrinsicSize.Min so the two dividers can size themselves to the row
+    // rather than to a hardcoded 40dp. The old fixed height was right for one
+    // type ramp and wrong for every other — it would not follow the system font
+    // scale, so at large text the rules stopped short of the labels they divide.
     Row(
         Modifier
             .fillMaxWidth()
+            .height(IntrinsicSize.Min)
             .padding(vertical = space.xl),
     ) {
         StatCol("Bookings", bookings, Modifier.weight(1f)) {
             onClick(ArtistListKind.Bookings)
         }
-        Box(
-            Modifier
-                .width(1.dp)
-                .height(40.dp)
-                .align(Alignment.CenterVertically)
-                .background(colors.lineSoft),
-        )
+        StatDivider()
         StatCol("Saved", saved, Modifier.weight(1f)) {
             onClick(ArtistListKind.Saved)
         }
-        Box(
-            Modifier
-                .width(1.dp)
-                .height(40.dp)
-                .align(Alignment.CenterVertically)
-                .background(colors.lineSoft),
-        )
+        StatDivider()
         StatCol("Completed", completed, Modifier.weight(1f)) {
             onClick(ArtistListKind.Completed)
         }
     }
+}
+
+/**
+ * The rule between two stat columns. Full row height less a small inset at each
+ * end, so it reads as a separator between the columns rather than as a tick mark
+ * floating beside them.
+ */
+@Composable
+private fun StatDivider() {
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .padding(vertical = AppTheme.dimens.space.sm)
+            .width(AppTheme.dimens.size.hairline)
+            .background(AppTheme.colors.lineSoft),
+    )
 }
 
 @Composable
@@ -404,20 +457,35 @@ private fun StatCol(
 ) {
     val colors = AppTheme.colors
     Column(
-        modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = AppTheme.dimens.space.sm),
+        modifier.clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
     ) {
-        Text("$value", style = AppTheme.type.monoLarge, color = colors.ink)
+        Text("$value", style = AppTheme.type.monoCount, color = colors.ink)
         Text(
             title.uppercase(),
-            style = AppTheme.type.caption,
+            style = AppTheme.type.statLabel,
             color = colors.ink3,
         )
     }
 }
 
+/**
+ * The calendar-sync control: a plain switch row, with the write target revealed
+ * underneath only once it is on.
+ *
+ * The row used to carry a permanent second line — "Mirrors confirmed bookings
+ * onto this device." off, "Writing to <calendar>" on — which made it the only
+ * two-line row in the list and broke the settings rhythm every other row keeps.
+ * iOS explains nothing in the off state (the label already says what it does)
+ * and surfaces the destination as its OWN sub-row once there is a destination
+ * to name, so that is what this does now: the label answers "what", and the
+ * target answers "where", but only when "where" exists.
+ *
+ * The picker still lists every writable calendar when there is more than one,
+ * because choosing a Google-account calendar is how "sync to Google Calendar"
+ * works with no Google API — same as iOS.
+ */
 @Composable
 private fun CalendarSyncRow(
     enabled: Boolean,
@@ -428,39 +496,64 @@ private fun CalendarSyncRow(
 ) {
     val space = AppTheme.dimens.space
     val colors = AppTheme.colors
-    Column(Modifier.fillMaxWidth().padding(vertical = space.md)) {
+    Column(Modifier.fillMaxWidth()) {
+        // `sm`, not the `lg` every text-only row uses. Material's Switch expands
+        // itself to the 48dp minimum interactive size, so it already carries
+        // 8dp of slop above and below its 32dp track. Padding it by a full `lg`
+        // on top of that double-counts the breathing room and made this the
+        // tallest row in the list by 16dp — a toggle sitting visibly lower than
+        // the rules that bracket it. Total here lands within a couple of units
+        // of the iOS row, whose own switch is shorter to begin with.
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().padding(vertical = space.sm),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Sync gigs to calendar", style = AppTheme.type.callout, color = colors.ink)
-                Text(
-                    if (enabled) "Writing to $calendarTitle" else "Mirrors confirmed bookings onto this device.",
-                    style = AppTheme.type.footnote,
-                    color = colors.ink3,
-                )
-            }
+            Text(
+                "Sync gigs to calendar",
+                style = AppTheme.type.callout,
+                color = colors.ink,
+                modifier = Modifier.weight(1f),
+            )
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
-        if (enabled && calendars.size > 1) {
-            Spacer(Modifier.height(space.sm))
-            calendars.forEach { option ->
-                Text(
-                    option.title,
-                    style = AppTheme.type.footnote,
-                    color = if (option.title == calendarTitle) colors.brand else colors.ink2,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectCalendar(option.id) }
-                        .padding(vertical = space.xs),
-                )
+        if (enabled) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = space.lg),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Calendar", style = AppTheme.type.footnote, color = colors.ink3)
+                Text(calendarTitle, style = AppTheme.type.footnote, color = colors.ink)
+            }
+            if (calendars.size > 1) {
+                calendars.forEach { option ->
+                    Text(
+                        option.title,
+                        style = AppTheme.type.footnote,
+                        color = if (option.title == calendarTitle) colors.brand else colors.ink2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectCalendar(option.id) }
+                            .padding(vertical = space.xs),
+                    )
+                }
+                Spacer(Modifier.height(space.sm))
             }
         }
     }
 }
 
+/**
+ * One settings row.
+ *
+ * The chevron is NOT decoration — it means "this opens something". Sign out and
+ * Delete account are terminal actions that raise a confirmation in place, so
+ * they get no chevron; drawing one on them promised a screen that never comes.
+ * The test is the tint: a row rendered in a status colour (warm/hot) is
+ * destructive by definition, which is why the condition reads off [tint] rather
+ * than asking each call site to repeat itself.
+ */
 @Composable
 private fun SettingsRow(
     title: String,
@@ -469,6 +562,7 @@ private fun SettingsRow(
     onClick: () -> Unit,
 ) {
     val space = AppTheme.dimens.space
+    val navigates = tint == AppTheme.colors.ink
     Row(
         Modifier
             .fillMaxWidth()
@@ -479,12 +573,23 @@ private fun SettingsRow(
     ) {
         Text(title, style = AppTheme.type.callout, color = tint)
         if (working) {
-            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = AppTheme.colors.brand)
-        } else {
+            CircularProgressIndicator(
+                Modifier.size(AppTheme.dimens.size.iconMd),
+                strokeWidth = AppTheme.dimens.size.stroke,
+                color = AppTheme.colors.brand,
+            )
+        } else if (navigates) {
+            // Sized, not left at Material's 24dp default. A settings row is
+            // 16 + content + 16, so an unsized chevron — taller than the 15sp
+            // label beside it — was the thing SETTING the row height, and every
+            // row in the list came out 4.4 units taller than the reference's.
+            // The reference draws this glyph at footnote weight, i.e. smaller
+            // than the label, never larger.
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = AppTheme.colors.ink3,
+                modifier = Modifier.size(AppTheme.dimens.size.iconMd),
             )
         }
     }

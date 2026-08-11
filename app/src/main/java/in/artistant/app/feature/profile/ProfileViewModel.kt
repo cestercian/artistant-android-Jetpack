@@ -43,6 +43,14 @@ data class ProfileUiState(
     val calendarHasPermission: Boolean = false,
     val calendarTitle: String = "Artistant",
     val calendars: List<CalendarSyncService.CalendarOption> = emptyList(),
+    /**
+     * The signed-in account's email, straight off the cached auth session (the
+     * `public.users` row does not carry one). Read-only identity, rendered
+     * MASKED — see [maskedEmail]. Null for a session without an email address,
+     * which is legitimate: OAuth providers can withhold it, and the row is
+     * simply omitted then rather than showing a blank value.
+     */
+    val email: String? = null,
     /** Profile stats — Bookings = still live (see [liveBookingsCount]), Completed = finished. */
     val bookingsCount: Int = 0,
     val savedCount: Int = 0,
@@ -66,7 +74,38 @@ data class ProfileUiState(
     val handleLabel: String?
         get() = profile?.handle?.trim()?.takeIf { it.isNotEmpty() }?.let { "@$it" }
 
+    /** The email row's rendered value, or null when there is no email to show. */
+    val maskedEmail: String?
+        get() = email?.trim()?.takeIf { it.isNotEmpty() }?.let(::maskEmail)
+
     val subscriptionsEnabled: Boolean get() = AppEnvironment.subscriptionsEnabled
+}
+
+/**
+ * Render-time PII mask for the account email: `yashafaid@gmail.com` →
+ * `y•••d@gmail.com`.
+ *
+ * Masking happens at RENDER, never in storage — the stored value is untouched,
+ * we just refuse to put the whole address on a screen that a shoulder-surfer or
+ * a screenshot can read. Keeping the first and last character of the local part
+ * is what lets the owner still recognise WHICH of their addresses is signed in,
+ * which is the entire point of showing the row.
+ *
+ * Anything that is not a single-`@` address is returned verbatim rather than
+ * mangled: a value we cannot parse is a value we cannot safely shorten, and a
+ * half-masked string would be worse than either extreme. A one-character local
+ * part has no distinct last character, so it degrades to `x•••@domain`.
+ */
+internal fun maskEmail(email: String): String {
+    val at = email.indexOf('@')
+    // Needs a local part, an @, and a domain — reject 0 matches, a leading @,
+    // a trailing @, and (via lastIndexOf) any address carrying a second @.
+    if (at <= 0 || at == email.length - 1 || at != email.lastIndexOf('@')) return email
+    val local = email.substring(0, at)
+    val domain = email.substring(at)
+    val head = local.first()
+    val tail = local.drop(1).takeLast(1)
+    return "$head•••$tail$domain"
 }
 
 @HiltViewModel
@@ -107,6 +146,13 @@ class ProfileViewModel @Inject constructor(
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }
         val role = prefs.role.first()
+        // Off the cached session, not a network call — safe to read on every
+        // refresh, and it is the only place the account email exists (the
+        // `public.users` row has no email column). Published BEFORE the profile
+        // fetch so the identity row survives a failed refresh: the email is
+        // already known locally, and blanking it because an unrelated request
+        // 500'd would be inventing a gap.
+        _state.update { it.copy(email = session.currentUser?.email) }
         runCatching { users.fetchSelfProfile() }
             .onSuccess { profile ->
                 _state.update {

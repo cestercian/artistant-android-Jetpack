@@ -46,9 +46,35 @@ data class Size(
     val hairline: Dp = 1.dp,
     /** Avatar ring / badge stroke (iOS Avatar uses fixed 2pt). */
     val stroke: Dp = 2.dp,
+    /**
+     * Emphasis stroke — a month-grid tile that is selected or is today. Half a
+     * unit above [hairline], which is all it takes for a ring to read as picked;
+     * at [stroke] it stops being a ring and becomes a border, and a grid of 35
+     * bordered boxes is a spreadsheet.
+     */
+    val strokeEmphasis: Dp = 1.5.dp,
+
+    // ── Month grid ────────────────────────────────────────────────────────
+    /**
+     * A day tile in the month grid. Fixed height rather than a square aspect
+     * ratio: the tile stacks a numeral over a status dot, and a square cell on a
+     * 7-column grid is ~48 wide on a phone — tall enough for the numeral alone,
+     * not for the numeral plus the dot plus the air between them.
+     */
+    val gridCellH: Dp = 52.dp,
+    /** The status dot under a day numeral (open / unavailable). */
+    val gridDot: Dp = 5.dp,
     /** ArtistList row thumbnail (iOS ArtistRow thumb 62×78). */
     val listThumbW: Dp = 62.dp,
     val listThumbH: Dp = 78.dp,
+    /**
+     * Tailroom under the last row of a settings list, so the final entry — which
+     * is "Delete account", the one row nobody should have to fight the floating
+     * tab bar to read — clears the chrome and has somewhere to scroll to.
+     * Smaller than [Hero.scrollTailroom]: that one buys a horizontal rail room
+     * to overshoot, this one just buys a hairline some air.
+     */
+    val listTailroom: Dp = 56.dp,
 
     // ── Artist hero / booking funnel ──────────────────────────────────────
     /**

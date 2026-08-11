@@ -185,9 +185,62 @@ data class AppType(
         fontFamily = MonoFamily, fontSize = 14.sp, fontWeight = FontWeight.Bold,
     ),
 
+    /**
+     * The account page's stat triple — Bookings / Saved / Completed.
+     *
+     * Its own step rather than [monoLarge] (24sp): three counts share one row
+     * and each is a navigation target, so they have to read as a SET of numbers.
+     * At the currency step they compete with the serif name above them, which is
+     * the one thing on that screen allowed to be the largest.
+     *
+     * It lands on the same 22sp as [scoreRing] today, and that is a coincidence
+     * of two unrelated surfaces wanting the same optical size — not a shared
+     * value. Tuning the ring must not move the counters, so it is spelled out
+     * rather than derived.
+     */
+    val monoCount: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+    ),
+
+    /**
+     * The label under a [monoCount]. One point below [caption], carrying the
+     * same editorial kerning: it sits directly beneath a number it is captioning
+     * rather than heading a section, so it has to sit lower in the hierarchy
+     * than the section labels that share its all-caps treatment.
+     */
+    val statLabel: TextStyle = TextStyle(
+        fontFamily = SansFamily, fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+    ),
+
     /** Time-slot pills. */
     val monoChip: TextStyle = TextStyle(
         fontFamily = MonoFamily, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+    ),
+
+    // ── Month calendar ───────────────────────────────────────────────────────
+    // A calendar is a table of numerals, so all three of its steps are mono: the
+    // day numbers have to sit on the same optical column down every week, which
+    // proportional figures cannot do. These were the last surface still setting
+    // its numerals in the sans `caption` step, which is why the grid read as a
+    // list of small labels rather than as a calendar.
+
+    /** The year beside the month name in a calendar header. Quiet on purpose —
+     *  the month is the headline, the year is the disambiguator. */
+    val monoYear: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+    ),
+
+    /** A day numeral in the month grid. Taken to Bold at the call site for the
+     *  two days that earn it: today, and a day carrying a gig. */
+    val monoDay: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+    ),
+
+    /** The M T W T F S S strip above the grid. Deliberately below every other
+     *  step — it is a column header nobody reads twice. */
+    val monoWeekday: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
     ),
 
     /**

@@ -78,6 +78,14 @@ private fun initialsFor(name: String): String =
         .joinToString("")
         .ifEmpty { "?" }
 
+/**
+ * The name-derived gradient an [Avatar] paints, for surfaces that need the same
+ * fill on a different silhouette — the inbox thumbnail is a rounded square, not
+ * a circle, but an un-hydrated one has to carry the same colour as the initials
+ * badge sitting on it or the pair reads as two unrelated objects.
+ */
+fun avatarGradient(name: String): Brush = gradientFor(name)
+
 /** DJB2 hash → hue pair, matching iOS `Avatar.gradient`. */
 private fun gradientFor(name: String): Brush {
     var h = 5381L
