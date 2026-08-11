@@ -2,6 +2,9 @@ package `in`.artistant.app.data.repository
 
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistGradient
+import `in`.artistant.app.data.model.ArtistPrompt
+import `in`.artistant.app.domain.artist.ArtistPrompts
+import `in`.artistant.app.domain.artist.ServiceTags
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -119,6 +122,25 @@ class FakeArtistsRepository(
 
     override suspend fun updateNewArtistDiscount(pct: Int) = mutateSelf {
         it.copy(newArtistDiscountPct = pct.coerceIn(0, 100))
+    }
+
+    override suspend fun updateServiceTags(tags: List<String>) = mutateSelf {
+        // Normalized here too, because the production repository normalizes on
+        // the way out — a fake that stored the raw list would let a test pass on
+        // a set the server would never have received.
+        it.copy(serviceTags = ServiceTags.normalize(tags))
+    }
+
+    override suspend fun updateWeekendPremium(pct: Int) = mutateSelf {
+        it.copy(weekendPremiumPct = pct.coerceIn(0, 100))
+    }
+
+    override suspend fun updatePrompts(prompts: List<ArtistPrompt>) = mutateSelf {
+        // Round-tripped through encode/decode rather than stored as handed in, so
+        // the fake holds what the SERVER would hold — blank answers dropped,
+        // answers clamped. A fake that stored the draft verbatim would hide
+        // exactly the encoding bugs these helpers exist to prevent.
+        it.copy(prompts = ArtistPrompts.decode(ArtistPrompts.encode(prompts)))
     }
 
     override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =

@@ -64,7 +64,9 @@ import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
@@ -155,6 +157,12 @@ fun ArtistProfileScreen(
                         ) {
                             if (artist.bio.isNotBlank()) {
                                 AboutBlock(bio = artist.bio)
+                            }
+                            if (artist.serviceTags.isNotEmpty()) {
+                                ServicesBlock(tags = artist.serviceTags)
+                            }
+                            if (artist.prompts.isNotEmpty()) {
+                                PromptsBlock(prompts = artist.prompts)
                             }
                             BookingBlock(artist = artist)
                             PackagesBlock(
@@ -601,6 +609,79 @@ private fun AboutBlock(bio: String) {
 }
 
 /**
+ * What this artist plays, as the client's own filter vocabulary.
+ *
+ * The labels here are the same nine the search sheet offers, which is the point:
+ * a client who filtered for "Full band" should see the words they ticked on the
+ * profile they landed on, rather than having to infer the match from a bio.
+ *
+ * Hairline outline chips, never filled — a filled chip is the *selected* state in
+ * this app's chip language, and nothing on a read-only profile is selected. An
+ * unrecognised slug renders verbatim via [ServiceTags.label] rather than being
+ * dropped, so a tag written by another client still describes the artist.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ServicesBlock(tags: List<String>) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+        Text("What they play", style = AppTheme.type.displaySmall, color = colors.ink)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(space.sm),
+            verticalArrangement = Arrangement.spacedBy(space.sm),
+        ) {
+            ServiceTags.labels(tags).forEach { label ->
+                Text(
+                    label,
+                    style = AppTheme.type.footnote,
+                    color = colors.ink2,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .border(dimens.size.hairline, colors.line, CircleShape)
+                        .padding(horizontal = space.md, vertical = space.sm),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The artist in their own words.
+ *
+ * Question above, answer below, hairline between — no card, no quote marks. The
+ * question is the quiet half (caption weight, dimmed) because the answer is what
+ * the client came to read; a bolded question would make the page look like an
+ * FAQ about the artist rather than the artist talking.
+ *
+ * Only answered prompts reach here — the decode drops blank answers — so there is
+ * no empty state to design and no risk of rendering a question with nothing
+ * under it.
+ */
+@Composable
+private fun PromptsBlock(prompts: List<ArtistPrompt>) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+        Text("In their words", style = AppTheme.type.displaySmall, color = colors.ink)
+        Column {
+            HRule()
+            prompts.forEach { prompt ->
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = space.md),
+                    verticalArrangement = Arrangement.spacedBy(space.xs),
+                ) {
+                    Text(prompt.question, style = AppTheme.type.caption, color = colors.ink3)
+                    Text(prompt.answer, style = AppTheme.type.body, color = colors.ink2)
+                }
+                HRule()
+            }
+        }
+    }
+}
+
+/**
  * The "from" figure as an editorial line: a big mono number with the tier it
  * belongs to trailing it on the same baseline. It restates the dock's price
  * deliberately — the dock is a control the eye skips, this is the page saying
@@ -645,11 +726,23 @@ private fun BookingBlock(artist: Artist) {
                 color = colors.ink2,
             )
         }
-        // Quiet, deliberately NOT lime: it is a note, and the neighbouring
+        // Quiet, deliberately NOT lime: they are notes, and the neighbouring
         // "from · package" caption sets the register. Absent/0 hides the line.
+        //
+        // Both modifiers render the same way because a client is owed the same
+        // clarity about the one that raises the price as about the one that
+        // lowers it — showing only the discount would be the marketplace choosing
+        // which half of the pricing to make prominent.
         if (artist.newArtistDiscountPct > 0) {
             Text(
                 "New-artist offer: ${artist.newArtistDiscountPct}% off your booking",
+                style = AppTheme.type.footnote,
+                color = colors.ink2,
+            )
+        }
+        if (artist.weekendPremiumPct > 0) {
+            Text(
+                "Fri–Sun: +${artist.weekendPremiumPct}% on the quoted price",
                 style = AppTheme.type.footnote,
                 color = colors.ink2,
             )

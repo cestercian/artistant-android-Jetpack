@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistLinksRepository
@@ -16,6 +17,8 @@ import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.SamplesRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.domain.artist.ArtistPrompts
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
@@ -92,6 +95,34 @@ data class EpkUiState(
     val newArtistDiscountPct: Int? = null,
 
     /**
+     * The services the artist has ticked, pending confirmation. Null means "show
+     * what the row says" — the same one-field-to-clear shape the two pricing
+     * modifiers use.
+     *
+     * Held as the whole set rather than as a diff because that is what the write
+     * sends, so a failed write has exactly one thing to discard.
+     */
+    val serviceTags: List<String>? = null,
+
+    /**
+     * The weekend surcharge just picked, before the write confirms. Same
+     * one-field-to-clear shape as [newArtistDiscountPct] — they are two halves of
+     * the same "what modifies my price" idea and behave identically.
+     */
+    val weekendPremiumPct: Int? = null,
+
+    /**
+     * The prompt deck as it is being typed, held apart from `artist.prompts` —
+     * which stays the last SAVED deck — so the debounce has something to diff
+     * against, exactly like [bioDraft].
+     *
+     * Seeded only from a successful read; see [identityHydrated]. The write
+     * replaces the whole array, so a save fired against a default-constructed
+     * empty deck would erase every answer the artist wrote elsewhere.
+     */
+    val promptDrafts: List<ArtistPrompt> = emptyList(),
+
+    /**
      * The bio as it is being typed. Held apart from `artist.bio` — which stays
      * the last value known to have been SAVED — so the debounce has something to
      * compare against and a re-entry to the screen can tell an unsaved edit from
@@ -120,6 +151,7 @@ data class EpkUiState(
     val savingTech: Boolean = false,
     val savingBio: Boolean = false,
     val savingSocials: Boolean = false,
+    val savingPrompts: Boolean = false,
     val uploadingPhoto: Boolean = false,
     val busyLinks: Boolean = false,
 
@@ -130,7 +162,8 @@ data class EpkUiState(
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
-    val anySaveInFlight: Boolean get() = savingPackages || savingTech || savingBio || savingSocials
+    val anySaveInFlight: Boolean
+        get() = savingPackages || savingTech || savingBio || savingSocials || savingPrompts
 }
 
 /**
@@ -185,6 +218,7 @@ class EpkViewModel @Inject constructor(
     private var techSaveJob: Job? = null
     private var bioSaveJob: Job? = null
     private var socialsSaveJob: Job? = null
+    private var promptsSaveJob: Job? = null
 
     init {
         refresh()
@@ -260,6 +294,11 @@ class EpkViewModel @Inject constructor(
                     // which is exactly what has to happen before the gate below
                     // lets anything write them back.
                     val pendingSocials = socialsNeedSave(it.socialDraft, savedSocials(it.artist))
+                    // And the same for the deck, which is also typed prose.
+                    val pendingPrompts = ArtistPrompts.needsSave(
+                        it.promptDrafts,
+                        it.artist?.prompts.orEmpty(),
+                    )
                     it.copy(
                         artist = artist,
                         setupComplete = profile?.artistSetupComplete == true,
@@ -269,8 +308,12 @@ class EpkViewModel @Inject constructor(
                         identityHydrated = artist != null,
                         coverGradientIndex = null,
                         newArtistDiscountPct = null,
+                        serviceTags = null,
+                        weekendPremiumPct = null,
                         bioDraft = if (pendingBio) it.bioDraft else artist?.bio.orEmpty(),
                         socialDraft = if (pendingSocials) it.socialDraft else savedSocials(artist),
+                        promptDrafts =
+                            if (pendingPrompts) it.promptDrafts else artist?.prompts.orEmpty(),
                     )
                 }
             }
@@ -410,6 +453,183 @@ class EpkViewModel @Inject constructor(
                         it.copy(
                             newArtistDiscountPct = null,
                             saveError = "Couldn't change your new-artist offer — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── Weekend premium ──────────────────────────────────────────────────────
+
+    /**
+     * Step the Fri–Sun surcharge.
+     *
+     * Deliberately the SAME shape as [onNewArtistOfferToggled] — optimistic,
+     * undebounced, gated on hydration, failure clears the pending value — because
+     * they are the two modifiers a client sees applied to the same price, and a
+     * pair of controls that behaved differently would imply a difference that is
+     * not there.
+     *
+     * Where they differ is the range, and the column is why: a discount is a
+     * switch (on, or withdrawn), while a premium is a judgement about how much
+     * more a Saturday is worth. So this cycles the steps in [WEEKEND_PREMIUM_STEPS]
+     * rather than flipping. One tap is still one decision, which keeps it inside
+     * the same optimistic contract.
+     */
+    fun onWeekendPremiumStepped() {
+        val current = _state.value
+        if (!current.identityHydrated) return
+        val shown = shownWeekendPremium(
+            current.weekendPremiumPct,
+            current.artist?.weekendPremiumPct ?: 0,
+        )
+        val target = weekendPremiumStepTarget(shown)
+        _state.update { it.copy(weekendPremiumPct = target, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateWeekendPremium(target) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            statusNote = if (target > 0) "Weekend premium on." else "Weekend premium off.",
+                            artist = it.artist?.copy(weekendPremiumPct = target),
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            weekendPremiumPct = null,
+                            saveError = "Couldn't change your weekend premium — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── Prompt deck ──────────────────────────────────────────────────────────
+
+    /**
+     * Type an answer. Clamped on the way in so a paste truncates visibly rather
+     * than being bounced by the column.
+     */
+    fun onPromptAnswerChanged(question: String, value: String) {
+        _state.update {
+            it.copy(
+                promptDrafts = ArtistPrompts.upsert(
+                    it.promptDrafts,
+                    question,
+                    ArtistPrompts.clampAnswerInput(value),
+                ),
+            )
+        }
+        schedulePromptsSave()
+    }
+
+    /**
+     * Debounced whole-deck write.
+     *
+     * Debounced because these are prose fields — one write per character would be
+     * wasteful and lets an out-of-order response land an older prefix last, the
+     * same reasoning as the bio.
+     *
+     * Gated on [EpkUiState.identityHydrated] because `updatePrompts` replaces the
+     * whole array: a save fired before the read seeded [EpkUiState.promptDrafts]
+     * would send a one-entry deck over an artist who had answered all four
+     * elsewhere. The UI disables the fields until the same flag is true, so this
+     * is the second of two locks — kept because the flag can flip on a background
+     * refresh and a guard that lives only in a Composable is not a guard the next
+     * caller of this method inherits.
+     */
+    private fun schedulePromptsSave() {
+        if (!_state.value.identityHydrated || session.currentUserId == null) return
+        promptsSaveJob?.cancel()
+        promptsSaveJob = viewModelScope.launch {
+            delay(SAVE_DEBOUNCE_MS)
+            persistPrompts()
+        }
+    }
+
+    private suspend fun persistPrompts() {
+        val draft = _state.value.promptDrafts
+        if (!ArtistPrompts.needsSave(draft, _state.value.artist?.prompts.orEmpty())) return
+        _state.update { it.copy(savingPrompts = true) }
+        runCatching { artists.updatePrompts(draft) }
+            .onSuccess {
+                _state.update {
+                    it.copy(
+                        savingPrompts = false,
+                        saveError = null,
+                        statusNote = "Answers saved.",
+                        // Folded in exactly as the server stores it — blanks
+                        // dropped, answers clamped — so the next diff compares
+                        // like with like. Fold the raw draft instead and every
+                        // later keystroke re-sends the whole deck.
+                        artist = it.artist?.copy(
+                            prompts = ArtistPrompts.decode(ArtistPrompts.encode(draft)),
+                        ),
+                    )
+                }
+            }
+            .onFailure {
+                _state.update {
+                    it.copy(
+                        savingPrompts = false,
+                        // Draft left alone, like the bio's: these are the artist's
+                        // own words and a failed write must not be resolved by
+                        // discarding them.
+                        saveError = "Couldn't save your answers — check your connection and edit again to retry.",
+                    )
+                }
+            }
+    }
+
+    // ── Services offered ─────────────────────────────────────────────────────
+
+    /**
+     * Tick or untick one service, optimistically.
+     *
+     * **Gated on [EpkUiState.identityHydrated] for the same reason the accounts
+     * write is.** `updateServiceTags` sends the complete array, so a tap that
+     * fired before [loadIdentity] returned would send a one-element list built on
+     * top of an empty local set — publishing "I only do DJ sets" over an artist
+     * who had ticked five services on another device. The gate is what makes the
+     * local set a copy of the server's rather than a guess at it.
+     *
+     * Undebounced like the palette and the offer: a chip tap is one decision, and
+     * the nine-chip group cannot produce a burst worth coalescing. A failure
+     * clears the pending set so the chips snap back to what is actually
+     * published — which here also decides whether clients can find this artist at
+     * all, since the same slugs back Discover's services filter.
+     */
+    fun onServiceTagToggled(slug: String) {
+        val current = _state.value
+        if (!current.identityHydrated) return
+        val shown = shownServiceTags(current.serviceTags, current.artist?.serviceTags.orEmpty())
+        val next = ServiceTags.toggle(shown, slug)
+        // At the cap, toggling ON is refused rather than silently truncated. Say
+        // so — a chip that does not light up on tap reads as a broken control.
+        if (next == shown) {
+            _state.update {
+                it.copy(saveError = "You can list up to ${ServiceTags.MAX_TAGS} services — untick one to add another.")
+            }
+            return
+        }
+        _state.update { it.copy(serviceTags = next, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateServiceTags(next) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            statusNote = "Services saved.",
+                            artist = it.artist?.copy(serviceTags = next),
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            serviceTags = null,
+                            saveError = "Couldn't save what you offer — check your connection and try again.",
                         )
                     }
                 }

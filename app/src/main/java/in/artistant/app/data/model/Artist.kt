@@ -46,6 +46,38 @@ data class Artist(
      */
     val coverGradientIndex: Int = 0,
     val newArtistDiscountPct: Int = 0,
+    /**
+     * Fri–Sun surcharge %, 0–100 (`artists.weekend_premium_pct`).
+     *
+     * Sits beside [newArtistDiscountPct] rather than in a nested "pricing"
+     * object because they are the same kind of fact — a percentage the artist
+     * publishes and honours in their own quote — and every reader that wants one
+     * wants the other.
+     */
+    val weekendPremiumPct: Int = 0,
+    /**
+     * The curated "what you offer" slugs (`artists.service_tags`).
+     *
+     * Slugs, not labels: Discover's server-side services filter overlaps this
+     * column with the same slug vocabulary, so storing display text here would
+     * publish an artist who can never be found by the filter that exists to find
+     * them. See `ServiceTags` for the taxonomy and the label lookup.
+     */
+    val serviceTags: List<String> = emptyList(),
+    /** Answered personality prompts (`artists.prompts` jsonb). */
+    val prompts: List<ArtistPrompt> = emptyList(),
+)
+
+/**
+ * One personality prompt and its answer.
+ *
+ * Round-trips 1:1 to a `{"q":…,"a":…}` object in the `artists.prompts` jsonb
+ * array — the field names here are the readable ones, and the wire keys live in
+ * `ArtistPrompts` so exactly one place knows the encoding.
+ */
+data class ArtistPrompt(
+    val question: String,
+    val answer: String,
 )
 
 data class ArtistPackage(

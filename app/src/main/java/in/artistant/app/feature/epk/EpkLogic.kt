@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.epk
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.PackageDraft
+import `in`.artistant.app.domain.artist.ServiceTags
 
 /**
  * Every decision the EPK editor makes, extracted from the Composables and the
@@ -302,6 +303,68 @@ fun newArtistDiscountToggleTarget(current: Int): Int =
  */
 fun newArtistDiscountLabel(pct: Int): String =
     "${if (pct > 0) pct else NEW_ARTIST_DISCOUNT_PCT}% off first bookings"
+
+// ── Weekend premium ──────────────────────────────────────────────────────────
+
+/**
+ * The surcharge steps the control cycles through, in order.
+ *
+ * A short ladder rather than free entry: the artist is answering "how much more
+ * is a Saturday worth", and a text field for that invites 7% and 33%, which reads
+ * as haggling on a public profile. 0 is in the list because the cycle has to come
+ * back round to off — a modifier you cannot withdraw is worse than one you cannot
+ * fine-tune.
+ */
+val WEEKEND_PREMIUM_STEPS: List<Int> = listOf(0, 10, 15, 20, 25, 30)
+
+/**
+ * The percentage to render, pending winning over the published one.
+ *
+ * Coerced to the column's range rather than to the step ladder: a value another
+ * client wrote (the reference offers a continuous 0–30 slider) is a real fact
+ * about this artist's profile, and rounding it to our nearest step on READ would
+ * quietly misreport what clients are being shown.
+ */
+fun shownWeekendPremium(pending: Int?, published: Int): Int =
+    (pending ?: published).coerceIn(0, 100)
+
+/**
+ * What a tap should write: the next step up, wrapping to off past the top.
+ *
+ * An off-ladder value (another client's 12%) advances to the next step ABOVE it
+ * rather than snapping to 0 — a tap means "more", and turning someone's premium
+ * off because they set it on a slider would be a surprising way to lose it.
+ * Anything at or above the top of the ladder wraps to off, which is the only way
+ * the cycle can withdraw a value it cannot represent.
+ */
+fun weekendPremiumStepTarget(current: Int): Int =
+    WEEKEND_PREMIUM_STEPS.firstOrNull { it > current } ?: 0
+
+/**
+ * The premium as the artist's own profile states it.
+ *
+ * Reads the STORED percentage for the same reason [newArtistDiscountLabel] does:
+ * the column is shared with another client, and a label that assumed our own
+ * ladder would disagree with the public page it exists to edit.
+ */
+fun weekendPremiumLabel(pct: Int): String =
+    if (pct > 0) "$pct% on Fri–Sun" else "Off"
+
+// ── Services offered ─────────────────────────────────────────────────────────
+
+/**
+ * The service set to render, pending winning over the published one.
+ *
+ * Same optimistic shape as [shownNewArtistDiscount] and [shownCoverGradient]: the
+ * pending value is null until the artist touches a chip, so a failed write falls
+ * back to the truth by clearing one field rather than by reconstructing it.
+ *
+ * Normalized on the way out so the chips can never show a set the column would
+ * not accept — the artist should not see seven services selected and then be told
+ * six saved.
+ */
+fun shownServiceTags(pending: List<String>?, published: List<String>): List<String> =
+    ServiceTags.normalize(pending ?: published)
 
 // ── Whole-set write guard ────────────────────────────────────────────────────
 
