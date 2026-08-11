@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -168,10 +169,15 @@ private fun ArtistListRowUi(
                 }
             }
         }
+        // Sized rather than left at Material's 24dp default — the reference
+        // draws a row's disclosure glyph at footnote weight, below the label
+        // beside it. Everywhere else in the app already sizes this glyph; these
+        // were the last two left at the Material default.
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = colors.ink3,
+            modifier = Modifier.size(AppTheme.dimens.size.iconMd),
         )
     }
 }

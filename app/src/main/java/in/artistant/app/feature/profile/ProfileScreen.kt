@@ -579,10 +579,17 @@ private fun SettingsRow(
                 color = AppTheme.colors.brand,
             )
         } else if (navigates) {
+            // Sized, not left at Material's 24dp default. A settings row is
+            // 16 + content + 16, so an unsized chevron — taller than the 15sp
+            // label beside it — was the thing SETTING the row height, and every
+            // row in the list came out 4.4 units taller than the reference's.
+            // The reference draws this glyph at footnote weight, i.e. smaller
+            // than the label, never larger.
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
                 tint = AppTheme.colors.ink3,
+                modifier = Modifier.size(AppTheme.dimens.size.iconMd),
             )
         }
     }
