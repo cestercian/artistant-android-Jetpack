@@ -218,6 +218,31 @@ data class AppType(
         fontFamily = MonoFamily, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
     ),
 
+    // ── Month calendar ───────────────────────────────────────────────────────
+    // A calendar is a table of numerals, so all three of its steps are mono: the
+    // day numbers have to sit on the same optical column down every week, which
+    // proportional figures cannot do. These were the last surface still setting
+    // its numerals in the sans `caption` step, which is why the grid read as a
+    // list of small labels rather than as a calendar.
+
+    /** The year beside the month name in a calendar header. Quiet on purpose —
+     *  the month is the headline, the year is the disambiguator. */
+    val monoYear: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+    ),
+
+    /** A day numeral in the month grid. Taken to Bold at the call site for the
+     *  two days that earn it: today, and a day carrying a gig. */
+    val monoDay: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+    ),
+
+    /** The M T W T F S S strip above the grid. Deliberately below every other
+     *  step — it is a column header nobody reads twice. */
+    val monoWeekday: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+    ),
+
     /**
      * Sub-caption mono, wide-tracked: "FROM" under the dock price, the tier
      * word inside the score chip. Deliberately tiny — it is a unit label on a

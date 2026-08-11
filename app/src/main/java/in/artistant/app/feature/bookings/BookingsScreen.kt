@@ -92,12 +92,11 @@ fun BookingsScreen(
                         .background(colors.bg)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    Text(
-                        "Bookings",
-                        style = AppTheme.type.displaySub,
-                        color = colors.ink,
-                        modifier = Modifier.padding(space.lg),
-                    )
+                    // No screen heading. The month IS the heading here — the
+                    // calendar header sets it at the display step — and stacking
+                    // a serif "Bookings" above a serif "August" gave the screen
+                    // two competing titles one line apart. The tab bar already
+                    // says which tab this is.
                     MonthCalendarHeader(
                         monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
                         onPrevMonth = { stepMonth(-1) },

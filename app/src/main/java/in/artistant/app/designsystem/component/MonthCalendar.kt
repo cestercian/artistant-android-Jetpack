@@ -1,18 +1,20 @@
 package `in`.artistant.app.designsystem.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -29,6 +31,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -92,18 +95,45 @@ fun MonthCalendarHeader(
     onNextMonth: (() -> Unit)? = null,
 ) {
     val space = AppTheme.dimens.space
+    // "August 2026" arrives as one string, but it is TWO pieces of information
+    // at two levels of importance, and iOS sets them that way: the month is the
+    // editorial headline (the serif display step), the year is a quiet mono
+    // disambiguator beside it. Rendering the whole label at one serif size made
+    // the year shout as loudly as the month and left the header reading like a
+    // section title rather than like a calendar's masthead.
+    //
+    // Split on the LAST space so a spelled-out month survives; anything without
+    // a trailing year token renders whole, which is what the plain group-header
+    // use (both callbacks null) relies on.
+    val split = monthLabel.trim().lastIndexOf(' ')
+    val yearToken = if (split > 0) monthLabel.trim().substring(split + 1) else ""
+    val isYear = yearToken.length == 4 && yearToken.all { it.isDigit() }
+    val month = if (isYear) monthLabel.trim().substring(0, split) else monthLabel
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = space.lg, vertical = space.md),
-        verticalAlignment = Alignment.CenterVertically,
+        // Baseline, not centre: the year has to sit ON the month's baseline, and
+        // centring two wildly different type sizes floats the small one.
+        verticalAlignment = Alignment.Bottom,
     ) {
         Text(
-            text = monthLabel,
-            style = AppTheme.type.displaySmall,
+            text = month,
+            style = AppTheme.type.displayTitle,
             color = AppTheme.colors.ink,
-            modifier = Modifier.weight(1f),
         )
+        if (isYear) {
+            Spacer(Modifier.width(space.sm))
+            Text(
+                text = yearToken,
+                style = AppTheme.type.monoYear,
+                color = AppTheme.colors.ink3,
+                // Nudged off the very bottom so it aligns to the serif's baseline
+                // rather than to its descender line.
+                modifier = Modifier.padding(bottom = space.sm),
+            )
+        }
+        Spacer(Modifier.weight(1f))
         onPrevMonth?.let {
             MonthStepButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous month", it)
         }
@@ -132,8 +162,73 @@ private fun MonthStepButton(icon: ImageVector, label: String, onClick: () -> Uni
 }
 
 /**
- * Compact 7-col day grid for the visible month. [busyDays] are day-of-month
- * ints that light up (confirmed gigs). Tap a day via [onDayClick].
+ * One cell of the month grid.
+ *
+ * [inMonth] false marks an adjacent-month filler: the previous month's trailing
+ * days and the next month's leading ones, drawn dim and inert purely so every
+ * week row has seven tiles. Without them the first and last rows end in holes,
+ * and a grid with holes in it stops reading as a grid.
+ */
+private data class DayCell(val number: Int, val inMonth: Boolean)
+
+/**
+ * The visible month as complete Monday-first weeks, adjacent-month days
+ * included.
+ *
+ * Kept as a pure function of (year, month) so the fill arithmetic — which is
+ * where off-by-one and year-boundary bugs live — is assertable without a
+ * Compose test. The trailing fill counts up from 1 because the next month always
+ * starts at 1; the leading fill counts back from the previous month's length.
+ */
+internal fun monthGridCells(year: Int, month: Int): List<List<Int>> =
+    monthGridDays(year, month).chunked(7).map { week -> week.map { it.number } }
+
+private fun monthGridDays(year: Int, month: Int): List<DayCell> {
+    val cal = Calendar.getInstance().apply {
+        clear()
+        set(year, month, 1)
+    }
+    // Calendar.DAY_OF_WEEK is Sunday=1; +5 mod 7 rebases it to Monday=0.
+    val leading = (cal.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val prevLength = Calendar.getInstance().apply {
+        clear()
+        set(year, month, 1)
+        add(Calendar.MONTH, -1)
+    }.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    val cells = ArrayList<DayCell>(42)
+    for (i in leading downTo 1) cells += DayCell(prevLength - i + 1, inMonth = false)
+    for (d in 1..daysInMonth) cells += DayCell(d, inMonth = true)
+    var next = 1
+    while (cells.size % 7 != 0) cells += DayCell(next++, inMonth = false)
+    return cells
+}
+
+/**
+ * The month grid: seven columns of day TILES.
+ *
+ * Rebuilt against the iOS original, which this had been approximating with bare
+ * numerals in circles. Four things changed, and each of them was carrying
+ * information the old grid could not:
+ *
+ *  - **Tiles, not circles.** Every current-month day is a filled, hairlined
+ *    rounded tile. That is what makes the grid legible as a month at a glance
+ *    instead of as scattered numbers, and it is the surface the states below
+ *    paint onto.
+ *  - **Adjacent-month fill.** Leading and trailing cells carry the neighbouring
+ *    months' dates, dimmed and inert, so no week row has a hole in it.
+ *  - **A status dot under every open day.** A blank day and a day with no data
+ *    used to look identical; the dot is the difference between "nothing booked"
+ *    and "nothing known".
+ *  - **Booked days FILL brand** rather than tinting to 20%. A gig is the thing
+ *    the screen exists to show, and lime is signal — a 20% wash spends the
+ *    accent without earning attention.
+ *
+ * Selection and today are rings, not fills, so they can stack on top of a booked
+ * day without competing with it. [busyDays] and [selectedDay] stay day-of-month
+ * ints — the callers filter their own lists by that, and widening it here would
+ * be a change to their contract, not a visual fix.
  */
 @Composable
 fun MonthDayGrid(
@@ -146,78 +241,124 @@ fun MonthDayGrid(
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val cal = Calendar.getInstance().apply {
-        set(Calendar.YEAR, year)
-        set(Calendar.MONTH, month)
-        set(Calendar.DAY_OF_MONTH, 1)
+    val today = Calendar.getInstance()
+    val todayDay = if (today.get(Calendar.YEAR) == year && today.get(Calendar.MONTH) == month) {
+        today.get(Calendar.DAY_OF_MONTH)
+    } else {
+        null
     }
-    val firstDow = ((cal.get(Calendar.DAY_OF_WEEK) + 5) % 7) // Mon=0
-    val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val cells = List(firstDow) { null } + (1..daysInMonth).toList()
-    Column(modifier.padding(horizontal = space.lg)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("M", "T", "W", "T", "F", "S", "S").forEach { d ->
+    Column(
+        modifier.padding(horizontal = space.lg),
+        verticalArrangement = Arrangement.spacedBy(space.sm),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+            // Weekend letters drop a rung on the ink ladder — the only thing
+            // distinguishing S and S from the rest of a mono row of capitals.
+            listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { i, d ->
                 Text(
                     d,
-                    style = AppTheme.type.caption,
-                    color = colors.ink3,
+                    style = AppTheme.type.monoWeekday,
+                    color = if (i >= 5) colors.ink4 else colors.ink3,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
                 )
             }
         }
-        cells.chunked(7).forEach { week ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                week.forEach { day ->
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .aspectRatio(1f)
-                            .padding(space.xs)
-                            .then(
-                                if (day != null) {
-                                    val isSelected = selectedDay == day
-                                    val isBusy = day in busyDays
-                                    Modifier
-                                        .clip(CircleShape)
-                                        .background(
-                                            when {
-                                                isSelected -> colors.brand
-                                                isBusy -> colors.brand.copy(alpha = 0.2f)
-                                                else -> Color.Transparent
-                                            },
-                                        )
-                                        .semantics {
-                                            contentDescription = buildString {
-                                                append("Day $day")
-                                                if (isBusy) append(", has bookings")
-                                                if (isSelected) append(", selected")
-                                            }
-                                            selected = isSelected
-                                            if (isBusy) stateDescription = "Busy"
-                                        }
-                                        .clickable { onDayClick(day) }
-                                } else Modifier,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (day != null) {
-                            Text(
-                                "$day",
-                                style = AppTheme.type.caption,
-                                color = when {
-                                    selectedDay == day -> colors.brandInk
-                                    day in busyDays -> colors.ink
-                                    else -> colors.ink2
-                                },
-                            )
-                        }
-                    }
-                }
-                repeat(7 - week.size) {
-                    Spacer(Modifier.weight(1f))
+        monthGridDays(year, month).chunked(7).forEach { week ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                week.forEach { cell ->
+                    DayTile(
+                        cell = cell,
+                        busy = cell.inMonth && cell.number in busyDays,
+                        selected = cell.inMonth && selectedDay == cell.number,
+                        isToday = cell.inMonth && cell.number == todayDay,
+                        onClick = { onDayClick(cell.number) },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DayTile(
+    cell: DayCell,
+    busy: Boolean,
+    selected: Boolean,
+    isToday: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.sm)
+
+    // Ring rules, in priority order. Selected wins, and on a lime tile it has to
+    // switch to ink or it disappears into its own fill. A booked-but-unselected
+    // tile takes no ring at all — the fill has already said everything.
+    val ring = when {
+        selected -> if (busy) colors.ink else colors.brand
+        isToday && !busy -> colors.ink
+        busy -> Color.Transparent
+        else -> colors.lineSoft
+    }
+    val ringWidth = if (selected || (isToday && !busy)) dimens.size.strokeEmphasis else dimens.size.hairline
+
+    val base = modifier
+        .height(dimens.size.gridCellH)
+        .clip(shape)
+        .background(
+            when {
+                !cell.inMonth -> colors.bgCard.copy(alpha = 0.35f)
+                busy -> colors.brand
+                else -> colors.bgCard
+            },
+        )
+
+    Box(
+        if (cell.inMonth) {
+            base
+                .border(ringWidth, ring, shape)
+                .semantics {
+                    contentDescription = buildString {
+                        append("Day ${cell.number}")
+                        if (busy) append(", has bookings")
+                        if (selected) append(", selected")
+                    }
+                    this.selected = selected
+                    if (busy) stateDescription = "Busy"
+                }
+                .clickable(onClick = onClick)
+        } else {
+            base
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(dimens.space.xs),
+        ) {
+            Text(
+                "${cell.number}",
+                style = AppTheme.type.monoDay.copy(
+                    fontWeight = if (busy || isToday) FontWeight.Bold else FontWeight.Medium,
+                ),
+                color = when {
+                    !cell.inMonth -> colors.ink4
+                    busy -> colors.brandInk
+                    else -> colors.ink
+                },
+            )
+            // The dot occupies its slot even when it has nothing to say, so the
+            // numerals stay on one baseline across a row where some days are
+            // booked and some are not.
+            Box(
+                Modifier
+                    .size(dimens.size.gridDot)
+                    .clip(CircleShape)
+                    .background(if (cell.inMonth && !busy) colors.ink3 else Color.Transparent),
+            )
         }
     }
 }

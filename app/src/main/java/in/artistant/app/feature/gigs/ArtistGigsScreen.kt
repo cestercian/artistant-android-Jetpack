@@ -97,12 +97,10 @@ fun ArtistGigsScreen(
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        Text(
-                            "Gigs",
-                            style = AppTheme.type.displaySub,
-                            color = colors.ink,
-                            modifier = Modifier.padding(space.lg),
-                        )
+                        // No screen heading — see the matching note on the
+                        // client Bookings tab. The month header IS this
+                        // screen's title, and two serif titles a line apart
+                        // read as a mistake.
                         MonthCalendarHeader(
                             monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
                             onPrevMonth = { stepMonth(-1) },
