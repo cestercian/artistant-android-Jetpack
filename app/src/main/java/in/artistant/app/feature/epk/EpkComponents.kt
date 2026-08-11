@@ -189,6 +189,19 @@ fun EpkField(
     textAlign: TextAlign = TextAlign.Start,
     enabled: Boolean = true,
     contentDescription: String? = null,
+    /**
+     * Multi-line fields keep the Return key instead of spending it on "next
+     * field". Only prose wants that — a name, a duration or a price is one line
+     * by definition, and letting those wrap turns a stray paste with a newline
+     * in it into a row that silently changes height.
+     */
+    singleLine: Boolean = true,
+    /**
+     * Opening height for a multi-line field, in lines. A prose field that starts
+     * one line tall reads as a name field and gets a name typed into it, so the
+     * box has to look like it wants a paragraph before anyone has typed one.
+     */
+    minLines: Int = 1,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
@@ -201,7 +214,8 @@ fun EpkField(
             value = value,
             onValueChange = onValueChange,
             enabled = enabled,
-            singleLine = true,
+            singleLine = singleLine,
+            minLines = minLines,
             textStyle = resolved,
             cursorBrush = SolidColor(colors.brand),
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
@@ -220,10 +234,13 @@ fun EpkField(
                         .fillMaxWidth()
                         .heightIn(min = dimens.size.rowMin)
                         .padding(vertical = dimens.space.sm),
-                    contentAlignment = if (textAlign == TextAlign.End) {
-                        Alignment.CenterEnd
-                    } else {
-                        Alignment.CenterStart
+                    // A multi-line box grows downward, so its placeholder and its
+                    // text have to start at the top — centring them would walk the
+                    // first line down the box as the artist types.
+                    contentAlignment = when {
+                        !singleLine -> Alignment.TopStart
+                        textAlign == TextAlign.End -> Alignment.CenterEnd
+                        else -> Alignment.CenterStart
                     },
                 ) {
                     if (value.isEmpty()) {

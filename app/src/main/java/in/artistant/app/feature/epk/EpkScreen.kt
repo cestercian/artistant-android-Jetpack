@@ -261,7 +261,12 @@ private fun EpkEditor(
             )
         }
         item(key = "about") {
-            AboutSection(bio = artist.bio, modifier = Modifier.padding(horizontal = space.lg))
+            AboutSection(
+                bio = state.bioDraft,
+                canEdit = state.identityHydrated,
+                onBioChanged = viewModel::onBioChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
         }
         item(key = "pricing") {
             PricingSection(
@@ -517,7 +522,10 @@ private fun StatusBlock(
     val space = AppTheme.dimens.space
     val completeness = epkCompleteness(
         photoCount = state.photos.size,
-        bio = artist.bio,
+        // The DRAFT, matching how the tier count reads the draft rows: the
+        // checklist is feedback on the edit in progress, so a bio that has been
+        // typed but not yet debounced still counts as written.
+        bio = state.bioDraft,
         packageCount = state.packageRows.count(::packageRowIsSavable),
         sampleCount = state.samples.size,
         techCount = state.techItems.size,
@@ -748,20 +756,55 @@ private fun PhotoActionRow(
  * control here would therefore be a control that silently destroys three other
  * fields, so the section shows the bio and says where it comes from instead.
  */
+/**
+ * The bio, as an actual field.
+ *
+ * This section used to RENDER the bio and offer no way to change it, which made
+ * the editor's most-read section its only unwritable one — the empty state said
+ * clients read this first, and then gave the artist nowhere to write it. The
+ * narrow single-column write existed in the data layer with no caller; this is
+ * the caller.
+ *
+ * Autosaves on a debounce like the rest of the editor, so there is no Save
+ * button to leave half-pressed. Read-only until the artist row has been read,
+ * matching every other write on this screen: the row has to be seen before it
+ * can be written.
+ */
 @Composable
-private fun AboutSection(bio: String, modifier: Modifier = Modifier) {
+private fun AboutSection(
+    bio: String,
+    canEdit: Boolean,
+    onBioChanged: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
         EpkSectionHeader(title = "About")
-        if (bio.isBlank()) {
+        EpkField(
+            value = bio,
+            onValueChange = onBioChanged,
+            placeholder = "Clients read this before anything else on your profile.",
+            enabled = canEdit,
+            singleLine = false,
+            minLines = BIO_FIELD_MIN_LINES,
+            contentDescription = "Bio",
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "No bio yet. Clients read this before anything else on your profile.",
-                style = AppTheme.type.footnote,
+                "A line or two on what a client is booking.",
+                style = AppTheme.type.caption,
                 color = colors.ink3,
+                modifier = Modifier.weight(1f),
             )
-        } else {
-            Text(bio, style = AppTheme.type.body, color = colors.ink2)
+            Text(
+                "${bio.length} / $MAX_BIO_CHARS",
+                style = AppTheme.type.monoMicro,
+                // Only loud at the wall, because that is the only moment the count
+                // explains something the artist can otherwise only experience as
+                // keystrokes going missing.
+                color = if (bioIsAtCap(bio.length)) colors.warm else colors.ink3,
+            )
         }
     }
 }

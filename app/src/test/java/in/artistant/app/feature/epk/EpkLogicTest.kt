@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.epk
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.feature.wizard.WIZARD_BIO_MAX
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -358,6 +359,62 @@ class EpkLogicTest {
     fun socialCount_treatsBlankAsUnlinked() {
         assertEquals(0, socialLinkCount(null, "", "   "))
         assertEquals(2, socialLinkCount("https://open.spotify.com/x", null, "https://youtube.com/@y"))
+    }
+
+    // ── Bio ──────────────────────────────────────────────────────────────────
+
+    /**
+     * The editor is the post-wizard write path for the same column, so a looser
+     * cap here would be a way around the wizard's. The constant is deliberately
+     * re-declared per feature (as the sample cap already is); this is the guard
+     * that keeps the copies honest, because a duplicated number with nothing
+     * watching it is a number that drifts.
+     */
+    @Test
+    fun bioCap_agreesWithTheWizardsCap() {
+        assertEquals(WIZARD_BIO_MAX, MAX_BIO_CHARS)
+    }
+
+    @Test
+    fun clampBio_truncatesAPasteInsteadOfAcceptingIt() {
+        val essay = "x".repeat(MAX_BIO_CHARS + 50)
+
+        assertEquals(MAX_BIO_CHARS, clampBioInput(essay).length)
+    }
+
+    @Test
+    fun clampBio_leavesAnythingWithinTheCapExactlyAsTyped() {
+        assertEquals("Bangalore four-piece.", clampBioInput("Bangalore four-piece."))
+        assertEquals("", clampBioInput(""))
+    }
+
+    @Test
+    fun bioCounter_onlyGoesLoudAtTheWall() {
+        assertFalse(bioIsAtCap(0))
+        assertFalse(bioIsAtCap(MAX_BIO_CHARS - 1))
+        assertTrue(bioIsAtCap(MAX_BIO_CHARS))
+    }
+
+    @Test
+    fun bioSave_isSkippedWhenNothingActuallyChanged() {
+        assertFalse(bioNeedsSave(draft = "Bangalore four-piece.", saved = "Bangalore four-piece."))
+        assertFalse(bioNeedsSave(draft = "", saved = ""))
+    }
+
+    /**
+     * The write trims, so an untrimmed draft that differs only in whitespace is
+     * already what the server holds. Comparing raw would make every save look
+     * like a change and re-send the bio on every debounce forever.
+     */
+    @Test
+    fun bioSave_ignoresWhitespaceTheWriteWouldHaveTrimmedAnyway() {
+        assertFalse(bioNeedsSave(draft = "  Bangalore four-piece.  ", saved = "Bangalore four-piece."))
+    }
+
+    @Test
+    fun bioSave_firesOnARealEdit_includingClearingIt() {
+        assertTrue(bioNeedsSave(draft = "Bangalore five-piece.", saved = "Bangalore four-piece."))
+        assertTrue(bioNeedsSave(draft = "", saved = "Bangalore four-piece."))
     }
 
     // ── Cover palette ────────────────────────────────────────────────────────

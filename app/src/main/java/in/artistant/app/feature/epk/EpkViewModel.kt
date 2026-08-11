@@ -84,6 +84,14 @@ data class EpkUiState(
      */
     val coverGradientIndex: Int? = null,
 
+    /**
+     * The bio as it is being typed. Held apart from `artist.bio` — which stays
+     * the last value known to have been SAVED — so the debounce has something to
+     * compare against and a re-entry to the screen can tell an unsaved edit from
+     * a published one.
+     */
+    val bioDraft: String = "",
+
     val techDraft: String = "",
     val linkEditor: LinkEditorState? = null,
 
@@ -91,6 +99,7 @@ data class EpkUiState(
     val isRefreshing: Boolean = false,
     val savingPackages: Boolean = false,
     val savingTech: Boolean = false,
+    val savingBio: Boolean = false,
     val uploadingPhoto: Boolean = false,
     val busyLinks: Boolean = false,
 
@@ -101,7 +110,7 @@ data class EpkUiState(
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
-    val anySaveInFlight: Boolean get() = savingPackages || savingTech
+    val anySaveInFlight: Boolean get() = savingPackages || savingTech || savingBio
 }
 
 /**
@@ -116,8 +125,11 @@ data class EpkUiState(
  * write paths invalidates it. Hydrating the editor from it meant every save was
  * followed by a refresh that handed back the pre-save list, so a saved change
  * appeared to revert until the process restarted. The artist row is now used
- * only for the parts the editor cannot write anyway (name, bio, socials, cover
- * gradient), where staleness has no consequence.
+ * only for the parts that are not whole-set replaces — identity, plus the narrow
+ * single-column writes (bio, socials, cover palette), which are safe from the
+ * cache-staleness trap precisely because they send one field rather than
+ * rebuilding a set from a possibly-stale read. Those still gate on
+ * [EpkUiState.identityHydrated] so they never write a row nobody read.
  *
  * **2. Whole-set replaces are gated on a successful read.** Packages, the tech
  * rider and the photo order all persist by sending the complete list. The
@@ -151,6 +163,7 @@ class EpkViewModel @Inject constructor(
 
     private var packagesSaveJob: Job? = null
     private var techSaveJob: Job? = null
+    private var bioSaveJob: Job? = null
 
     init {
         refresh()
@@ -213,6 +226,13 @@ class EpkViewModel @Inject constructor(
         runCatching { artists.fetchArtist(userId) }
             .onSuccess { artist ->
                 _state.update {
+                    // Refuse to overwrite typing. A pull-to-refresh landing between
+                    // a keystroke and its debounced write would otherwise replace
+                    // the half-written bio with the published one, which reads as
+                    // the field erasing itself. Only adopt the server's copy when
+                    // the artist has nothing outstanding — which is the common
+                    // case, including every first load.
+                    val pendingEdit = bioNeedsSave(it.bioDraft, it.artist?.bio.orEmpty())
                     it.copy(
                         artist = artist,
                         setupComplete = profile?.artistSetupComplete == true,
@@ -221,6 +241,7 @@ class EpkViewModel @Inject constructor(
                         // previous session — the row is now the truth.
                         identityHydrated = artist != null,
                         coverGradientIndex = null,
+                        bioDraft = if (pendingEdit) it.bioDraft else artist?.bio.orEmpty(),
                     )
                 }
             }
@@ -322,6 +343,73 @@ class EpkViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    // ── Bio ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Type into the bio.
+     *
+     * Clamped on the way in so a pasted essay truncates where the artist can see
+     * it, rather than being accepted, sent, and rejected by the column.
+     */
+    fun onBioChanged(value: String) {
+        _state.update { it.copy(bioDraft = clampBioInput(value)) }
+        scheduleBioSave()
+    }
+
+    /**
+     * Debounced single-column write.
+     *
+     * Debounced for the reason the pricing set is: a bio typed at speed is one
+     * state change per character, and a PATCH per character is both wasteful and
+     * a way for an out-of-order response to land an older prefix last.
+     *
+     * Unlike pricing this is NOT a whole-set replace, so it gates on
+     * [EpkUiState.identityHydrated] rather than [canReplaceWholeSet] — there is no
+     * set to wipe, but there is still a row we must have read before writing it.
+     */
+    private fun scheduleBioSave() {
+        if (!_state.value.identityHydrated || session.currentUserId == null) return
+        bioSaveJob?.cancel()
+        bioSaveJob = viewModelScope.launch {
+            delay(SAVE_DEBOUNCE_MS)
+            persistBio()
+        }
+    }
+
+    private suspend fun persistBio() {
+        val draft = _state.value.bioDraft
+        // Nothing to say to the server: the debounce fires on any keystroke,
+        // including the ones that type a character and delete it again.
+        if (!bioNeedsSave(draft, _state.value.artist?.bio.orEmpty())) return
+        _state.update { it.copy(savingBio = true) }
+        runCatching { artists.updateBio(draft) }
+            .onSuccess {
+                _state.update {
+                    it.copy(
+                        savingBio = false,
+                        saveError = null,
+                        statusNote = "Bio saved.",
+                        // Fold the saved value into the artist row so the next
+                        // debounce has an accurate "already saved" to compare
+                        // against. Without this every later keystroke re-sends the
+                        // whole bio, because the row still holds the pre-save copy.
+                        artist = it.artist?.copy(bio = draft.trim()),
+                    )
+                }
+            }
+            .onFailure {
+                _state.update {
+                    it.copy(
+                        savingBio = false,
+                        // The draft is deliberately left alone. The artist's words
+                        // are the one thing here that cannot be re-derived, so a
+                        // failed write must never be resolved by discarding them.
+                        saveError = "Couldn't save your bio — check your connection and edit again to retry.",
+                    )
+                }
+            }
     }
 
     // ── Pricing tiers ────────────────────────────────────────────────────────

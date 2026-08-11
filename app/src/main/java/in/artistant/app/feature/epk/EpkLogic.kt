@@ -36,6 +36,49 @@ const val MAX_PHOTOS: Int = 6
 const val MAX_PRICE_INR: Int = 10_000_000
 
 /**
+ * Bio ceiling, matching the wizard's. Re-declared here rather than imported for
+ * the same reason [MAX_SAMPLES] is: the editor is the post-wizard write path, so
+ * a looser cap here would be a way around the wizard's. `EpkLogicTest` asserts
+ * the two numbers agree, which is the part the sample cap never had — a
+ * duplicated constant with nothing watching it is a constant that drifts.
+ */
+const val MAX_BIO_CHARS: Int = 200
+
+/**
+ * Clamp on the way in, so a pasted essay truncates visibly instead of being
+ * accepted and then rejected by the column.
+ */
+fun clampBioInput(raw: String): String = if (raw.length <= MAX_BIO_CHARS) raw else raw.take(MAX_BIO_CHARS)
+
+/**
+ * Whether the counter should go loud.
+ *
+ * One threshold rather than the wizard's three-tone ramp: this field clamps its
+ * input, so "over" cannot happen, and the wizard's warm band exists to coach a
+ * first-ever bio through a flow the artist cannot leave. An artist re-reading a
+ * bio they already wrote needs one fact — that they have hit the wall and the
+ * keystrokes are being dropped.
+ */
+fun bioIsAtCap(length: Int): Boolean = length >= MAX_BIO_CHARS
+
+/**
+ * Opening height of the bio field, in lines. A prose field that opens one line
+ * tall looks like a name field and gets a name typed into it.
+ */
+const val BIO_FIELD_MIN_LINES: Int = 3
+
+/**
+ * Whether a bio edit is worth a write.
+ *
+ * Trailing whitespace is not a change worth a round-trip, and neither is
+ * re-saving what the server already holds — the field autosaves on a debounce,
+ * so without this every focus-and-blur would spend a request restating the row.
+ * Compared trimmed because the write trims too; otherwise the value sent back
+ * would never equal the value held and every save would look like a change.
+ */
+fun bioNeedsSave(draft: String, saved: String): Boolean = draft.trim() != saved.trim()
+
+/**
  * Stock tech-rider items, same set as iOS. Presets exist because a rider is a
  * checklist an artist recognises rather than composes — typing "4 vocal mics"
  * from scratch every time is how riders end up inconsistent across artists and
