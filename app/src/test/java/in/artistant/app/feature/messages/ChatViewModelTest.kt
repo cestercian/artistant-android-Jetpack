@@ -94,6 +94,15 @@ class ChatViewModelTest {
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
         override suspend fun counterpartLastRead(threadId: String): Long? = 9_000L
 
+        /** Every mute value the ViewModel asked the server to write, in order. */
+        val muteWrites = mutableListOf<Boolean>()
+        var failMute: Boolean = false
+
+        override suspend fun setMuted(threadId: String, muted: Boolean) {
+            muteWrites += muted
+            if (failMute) throw IllegalStateException("network down")
+        }
+
         override suspend fun subscribeMessages(
             threadId: String,
             onInsert: (Message) -> Unit,
@@ -109,6 +118,7 @@ class ChatViewModelTest {
         viewerId: String? = CLIENT_ID,
         bookings: StubBookings = StubBookings(),
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
+        blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
@@ -116,6 +126,7 @@ class ChatViewModelTest {
         bookingsRepository = bookings,
         reports = FakeReportsRepository(),
         flagsStore = flags,
+        blockedUsers = blockedUsers,
         viewer = { viewerId },
     )
 
@@ -395,6 +406,7 @@ class ChatViewModelTest {
             bookingsRepository = StubBookings(),
             reports = reports,
             flagsStore = FakeThreadFlagsStore(),
+            blockedUsers = FakeBlockedUsersStore(),
             viewer = { CLIENT_ID },
         )
 
@@ -414,6 +426,7 @@ class ChatViewModelTest {
             override suspend fun markThreadRead(threadId: String) = Unit
             override suspend fun markThreadReadReceipt(threadId: String) = Unit
             override suspend fun counterpartLastRead(threadId: String): Long? = null
+            override suspend fun setMuted(threadId: String, muted: Boolean) = error("offline")
             override suspend fun subscribeMessages(
                 threadId: String,
                 onInsert: (Message) -> Unit,
@@ -560,6 +573,7 @@ class ChatViewModelTest {
             bookingsRepository = StubBookings(),
             reports = reports,
             flagsStore = FakeThreadFlagsStore(),
+            blockedUsers = FakeBlockedUsersStore(),
             viewer = { CLIENT_ID },
         )
 
@@ -600,5 +614,132 @@ class ChatViewModelTest {
         assertTrue(repo.listCount > listsBefore)
         assertTrue(repo.subscribeCount > subscribesBefore)
         assertTrue("the superseded channel must be torn down", repo.cancelCount > 0)
+    }
+
+    // --- per-thread mute (mig 0091) ------------------------------------------
+
+    @Test
+    fun theMuteStateIsReadFromTheViewersOwnSideOfTheThread() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID, muted = true),
+        )
+
+        val model = vm(repo)
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.muted)
+    }
+
+    @Test
+    fun mutingWritesOnceAndFlipsTheState() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val model = vm(repo)
+        advanceUntilIdle()
+
+        model.toggleMuted()
+        advanceUntilIdle()
+
+        assertEquals(listOf(true), repo.muteWrites)
+        assertTrue(model.state.value.muted)
+    }
+
+    @Test
+    fun aFailedMuteRevertsRatherThanClaimingSilence() = runTest {
+        // The control promises no lock-screen notifications. A toggle that stuck
+        // in the UI but never reached the server would be a promise the app
+        // cannot keep, so the state goes back and the failure is surfaced.
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        ).apply { failMute = true }
+        val model = vm(repo)
+        advanceUntilIdle()
+
+        model.toggleMuted()
+        advanceUntilIdle()
+
+        assertFalse(model.state.value.muted)
+        assertNotNull(model.state.value.error)
+    }
+
+    // --- blocking (mig 0087) -------------------------------------------------
+
+    @Test
+    fun theClientSeatBlocksTheArtist() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, viewerId = CLIENT_ID, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        // The id blocked is the COUNTERPARTY's, never the viewer's own — 0087's
+        // no-self check would reject that outright.
+        assertEquals(setOf(ARTIST_ID.lowercase()), blocked.blocked.value)
+        assertTrue(model.state.value.blocked)
+    }
+
+    @Test
+    fun theArtistSeatBlocksTheClient() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, viewerId = ARTIST_ID, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        assertEquals(setOf(CLIENT_ID.lowercase()), blocked.blocked.value)
+    }
+
+    @Test
+    fun anAlreadyBlockedCounterpartRendersAsBlocked() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+
+        val model = vm(repo, blockedUsers = FakeBlockedUsersStore(setOf(ARTIST_ID.lowercase())))
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.blocked)
+    }
+
+    @Test
+    fun aFailedBlockSurfacesAnErrorAndDoesNotClaimTheBlock() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val blocked = FakeBlockedUsersStore().apply { failWrites = true }
+        val model = vm(repo, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        assertFalse(model.state.value.blocked)
+        assertNotNull(model.state.value.error)
+    }
+
+    @Test
+    fun aThreadWithNoResolvableCounterpartOffersNoBlock() = runTest {
+        // No `client_id` on the row and the viewer sits in the artist seat, so
+        // there is no id to block. The state carries null, which is what hides
+        // the action rather than letting it aim at the viewer themselves.
+        val repo = ScriptedMessages(thread = Thread(id = threadId, artistId = ARTIST_ID))
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, viewerId = ARTIST_ID, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        assertNull(model.state.value.counterpartId)
+        assertTrue(blocked.blocked.value.isEmpty())
     }
 }

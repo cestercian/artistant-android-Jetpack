@@ -44,7 +44,12 @@ class MessagesInboxViewModelTest {
         private val threads: List<Thread> = emptyList(),
         private val failList: Boolean = false,
     ) : MessagesRepository {
+        /** Load count — proves a re-projection didn't secretly go back to the network. */
+        var calls = 0
+            private set
+
         override suspend fun listThreadsForUser(): List<Thread> {
+            calls++
             if (failList) throw IllegalStateException("offline")
             return threads
         }
@@ -55,6 +60,7 @@ class MessagesInboxViewModelTest {
         override suspend fun markThreadRead(threadId: String) = Unit
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
         override suspend fun counterpartLastRead(threadId: String): Long? = null
+        override suspend fun setMuted(threadId: String, muted: Boolean) = Unit
         override suspend fun subscribeMessages(
             threadId: String,
             onInsert: (Message) -> Unit,
@@ -67,11 +73,13 @@ class MessagesInboxViewModelTest {
         viewerId: String? = CLIENT_ID,
         bookings: StubBookings = StubBookings(),
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
+        blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
     ) = MessagesViewModel(
         messagesRepository = messages,
         artistsRepository = artists,
         bookingsRepository = bookings,
         flagsStore = flags,
+        blockedUsers = blockedUsers,
         viewer = { viewerId },
     )
 
@@ -397,6 +405,61 @@ class MessagesInboxViewModelTest {
 
         model.toggleArchived("t-1")
         assertEquals(1, model.state.value.activeThreads.size)
+    }
+
+    // --- blocking (migration 0087) -------------------------------------------
+    //
+    // 0087 is enforced CLIENT-SIDE in v1: the table records the block, and the
+    // inbox filter is what makes it mean anything. These pin that the filter
+    // reaches every inbox surface, not just the visible list.
+
+    @Test
+    fun aBlockedCounterpartsThreadsLeaveTheInboxEntirely() = runTest {
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID),
+                    Thread(id = "t-2", artistId = OTHER_ARTIST_ID, clientId = CLIENT_ID),
+                ),
+            ),
+            blockedUsers = FakeBlockedUsersStore(setOf(ARTIST_ID.lowercase())),
+        )
+
+        // Not just `visibleThreads`: a block that left the row in `threads`
+        // would keep feeding the chip counts and the unread badge, so the tab
+        // bar would still advertise a conversation with no way to open it.
+        assertEquals(listOf("t-2"), model.state.value.threads.map { it.thread.id })
+        assertEquals(listOf("t-2"), model.state.value.visibleThreads.map { it.thread.id })
+        assertEquals(1, model.state.value.counts[MessagesFilter.All])
+    }
+
+    @Test
+    fun blockingAnArtistFromAnotherScreenUpdatesTheInboxWithoutARefetch() = runTest {
+        // The block happens in the chat's details sheet, not here. The inbox
+        // observes the same store, so it must react on its own — otherwise
+        // blocking someone appears to do nothing until a pull-to-refresh.
+        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID)))
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, blockedUsers = blocked)
+        val loadsBefore = repo.calls
+
+        blocked.toggle(ARTIST_ID)
+
+        assertTrue(model.state.value.threads.isEmpty())
+        assertEquals("the inbox must re-project, not reload", loadsBefore, repo.calls)
+    }
+
+    @Test
+    fun anArtistViewerBlockingAClientHidesThatConversation() = runTest {
+        // The mirror case, from the other seat: `artist_id` is the artist's own
+        // uid here, so only the `client_id` leg can be what matches.
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID))),
+            viewerId = ARTIST_ID,
+            blockedUsers = FakeBlockedUsersStore(setOf(CLIENT_ID.lowercase())),
+        )
+
+        assertTrue(model.state.value.threads.isEmpty())
     }
 
     @Test

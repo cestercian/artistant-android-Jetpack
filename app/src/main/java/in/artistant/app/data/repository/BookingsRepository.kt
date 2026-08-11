@@ -346,6 +346,12 @@ private data class DbBooking(
     val id: String,
     @SerialName("artist_id") val artistId: String,
     @SerialName("package_index") val packageIndex: Int = 0,
+    /**
+     * The tier name the server stamped at insert (`package_name`, `not null`
+     * since 0001). Defaulted to null anyway so a projection that omits the
+     * column decodes rather than throwing.
+     */
+    @SerialName("package_name") val packageName: String? = null,
     @SerialName("date_label") val dateLabel: String = "",
     @SerialName("time_label") val timeLabel: String = "",
     val venue: String = "TBD",
@@ -370,6 +376,7 @@ private data class DbBooking(
             id = id,
             artistId = artistId,
             packageIndex = packageIndex,
+            packageName = packageName?.trim()?.takeIf { it.isNotEmpty() },
             date = dateLabel,
             time = timeLabel,
             venue = venue,
@@ -398,6 +405,7 @@ private data class DbBookingWithClient(
     val id: String,
     @SerialName("artist_id") val artistId: String,
     @SerialName("package_index") val packageIndex: Int = 0,
+    @SerialName("package_name") val packageName: String? = null,
     @SerialName("date_label") val dateLabel: String = "",
     @SerialName("time_label") val timeLabel: String = "",
     val venue: String = "TBD",
@@ -427,6 +435,7 @@ private data class DbBookingWithClient(
             id = id,
             artistId = artistId,
             packageIndex = packageIndex,
+            packageName = packageName,
             dateLabel = dateLabel,
             timeLabel = timeLabel,
             venue = venue,
@@ -467,6 +476,9 @@ class FakeBookingsRepository(
             id = UUID.randomUUID().toString(),
             artistId = draft.artistId.lowercase(),
             packageIndex = draft.packageIndex,
+            // Same snapshot the real insert writes (`package_name`), so a test
+            // driving this fake sees the tier name a real booking would carry.
+            packageName = draft.packageName.ifBlank { "Custom" },
             date = draft.date,
             time = draft.time,
             venue = draft.venue.ifBlank { "TBD" },

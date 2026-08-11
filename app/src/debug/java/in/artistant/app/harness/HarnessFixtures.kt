@@ -304,6 +304,11 @@ object HarnessFixtures {
             id = id,
             artistId = ARTIST_ID,
             packageIndex = packageIndex,
+            // The server's insert-time snapshot (`package_name`). Seeded here so
+            // the harness exercises the same read path a real booking takes —
+            // the tier name comes off the booking, not off the artist's current
+            // package list.
+            packageName = packages[packageIndex].name,
             date = dayLabel(startMs),
             time = timeLabel(startMs),
             venue = venue,
@@ -484,6 +489,10 @@ object HarnessFixtures {
     val thread = Thread(
         id = THREAD_ID,
         artistId = ARTIST_ID,
+        // Both seats are set so the harness can answer "who is the counterparty"
+        // from either role — the artist seat has no other way to identify the
+        // client, which is what the block action needs.
+        clientId = CLIENT_ID,
         bookingId = BOOKING_ID,
         clientName = "Meera Iyer",
         lastPreview = "Perfect — see you on the day.",

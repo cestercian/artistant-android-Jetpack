@@ -44,6 +44,13 @@ data class ChatUiState(
     val starred: Boolean = false,
     val archived: Boolean = false,
     /**
+     * The viewer's own mute state for this thread (mig 0091). Unlike starred /
+     * archived — which are device-local reading preferences — this is a server
+     * column that `send-push` honours, so it survives a reinstall and applies on
+     * every device the person signs in on.
+     */
+    val muted: Boolean = false,
+    /**
      * The gig's artist, for the details sheet. Only the client seat can act on
      * it — an artist's counterpart is a client with no public profile — so the
      * id is null for the artist seat rather than pointing at the viewer.
@@ -53,6 +60,15 @@ data class ChatUiState(
     val artistScore: Int? = null,
     /** True once the report has been filed for this conversation. */
     val reportSubmitted: Boolean = false,
+    /**
+     * The other person's user id, for blocking (mig 0087). Unlike [artistId] this
+     * is populated on BOTH seats — an artist blocks a client just as a client
+     * blocks an artist — and is null only when the seat can't be resolved, which
+     * is what hides the action rather than letting it guess.
+     */
+    val counterpartId: String? = null,
+    /** Whether the viewer has blocked [counterpartId]. */
+    val blocked: Boolean = false,
 ) {
     /**
      * The last of the viewer's own messages the counterparty has read. Only
@@ -79,6 +95,7 @@ class ChatViewModel @Inject constructor(
     private val bookingsRepository: BookingsRepository,
     private val reports: ReportsRepository,
     private val flagsStore: ThreadFlagsStore,
+    private val blockedUsers: BlockedUsersStore,
     private val viewer: ViewerIdentity,
 ) : ViewModel() {
     private val threadId: String = checkNotNull(savedStateHandle["threadId"])
@@ -99,6 +116,20 @@ class ChatViewModel @Inject constructor(
                         safetyBannerVisible = threadId !in flags.safetyDismissed,
                     )
                 }
+            }
+        }
+        // Hydrated here as well as in the inbox because a chat can be opened
+        // straight from a push notification, never having passed through the
+        // inbox this session. Separate launch from the collect below, which
+        // never returns.
+        viewModelScope.launch { blockedUsers.refresh() }
+        // The blocked set is the single source of truth for the Block/Unblock
+        // label, so the toggle needs no optimistic state of its own here — the
+        // store flips its set immediately and reverts if the write fails, and
+        // this collect just follows it.
+        viewModelScope.launch {
+            blockedUsers.blocked.collect { ids ->
+                _state.update { it.copy(blocked = it.counterpartId in ids) }
             }
         }
         refresh()
@@ -124,11 +155,20 @@ class ChatViewModel @Inject constructor(
             val title = thread?.let {
                 ThreadCounterpart.name(thread = it, viewerId = viewerId, artistName = artist?.name)
             } ?: FALLBACK_TITLE
+            // Resolved on the same pass as the title so the sheet can never offer
+            // to block one person while naming another.
+            val counterpartId = thread?.let { ThreadCounterpart.counterpartId(it, viewerId) }
             _state.update { state ->
                 state.copy(
                     thread = thread,
                     title = title,
                     viewerIsArtist = viewerIsArtist,
+                    counterpartId = counterpartId,
+                    blocked = counterpartId != null && counterpartId in blockedUsers.blocked.value,
+                    // Server-owned and already resolved to the viewer's own side
+                    // by the decoder, so a refresh is the only thing that can
+                    // correct an optimistic toggle that failed.
+                    muted = thread?.muted ?: false,
                     // Only the client seat's counterpart has a profile to open.
                     artistId = thread?.artistId?.takeUnless { viewerIsArtist },
                     artistSubtitle = artist
@@ -314,6 +354,59 @@ class ChatViewModel @Inject constructor(
     fun markUnread() = viewModelScope.launch { flagsStore.markUnread(threadId) }
 
     /**
+     * Mute or unmute this conversation for the viewer only.
+     *
+     * Optimistic, then reverted on failure. The revert matters more here than it
+     * does for the device-local flags: this control claims to stop notifications
+     * arriving on the lock screen, so a toggle that flipped in the UI but never
+     * reached the server would leave someone expecting silence and getting
+     * pushes. `thread.muted` is also patched so a details sheet reopened before
+     * the next refresh doesn't read the stale row.
+     */
+    fun toggleMuted() {
+        val next = !_state.value.muted
+        _state.update { it.copy(muted = next, thread = it.thread?.copy(muted = next)) }
+        viewModelScope.launch {
+            runCatching { messagesRepository.setMuted(threadId, next) }
+                .onFailure { e ->
+                    _state.update {
+                        it.copy(
+                            muted = !next,
+                            thread = it.thread?.copy(muted = !next),
+                            error = e.message ?: MUTE_FAILED,
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Block or unblock the other person (migration 0087).
+     *
+     * Keyed on the counterparty's USER id, not this thread: blocking is about a
+     * person, so every conversation with them leaves the inbox, not just this
+     * one. No-ops when the seat is unresolved rather than guessing an id — the
+     * UI hides the action in that case, and this is the second guard.
+     *
+     * What it does NOT do, deliberately: 0087's v1 scope is client-side
+     * filtering only. The blocked person is not told, is not prevented from
+     * sending, and their pushes are not suppressed (mute is the control for
+     * that). The copy in the details sheet says exactly this — see
+     * [ThreadDetailsSheet] — because a block that quietly under-delivers is
+     * worse for someone's safety than one that is honest about its limits.
+     */
+    fun toggleBlocked() {
+        val target = _state.value.counterpartId ?: return
+        viewModelScope.launch {
+            // The store owns the optimistic flip and its revert; all that is
+            // left here is saying so when the write didn't land.
+            if (!blockedUsers.toggle(target)) {
+                _state.update { it.copy(error = BLOCK_FAILED) }
+            }
+        }
+    }
+
+    /**
      * File a report against this conversation.
      *
      * `reportConversation` never throws — it soft-fails to an on-device log so a
@@ -335,5 +428,7 @@ class ChatViewModel @Inject constructor(
 
     private companion object {
         const val FALLBACK_TITLE = "Chat"
+        const val MUTE_FAILED = "Couldn't update notifications for this conversation."
+        const val BLOCK_FAILED = "Couldn't update your block list. Nothing changed."
     }
 }

@@ -19,9 +19,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -75,10 +79,20 @@ fun ThreadDetailsSheet(
     viewerIsArtist: Boolean,
     starred: Boolean,
     archived: Boolean,
+    muted: Boolean,
+    blocked: Boolean,
+    /**
+     * False when the counterparty's user id couldn't be resolved, which is the
+     * only thing a block can be keyed on. Hides the row entirely rather than
+     * offering an action that would have to guess who to block.
+     */
+    canBlock: Boolean,
     reportSubmitted: Boolean,
     onBookingClick: (String) -> Unit,
     onToggleStar: () -> Unit,
     onToggleArchive: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleBlock: () -> Unit,
     onMarkUnread: () -> Unit,
     onReport: (reason: String) -> Unit,
     onDismiss: () -> Unit,
@@ -91,6 +105,12 @@ fun ThreadDetailsSheet(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     var reporting by remember { mutableStateOf(false) }
+    // Blocking gets a confirm step for the same reason reporting gets a reason
+    // picker, plus one of its own: a block takes the conversation out of the
+    // inbox, so an accidental one is genuinely awkward to walk back — the way
+    // back in is the thread you just hid. Unblocking is one tap, since undoing
+    // a mistake should never need a confirmation of its own.
+    var blocking by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -134,6 +154,14 @@ fun ThreadDetailsSheet(
                     counterpartName = counterpartName,
                     onPick = onReport,
                 )
+                blocking -> BlockConfirm(
+                    counterpartName = counterpartName,
+                    onConfirm = {
+                        onToggleBlock()
+                        blocking = false
+                    },
+                    onCancel = { blocking = false },
+                )
                 else -> {
                     // Labels flip with state so a row always reads as the action
                     // it will perform, not the state it is in.
@@ -150,6 +178,25 @@ fun ThreadDetailsSheet(
                         tag = "threadDetails.markUnread",
                         onClick = onMarkUnread,
                     )
+                    // Notifications, not visibility: a muted thread still shows
+                    // up in the inbox and still counts as unread — the label says
+                    // "notifications" so it can't be read as "hide this". The
+                    // caption spells out that it is one-sided, because the
+                    // obvious wrong reading of a mute in a two-person thread is
+                    // that the other person has been silenced too.
+                    ActionRow(
+                        label = if (muted) "Unmute notifications" else "Mute notifications",
+                        icon = if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
+                        tint = if (muted) colors.ink3 else colors.ink,
+                        tag = "threadDetails.mute",
+                        caption = if (muted) {
+                            "You won't get notifications about this conversation. " +
+                                "$counterpartName still gets theirs."
+                        } else {
+                            null
+                        },
+                        onClick = onToggleMute,
+                    )
                     ActionRow(
                         label = if (archived) "Unarchive" else "Archive",
                         icon = if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive,
@@ -162,6 +209,27 @@ fun ThreadDetailsSheet(
                         tag = "threadDetails.report",
                         onClick = { reporting = true },
                     )
+                    // Block sits last, below Report, because report is the action
+                    // that actually gets someone looked at — blocking only
+                    // changes what THIS person sees (mig 0087 is client-side
+                    // filtering in v1). The caption on the blocked state says so
+                    // rather than letting the word "blocked" imply a wall that
+                    // isn't there yet.
+                    if (canBlock) {
+                        ActionRow(
+                            label = if (blocked) "Unblock $counterpartName" else "Block $counterpartName",
+                            icon = if (blocked) Icons.Outlined.LockOpen else Icons.Outlined.Block,
+                            tint = if (blocked) colors.ink3 else colors.ink,
+                            tag = "threadDetails.block",
+                            caption = if (blocked) {
+                                "Hidden from your inbox. They aren't told, and they can still " +
+                                    "message you."
+                            } else {
+                                null
+                            },
+                            onClick = { if (blocked) onToggleBlock() else blocking = true },
+                        )
+                    }
                 }
             }
         }
@@ -292,6 +360,14 @@ private fun ParticipantRow(
     HRule()
 }
 
+/**
+ * One tappable action.
+ *
+ * [caption] is the slot for a row whose consequence isn't self-evident from its
+ * label — currently mute and block, both of which people reliably assume do more
+ * than they do. It renders only when the state it describes is actually in
+ * effect, so an inert row stays a single line.
+ */
 @Composable
 private fun ActionRow(
     label: String,
@@ -299,6 +375,7 @@ private fun ActionRow(
     tag: String,
     onClick: () -> Unit,
     tint: Color = AppTheme.colors.ink,
+    caption: String? = null,
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
@@ -317,7 +394,12 @@ private fun ActionRow(
             tint = tint,
             modifier = Modifier.size(AppTheme.dimens.size.iconLg),
         )
-        Text(label, style = AppTheme.type.body, color = colors.ink)
+        Column(Modifier.weight(1f)) {
+            Text(label, style = AppTheme.type.body, color = colors.ink)
+            caption?.let {
+                Text(it, style = AppTheme.type.footnote, color = colors.ink3)
+            }
+        }
     }
     HRule()
 }
@@ -353,6 +435,70 @@ private fun ReportReasonPicker(counterpartName: String, onPick: (String) -> Unit
             "This won't be shared with $counterpartName.",
             style = AppTheme.type.footnote,
             color = colors.ink3,
+        )
+    }
+}
+
+/**
+ * Confirm a block — and say what one actually is.
+ *
+ * The wording is load-bearing, not padding. Migration 0087 ships blocking as
+ * CLIENT-SIDE FILTERING: the blocked person's conversations stop appearing in
+ * your inbox. Server-side contact prevention was deliberately deferred rather
+ * than amend the message-insert policy, so nothing here stops them sending, and
+ * their pushes are not suppressed either — mute is the control for that. Someone
+ * who blocks a person they feel unsafe around and believes it walled them off is
+ * worse off than someone who was told the truth and reported them as well, which
+ * is why report is named as the next step rather than left implied.
+ *
+ * Reword this only alongside the migration that changes what a block does.
+ */
+@Composable
+private fun BlockConfirm(
+    counterpartName: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(Modifier.fillMaxWidth().semantics { testTag = "threadDetails.blockConfirm" }) {
+        Text("Block $counterpartName?", style = AppTheme.type.callout, color = colors.ink)
+        Spacer(Modifier.height(space.xs))
+        Text(
+            "Your conversations with them stop showing in your inbox, and they aren't told.",
+            style = AppTheme.type.body,
+            color = colors.ink2,
+        )
+        Spacer(Modifier.height(space.xs))
+        Text(
+            "Blocking doesn't stop them sending messages or notifications — mute the " +
+                "conversation for that, and report it if something's wrong.",
+            style = AppTheme.type.footnote,
+            color = colors.ink3,
+        )
+        Spacer(Modifier.height(space.md))
+        Text(
+            "Block $counterpartName",
+            style = AppTheme.type.body,
+            color = colors.ink,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                .clickable(onClick = onConfirm)
+                .padding(vertical = space.md)
+                .semantics { testTag = "threadDetails.blockConfirmed" },
+        )
+        HRule()
+        Text(
+            "Cancel",
+            style = AppTheme.type.body,
+            color = colors.ink3,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                .clickable(onClick = onCancel)
+                .padding(vertical = space.md)
+                .semantics { testTag = "threadDetails.blockCancel" },
         )
     }
 }

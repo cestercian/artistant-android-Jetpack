@@ -168,6 +168,9 @@ fun ChatScreen(
             artistScore = state.artistScore,
             starred = state.starred,
             archived = state.archived,
+            muted = state.muted,
+            blocked = state.blocked,
+            canBlock = state.counterpartId != null,
             reportSubmitted = state.reportSubmitted,
             onBookingClick = onBookingClick,
             onArtistClick = onArtistClick,
@@ -176,6 +179,14 @@ fun ChatScreen(
                 viewModel.toggleArchived()
                 viewModel.dismissDetails()
             },
+            // Stays open, unlike archive: the row's own label and caption ARE
+            // the confirmation that the mute landed, so closing the sheet would
+            // hide the only feedback the action has.
+            onToggleMute = viewModel::toggleMuted,
+            // Also stays open: the row flips to "Unblock", which is the only
+            // affordance for undoing an accidental block — the conversation is
+            // by then out of the inbox, so closing the sheet would strand it.
+            onToggleBlock = viewModel::toggleBlocked,
             onMarkUnread = {
                 viewModel.markUnread()
                 viewModel.dismissDetails()

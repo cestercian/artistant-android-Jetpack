@@ -14,6 +14,8 @@ import `in`.artistant.app.data.repository.FakeArtistMediaRepository
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.data.repository.FakePackagesRepository
+import `in`.artistant.app.data.repository.BlockRepository
+import `in`.artistant.app.data.repository.FakeBlockRepository
 import `in`.artistant.app.data.repository.FakeReportsRepository
 import `in`.artistant.app.data.repository.FakeReviewsRepository
 import `in`.artistant.app.data.repository.FakeRequestsRepository
@@ -144,6 +146,11 @@ object HarnessRepositories {
     private val accountImpl: FakeAccountRepository by lazy { FakeAccountRepository() }
     private val reportsImpl: FakeReportsRepository by lazy { FakeReportsRepository() }
 
+    // Nobody is blocked in the fixture, so the harness inbox shows every seeded
+    // thread; the point of the fake is that Block/Unblock round-trips offline
+    // instead of throwing at a Supabase call the harness can never reach.
+    private val blockImpl: FakeBlockRepository by lazy { FakeBlockRepository() }
+
     val artists: ArtistsRepository? get() = if (on) artistsImpl else null
     val bookings: BookingsRepository? get() = if (on) bookingsImpl else null
     val requests: RequestsRepository? get() = if (on) requestsImpl else null
@@ -155,6 +162,7 @@ object HarnessRepositories {
     val artistLinks: ArtistLinksRepository? get() = if (on) artistLinksImpl else null
     val account: AccountRepository? get() = if (on) accountImpl else null
     val reports: ReportsRepository? get() = if (on) reportsImpl else null
+    val block: BlockRepository? get() = if (on) blockImpl else null
 
     // --- Client path: Discover / search / profile / saved / messages -----------------------
 
@@ -249,6 +257,17 @@ private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository 
     override suspend fun markThreadRead(threadId: String) {
         val index = threads.indexOfFirst { it.id == threadId }
         if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
+    }
+
+    /**
+     * The harness holds one viewer, so it stores the resolved viewer-relative
+     * flag rather than the server's two columns — enough to drive the details
+     * sheet's label flip on device. The per-side column rule is asserted against
+     * `FakeMessagesRepository`, which models both columns.
+     */
+    override suspend fun setMuted(threadId: String, muted: Boolean) {
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) threads[index] = threads[index].copy(muted = muted)
     }
 
     override suspend fun markThreadReadReceipt(threadId: String) = Unit

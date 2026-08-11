@@ -145,17 +145,25 @@ class BookingDetailViewModel @Inject constructor(
     /**
      * The booked tier's name, or null when there is nothing honest to show.
      *
-     * Resolved by index into the artist's CURRENT package list, which is the
-     * only package data this client has: the server stamps a `package_name`
-     * snapshot at insert time, but no read path decodes it (see the PR notes).
-     * The index is bounds-checked because an artist republishing their packages
-     * between the booking and this render can leave it dangling — in which case
-     * the row disappears rather than mislabelling the gig.
+     * Prefers the server's own snapshot (`bookings.package_name`, stamped at
+     * insert since migration 0001) because that is the tier as it stood WHEN THE
+     * GIG WAS BOOKED. Resolving the index into the artist's current package list
+     * — which is all this screen used to do — meant an artist reordering their
+     * tiers relabelled every past booking: a client who booked "Evening set"
+     * would open a months-old gig and read "Acoustic hour".
+     *
+     * The index survives only as a fallback for a booking whose snapshot didn't
+     * come back — a projection that omitted the column, or a blank value. It
+     * cannot be a null column: `package_name` is `not null` on the server and
+     * both clients write it on every create, so no stored row is missing it. The
+     * fallback is bounds-checked so a dangling index drops the row rather than
+     * naming the wrong tier.
      */
     fun packageName(): String? {
         val s = _state.value
-        val index = s.booking?.packageIndex ?: return null
-        return s.artist?.packages?.getOrNull(index)?.name?.takeIf { it.isNotBlank() }
+        val booking = s.booking ?: return null
+        booking.packageName?.takeIf { it.isNotBlank() }?.let { return it }
+        return s.artist?.packages?.getOrNull(booking.packageIndex)?.name?.takeIf { it.isNotBlank() }
     }
 
     fun showAcceptDecline(isArtistViewer: Boolean): Boolean =
