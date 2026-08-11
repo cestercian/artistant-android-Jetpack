@@ -200,6 +200,61 @@ class BookingDetailLogicTest {
     }
 
     @Test
+    fun manageRowsAndDockSecondary_partitionTheSecondarySet_soNothingRendersTwice() {
+        // The duplicate this guards: a client's pending Cancel used to render as
+        // an in-page row AND as a dock button, two controls for one act.
+        for (viewer in BookingViewer.entries) {
+            for (status in BookingStatus.entries) {
+                val rows = BookingActions.manageRows(viewer, status)
+                val dock = BookingActions.dockSecondary(viewer, status)
+
+                assertTrue(
+                    "$viewer/$status renders ${rows intersect dock.toSet()} twice",
+                    (rows intersect dock.toSet()).isEmpty(),
+                )
+                assertEquals(
+                    "$viewer/$status drops a secondary action on the floor",
+                    BookingActions.manage(viewer, status).toSet(),
+                    (rows + dock).toSet(),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun aPendingClientsCancelIsPinnedInTheDock_notListedAsARow() {
+        assertEquals(
+            emptyList<BookingAction>(),
+            BookingActions.manageRows(BookingViewer.Client, BookingStatus.PendingConfirm),
+        )
+        assertEquals(
+            listOf(BookingAction.Cancel),
+            BookingActions.dockSecondary(BookingViewer.Client, BookingStatus.PendingConfirm),
+        )
+    }
+
+    @Test
+    fun aConfirmedBookingsActionsAreAllRows_soTheDockStaysOneButton() {
+        assertEquals(
+            emptyList<BookingAction>(),
+            BookingActions.dockSecondary(BookingViewer.Client, BookingStatus.Confirmed),
+        )
+        assertEquals(
+            BookingActions.manage(BookingViewer.Artist, BookingStatus.Confirmed),
+            BookingActions.manageRows(BookingViewer.Artist, BookingStatus.Confirmed),
+        )
+    }
+
+    @Test
+    fun aCompletedBookingsReviewIsPinnedInTheDock() {
+        assertEquals(
+            listOf(BookingAction.LeaveReview),
+            BookingActions.dockSecondary(BookingViewer.Client, BookingStatus.Completed),
+        )
+        assertTrue(BookingActions.dockSecondary(BookingViewer.Artist, BookingStatus.Completed).isEmpty())
+    }
+
+    @Test
     fun gettingThere_onlyOnceTheGigIsConfirmed() {
         assertTrue(BookingActions.showsGettingThere(BookingStatus.Confirmed))
         assertFalse(BookingActions.showsGettingThere(BookingStatus.PendingConfirm))

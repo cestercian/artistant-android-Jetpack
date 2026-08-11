@@ -142,6 +142,30 @@ object BookingActions {
         else -> emptyList()
     }
 
+    /**
+     * The half of [manage] that renders as in-page rows.
+     *
+     * Only a confirmed booking has enough secondary actions to earn a list. The
+     * lone entries the other states carry (a client's pending Cancel, a
+     * completed booking's review) would otherwise be a one-item "Manage" section
+     * floating above a dock — so they go to [dockSecondary] instead.
+     */
+    fun manageRows(viewer: BookingViewer, status: BookingStatus): List<BookingAction> =
+        if (status == BookingStatus.Confirmed) manage(viewer, status) else emptyList()
+
+    /**
+     * The half of [manage] pinned in the dock under the primary.
+     *
+     * Defined as the complement of [manageRows] rather than as its own list, so
+     * the two are a genuine PARTITION of [manage]: every secondary action is
+     * rendered exactly once, and no state can grow two Cancel buttons (the
+     * client's pending row did exactly that before this split existed).
+     */
+    fun dockSecondary(viewer: BookingViewer, status: BookingStatus): List<BookingAction> {
+        val rows = manageRows(viewer, status).toSet()
+        return manage(viewer, status).filterNot { it in rows }
+    }
+
     /** Do the travel/venue rows have anything to say yet? */
     fun showsGettingThere(status: BookingStatus): Boolean = status == BookingStatus.Confirmed
 }

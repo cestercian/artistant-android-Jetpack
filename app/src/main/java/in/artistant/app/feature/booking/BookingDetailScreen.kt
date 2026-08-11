@@ -185,14 +185,12 @@ fun BookingDetailScreen(
                                 )
                             }
                             ManageSection(
-                                actions = viewModel.manageActions(viewer)
-                                    // Cancel is the dock's business at pending
-                                    // (it is the client's only action there and
-                                    // belongs beside the primary), and review
-                                    // opens a sheet rather than a row.
-                                    .filter { it != BookingAction.LeaveReview },
+                                // Rows only — the states whose single secondary
+                                // action belongs beside the primary hand it to
+                                // the dock instead. The two halves partition the
+                                // manage set, so nothing renders twice.
+                                actions = BookingActions.manageRows(viewer, booking.status),
                                 viewer = viewer,
-                                showHeader = booking.status == BookingStatus.Confirmed,
                                 onShare = {
                                     shareGig(context, shareGigText(counterparty, booking, city))
                                         ?.let(viewModel::reportActionError)
@@ -480,7 +478,6 @@ private fun GettingThereSection(
 private fun ManageSection(
     actions: List<BookingAction>,
     viewer: BookingViewer,
-    showHeader: Boolean,
     onShare: () -> Unit,
     onAddToCalendar: () -> Unit,
     onCancel: () -> Unit,
@@ -492,7 +489,7 @@ private fun ManageSection(
     if (rows.isEmpty()) return
 
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        if (showHeader) SectionLabel("Manage")
+        SectionLabel("Manage")
         Column {
             rows.forEachIndexed { index, action ->
                 if (index == 0) HRule()
@@ -578,7 +575,9 @@ private fun Dock(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val primary = BookingActions.primary(viewer, booking.status)
-    val manage = BookingActions.manage(viewer, booking.status)
+    // Only the secondary actions the in-page list did NOT take — see the
+    // manageRows/dockSecondary partition.
+    val secondary = BookingActions.dockSecondary(viewer, booking.status)
 
     Column(
         Modifier
@@ -638,23 +637,25 @@ private fun Dock(
         }
 
         // Pending has no Manage list to hold its Cancel, and a completed booking's
-        // review is a sheet rather than a row — so both pin here under the primary.
-        if (booking.status == BookingStatus.PendingConfirm && BookingAction.Cancel in manage) {
-            PrimaryButton(
-                text = if (isActing) "Cancelling…" else "Cancel request",
-                onClick = onCancel,
-                variant = ButtonVariant.Ghost,
-                fullWidth = true,
-                enabled = !isActing,
-            )
-        }
-        if (BookingAction.LeaveReview in manage) {
-            PrimaryButton(
-                text = "Leave a review",
-                onClick = onReview,
-                variant = ButtonVariant.Ghost,
-                fullWidth = true,
-            )
+        // review opens a sheet rather than a row — so both pin here under the
+        // primary rather than floating a one-item section above the dock.
+        secondary.forEach { action ->
+            when (action) {
+                BookingAction.Cancel -> PrimaryButton(
+                    text = if (isActing) "Cancelling…" else "Cancel request",
+                    onClick = onCancel,
+                    variant = ButtonVariant.Ghost,
+                    fullWidth = true,
+                    enabled = !isActing,
+                )
+                BookingAction.LeaveReview -> PrimaryButton(
+                    text = "Leave a review",
+                    onClick = onReview,
+                    variant = ButtonVariant.Ghost,
+                    fullWidth = true,
+                )
+                else -> Unit
+            }
         }
     }
 }
