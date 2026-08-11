@@ -92,6 +92,18 @@ data class EpkUiState(
      */
     val bioDraft: String = "",
 
+    /**
+     * The three account fields as they are being typed, held apart from the
+     * artist row for the same reason [bioDraft] is — the row stays the last
+     * SAVED state, so the debounce has something to diff against.
+     *
+     * Whole-set by construction: the write sends all three, so the draft has to
+     * carry all three, and it may only be seeded from a successful read. See
+     * [identityHydrated] — that gate is what stops a save firing against the
+     * default-constructed value and unlinking every account at once.
+     */
+    val socialDraft: SocialDraft = SocialDraft(),
+
     val techDraft: String = "",
     val linkEditor: LinkEditorState? = null,
 
@@ -100,6 +112,7 @@ data class EpkUiState(
     val savingPackages: Boolean = false,
     val savingTech: Boolean = false,
     val savingBio: Boolean = false,
+    val savingSocials: Boolean = false,
     val uploadingPhoto: Boolean = false,
     val busyLinks: Boolean = false,
 
@@ -110,7 +123,7 @@ data class EpkUiState(
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
-    val anySaveInFlight: Boolean get() = savingPackages || savingTech || savingBio
+    val anySaveInFlight: Boolean get() = savingPackages || savingTech || savingBio || savingSocials
 }
 
 /**
@@ -164,6 +177,7 @@ class EpkViewModel @Inject constructor(
     private var packagesSaveJob: Job? = null
     private var techSaveJob: Job? = null
     private var bioSaveJob: Job? = null
+    private var socialsSaveJob: Job? = null
 
     init {
         refresh()
@@ -232,7 +246,13 @@ class EpkViewModel @Inject constructor(
                     // the field erasing itself. Only adopt the server's copy when
                     // the artist has nothing outstanding — which is the common
                     // case, including every first load.
-                    val pendingEdit = bioNeedsSave(it.bioDraft, it.artist?.bio.orEmpty())
+                    val pendingBio = bioNeedsSave(it.bioDraft, it.artist?.bio.orEmpty())
+                    // Same refusal for the accounts, asked of all three at once
+                    // because they save as one. On a first load both sides are
+                    // empty, so this is false and the server's values are adopted —
+                    // which is exactly what has to happen before the gate below
+                    // lets anything write them back.
+                    val pendingSocials = socialsNeedSave(it.socialDraft, savedSocials(it.artist))
                     it.copy(
                         artist = artist,
                         setupComplete = profile?.artistSetupComplete == true,
@@ -241,7 +261,8 @@ class EpkViewModel @Inject constructor(
                         // previous session — the row is now the truth.
                         identityHydrated = artist != null,
                         coverGradientIndex = null,
-                        bioDraft = if (pendingEdit) it.bioDraft else artist?.bio.orEmpty(),
+                        bioDraft = if (pendingBio) it.bioDraft else artist?.bio.orEmpty(),
+                        socialDraft = if (pendingSocials) it.socialDraft else savedSocials(artist),
                     )
                 }
             }
@@ -407,6 +428,96 @@ class EpkViewModel @Inject constructor(
                         // are the one thing here that cannot be re-derived, so a
                         // failed write must never be resolved by discarding them.
                         saveError = "Couldn't save your bio — check your connection and edit again to retry.",
+                    )
+                }
+            }
+    }
+
+    // ── Connected accounts ───────────────────────────────────────────────────
+
+    /**
+     * The row's social columns as a draft. One place that knows the mapping, so
+     * the seeding, the "has it changed" diff and the post-save fold cannot drift
+     * apart into three subtly different ideas of what is currently published.
+     */
+    private fun savedSocials(artist: Artist?): SocialDraft = socialDraftOf(
+        spotify = artist?.spotifyArtistUrl,
+        instagram = artist?.instagramHandle,
+        youtube = artist?.youtubeChannelUrl,
+    )
+
+    fun onSocialChanged(platform: SocialPlatform, value: String) {
+        _state.update { it.copy(socialDraft = it.socialDraft.with(platform, value)) }
+        scheduleSocialsSave()
+    }
+
+    /**
+     * Debounced write of all three account fields.
+     *
+     * **The hydration gate is load-bearing here in a way it is nowhere else on
+     * this screen.** `updateSocialLinks` sends every one of the three columns on
+     * every call, so it behaves like a whole-set replace even though it is a
+     * single-row PATCH: a save that fired before [loadIdentity] seeded the draft
+     * would send three empty strings, and the repository turns blank into NULL —
+     * unlinking the artist's Spotify, Instagram and YouTube in one request, from
+     * a device that never read them.
+     *
+     * Editing is disabled in the UI until the same flag is true, so this guard is
+     * the second of two locks rather than the only one. It stays anyway: the flag
+     * flips on a background refresh, and a guard that exists only in a Composable
+     * is a guard the next caller of this method will not have.
+     */
+    private fun scheduleSocialsSave() {
+        if (!_state.value.identityHydrated || session.currentUserId == null) return
+        socialsSaveJob?.cancel()
+        socialsSaveJob = viewModelScope.launch {
+            delay(SAVE_DEBOUNCE_MS)
+            persistSocials()
+        }
+    }
+
+    private suspend fun persistSocials() {
+        val draft = _state.value.socialDraft
+        if (!socialsNeedSave(draft, savedSocials(_state.value.artist))) return
+        _state.update { it.copy(savingSocials = true) }
+        runCatching {
+            // Named, not positional. The parameter order here is
+            // (instagram, spotify, youtube) while the draft and the count helper
+            // read (spotify, instagram, youtube) — positionally this compiles
+            // fine and silently files an artist's Spotify URL as their Instagram
+            // handle.
+            artists.updateSocialLinks(
+                instagram = draft.instagram,
+                spotify = draft.spotify,
+                youtube = draft.youtube,
+            )
+        }
+            .onSuccess {
+                _state.update {
+                    it.copy(
+                        savingSocials = false,
+                        saveError = null,
+                        statusNote = "Accounts saved.",
+                        // Folded in exactly as the repository stores it — trimmed,
+                        // blank as NULL — so the next diff compares like with like.
+                        // Fold it any other way and every later keystroke re-sends
+                        // all three because the row never matches the draft.
+                        artist = it.artist?.copy(
+                            spotifyArtistUrl = draft.spotify.trim().ifBlank { null },
+                            instagramHandle = draft.instagram.trim().ifBlank { null },
+                            youtubeChannelUrl = draft.youtube.trim().ifBlank { null },
+                        ),
+                    )
+                }
+            }
+            .onFailure {
+                _state.update {
+                    it.copy(
+                        savingSocials = false,
+                        // Draft left alone, like the bio's: the artist pasted these
+                        // from three other apps, and discarding them on a failed
+                        // write means going and fetching them again.
+                        saveError = "Couldn't save your accounts — check your connection and edit again to retry.",
                     )
                 }
             }

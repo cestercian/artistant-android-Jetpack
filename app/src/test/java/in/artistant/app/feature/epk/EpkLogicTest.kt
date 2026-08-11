@@ -417,6 +417,89 @@ class EpkLogicTest {
         assertTrue(bioNeedsSave(draft = "", saved = "Bangalore four-piece."))
     }
 
+    // ── Connected accounts ───────────────────────────────────────────────────
+
+    private val linked = SocialDraft(
+        spotify = "https://open.spotify.com/artist/x",
+        instagram = "@kaavya",
+        youtube = "https://youtube.com/@kaavya",
+    )
+
+    /**
+     * The seeding round-trip, which is what the hydration gate is protecting.
+     *
+     * A row where all three are NULL and a draft where all three are empty have
+     * to be the SAME state, or the very first hydrate would look like an edit and
+     * schedule a save of three blanks against a row nobody read.
+     */
+    @Test
+    fun socialDraft_treatsAnUnsetRowAsAnEmptyDraft_notAsAnEdit() {
+        val fromEmptyRow = socialDraftOf(spotify = null, instagram = null, youtube = null)
+
+        assertEquals(SocialDraft(), fromEmptyRow)
+        assertFalse(socialsNeedSave(draft = SocialDraft(), saved = fromEmptyRow))
+    }
+
+    /**
+     * The field-order guard. [SocialDraft.value] and the row mapping disagree on
+     * argument order with the repository's writer, which is the whole reason the
+     * draft exists — this asserts the mapping itself lands each value on its own
+     * platform rather than one seat over.
+     */
+    @Test
+    fun socialDraft_mapsEachColumnToItsOwnPlatform() {
+        val draft = socialDraftOf(
+            spotify = "https://open.spotify.com/artist/x",
+            instagram = "@kaavya",
+            youtube = "https://youtube.com/@kaavya",
+        )
+
+        assertEquals("https://open.spotify.com/artist/x", draft.value(SocialPlatform.Spotify))
+        assertEquals("@kaavya", draft.value(SocialPlatform.Instagram))
+        assertEquals("https://youtube.com/@kaavya", draft.value(SocialPlatform.YouTube))
+    }
+
+    @Test
+    fun socialDraft_withEditsOnlyTheOnePlatform() {
+        val edited = linked.with(SocialPlatform.Instagram, "@kaavyalive")
+
+        assertEquals("@kaavyalive", edited.instagram)
+        assertEquals(linked.spotify, edited.spotify)
+        assertEquals(linked.youtube, edited.youtube)
+    }
+
+    @Test
+    fun socialSave_isSkippedWhenNothingActuallyChanged() {
+        assertFalse(socialsNeedSave(draft = linked, saved = linked))
+        assertFalse(socialsNeedSave(draft = SocialDraft(), saved = SocialDraft()))
+    }
+
+    /** Same reason as the bio's: the write trims, so whitespace is not a change. */
+    @Test
+    fun socialSave_ignoresWhitespaceTheWriteWouldHaveTrimmedAnyway() {
+        val padded = linked.copy(instagram = "  @kaavya  ")
+
+        assertFalse(socialsNeedSave(draft = padded, saved = linked))
+    }
+
+    /**
+     * Clearing a field IS the unlink affordance, so it has to read as a change —
+     * if it did not, an artist could never remove an account.
+     */
+    @Test
+    fun socialSave_firesOnAnyOneOfTheThree_includingClearingIt() {
+        assertTrue(socialsNeedSave(draft = linked.copy(spotify = ""), saved = linked))
+        assertTrue(socialsNeedSave(draft = linked.copy(instagram = "@other"), saved = linked))
+        assertTrue(socialsNeedSave(draft = linked.copy(youtube = ""), saved = linked))
+    }
+
+    @Test
+    fun socialDraft_countsBlankFieldsAsUnlinked() {
+        assertEquals(0, SocialDraft().linkedCount)
+        assertEquals(3, linked.linkedCount)
+        assertEquals(2, linked.copy(youtube = "   ").linkedCount)
+    }
+
     // ── Cover palette ────────────────────────────────────────────────────────
 
     @Test

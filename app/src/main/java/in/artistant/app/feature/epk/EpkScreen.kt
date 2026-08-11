@@ -243,7 +243,6 @@ private fun EpkEditor(
         item(key = "status") {
             StatusBlock(
                 state = state,
-                artist = artist,
                 onRetry = viewModel::refresh,
                 onDismissSaveError = viewModel::dismissSaveError,
                 modifier = Modifier.padding(horizontal = space.lg),
@@ -304,7 +303,13 @@ private fun EpkEditor(
             )
         }
         item(key = "socials") {
-            SocialSection(artist = artist, modifier = Modifier.padding(horizontal = space.lg))
+            SocialSection(
+                draft = state.socialDraft,
+                canEdit = state.identityHydrated,
+                saving = state.savingSocials,
+                onChanged = viewModel::onSocialChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
         }
         item(key = "links") {
             LinksSection(
@@ -513,7 +518,6 @@ private fun MediaChip(text: String, showPin: Boolean = false) {
 @Composable
 private fun StatusBlock(
     state: EpkUiState,
-    artist: Artist,
     onRetry: () -> Unit,
     onDismissSaveError: () -> Unit,
     modifier: Modifier = Modifier,
@@ -529,11 +533,10 @@ private fun StatusBlock(
         packageCount = state.packageRows.count(::packageRowIsSavable),
         sampleCount = state.samples.size,
         techCount = state.techItems.size,
-        socialCount = socialLinkCount(
-            artist.spotifyArtistUrl,
-            artist.instagramHandle,
-            artist.youtubeChannelUrl,
-        ),
+        // The DRAFT, for the same reason the bio above reads its draft: the
+        // checklist is feedback on the edit in progress, so an account pasted a
+        // second ago should tick immediately rather than after the debounce.
+        socialCount = state.socialDraft.linkedCount,
         linkCount = state.links.size,
     )
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
@@ -1117,53 +1120,118 @@ private fun TechSection(
 // ── Connected accounts ───────────────────────────────────────────────────────
 
 /**
- * Read-only, for the same reason the bio is: the three social columns have no
- * narrow write path on Android, and the only code that writes them sends the
- * whole artist row.
+ * The three accounts, as three fields.
+ *
+ * These were read-only rows showing "Linked / Not linked", because the only
+ * writer for these columns was the wizard's whole-row upsert. The narrow write
+ * exists now, so the row that reported a state becomes the field that sets it —
+ * and the "Linked" chip goes away with it, since a field showing the value has
+ * already answered the question the chip was there to answer.
+ *
+ * **Editing is off until the artist row has been read**, and this is the section
+ * where that matters most: the write sends all three columns at once, so a save
+ * from an un-hydrated screen would not "fail to update one" — it would unlink
+ * all three. The gate is enforced in the ViewModel too; disabling here is what
+ * makes the reason visible instead of leaving the artist typing into a field
+ * that silently declines to save.
+ *
+ * Helper copy per platform is carried over from the wizard's socials step
+ * verbatim. It is not decoration: the Spotify artist URL in particular is buried
+ * in Spotify for Artists rather than the normal share sheet, and artists
+ * reliably paste their personal profile URL instead.
  */
 @Composable
-private fun SocialSection(artist: Artist, modifier: Modifier = Modifier) {
+private fun SocialSection(
+    draft: SocialDraft,
+    canEdit: Boolean,
+    saving: Boolean,
+    onChanged: (SocialPlatform, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
-        EpkSectionHeader(title = "Connected accounts")
-        Column {
-            HRule()
-            SocialRow("Spotify", artist.spotifyArtistUrl)
-            HRule()
-            SocialRow("Instagram", artist.instagramHandle)
-            HRule()
-            SocialRow("YouTube", artist.youtubeChannelUrl)
-            HRule()
+        EpkSectionHeader(
+            title = "Connected accounts",
+            trailingNote = if (saving) "Saving…" else null,
+        )
+        if (!canEdit) {
+            Text(
+                "Couldn't read your profile, so editing is off — pull to refresh to try again.",
+                style = AppTheme.type.footnote,
+                color = colors.warm,
+            )
         }
+        // Spotify first: it is the one a client is most likely to open before
+        // deciding, and the order matches the public profile's.
+        SocialField(
+            platform = SocialPlatform.Spotify,
+            label = "Spotify",
+            value = draft.spotify,
+            placeholder = "open.spotify.com/artist/…",
+            helper = "From Spotify for Artists → Profile → Share.",
+            keyboardType = KeyboardType.Uri,
+            enabled = canEdit,
+            onChanged = onChanged,
+        )
+        SocialField(
+            platform = SocialPlatform.Instagram,
+            label = "Instagram",
+            value = draft.instagram,
+            placeholder = "@yourhandle",
+            // Text, not Uri: this field takes a handle, and a Uri keyboard puts
+            // "/" and ".com" where the artist wants letters.
+            keyboardType = KeyboardType.Text,
+            helper = "We deep-link clients straight into the Instagram app.",
+            enabled = canEdit,
+            onChanged = onChanged,
+        )
+        SocialField(
+            platform = SocialPlatform.YouTube,
+            label = "YouTube",
+            value = draft.youtube,
+            placeholder = "youtube.com/@yourchannel",
+            helper = "Channel URL — handle URLs (with @) work too.",
+            keyboardType = KeyboardType.Uri,
+            enabled = canEdit,
+            onChanged = onChanged,
+        )
+        Text(
+            // Says how to unlink, because there is no delete affordance and an
+            // artist who wants one off will otherwise go looking for a button
+            // that does not exist.
+            "Clear a field to unlink that account.",
+            style = AppTheme.type.caption,
+            color = colors.ink3,
+        )
     }
 }
 
 @Composable
-private fun SocialRow(label: String, value: String?) {
+private fun SocialField(
+    platform: SocialPlatform,
+    label: String,
+    value: String,
+    placeholder: String,
+    helper: String,
+    keyboardType: KeyboardType,
+    enabled: Boolean,
+    onChanged: (SocialPlatform, String) -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val linked = !value.isNullOrBlank()
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = space.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = AppTheme.type.callout, color = colors.ink)
-            if (linked) {
-                Text(
-                    value.orEmpty(),
-                    style = AppTheme.type.caption,
-                    color = colors.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Text(
-            if (linked) "Linked" else "Not linked",
-            style = AppTheme.type.footnote,
-            color = if (linked) colors.good else colors.ink3,
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.xs)) {
+        Text(label, style = AppTheme.type.callout, color = colors.ink)
+        EpkField(
+            value = value,
+            onValueChange = { onChanged(platform, it) },
+            placeholder = placeholder,
+            enabled = enabled,
+            textStyle = AppTheme.type.footnote,
+            keyboardType = keyboardType,
+            contentDescription = "$label link",
         )
+        Text(helper, style = AppTheme.type.caption, color = colors.ink3)
     }
 }
 

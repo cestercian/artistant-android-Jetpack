@@ -402,6 +402,78 @@ fun epkCompleteness(
 fun socialLinkCount(spotify: String?, instagram: String?, youtube: String?): Int =
     listOf(spotify, instagram, youtube).count { !it.isNullOrBlank() }
 
+// ── Connected accounts ───────────────────────────────────────────────────────
+
+/** Which of the three account fields an edit came from. */
+enum class SocialPlatform { Spotify, Instagram, YouTube }
+
+/**
+ * The three social columns as ONE value.
+ *
+ * They travel together because they are WRITTEN together: `updateSocialLinks`
+ * sends all three on every call, so a caller holding them as three loose strings
+ * gets three chances per save to pass a stale one and unlink an account the
+ * artist never touched.
+ *
+ * It also closes a live footgun. [socialLinkCount] takes
+ * `(spotify, instagram, youtube)` and the repository takes
+ * `(instagram, spotify, youtube)` — two `String?` triples in different orders,
+ * which the compiler cannot tell apart and which would swap an artist's Spotify
+ * URL into their Instagram handle without a single error. Named fields plus
+ * [value] / [with] make the order impossible to get wrong at a call site.
+ */
+data class SocialDraft(
+    val spotify: String = "",
+    val instagram: String = "",
+    val youtube: String = "",
+) {
+    /** How many carry a value, on the same blank-is-absent rule as [socialLinkCount]. */
+    val linkedCount: Int get() = socialLinkCount(spotify, instagram, youtube)
+
+    fun value(platform: SocialPlatform): String = when (platform) {
+        SocialPlatform.Spotify -> spotify
+        SocialPlatform.Instagram -> instagram
+        SocialPlatform.YouTube -> youtube
+    }
+
+    fun with(platform: SocialPlatform, value: String): SocialDraft = when (platform) {
+        SocialPlatform.Spotify -> copy(spotify = value)
+        SocialPlatform.Instagram -> copy(instagram = value)
+        SocialPlatform.YouTube -> copy(youtube = value)
+    }
+}
+
+/**
+ * Server row → draft.
+ *
+ * Nulls become empty strings because a text field cannot hold null, and the
+ * round trip has to be lossless in the other direction too: the write path turns
+ * a blank back into NULL, so "never set" and "cleared" converge on one state
+ * rather than drifting into a `""`-vs-`null` distinction nothing in the UI can
+ * express.
+ */
+fun socialDraftOf(spotify: String?, instagram: String?, youtube: String?): SocialDraft =
+    SocialDraft(
+        spotify = spotify.orEmpty(),
+        instagram = instagram.orEmpty(),
+        youtube = youtube.orEmpty(),
+    )
+
+/**
+ * Whether a social edit is worth a write.
+ *
+ * Same rule and the same reason as [bioNeedsSave]: the fields autosave on a
+ * debounce, so without this a focus-and-blur would spend a request restating
+ * three values the server already holds. Compared trimmed because the write
+ * trims, and an untrimmed comparison would call every saved value "changed"
+ * forever after.
+ *
+ * The comparison is over all three at once, matching the write's granularity —
+ * there is no such thing as saving "just Instagram" here.
+ */
+fun socialsNeedSave(draft: SocialDraft, saved: SocialDraft): Boolean =
+    SocialPlatform.entries.any { draft.value(it).trim() != saved.value(it).trim() }
+
 // ── Cover palette ────────────────────────────────────────────────────────────
 
 /**
