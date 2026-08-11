@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import `in`.artistant.app.designsystem.component.ArtistTile
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.RevealOnAppear
+import `in`.artistant.app.designsystem.component.ScreenTitleBar
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.Locale
@@ -71,6 +72,13 @@ fun SearchScreen(
             .fillMaxSize()
             .background(colors.bg),
     ) {
+        // The screen never said its own name. Every other tab root either declares a
+        // title band or carries a masthead that names it; Search opened straight onto
+        // its query field, so it read as a sheet someone had already pushed you into.
+        // Measured against the reference: its field sits ~77 units below the top inset,
+        // ours sat ~36; the missing 44 is exactly this band.
+        ScreenTitleBar("Search")
+
         // Search bar — hairline, no card chrome.
         Row(
             Modifier
