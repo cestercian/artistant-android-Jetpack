@@ -57,4 +57,28 @@ object PackagePricing {
      */
     fun fromPrice(packages: List<ArtistPackage>, fallback: Int): Int =
         packages.minOfOrNull { it.price } ?: fallback
+
+    /**
+     * The figure the bottom dock may quote, or `null` when the page has no
+     * honest number to show.
+     *
+     * [fromPrice] falls back to the artist row's denormalized price so a profile
+     * rendered BEFORE its packages load still has something in the dock. That is
+     * right during hydration and wrong once the packages are known to be empty:
+     * an artist with no published tiers takes custom requests, the Booking block
+     * correctly says "Pricing on request", and the dock underneath it was still
+     * quoting the stale server column — one screen stating two different things
+     * about the same artist's price. Seen on-device: the block read "Pricing on
+     * request" while the dock read "FROM ₹2,10,000".
+     *
+     * [packagesLoaded] is what separates the two cases. While false the fallback
+     * still applies (a dock with no number reads as broken mid-load); once true
+     * and the set is empty, there is no minimum and the dock says so instead of
+     * inventing one.
+     */
+    fun dockPrice(packages: List<ArtistPackage>, fallback: Int, packagesLoaded: Boolean): Int? = when {
+        packages.isNotEmpty() -> packages.minOf { it.price }
+        packagesLoaded -> null
+        else -> fallback
+    }
 }

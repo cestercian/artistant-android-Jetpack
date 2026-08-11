@@ -94,4 +94,46 @@ class PackagePricingTest {
 
         assertEquals(12_000, PackagePricing.fromPrice(packages, fallback = 99_000))
     }
+
+    // ── dockPrice ───────────────────────────────────────────────────────────
+    // Found on-device: the artist profile rendered "Pricing on request" in the
+    // Booking block and "FROM ₹2,10,000" in the dock directly beneath it — one
+    // screen making two different claims about the same artist's price. The
+    // dock was falling back to the artist row's denormalized column, which is
+    // right while packages are still loading and wrong once they're known empty.
+
+    @Test
+    fun dockPrice_isTheCheapestPackage_whenTiersArePublished() {
+        val packages = listOf(
+            pkg("p0", "Evening set", 51_000),
+            pkg("p1", "Acoustic hour", 22_000),
+            pkg("p2", "Full night", 83_000),
+        )
+
+        assertEquals(22_000, PackagePricing.dockPrice(packages, fallback = 999_999, packagesLoaded = true))
+    }
+
+    @Test
+    fun dockPrice_isNull_whenTheArtistHasPublishedNoTiers() {
+        // The exact device case: a custom-request artist. No minimum exists, so
+        // the dock must say so rather than quote the stale server column.
+        assertEquals(null, PackagePricing.dockPrice(emptyList(), fallback = 210_000, packagesLoaded = true))
+    }
+
+    @Test
+    fun dockPrice_stillUsesTheFallback_whilePackagesAreLoading() {
+        // A dock with no number mid-hydration reads as broken, so the fallback
+        // survives until the empty set is a fact rather than a not-yet.
+        assertEquals(210_000, PackagePricing.dockPrice(emptyList(), fallback = 210_000, packagesLoaded = false))
+    }
+
+    @Test
+    fun dockPrice_agreesWithFromPrice_wheneverTiersExist() {
+        val packages = listOf(pkg("p0", "A", 40_000), pkg("p1", "B", 15_000))
+
+        assertEquals(
+            PackagePricing.fromPrice(packages, fallback = 1),
+            PackagePricing.dockPrice(packages, fallback = 1, packagesLoaded = true),
+        )
+    }
 }
