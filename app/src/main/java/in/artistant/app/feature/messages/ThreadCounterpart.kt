@@ -55,6 +55,42 @@ object ThreadCounterpart {
         }
 
     /**
+     * The counterparty's USER id — who "the other person" actually is.
+     *
+     * Needed by blocking (migration 0087), which is keyed on user ids, not
+     * threads: you block a person, and every conversation with them goes.
+     *
+     * Null when the seat can't be resolved — signed out, or a locally-minted row
+     * that has never been to the server and so carries no `client_id`. Callers
+     * must hide the block action rather than guess, because the two ids here are
+     * not interchangeable: blocking the wrong one would block YOURSELF, which
+     * 0087's `blocked_users_no_self` check rejects outright.
+     */
+    fun counterpartId(thread: Thread, viewerId: String?): String? =
+        if (viewerIsArtist(thread, viewerId)) {
+            thread.clientId.takeIf { it.isNotBlank() }?.lowercase()
+        } else {
+            thread.artistId.takeIf { it.isNotBlank() }?.lowercase()
+        }
+
+    /**
+     * True when either seat of the thread is in [blockedIds] — the inbox filter
+     * behind 0087's client-side enforcement.
+     *
+     * Deliberately seat-agnostic, and therefore correct without a session: you
+     * can only ever block your counterparty (0087 forbids blocking yourself), so
+     * "either id is blocked" selects exactly the blocked-counterparty threads.
+     * Asking which seat the viewer occupies would add a way to be wrong — a null
+     * viewer id mid-render would stop the filter working and flash a blocked
+     * person's conversation back into the inbox.
+     */
+    fun isBlocked(thread: Thread, blockedIds: Set<String>): Boolean {
+        if (blockedIds.isEmpty()) return false
+        if (thread.artistId.lowercase() in blockedIds) return true
+        return thread.clientId.isNotBlank() && thread.clientId.lowercase() in blockedIds
+    }
+
+    /**
      * The counterparty's ROLE label, for the details-sheet participant rows and
      * the incoming-run caption. Always the opposite of the viewer's own seat.
      */

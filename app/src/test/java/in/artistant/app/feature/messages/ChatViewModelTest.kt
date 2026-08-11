@@ -118,6 +118,7 @@ class ChatViewModelTest {
         viewerId: String? = CLIENT_ID,
         bookings: StubBookings = StubBookings(),
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
+        blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
@@ -125,6 +126,7 @@ class ChatViewModelTest {
         bookingsRepository = bookings,
         reports = FakeReportsRepository(),
         flagsStore = flags,
+        blockedUsers = blockedUsers,
         viewer = { viewerId },
     )
 
@@ -404,6 +406,7 @@ class ChatViewModelTest {
             bookingsRepository = StubBookings(),
             reports = reports,
             flagsStore = FakeThreadFlagsStore(),
+            blockedUsers = FakeBlockedUsersStore(),
             viewer = { CLIENT_ID },
         )
 
@@ -570,6 +573,7 @@ class ChatViewModelTest {
             bookingsRepository = StubBookings(),
             reports = reports,
             flagsStore = FakeThreadFlagsStore(),
+            blockedUsers = FakeBlockedUsersStore(),
             viewer = { CLIENT_ID },
         )
 
@@ -657,5 +661,85 @@ class ChatViewModelTest {
 
         assertFalse(model.state.value.muted)
         assertNotNull(model.state.value.error)
+    }
+
+    // --- blocking (mig 0087) -------------------------------------------------
+
+    @Test
+    fun theClientSeatBlocksTheArtist() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, viewerId = CLIENT_ID, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        // The id blocked is the COUNTERPARTY's, never the viewer's own — 0087's
+        // no-self check would reject that outright.
+        assertEquals(setOf(ARTIST_ID.lowercase()), blocked.blocked.value)
+        assertTrue(model.state.value.blocked)
+    }
+
+    @Test
+    fun theArtistSeatBlocksTheClient() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, viewerId = ARTIST_ID, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        assertEquals(setOf(CLIENT_ID.lowercase()), blocked.blocked.value)
+    }
+
+    @Test
+    fun anAlreadyBlockedCounterpartRendersAsBlocked() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+
+        val model = vm(repo, blockedUsers = FakeBlockedUsersStore(setOf(ARTIST_ID.lowercase())))
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.blocked)
+    }
+
+    @Test
+    fun aFailedBlockSurfacesAnErrorAndDoesNotClaimTheBlock() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val blocked = FakeBlockedUsersStore().apply { failWrites = true }
+        val model = vm(repo, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        assertFalse(model.state.value.blocked)
+        assertNotNull(model.state.value.error)
+    }
+
+    @Test
+    fun aThreadWithNoResolvableCounterpartOffersNoBlock() = runTest {
+        // No `client_id` on the row and the viewer sits in the artist seat, so
+        // there is no id to block. The state carries null, which is what hides
+        // the action rather than letting it aim at the viewer themselves.
+        val repo = ScriptedMessages(thread = Thread(id = threadId, artistId = ARTIST_ID))
+        val blocked = FakeBlockedUsersStore()
+        val model = vm(repo, viewerId = ARTIST_ID, blockedUsers = blocked)
+        advanceUntilIdle()
+
+        model.toggleBlocked()
+        advanceUntilIdle()
+
+        assertNull(model.state.value.counterpartId)
+        assertTrue(blocked.blocked.value.isEmpty())
     }
 }

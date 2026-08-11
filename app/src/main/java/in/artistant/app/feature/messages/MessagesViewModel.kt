@@ -67,6 +67,7 @@ class MessagesViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val bookingsRepository: BookingsRepository,
     private val flagsStore: ThreadFlagsStore,
+    private val blockedUsers: BlockedUsersStore,
     private val viewer: ViewerIdentity,
 ) : ViewModel() {
     private val _state = MutableStateFlow(MessagesUiState())
@@ -80,6 +81,7 @@ class MessagesViewModel @Inject constructor(
     private var loadedThreads: List<Thread> = emptyList()
     private var bookingsById: Map<String, Booking> = emptyMap()
     private var flags: ThreadFlags = ThreadFlags()
+    private var blockedIds: Set<String> = emptySet()
 
     init {
         // Flags arrive from DataStore asynchronously and change under us as the
@@ -87,6 +89,14 @@ class MessagesViewModel @Inject constructor(
         viewModelScope.launch {
             flagsStore.flags.collect { latest ->
                 flags = latest
+                _state.update { it.copy(threads = project()) }
+            }
+        }
+        // Same reason, one screen further away: the block is performed inside a
+        // chat, so the inbox has to hear about it without being told to reload.
+        viewModelScope.launch {
+            blockedUsers.blocked.collect { ids ->
+                blockedIds = ids
                 _state.update { it.copy(threads = project()) }
             }
         }
@@ -99,6 +109,11 @@ class MessagesViewModel @Inject constructor(
 
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }
+        // Reconciled alongside the threads, and deliberately before them: the
+        // rows are filtered against this set, so pulling it late would paint a
+        // blocked conversation for one frame. It swallows its own failures and
+        // never clears on one, so it can't take the inbox down or un-hide anyone.
+        blockedUsers.refresh()
         runCatching { messagesRepository.listThreadsForUser() }
             .onSuccess { threads ->
                 loadedThreads = threads
@@ -127,7 +142,13 @@ class MessagesViewModel @Inject constructor(
     /** Rebuild the rows from the last payload plus the current local flags. */
     private fun project(): List<ThreadListItem> {
         val viewerId = viewer.currentUserId()
-        return loadedThreads.map { thread ->
+        // Blocked conversations are dropped HERE, before the rows exist, rather
+        // than in one of the inbox's list projections. Everything the inbox
+        // shows — the rows, the filter-chip counts, the archive list and the
+        // unread badge — is derived from this one list, so filtering at the
+        // source is what makes a block complete: a blocked person can't leave a
+        // badge on the tab bar for a conversation there is no way to open.
+        return loadedThreads.filterNot { ThreadCounterpart.isBlocked(it, blockedIds) }.map { thread ->
             val viewerIsArtist = ThreadCounterpart.viewerIsArtist(thread, viewerId)
             val artist = artistsRepository.find(thread.artistId)
             ThreadListItem(

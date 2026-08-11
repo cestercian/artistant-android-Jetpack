@@ -6,6 +6,7 @@ import `in`.artistant.app.data.payments.PaymentResult
 import `in`.artistant.app.data.repository.BookingsRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Doubles shared by the messages ViewModel tests.
@@ -95,4 +96,32 @@ class FakeThreadFlagsStore(initial: ThreadFlags = ThreadFlags()) : ThreadFlagsSt
     }
 
     private fun Set<String>.toggle(id: String) = if (id in this) this - id else this + id
+}
+
+/**
+ * In-memory [BlockedUsersStore] — the real one needs DataStore for its offline
+ * mirror, which a JVM test can't build. Keeps the same contract that matters to
+ * the ViewModels: the set flips immediately, and [toggle] returns false without
+ * having changed anything when the write is set to fail.
+ */
+class FakeBlockedUsersStore(initial: Set<String> = emptySet()) : BlockedUsersStore {
+    private val state = MutableStateFlow(initial)
+    override val blocked: StateFlow<Set<String>> = state
+
+    /** Set to make the next [toggle] report a failed write. */
+    var failWrites: Boolean = false
+
+    var refreshCount = 0
+        private set
+
+    override suspend fun refresh() {
+        refreshCount++
+    }
+
+    override suspend fun toggle(userId: String): Boolean {
+        if (failWrites) return false
+        val id = userId.lowercase()
+        state.value = if (id in state.value) state.value - id else state.value + id
+        return true
+    }
 }
