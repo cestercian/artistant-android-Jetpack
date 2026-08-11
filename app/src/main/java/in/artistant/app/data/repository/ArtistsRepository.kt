@@ -73,6 +73,17 @@ interface ArtistsRepository {
     suspend fun updateCoverGradient(index: Int)
 
     /**
+     * `artists.new_artist_discount_pct`, clamped to 0–100.
+     *
+     * This column had a reader (the public profile prints "New-artist offer: N%
+     * off your booking") and, before this, no writer anywhere in the app — not
+     * even the wizard. On a backend shared with another client that DOES set it,
+     * that left an artist with a discount advertised on their own profile and no
+     * way to withdraw it.
+     */
+    suspend fun updateNewArtistDiscount(pct: Int)
+
+    /**
      * The three social columns, all three every time.
      *
      * Whole-set semantics on purpose: the caller has to pass the current values of
@@ -217,6 +228,9 @@ class SupabaseArtistsRepository @Inject constructor(
 
     override suspend fun updateCoverGradient(index: Int) =
         patchSelf(CoverGradientPatch(ArtistGradient.clampIndex(index)))
+
+    override suspend fun updateNewArtistDiscount(pct: Int) =
+        patchSelf(NewArtistDiscountPatch(pct.coerceIn(0, MAX_DISCOUNT_PCT)))
 
     override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
         patchSelf(
@@ -469,6 +483,14 @@ internal data class BioPatch(val bio: String?)
 @Serializable
 internal data class CoverGradientPatch(
     @SerialName("cover_gradient_index") val coverGradientIndex: Int,
+)
+
+/** A percentage is a percentage; clamped so a caller bug cannot store 900% off. */
+private const val MAX_DISCOUNT_PCT = 100
+
+@Serializable
+internal data class NewArtistDiscountPatch(
+    @SerialName("new_artist_discount_pct") val newArtistDiscountPct: Int,
 )
 
 @Serializable

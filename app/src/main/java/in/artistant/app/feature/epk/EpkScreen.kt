@@ -273,6 +273,12 @@ private fun EpkEditor(
                 fallbackPrice = artist.price,
                 hydrated = state.packagesHydrated,
                 saving = state.savingPackages,
+                discountPct = shownNewArtistDiscount(
+                    state.newArtistDiscountPct,
+                    artist.newArtistDiscountPct,
+                ),
+                canEditOffer = state.identityHydrated,
+                onToggleOffer = viewModel::onNewArtistOfferToggled,
                 onAdd = viewModel::addPackageRow,
                 onName = viewModel::onPackageName,
                 onDuration = viewModel::onPackageDuration,
@@ -832,6 +838,10 @@ private fun PricingSection(
     fallbackPrice: Int,
     hydrated: Boolean,
     saving: Boolean,
+    /** The offer lives on the artist ROW, so it has its own gate and its own value. */
+    discountPct: Int,
+    canEditOffer: Boolean,
+    onToggleOffer: () -> Unit,
     onAdd: () -> Unit,
     onName: (String, String) -> Unit,
     onDuration: (String, String) -> Unit,
@@ -909,6 +919,59 @@ private fun PricingSection(
                     color = colors.ink3,
                 )
             }
+        }
+        NewArtistOfferRow(
+            pct = discountPct,
+            enabled = canEditOffer,
+            onToggle = onToggleOffer,
+        )
+    }
+}
+
+/**
+ * The public new-artist discount, as a switch.
+ *
+ * This column was rendered on the artist's own public profile — "New-artist
+ * offer: N% off your booking" — by a reader with no writer anywhere in the
+ * Android app, wizard included. An artist whose row carried it (set by another
+ * client on the shared backend) was advertising a discount they had no way to
+ * withdraw. So the control here is not a new feature so much as the missing half
+ * of one that was already live in front of clients.
+ *
+ * The sub-line says who honours it, because the app does not: there is no
+ * payments path in v1, so this is a promise the artist keeps in their own quote.
+ * A discount control that looked automatic would have artists discovering at
+ * quote time that the number was theirs to absorb.
+ */
+@Composable
+private fun NewArtistOfferRow(
+    pct: Int,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+        HRule()
+        Row(
+            Modifier.fillMaxWidth().padding(top = space.sm),
+            horizontalArrangement = Arrangement.spacedBy(space.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("New-artist offer", style = AppTheme.type.callout, color = colors.ink)
+                Text(
+                    "Shown on your profile. You honour it in your quote.",
+                    style = AppTheme.type.caption,
+                    color = colors.ink3,
+                )
+            }
+            EpkChip(
+                label = newArtistDiscountLabel(pct),
+                selected = pct > 0,
+                enabled = enabled,
+                onClick = onToggle,
+            )
         }
     }
 }

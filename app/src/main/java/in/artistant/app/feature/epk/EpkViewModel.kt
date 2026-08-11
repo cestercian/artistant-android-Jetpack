@@ -85,6 +85,13 @@ data class EpkUiState(
     val coverGradientIndex: Int? = null,
 
     /**
+     * The new-artist offer the artist just toggled, before the write confirms.
+     * Null means "show what the row says". Held apart from the artist row for the
+     * same reason [coverGradientIndex] is — one field to clear on failure.
+     */
+    val newArtistDiscountPct: Int? = null,
+
+    /**
      * The bio as it is being typed. Held apart from `artist.bio` — which stays
      * the last value known to have been SAVED — so the debounce has something to
      * compare against and a re-entry to the screen can tell an unsaved edit from
@@ -261,6 +268,7 @@ class EpkViewModel @Inject constructor(
                         // previous session — the row is now the truth.
                         identityHydrated = artist != null,
                         coverGradientIndex = null,
+                        newArtistDiscountPct = null,
                         bioDraft = if (pendingBio) it.bioDraft else artist?.bio.orEmpty(),
                         socialDraft = if (pendingSocials) it.socialDraft else savedSocials(artist),
                     )
@@ -360,6 +368,48 @@ class EpkViewModel @Inject constructor(
                         it.copy(
                             coverGradientIndex = null,
                             saveError = "Couldn't save your cover — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── New-artist offer ─────────────────────────────────────────────────────
+
+    /**
+     * Switch the public "N% off first bookings" line on or off.
+     *
+     * Optimistic and undebounced, like the palette: one tap is one decision, and
+     * the artist is entitled to see a promise made on their own profile change
+     * the moment they change it. A failure clears the optimistic value so the
+     * control snaps back to what clients are actually being shown — the one thing
+     * that must never be misreported here, since the artist honours this in their
+     * quote.
+     */
+    fun onNewArtistOfferToggled() {
+        val current = _state.value
+        if (!current.identityHydrated) return
+        val shown = shownNewArtistDiscount(
+            current.newArtistDiscountPct,
+            current.artist?.newArtistDiscountPct ?: 0,
+        )
+        val target = newArtistDiscountToggleTarget(shown)
+        _state.update { it.copy(newArtistDiscountPct = target, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateNewArtistDiscount(target) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            statusNote = if (target > 0) "Offer on." else "Offer off.",
+                            artist = it.artist?.copy(newArtistDiscountPct = target),
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            newArtistDiscountPct = null,
+                            saveError = "Couldn't change your new-artist offer — check your connection and try again.",
                         )
                     }
                 }

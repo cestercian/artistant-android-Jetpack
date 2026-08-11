@@ -461,6 +461,50 @@ class EpkLogicTest {
         assertFalse(packageRowIsPartiallyFilled(row()))
     }
 
+    // ── New-artist offer ─────────────────────────────────────────────────────
+
+    @Test
+    fun newArtistOffer_togglesBetweenOffAndTheStandardFigure() {
+        assertEquals(NEW_ARTIST_DISCOUNT_PCT, newArtistDiscountToggleTarget(0))
+        assertEquals(0, newArtistDiscountToggleTarget(NEW_ARTIST_DISCOUNT_PCT))
+    }
+
+    /**
+     * A row written by another client can hold a percentage this one never
+     * offers. Turning it off has to work anyway — the whole point of the control
+     * is being able to withdraw a promise the artist did not make here.
+     */
+    @Test
+    fun newArtistOffer_turnsOffAnyNonZeroValue_notJustTheStandardOne() {
+        assertEquals(0, newArtistDiscountToggleTarget(15))
+        assertEquals(0, newArtistDiscountToggleTarget(5))
+    }
+
+    /** The optimistic tap wins, and clearing it falls back to what is published. */
+    @Test
+    fun newArtistOffer_showsThePendingTapOverThePublishedValue() {
+        assertEquals(0, shownNewArtistDiscount(pending = 0, published = 20))
+        assertEquals(20, shownNewArtistDiscount(pending = null, published = 20))
+        assertEquals(0, shownNewArtistDiscount(pending = null, published = 0))
+    }
+
+    /**
+     * The editor must not claim a different figure than the public profile
+     * prints, so the label reads the stored percentage rather than assuming the
+     * standard one.
+     */
+    @Test
+    fun newArtistOffer_labelsWhateverIsActuallyStored() {
+        assertTrue(newArtistDiscountLabel(15).startsWith("15%"))
+        assertTrue(newArtistDiscountLabel(NEW_ARTIST_DISCOUNT_PCT).startsWith("20%"))
+    }
+
+    /** Off still has to offer a figure, or the switch has no label to turn on to. */
+    @Test
+    fun newArtistOffer_labelsTheStandardFigureWhenOff() {
+        assertTrue(newArtistDiscountLabel(0).startsWith("$NEW_ARTIST_DISCOUNT_PCT%"))
+    }
+
     // ── Connected accounts ───────────────────────────────────────────────────
 
     private val linked = SocialDraft(

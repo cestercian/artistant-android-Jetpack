@@ -261,6 +261,48 @@ fun popularBadgeWouldMeanSomething(rows: List<PackageRow>): Boolean {
     return savable.any { it.popular } && savable.any { !it.popular }
 }
 
+// ── New-artist offer ─────────────────────────────────────────────────────────
+
+/**
+ * What switching the offer ON promises. Matches the reference's figure so an
+ * artist who set it on one client does not find a different number on the other.
+ */
+const val NEW_ARTIST_DISCOUNT_PCT: Int = 20
+
+/**
+ * The percentage to render, pending value winning over the published one.
+ *
+ * Same optimistic pattern as [shownCoverGradient], for the same reason: the tap
+ * is a decision the artist must see land immediately, and clearing the pending
+ * value is how a failed write falls back to the truth without having to guess an
+ * inverse.
+ */
+fun shownNewArtistDiscount(pending: Int?, published: Int): Int =
+    (pending ?: published).coerceIn(0, 100)
+
+/**
+ * What a tap should write: off if it is on, otherwise the standard offer.
+ *
+ * Toggling OFF preserves nothing, which is intentional — an artist withdrawing
+ * a public discount wants it gone, not remembered. Toggling ON always writes the
+ * standard figure rather than restoring a previous custom one, because the
+ * control is a switch and a switch that turns on to a number the artist cannot
+ * see or choose is a lie about what it does.
+ */
+fun newArtistDiscountToggleTarget(current: Int): Int =
+    if (current > 0) 0 else NEW_ARTIST_DISCOUNT_PCT
+
+/**
+ * The offer as the artist's own profile states it.
+ *
+ * Reads the STORED percentage rather than assuming [NEW_ARTIST_DISCOUNT_PCT],
+ * because the column is a percentage and another client on the same backend may
+ * have written a different one. Showing "20% off" over a row that says 15 would
+ * make the editor disagree with the public page it exists to edit.
+ */
+fun newArtistDiscountLabel(pct: Int): String =
+    "${if (pct > 0) pct else NEW_ARTIST_DISCOUNT_PCT}% off first bookings"
+
 // ── Whole-set write guard ────────────────────────────────────────────────────
 
 /**

@@ -117,6 +117,10 @@ class FakeArtistsRepository(
         it.copy(coverGradientIndex = clamped, gradient = ArtistGradient.palette(clamped))
     }
 
+    override suspend fun updateNewArtistDiscount(pct: Int) = mutateSelf {
+        it.copy(newArtistDiscountPct = pct.coerceIn(0, 100))
+    }
+
     override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
         mutateSelf {
             it.copy(
