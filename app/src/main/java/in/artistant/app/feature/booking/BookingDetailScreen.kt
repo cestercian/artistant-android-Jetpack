@@ -227,23 +227,20 @@ fun BookingDetailScreen(
             if (showCancel) {
                 // Decline and Cancel share this sheet on purpose: both end the
                 // booking, both want a reason on the row, and both route by side
-                // (the artist's lands as `cancelled_by = "artist"`). The copy is
-                // what differs, and it is driven by the two arguments below.
+                // — the artist's lands as `cancelled_by = "artist"` either way,
+                // since `cancelBooking(Artist, …)` and `declineRequest` are the
+                // same Edge Function call. Only the copy differs, which is what
+                // `isDecline` selects.
+                val isDecline = viewer == BookingViewer.Artist &&
+                    booking.status == BookingStatus.PendingConfirm
                 CancelFlowSheet(
                     viewer = viewer,
-                    isDecline = viewer == BookingViewer.Artist &&
-                        booking.status == BookingStatus.PendingConfirm,
+                    isDecline = isDecline,
                     isActing = state.isActing,
                     onDismiss = { showCancel = false },
                     onConfirm = { reason ->
                         showCancel = false
-                        if (viewer == BookingViewer.Artist &&
-                            booking.status == BookingStatus.PendingConfirm
-                        ) {
-                            viewModel.declineRequest(reason)
-                        } else {
-                            viewModel.cancelBooking(viewer, reason)
-                        }
+                        viewModel.cancelBooking(viewer, reason)
                     },
                 )
             }
