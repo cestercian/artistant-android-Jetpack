@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,9 +60,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistMediaItem
+import `in`.artistant.app.designsystem.component.BottomDarkenScrim
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
@@ -68,6 +73,7 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 /**
  * The artist's press-kit editor — the private, editable twin of
@@ -224,8 +230,15 @@ private fun EpkEditor(
         contentPadding = PaddingValues(bottom = dimens.hero.scrollTailroom),
         verticalArrangement = Arrangement.spacedBy(space.xl),
     ) {
-        item(key = "hero") {
-            EpkHero(artist = artist, coverUrl = state.photos.firstOrNull()?.publicUrl ?: artist.coverUrl)
+        item(key = "cover") {
+            CoverSection(
+                artist = artist,
+                coverUrl = state.photos.firstOrNull()?.publicUrl ?: artist.coverUrl,
+                selectedGradient = shownCoverGradient(state.coverGradientIndex, artist.coverGradientIndex),
+                canEdit = state.identityHydrated,
+                onPickGradient = viewModel::onCoverGradientPicked,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
         }
         item(key = "status") {
             StatusBlock(
@@ -302,74 +315,156 @@ private fun EpkEditor(
     }
 }
 
-// ── Hero ─────────────────────────────────────────────────────────────────────
+// ── Cover ────────────────────────────────────────────────────────────────────
 
 /**
- * The cover, exactly as a client meets it.
+ * The cover as a labelled, bounded PREVIEW — a picture of the hero rather than
+ * the hero itself — with the palette picker under it.
  *
- * The gradient floor paints first so a slow or missing cover is never a hole,
- * and the fade at the bottom ends on the PAGE background rather than on black —
- * ramping to black bottoms out darker than `bg` and leaves a visible step where
- * the seam is meant to vanish. Same construction as the public profile's hero,
- * deliberately: this is the editor showing the artist the real thing, not a
- * preview of it.
+ * This was a full-bleed hero, which is what the artist's PUBLIC page is. Wearing
+ * the public page's chrome made the editor read as a live preview an artist edits
+ * by poking at it, and the consequence was structural rather than cosmetic: a
+ * bled cover has no room for a label, so the section could not say what it was,
+ * could not carry an action, and could not sit in the same rhythm as the eight
+ * labelled sections below it. Boxed and labelled, it is one section among nine,
+ * and the picker has somewhere to live.
+ *
+ * The scrim is a bottom-darken to black inside the card's own bounds, not the
+ * hero's fade into the page background: this card has an edge, so there is no
+ * seam to dissolve — the scrim exists only to keep white type legible over an
+ * arbitrary photo.
  *
  * The cover image is the first photo in position order, not `artist.coverUrl`.
  * That field comes from the cached artist row, which the reorder write does not
- * invalidate — reading it here would leave the hero showing the previous cover
- * after the artist had just promoted a new one.
+ * invalidate — reading it here would leave the preview showing the previous cover
+ * right after the artist promoted a new one.
  */
 @Composable
-private fun EpkHero(artist: Artist, coverUrl: String?) {
+private fun CoverSection(
+    artist: Artist,
+    coverUrl: String?,
+    selectedGradient: Int,
+    canEdit: Boolean,
+    onPickGradient: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(dimens.size.heroShort),
-    ) {
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(artist.gradient)))
-        if (!coverUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = coverUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+    val shape = RoundedCornerShape(dimens.radii.lg)
+    // Render the PICKED palette, not the one the artist row was hydrated with.
+    // The write is fire-and-forget against the server; if the preview waited for
+    // the round-trip, tapping a swatch would look like it did nothing.
+    val palette = ArtistGradient.palette(selectedGradient)
+
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
+        EpkSectionHeader(title = "Cover")
         Box(
             Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        1f - dimens.fraction.heroFade to Color.Transparent,
-                        1f to colors.bg,
-                    ),
-                ),
-        )
-        Column(
-            Modifier
-                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .padding(bottom = space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.sm),
+                .height(dimens.size.coverPreview)
+                .clip(shape),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                if (artist.category.isNotBlank()) MediaChip(artist.category)
-                if (artist.city.isNotBlank()) MediaChip(artist.city, showPin = true)
+            // Palette floor first, so a slow or missing photo is never a hole.
+            Box(Modifier.fillMaxSize().background(Brush.linearGradient(palette)))
+            if (!coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-            Text(
-                artist.name.ifBlank { "Your stage name" },
-                style = AppTheme.type.profileHeroName,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            // No size modifier: the scrim applies `matchParentSize` itself, which
+            // deliberately keeps it out of the Box's measurement. Passing
+            // `fillMaxSize` here would put it back in and let the overlay
+            // participate in sizing the fixed-height preview.
+            BottomDarkenScrim()
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(space.lg),
+                verticalArrangement = Arrangement.spacedBy(space.xs),
+            ) {
+                if (artist.category.isNotBlank()) {
+                    Row { MediaChip(artist.category.uppercase(Locale.US)) }
+                }
+                Text(
+                    artist.name.ifBlank { "Your stage name" },
+                    style = AppTheme.type.displaySmall,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Genre and city on ONE line, in that order — the two facts a
+                // client pairs when they picture the booking, and two separate
+                // lines under a name is a stack, not an identity.
+                val meta = listOfNotNull(
+                    artist.genre.takeIf { it.isNotBlank() },
+                    artist.city.takeIf { it.isNotBlank() },
+                ).joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Text(meta, style = AppTheme.type.footnote, color = colors.inkOnMedia)
+                }
+            }
+        }
+        GradientPicker(
+            selectedIndex = selectedGradient,
+            enabled = canEdit,
+            onPick = onPickGradient,
+        )
+    }
+}
+
+/**
+ * The palette row: six little covers, the picked one ringed.
+ *
+ * Kept visible even once a real photo is set, because it is not dead then — it is
+ * what shows while a photo loads, what shows if it fails, and what a client sees
+ * on any surface that has not fetched the image yet. Hiding it behind "no photo"
+ * would mean the artist can only choose their fallback during the one window
+ * where they cannot see it.
+ *
+ * Landscape swatches rather than dots: the shape is the only thing telling the
+ * artist that what they are picking is a cover.
+ */
+@Composable
+private fun GradientPicker(
+    selectedIndex: Int,
+    enabled: Boolean,
+    onPick: (Int) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.sm)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        repeat(ArtistGradient.count) { index ->
+            val isSelected = index == selectedIndex
+            Box(
+                Modifier
+                    .size(dimens.size.swatchW, dimens.size.swatchH)
+                    .clip(shape)
+                    .background(Brush.linearGradient(ArtistGradient.palette(index)))
+                    .border(
+                        dimens.size.stroke,
+                        // Ring the picked one in the role accent; everything else
+                        // gets the quiet rule, so the row reads as one choice made
+                        // rather than six things outlined.
+                        if (isSelected) colors.brand else colors.lineSoft,
+                        shape,
+                    )
+                    .clickable(enabled = enabled) { onPick(index) }
+                    .semantics {
+                        contentDescription = "Cover palette ${index + 1}"
+                        if (isSelected) selected = true
+                    },
             )
-            if (artist.genre.isNotBlank()) {
-                Text(artist.genre, style = AppTheme.type.callout, color = colors.inkOnMedia)
-            }
         }
     }
 }

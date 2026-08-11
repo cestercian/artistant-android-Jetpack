@@ -67,6 +67,22 @@ data class EpkUiState(
     val packagesHydrated: Boolean = false,
     val techHydrated: Boolean = false,
     val photosHydrated: Boolean = false,
+    /**
+     * The artist row itself was read. Gates the edits that write ITS columns —
+     * bio, cover palette, social links — for the same reason the three gates
+     * above exist: those writes are only safe when the values on screen came from
+     * the server. The social write is the sharp one, since it sends all three
+     * links every time and an un-hydrated caller would unlink two of them.
+     */
+    val identityHydrated: Boolean = false,
+
+    /**
+     * The palette the artist just picked, before the write has been confirmed.
+     * Null means "nothing picked this session, show what the row says". Kept
+     * apart from the artist row rather than folded into it so a failed write can
+     * fall back to the truth by clearing one field.
+     */
+    val coverGradientIndex: Int? = null,
 
     val techDraft: String = "",
     val linkEditor: LinkEditorState? = null,
@@ -197,7 +213,15 @@ class EpkViewModel @Inject constructor(
         runCatching { artists.fetchArtist(userId) }
             .onSuccess { artist ->
                 _state.update {
-                    it.copy(artist = artist, setupComplete = profile?.artistSetupComplete == true)
+                    it.copy(
+                        artist = artist,
+                        setupComplete = profile?.artistSetupComplete == true,
+                        // A successful read is what opens the identity-column
+                        // edits, and it also drops any optimistic palette from a
+                        // previous session — the row is now the truth.
+                        identityHydrated = artist != null,
+                        coverGradientIndex = null,
+                    )
                 }
             }
             .onFailure { failLoad() }
@@ -261,6 +285,44 @@ class EpkViewModel @Inject constructor(
     fun dismissSaveError() = _state.update { it.copy(saveError = null) }
 
     fun consumeStatusNote() = _state.update { it.copy(statusNote = null) }
+
+    // ── Cover palette ────────────────────────────────────────────────────────
+
+    /**
+     * Pick a fallback palette, optimistically.
+     *
+     * The preview switches on the tap and the write follows, because the tap's
+     * entire purpose is seeing the new colour — waiting for a round-trip would
+     * make the control feel broken on a slow connection. A failure clears the
+     * optimistic value so the preview snaps back to what is actually published
+     * rather than lying about a choice that did not land.
+     *
+     * Not debounced: this is one tap producing one decision, not a text field
+     * producing a keystroke per character, and the six-swatch row is small enough
+     * that a burst is a handful of writes at most.
+     */
+    fun onCoverGradientPicked(index: Int) {
+        val current = _state.value
+        val clamped = coverGradientPickToWrite(
+            hydrated = current.identityHydrated,
+            pending = current.coverGradientIndex,
+            published = current.artist?.coverGradientIndex ?: 0,
+            requested = index,
+        ) ?: return
+        _state.update { it.copy(coverGradientIndex = clamped, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateCoverGradient(clamped) }
+                .onSuccess { _state.update { it.copy(statusNote = "Cover saved.") } }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            coverGradientIndex = null,
+                            saveError = "Couldn't save your cover — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
 
     // ── Pricing tiers ────────────────────────────────────────────────────────
 

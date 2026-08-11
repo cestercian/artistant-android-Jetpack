@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.epk
 
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.domain.artist.PackagePricing
 import org.junit.Assert.assertEquals
@@ -357,5 +358,62 @@ class EpkLogicTest {
     fun socialCount_treatsBlankAsUnlinked() {
         assertEquals(0, socialLinkCount(null, "", "   "))
         assertEquals(2, socialLinkCount("https://open.spotify.com/x", null, "https://youtube.com/@y"))
+    }
+
+    // ── Cover palette ────────────────────────────────────────────────────────
+
+    @Test
+    fun shownCover_prefersThePickOverThePublishedRow() {
+        assertEquals(3, shownCoverGradient(pending = 3, published = 1))
+        assertEquals(1, shownCoverGradient(pending = null, published = 1))
+    }
+
+    /** A row written before the palette list grew must not index off the end. */
+    @Test
+    fun shownCover_clampsAnOutOfRangePublishedIndex() {
+        val last = ArtistGradient.count - 1
+
+        assertEquals(last, shownCoverGradient(pending = null, published = 99))
+        assertEquals(0, shownCoverGradient(pending = null, published = -1))
+    }
+
+    /**
+     * The same gate the pricing whole-set replace has, for the same reason: the
+     * palette is a column on the artist row, and writing that row before reading
+     * it is how an editor overwrites a value it never showed the artist.
+     */
+    @Test
+    fun coverPick_isRefusedUntilTheArtistRowHasBeenRead() {
+        assertNull(coverGradientPickToWrite(hydrated = false, pending = null, published = 0, requested = 2))
+    }
+
+    @Test
+    fun coverPick_writesTheClampedIndexOnARealChange() {
+        assertEquals(2, coverGradientPickToWrite(hydrated = true, pending = null, published = 0, requested = 2))
+        assertEquals(
+            ArtistGradient.count - 1,
+            coverGradientPickToWrite(hydrated = true, pending = null, published = 0, requested = 99),
+        )
+    }
+
+    @Test
+    fun coverPick_isANoOpWhenItRestatesThePublishedPalette() {
+        assertNull(coverGradientPickToWrite(hydrated = true, pending = null, published = 4, requested = 4))
+    }
+
+    /**
+     * The subtle one. Re-tapping a swatch the artist already picked this session
+     * looks like nothing happening, so it has to BE nothing — comparing against
+     * the published row instead of the pending pick would spend a request per
+     * double-tap restating a value the server is already being told.
+     */
+    @Test
+    fun coverPick_isANoOpWhenItRestatesAPickTheWriteHasNotConfirmedYet() {
+        assertNull(coverGradientPickToWrite(hydrated = true, pending = 3, published = 0, requested = 3))
+    }
+
+    @Test
+    fun coverPick_allowsPickingBackToThePublishedPaletteAfterAnUnconfirmedPick() {
+        assertEquals(0, coverGradientPickToWrite(hydrated = true, pending = 3, published = 0, requested = 0))
     }
 }

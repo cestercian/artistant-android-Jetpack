@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.epk
 
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.PackageDraft
 
@@ -357,3 +358,45 @@ fun epkCompleteness(
  */
 fun socialLinkCount(spotify: String?, instagram: String?, youtube: String?): Int =
     listOf(spotify, instagram, youtube).count { !it.isNullOrBlank() }
+
+// ── Cover palette ────────────────────────────────────────────────────────────
+
+/**
+ * Which palette the cover preview should paint.
+ *
+ * `pending` is what the artist just tapped and `published` is what the artist
+ * row actually says. The pending value wins so a tap shows its colour without
+ * waiting for the round-trip; clearing it is how a failed write falls back to
+ * the truth, which is the whole reason the two are kept apart rather than the
+ * optimistic value being written into the cached row.
+ */
+fun shownCoverGradient(pending: Int?, published: Int): Int =
+    ArtistGradient.clampIndex(pending ?: published)
+
+/**
+ * The index a palette tap should write, or null if the tap should do nothing.
+ *
+ * Three refusals, all of which would otherwise cost a pointless write or worse:
+ *
+ * - **Not hydrated.** The palette lives on the artist row, and a write against a
+ *   row we never read is the same class of mistake the pricing wipe-guard exists
+ *   for. Gated rather than queued: a palette is cheap to re-pick once the row
+ *   loads, and a queued write would race the load it is waiting on.
+ * - **Out of range.** Clamped instead of dropped, because an index past the end
+ *   is a caller bug, not an artist decision, and refusing it silently would leave
+ *   the ring on a swatch the artist did not pick.
+ * - **Already shown.** Compared against what is ON SCREEN, not against what is
+ *   published: re-tapping a swatch the artist optimistically picked a moment ago
+ *   is visibly a no-op, so it must be an actual no-op too, or every double-tap
+ *   spends a request restating a value the server already has.
+ */
+fun coverGradientPickToWrite(
+    hydrated: Boolean,
+    pending: Int?,
+    published: Int,
+    requested: Int,
+): Int? {
+    if (!hydrated) return null
+    val clamped = ArtistGradient.clampIndex(requested)
+    return clamped.takeIf { it != shownCoverGradient(pending, published) }
+}
