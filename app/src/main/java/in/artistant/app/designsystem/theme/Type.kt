@@ -126,6 +126,25 @@ data class AppType(
     val displaySub: TextStyle = TextStyle(fontFamily = SerifFamily, fontSize = 24.sp),
     val displaySmall: TextStyle = TextStyle(fontFamily = SerifFamily, fontSize = 22.sp),
     val title: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 24.sp, fontWeight = FontWeight.Bold),
+    /**
+     * A tab root's LARGE page title, and its second line.
+     *
+     * Distinct from [title] (24sp) and from `ScreenTitleBar`'s [headline] (18sp),
+     * which is the centred inline bar most tab roots wear. The press-kit editor is
+     * the one artist root whose reference draws a large left-aligned title with a
+     * subtitle under it, and the two sizes are not interchangeable: at 24sp the
+     * title stops out-ranking the section labels below it and the page reads as
+     * starting mid-way through itself.
+     *
+     * 34sp is measured off the reference (ascender-to-baseline band of 25.3 units
+     * over a ~0.74 ascender ratio). It is sans rather than the editorial serif on
+     * purpose — this is chrome naming the screen, not an editorial moment, and the
+     * serif steps are reserved for the ones that are.
+     */
+    val pageTitle: TextStyle = TextStyle(
+        fontFamily = SansFamily, fontSize = 34.sp,
+        fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp,
+    ),
     val headline: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
     val body: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 16.sp),
     val callout: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 15.sp, fontWeight = FontWeight.Medium),

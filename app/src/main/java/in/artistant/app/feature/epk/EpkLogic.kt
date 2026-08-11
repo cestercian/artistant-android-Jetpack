@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.epk
 
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.PackageDraft
 
@@ -33,6 +34,49 @@ const val MAX_PHOTOS: Int = 6
 
 /** Longest price we will accept, in rupees. Guards a paste, not a business rule. */
 const val MAX_PRICE_INR: Int = 10_000_000
+
+/**
+ * Bio ceiling, matching the wizard's. Re-declared here rather than imported for
+ * the same reason [MAX_SAMPLES] is: the editor is the post-wizard write path, so
+ * a looser cap here would be a way around the wizard's. `EpkLogicTest` asserts
+ * the two numbers agree, which is the part the sample cap never had — a
+ * duplicated constant with nothing watching it is a constant that drifts.
+ */
+const val MAX_BIO_CHARS: Int = 200
+
+/**
+ * Clamp on the way in, so a pasted essay truncates visibly instead of being
+ * accepted and then rejected by the column.
+ */
+fun clampBioInput(raw: String): String = if (raw.length <= MAX_BIO_CHARS) raw else raw.take(MAX_BIO_CHARS)
+
+/**
+ * Whether the counter should go loud.
+ *
+ * One threshold rather than the wizard's three-tone ramp: this field clamps its
+ * input, so "over" cannot happen, and the wizard's warm band exists to coach a
+ * first-ever bio through a flow the artist cannot leave. An artist re-reading a
+ * bio they already wrote needs one fact — that they have hit the wall and the
+ * keystrokes are being dropped.
+ */
+fun bioIsAtCap(length: Int): Boolean = length >= MAX_BIO_CHARS
+
+/**
+ * Opening height of the bio field, in lines. A prose field that opens one line
+ * tall looks like a name field and gets a name typed into it.
+ */
+const val BIO_FIELD_MIN_LINES: Int = 3
+
+/**
+ * Whether a bio edit is worth a write.
+ *
+ * Trailing whitespace is not a change worth a round-trip, and neither is
+ * re-saving what the server already holds — the field autosaves on a debounce,
+ * so without this every focus-and-blur would spend a request restating the row.
+ * Compared trimmed because the write trims too; otherwise the value sent back
+ * would never equal the value held and every save would look like a change.
+ */
+fun bioNeedsSave(draft: String, saved: String): Boolean = draft.trim() != saved.trim()
 
 /**
  * Stock tech-rider items, same set as iOS. Presets exist because a rider is a
@@ -119,6 +163,41 @@ fun packageRowIsSavable(row: PackageRow): Boolean =
     row.name.isNotBlank() && (parsePrice(row.price) ?: 0) > 0
 
 /**
+ * Why a tier will not publish, or null when it will.
+ *
+ * [packageDrafts] DROPS unsavable rows rather than defaulting them, which is the
+ * right call — a tier auto-named "Set" at ₹0 is a free booking the artist never
+ * offered. But dropping silently is its own bug: the row sits on screen looking
+ * saved, the debounce fires, the write omits it, and the next refresh makes it
+ * vanish. The artist did the work and watched it disappear with no explanation.
+ *
+ * So the rule that decides gets a voice. Same predicate as
+ * [packageRowIsSavable], stated as the thing still missing.
+ */
+fun packageRowBlocker(row: PackageRow): String? {
+    if (packageRowIsSavable(row)) return null
+    val hasName = row.name.isNotBlank()
+    val hasPrice = (parsePrice(row.price) ?: 0) > 0
+    return when {
+        !hasName && !hasPrice -> "Add a name and a price to publish this tier."
+        !hasName -> "Add a name to publish this tier."
+        else -> "Add a price to publish this tier."
+    }
+}
+
+/**
+ * Whether the artist has put something into a row that will not publish.
+ *
+ * Splits "just tapped Add" from "typed half a tier". Both get the note; only the
+ * second gets it in a colour that interrupts, because only the second has
+ * anything to lose. A blank row shouting on the frame it was created reads as an
+ * error the artist caused by pressing the button they were meant to press.
+ */
+fun packageRowIsPartiallyFilled(row: PackageRow): Boolean =
+    !packageRowIsSavable(row) &&
+        (row.name.isNotBlank() || row.duration.isNotBlank() || row.price.isNotBlank())
+
+/**
  * Editor rows → the payload for `replace_packages`.
  *
  * Incomplete rows are DROPPED, not defaulted. The alternative — filling a blank
@@ -181,6 +260,48 @@ fun popularBadgeWouldMeanSomething(rows: List<PackageRow>): Boolean {
     val savable = rows.filter(::packageRowIsSavable)
     return savable.any { it.popular } && savable.any { !it.popular }
 }
+
+// ── New-artist offer ─────────────────────────────────────────────────────────
+
+/**
+ * What switching the offer ON promises. Matches the reference's figure so an
+ * artist who set it on one client does not find a different number on the other.
+ */
+const val NEW_ARTIST_DISCOUNT_PCT: Int = 20
+
+/**
+ * The percentage to render, pending value winning over the published one.
+ *
+ * Same optimistic pattern as [shownCoverGradient], for the same reason: the tap
+ * is a decision the artist must see land immediately, and clearing the pending
+ * value is how a failed write falls back to the truth without having to guess an
+ * inverse.
+ */
+fun shownNewArtistDiscount(pending: Int?, published: Int): Int =
+    (pending ?: published).coerceIn(0, 100)
+
+/**
+ * What a tap should write: off if it is on, otherwise the standard offer.
+ *
+ * Toggling OFF preserves nothing, which is intentional — an artist withdrawing
+ * a public discount wants it gone, not remembered. Toggling ON always writes the
+ * standard figure rather than restoring a previous custom one, because the
+ * control is a switch and a switch that turns on to a number the artist cannot
+ * see or choose is a lie about what it does.
+ */
+fun newArtistDiscountToggleTarget(current: Int): Int =
+    if (current > 0) 0 else NEW_ARTIST_DISCOUNT_PCT
+
+/**
+ * The offer as the artist's own profile states it.
+ *
+ * Reads the STORED percentage rather than assuming [NEW_ARTIST_DISCOUNT_PCT],
+ * because the column is a percentage and another client on the same backend may
+ * have written a different one. Showing "20% off" over a row that says 15 would
+ * make the editor disagree with the public page it exists to edit.
+ */
+fun newArtistDiscountLabel(pct: Int): String =
+    "${if (pct > 0) pct else NEW_ARTIST_DISCOUNT_PCT}% off first bookings"
 
 // ── Whole-set write guard ────────────────────────────────────────────────────
 
@@ -357,3 +478,117 @@ fun epkCompleteness(
  */
 fun socialLinkCount(spotify: String?, instagram: String?, youtube: String?): Int =
     listOf(spotify, instagram, youtube).count { !it.isNullOrBlank() }
+
+// ── Connected accounts ───────────────────────────────────────────────────────
+
+/** Which of the three account fields an edit came from. */
+enum class SocialPlatform { Spotify, Instagram, YouTube }
+
+/**
+ * The three social columns as ONE value.
+ *
+ * They travel together because they are WRITTEN together: `updateSocialLinks`
+ * sends all three on every call, so a caller holding them as three loose strings
+ * gets three chances per save to pass a stale one and unlink an account the
+ * artist never touched.
+ *
+ * It also closes a live footgun. [socialLinkCount] takes
+ * `(spotify, instagram, youtube)` and the repository takes
+ * `(instagram, spotify, youtube)` — two `String?` triples in different orders,
+ * which the compiler cannot tell apart and which would swap an artist's Spotify
+ * URL into their Instagram handle without a single error. Named fields plus
+ * [value] / [with] make the order impossible to get wrong at a call site.
+ */
+data class SocialDraft(
+    val spotify: String = "",
+    val instagram: String = "",
+    val youtube: String = "",
+) {
+    /** How many carry a value, on the same blank-is-absent rule as [socialLinkCount]. */
+    val linkedCount: Int get() = socialLinkCount(spotify, instagram, youtube)
+
+    fun value(platform: SocialPlatform): String = when (platform) {
+        SocialPlatform.Spotify -> spotify
+        SocialPlatform.Instagram -> instagram
+        SocialPlatform.YouTube -> youtube
+    }
+
+    fun with(platform: SocialPlatform, value: String): SocialDraft = when (platform) {
+        SocialPlatform.Spotify -> copy(spotify = value)
+        SocialPlatform.Instagram -> copy(instagram = value)
+        SocialPlatform.YouTube -> copy(youtube = value)
+    }
+}
+
+/**
+ * Server row → draft.
+ *
+ * Nulls become empty strings because a text field cannot hold null, and the
+ * round trip has to be lossless in the other direction too: the write path turns
+ * a blank back into NULL, so "never set" and "cleared" converge on one state
+ * rather than drifting into a `""`-vs-`null` distinction nothing in the UI can
+ * express.
+ */
+fun socialDraftOf(spotify: String?, instagram: String?, youtube: String?): SocialDraft =
+    SocialDraft(
+        spotify = spotify.orEmpty(),
+        instagram = instagram.orEmpty(),
+        youtube = youtube.orEmpty(),
+    )
+
+/**
+ * Whether a social edit is worth a write.
+ *
+ * Same rule and the same reason as [bioNeedsSave]: the fields autosave on a
+ * debounce, so without this a focus-and-blur would spend a request restating
+ * three values the server already holds. Compared trimmed because the write
+ * trims, and an untrimmed comparison would call every saved value "changed"
+ * forever after.
+ *
+ * The comparison is over all three at once, matching the write's granularity —
+ * there is no such thing as saving "just Instagram" here.
+ */
+fun socialsNeedSave(draft: SocialDraft, saved: SocialDraft): Boolean =
+    SocialPlatform.entries.any { draft.value(it).trim() != saved.value(it).trim() }
+
+// ── Cover palette ────────────────────────────────────────────────────────────
+
+/**
+ * Which palette the cover preview should paint.
+ *
+ * `pending` is what the artist just tapped and `published` is what the artist
+ * row actually says. The pending value wins so a tap shows its colour without
+ * waiting for the round-trip; clearing it is how a failed write falls back to
+ * the truth, which is the whole reason the two are kept apart rather than the
+ * optimistic value being written into the cached row.
+ */
+fun shownCoverGradient(pending: Int?, published: Int): Int =
+    ArtistGradient.clampIndex(pending ?: published)
+
+/**
+ * The index a palette tap should write, or null if the tap should do nothing.
+ *
+ * Three refusals, all of which would otherwise cost a pointless write or worse:
+ *
+ * - **Not hydrated.** The palette lives on the artist row, and a write against a
+ *   row we never read is the same class of mistake the pricing wipe-guard exists
+ *   for. Gated rather than queued: a palette is cheap to re-pick once the row
+ *   loads, and a queued write would race the load it is waiting on.
+ * - **Out of range.** Clamped instead of dropped, because an index past the end
+ *   is a caller bug, not an artist decision, and refusing it silently would leave
+ *   the ring on a swatch the artist did not pick.
+ * - **Already shown.** Compared against what is ON SCREEN, not against what is
+ *   published: re-tapping a swatch the artist optimistically picked a moment ago
+ *   is visibly a no-op, so it must be an actual no-op too, or every double-tap
+ *   spends a request restating a value the server already has.
+ */
+fun coverGradientPickToWrite(
+    hydrated: Boolean,
+    pending: Int?,
+    published: Int,
+    requested: Int,
+): Int? {
+    if (!hydrated) return null
+    val clamped = ArtistGradient.clampIndex(requested)
+    return clamped.takeIf { it != shownCoverGradient(pending, published) }
+}

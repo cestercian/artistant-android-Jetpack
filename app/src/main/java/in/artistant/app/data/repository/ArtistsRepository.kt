@@ -54,6 +54,44 @@ interface ArtistsRepository {
     suspend fun fetchSelfAvailability(): AvailabilityDraft?
 
     suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>)
+
+    // ── Narrow self-row edits (the press-kit editor) ─────────────────────────
+    //
+    // Each of these PATCHes exactly the columns it names, filtered to the
+    // signed-in artist. That narrowness is the whole point: the only writer these
+    // columns had was [publishWizardProfile], which upserts the WHOLE row and
+    // therefore blanks every profile column it does not carry. Editing a bio
+    // through that path would have silently cleared the artist's social links and
+    // cover choice on the way past, so the editor rendered those sections
+    // read-only instead. A PATCH per concern is what makes them editable without
+    // that collateral, and it is the same shape [updateAvailability] already uses.
+
+    /** `artists.bio`. Blank persists as NULL — an empty bio is absent, not "". */
+    suspend fun updateBio(bio: String)
+
+    /** `artists.cover_gradient_index`. Clamped to the palette range before it goes. */
+    suspend fun updateCoverGradient(index: Int)
+
+    /**
+     * `artists.new_artist_discount_pct`, clamped to 0–100.
+     *
+     * This column had a reader (the public profile prints "New-artist offer: N%
+     * off your booking") and, before this, no writer anywhere in the app — not
+     * even the wizard. On a backend shared with another client that DOES set it,
+     * that left an artist with a discount advertised on their own profile and no
+     * way to withdraw it.
+     */
+    suspend fun updateNewArtistDiscount(pct: Int)
+
+    /**
+     * The three social columns, all three every time.
+     *
+     * Whole-set semantics on purpose: the caller has to pass the current values of
+     * the two it is not editing, so an un-hydrated caller cannot send two nulls and
+     * silently unlink them. See the editor's save path for the guard that enforces
+     * it has read them first.
+     */
+    suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?)
 }
 
 /** Days + preferred start times on `artists` (not a separate table). */
@@ -177,6 +215,50 @@ class SupabaseArtistsRepository @Inject constructor(
             client.from("artists").update(
                 AvailabilityPatch(daysAvailable = daysAvailable, defaultTimeSlots = timeSlots),
             ) {
+                filter { eq("id", userId) }
+            }
+        } catch (t: Throwable) {
+            throw mapPostgrest(t)
+        }
+        invalidate(userId)
+    }
+
+    override suspend fun updateBio(bio: String) =
+        patchSelf(BioPatch(bio.trim().ifBlank { null }))
+
+    override suspend fun updateCoverGradient(index: Int) =
+        patchSelf(CoverGradientPatch(ArtistGradient.clampIndex(index)))
+
+    override suspend fun updateNewArtistDiscount(pct: Int) =
+        patchSelf(NewArtistDiscountPatch(pct.coerceIn(0, MAX_DISCOUNT_PCT)))
+
+    override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
+        patchSelf(
+            SocialLinksPatch(
+                instagramHandle = instagram?.trim()?.ifBlank { null },
+                spotifyArtistUrl = spotify?.trim()?.ifBlank { null },
+                youtubeChannelUrl = youtube?.trim()?.ifBlank { null },
+            ),
+        )
+
+    /**
+     * One PATCH against the signed-in artist's own row, then drop the cache entry.
+     *
+     * The invalidation is not optional. [fetchArtist] returns a hydrated entry
+     * WITHOUT re-reading, so a successful write followed by a refresh would hand
+     * back the pre-write row and the edit would appear to revert — the same trap
+     * the editor's per-section repositories exist to avoid.
+     *
+     * Reified so each caller passes its own tiny patch DTO. A shared "everything
+     * nullable" patch type would compile, and would also be a loaded gun: one
+     * forgotten field and a targeted edit becomes a whole-row overwrite, which is
+     * exactly what these methods exist to avoid.
+     */
+    private suspend inline fun <reified T : Any> patchSelf(patch: T) {
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        try {
+            client.from("artists").update(patch) {
                 filter { eq("id", userId) }
             }
         } catch (t: Throwable) {
@@ -348,6 +430,7 @@ internal data class DbArtist(
             timeSlots = defaultTimeSlots.orEmpty(),
             coverUrl = coverUrl,
             newArtistDiscountPct = newArtistDiscountPct ?: 0,
+            coverGradientIndex = ArtistGradient.clampIndex(coverGradientIndex),
         )
     }
 }
@@ -390,6 +473,32 @@ internal data class DbSample(
 
 @Serializable
 private data class PublishedPatch(val published: Boolean)
+
+// One DTO per narrow edit. `encodeDefaults` is off by default in kotlinx, but
+// these carry no defaults anyway — every field here is one the caller meant to
+// send, which is what keeps a PATCH a PATCH.
+@Serializable
+internal data class BioPatch(val bio: String?)
+
+@Serializable
+internal data class CoverGradientPatch(
+    @SerialName("cover_gradient_index") val coverGradientIndex: Int,
+)
+
+/** A percentage is a percentage; clamped so a caller bug cannot store 900% off. */
+private const val MAX_DISCOUNT_PCT = 100
+
+@Serializable
+internal data class NewArtistDiscountPatch(
+    @SerialName("new_artist_discount_pct") val newArtistDiscountPct: Int,
+)
+
+@Serializable
+internal data class SocialLinksPatch(
+    @SerialName("instagram_handle") val instagramHandle: String?,
+    @SerialName("spotify_artist_url") val spotifyArtistUrl: String?,
+    @SerialName("youtube_channel_url") val youtubeChannelUrl: String?,
+)
 
 @Serializable
 private data class AvailabilityPatch(

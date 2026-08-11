@@ -5,6 +5,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,9 +60,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistMediaItem
+import `in`.artistant.app.designsystem.component.BottomDarkenScrim
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
@@ -68,6 +73,7 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 /**
  * The artist's press-kit editor — the private, editable twin of
@@ -100,6 +106,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun EpkScreen(
     onEditInWizard: () -> Unit,
+    onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: EpkViewModel = hiltViewModel(),
 ) {
@@ -123,11 +130,31 @@ fun EpkScreen(
         }
     }
 
-    PullToRefreshBox(
-        isRefreshing = state.isRefreshing,
-        onRefresh = viewModel::refresh,
-        modifier = modifier.fillMaxSize().background(colors.bg),
-    ) {
+    Column(modifier.fillMaxSize().background(colors.bg)) {
+        // OUTSIDE the scroll, and outside the load/empty/error branch below.
+        //
+        // Pinned because that is what it is on the reference — navigation chrome
+        // under the status bar, not a piece of content that scrolls away. Pinned
+        // ALSO because the avatar in it is the artist's only route to account
+        // settings, and therefore to account deletion: rendering it inside the
+        // loaded branch would mean an artist whose profile failed to load, or who
+        // has not published one yet, could not reach it at all.
+        EpkTitleBar(
+            title = "Profile",
+            subtitle = "Your booking-ready profile",
+            // Falls back to a generic seed rather than a blank disc — the artist
+            // row may not have loaded, and an empty circle reads as broken.
+            avatarName = state.artist?.name?.takeIf { it.isNotBlank() } ?: "You",
+            onOpenAccount = onOpenAccount,
+            modifier = Modifier
+                .padding(horizontal = AppTheme.dimens.space.lg)
+                .padding(top = AppTheme.dimens.space.md, bottom = AppTheme.dimens.space.lg),
+        )
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         when {
             state.isLoading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -163,6 +190,7 @@ fun EpkScreen(
                     onPickAudio = { mimes -> pickAudio.launch(mimes) },
                 )
             }
+        }
         }
     }
 
@@ -202,13 +230,19 @@ private fun EpkEditor(
         contentPadding = PaddingValues(bottom = dimens.hero.scrollTailroom),
         verticalArrangement = Arrangement.spacedBy(space.xl),
     ) {
-        item(key = "hero") {
-            EpkHero(artist = artist, coverUrl = state.photos.firstOrNull()?.publicUrl ?: artist.coverUrl)
+        item(key = "cover") {
+            CoverSection(
+                artist = artist,
+                coverUrl = state.photos.firstOrNull()?.publicUrl ?: artist.coverUrl,
+                selectedGradient = shownCoverGradient(state.coverGradientIndex, artist.coverGradientIndex),
+                canEdit = state.identityHydrated,
+                onPickGradient = viewModel::onCoverGradientPicked,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
         }
         item(key = "status") {
             StatusBlock(
                 state = state,
-                artist = artist,
                 onRetry = viewModel::refresh,
                 onDismissSaveError = viewModel::dismissSaveError,
                 modifier = Modifier.padding(horizontal = space.lg),
@@ -226,7 +260,12 @@ private fun EpkEditor(
             )
         }
         item(key = "about") {
-            AboutSection(bio = artist.bio, modifier = Modifier.padding(horizontal = space.lg))
+            AboutSection(
+                bio = state.bioDraft,
+                canEdit = state.identityHydrated,
+                onBioChanged = viewModel::onBioChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
         }
         item(key = "pricing") {
             PricingSection(
@@ -234,6 +273,12 @@ private fun EpkEditor(
                 fallbackPrice = artist.price,
                 hydrated = state.packagesHydrated,
                 saving = state.savingPackages,
+                discountPct = shownNewArtistDiscount(
+                    state.newArtistDiscountPct,
+                    artist.newArtistDiscountPct,
+                ),
+                canEditOffer = state.identityHydrated,
+                onToggleOffer = viewModel::onNewArtistOfferToggled,
                 onAdd = viewModel::addPackageRow,
                 onName = viewModel::onPackageName,
                 onDuration = viewModel::onPackageDuration,
@@ -264,7 +309,13 @@ private fun EpkEditor(
             )
         }
         item(key = "socials") {
-            SocialSection(artist = artist, modifier = Modifier.padding(horizontal = space.lg))
+            SocialSection(
+                draft = state.socialDraft,
+                canEdit = state.identityHydrated,
+                saving = state.savingSocials,
+                onChanged = viewModel::onSocialChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
         }
         item(key = "links") {
             LinksSection(
@@ -280,74 +331,156 @@ private fun EpkEditor(
     }
 }
 
-// ── Hero ─────────────────────────────────────────────────────────────────────
+// ── Cover ────────────────────────────────────────────────────────────────────
 
 /**
- * The cover, exactly as a client meets it.
+ * The cover as a labelled, bounded PREVIEW — a picture of the hero rather than
+ * the hero itself — with the palette picker under it.
  *
- * The gradient floor paints first so a slow or missing cover is never a hole,
- * and the fade at the bottom ends on the PAGE background rather than on black —
- * ramping to black bottoms out darker than `bg` and leaves a visible step where
- * the seam is meant to vanish. Same construction as the public profile's hero,
- * deliberately: this is the editor showing the artist the real thing, not a
- * preview of it.
+ * This was a full-bleed hero, which is what the artist's PUBLIC page is. Wearing
+ * the public page's chrome made the editor read as a live preview an artist edits
+ * by poking at it, and the consequence was structural rather than cosmetic: a
+ * bled cover has no room for a label, so the section could not say what it was,
+ * could not carry an action, and could not sit in the same rhythm as the eight
+ * labelled sections below it. Boxed and labelled, it is one section among nine,
+ * and the picker has somewhere to live.
+ *
+ * The scrim is a bottom-darken to black inside the card's own bounds, not the
+ * hero's fade into the page background: this card has an edge, so there is no
+ * seam to dissolve — the scrim exists only to keep white type legible over an
+ * arbitrary photo.
  *
  * The cover image is the first photo in position order, not `artist.coverUrl`.
  * That field comes from the cached artist row, which the reorder write does not
- * invalidate — reading it here would leave the hero showing the previous cover
- * after the artist had just promoted a new one.
+ * invalidate — reading it here would leave the preview showing the previous cover
+ * right after the artist promoted a new one.
  */
 @Composable
-private fun EpkHero(artist: Artist, coverUrl: String?) {
+private fun CoverSection(
+    artist: Artist,
+    coverUrl: String?,
+    selectedGradient: Int,
+    canEdit: Boolean,
+    onPickGradient: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(dimens.size.heroShort),
-    ) {
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(artist.gradient)))
-        if (!coverUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = coverUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+    val shape = RoundedCornerShape(dimens.radii.lg)
+    // Render the PICKED palette, not the one the artist row was hydrated with.
+    // The write is fire-and-forget against the server; if the preview waited for
+    // the round-trip, tapping a swatch would look like it did nothing.
+    val palette = ArtistGradient.palette(selectedGradient)
+
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
+        EpkSectionHeader(title = "Cover")
         Box(
             Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        1f - dimens.fraction.heroFade to Color.Transparent,
-                        1f to colors.bg,
-                    ),
-                ),
-        )
-        Column(
-            Modifier
-                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .padding(bottom = space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.sm),
+                .height(dimens.size.coverPreview)
+                .clip(shape),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                if (artist.category.isNotBlank()) MediaChip(artist.category)
-                if (artist.city.isNotBlank()) MediaChip(artist.city, showPin = true)
+            // Palette floor first, so a slow or missing photo is never a hole.
+            Box(Modifier.fillMaxSize().background(Brush.linearGradient(palette)))
+            if (!coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-            Text(
-                artist.name.ifBlank { "Your stage name" },
-                style = AppTheme.type.profileHeroName,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            // No size modifier: the scrim applies `matchParentSize` itself, which
+            // deliberately keeps it out of the Box's measurement. Passing
+            // `fillMaxSize` here would put it back in and let the overlay
+            // participate in sizing the fixed-height preview.
+            BottomDarkenScrim()
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(space.lg),
+                verticalArrangement = Arrangement.spacedBy(space.xs),
+            ) {
+                if (artist.category.isNotBlank()) {
+                    Row { MediaChip(artist.category.uppercase(Locale.US)) }
+                }
+                Text(
+                    artist.name.ifBlank { "Your stage name" },
+                    style = AppTheme.type.displaySmall,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Genre and city on ONE line, in that order — the two facts a
+                // client pairs when they picture the booking, and two separate
+                // lines under a name is a stack, not an identity.
+                val meta = listOfNotNull(
+                    artist.genre.takeIf { it.isNotBlank() },
+                    artist.city.takeIf { it.isNotBlank() },
+                ).joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Text(meta, style = AppTheme.type.footnote, color = colors.inkOnMedia)
+                }
+            }
+        }
+        GradientPicker(
+            selectedIndex = selectedGradient,
+            enabled = canEdit,
+            onPick = onPickGradient,
+        )
+    }
+}
+
+/**
+ * The palette row: six little covers, the picked one ringed.
+ *
+ * Kept visible even once a real photo is set, because it is not dead then — it is
+ * what shows while a photo loads, what shows if it fails, and what a client sees
+ * on any surface that has not fetched the image yet. Hiding it behind "no photo"
+ * would mean the artist can only choose their fallback during the one window
+ * where they cannot see it.
+ *
+ * Landscape swatches rather than dots: the shape is the only thing telling the
+ * artist that what they are picking is a cover.
+ */
+@Composable
+private fun GradientPicker(
+    selectedIndex: Int,
+    enabled: Boolean,
+    onPick: (Int) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.sm)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        repeat(ArtistGradient.count) { index ->
+            val isSelected = index == selectedIndex
+            Box(
+                Modifier
+                    .size(dimens.size.swatchW, dimens.size.swatchH)
+                    .clip(shape)
+                    .background(Brush.linearGradient(ArtistGradient.palette(index)))
+                    .border(
+                        dimens.size.stroke,
+                        // Ring the picked one in the role accent; everything else
+                        // gets the quiet rule, so the row reads as one choice made
+                        // rather than six things outlined.
+                        if (isSelected) colors.brand else colors.lineSoft,
+                        shape,
+                    )
+                    .clickable(enabled = enabled) { onPick(index) }
+                    .semantics {
+                        contentDescription = "Cover palette ${index + 1}"
+                        if (isSelected) selected = true
+                    },
             )
-            if (artist.genre.isNotBlank()) {
-                Text(artist.genre, style = AppTheme.type.callout, color = colors.inkOnMedia)
-            }
         }
     }
 }
@@ -391,7 +524,6 @@ private fun MediaChip(text: String, showPin: Boolean = false) {
 @Composable
 private fun StatusBlock(
     state: EpkUiState,
-    artist: Artist,
     onRetry: () -> Unit,
     onDismissSaveError: () -> Unit,
     modifier: Modifier = Modifier,
@@ -400,15 +532,17 @@ private fun StatusBlock(
     val space = AppTheme.dimens.space
     val completeness = epkCompleteness(
         photoCount = state.photos.size,
-        bio = artist.bio,
+        // The DRAFT, matching how the tier count reads the draft rows: the
+        // checklist is feedback on the edit in progress, so a bio that has been
+        // typed but not yet debounced still counts as written.
+        bio = state.bioDraft,
         packageCount = state.packageRows.count(::packageRowIsSavable),
         sampleCount = state.samples.size,
         techCount = state.techItems.size,
-        socialCount = socialLinkCount(
-            artist.spotifyArtistUrl,
-            artist.instagramHandle,
-            artist.youtubeChannelUrl,
-        ),
+        // The DRAFT, for the same reason the bio above reads its draft: the
+        // checklist is feedback on the edit in progress, so an account pasted a
+        // second ago should tick immediately rather than after the debounce.
+        socialCount = state.socialDraft.linkedCount,
         linkCount = state.links.size,
     )
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
@@ -631,20 +765,55 @@ private fun PhotoActionRow(
  * control here would therefore be a control that silently destroys three other
  * fields, so the section shows the bio and says where it comes from instead.
  */
+/**
+ * The bio, as an actual field.
+ *
+ * This section used to RENDER the bio and offer no way to change it, which made
+ * the editor's most-read section its only unwritable one — the empty state said
+ * clients read this first, and then gave the artist nowhere to write it. The
+ * narrow single-column write existed in the data layer with no caller; this is
+ * the caller.
+ *
+ * Autosaves on a debounce like the rest of the editor, so there is no Save
+ * button to leave half-pressed. Read-only until the artist row has been read,
+ * matching every other write on this screen: the row has to be seen before it
+ * can be written.
+ */
 @Composable
-private fun AboutSection(bio: String, modifier: Modifier = Modifier) {
+private fun AboutSection(
+    bio: String,
+    canEdit: Boolean,
+    onBioChanged: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
         EpkSectionHeader(title = "About")
-        if (bio.isBlank()) {
+        EpkField(
+            value = bio,
+            onValueChange = onBioChanged,
+            placeholder = "Clients read this before anything else on your profile.",
+            enabled = canEdit,
+            singleLine = false,
+            minLines = BIO_FIELD_MIN_LINES,
+            contentDescription = "Bio",
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "No bio yet. Clients read this before anything else on your profile.",
-                style = AppTheme.type.footnote,
+                "A line or two on what a client is booking.",
+                style = AppTheme.type.caption,
                 color = colors.ink3,
+                modifier = Modifier.weight(1f),
             )
-        } else {
-            Text(bio, style = AppTheme.type.body, color = colors.ink2)
+            Text(
+                "${bio.length} / $MAX_BIO_CHARS",
+                style = AppTheme.type.monoMicro,
+                // Only loud at the wall, because that is the only moment the count
+                // explains something the artist can otherwise only experience as
+                // keystrokes going missing.
+                color = if (bioIsAtCap(bio.length)) colors.warm else colors.ink3,
+            )
         }
     }
 }
@@ -669,6 +838,10 @@ private fun PricingSection(
     fallbackPrice: Int,
     hydrated: Boolean,
     saving: Boolean,
+    /** The offer lives on the artist ROW, so it has its own gate and its own value. */
+    discountPct: Int,
+    canEditOffer: Boolean,
+    onToggleOffer: () -> Unit,
     onAdd: () -> Unit,
     onName: (String, String) -> Unit,
     onDuration: (String, String) -> Unit,
@@ -747,6 +920,59 @@ private fun PricingSection(
                 )
             }
         }
+        NewArtistOfferRow(
+            pct = discountPct,
+            enabled = canEditOffer,
+            onToggle = onToggleOffer,
+        )
+    }
+}
+
+/**
+ * The public new-artist discount, as a switch.
+ *
+ * This column was rendered on the artist's own public profile — "New-artist
+ * offer: N% off your booking" — by a reader with no writer anywhere in the
+ * Android app, wizard included. An artist whose row carried it (set by another
+ * client on the shared backend) was advertising a discount they had no way to
+ * withdraw. So the control here is not a new feature so much as the missing half
+ * of one that was already live in front of clients.
+ *
+ * The sub-line says who honours it, because the app does not: there is no
+ * payments path in v1, so this is a promise the artist keeps in their own quote.
+ * A discount control that looked automatic would have artists discovering at
+ * quote time that the number was theirs to absorb.
+ */
+@Composable
+private fun NewArtistOfferRow(
+    pct: Int,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+        HRule()
+        Row(
+            Modifier.fillMaxWidth().padding(top = space.sm),
+            horizontalArrangement = Arrangement.spacedBy(space.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("New-artist offer", style = AppTheme.type.callout, color = colors.ink)
+                Text(
+                    "Shown on your profile. You honour it in your quote.",
+                    style = AppTheme.type.caption,
+                    color = colors.ink3,
+                )
+            }
+            EpkChip(
+                label = newArtistDiscountLabel(pct),
+                selected = pct > 0,
+                enabled = enabled,
+                onClick = onToggle,
+            )
+        }
     }
 }
 
@@ -824,6 +1050,20 @@ private fun PackageEditorRow(
                 onClick = { onPopular(row.key, !row.popular) },
             )
             EpkRowAction("Remove", { onRemove(row.key) }, tone = colors.hot, enabled = enabled)
+        }
+        // Why this row is not going anywhere. The save silently omits rows that
+        // are missing a name or a price, so without this the artist watches a
+        // tier they typed disappear on the next refresh and has no way to learn
+        // which half was missing.
+        packageRowBlocker(row)?.let { blocker ->
+            Text(
+                blocker,
+                style = AppTheme.type.caption,
+                // Loud only once there is something to lose. A row that has just
+                // been added is blank by definition, and warning about it on the
+                // frame it appears blames the artist for pressing Add.
+                color = if (packageRowIsPartiallyFilled(row)) colors.warm else colors.ink3,
+            )
         }
     }
 }
@@ -957,53 +1197,118 @@ private fun TechSection(
 // ── Connected accounts ───────────────────────────────────────────────────────
 
 /**
- * Read-only, for the same reason the bio is: the three social columns have no
- * narrow write path on Android, and the only code that writes them sends the
- * whole artist row.
+ * The three accounts, as three fields.
+ *
+ * These were read-only rows showing "Linked / Not linked", because the only
+ * writer for these columns was the wizard's whole-row upsert. The narrow write
+ * exists now, so the row that reported a state becomes the field that sets it —
+ * and the "Linked" chip goes away with it, since a field showing the value has
+ * already answered the question the chip was there to answer.
+ *
+ * **Editing is off until the artist row has been read**, and this is the section
+ * where that matters most: the write sends all three columns at once, so a save
+ * from an un-hydrated screen would not "fail to update one" — it would unlink
+ * all three. The gate is enforced in the ViewModel too; disabling here is what
+ * makes the reason visible instead of leaving the artist typing into a field
+ * that silently declines to save.
+ *
+ * Helper copy per platform is carried over from the wizard's socials step
+ * verbatim. It is not decoration: the Spotify artist URL in particular is buried
+ * in Spotify for Artists rather than the normal share sheet, and artists
+ * reliably paste their personal profile URL instead.
  */
 @Composable
-private fun SocialSection(artist: Artist, modifier: Modifier = Modifier) {
+private fun SocialSection(
+    draft: SocialDraft,
+    canEdit: Boolean,
+    saving: Boolean,
+    onChanged: (SocialPlatform, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
-        EpkSectionHeader(title = "Connected accounts")
-        Column {
-            HRule()
-            SocialRow("Spotify", artist.spotifyArtistUrl)
-            HRule()
-            SocialRow("Instagram", artist.instagramHandle)
-            HRule()
-            SocialRow("YouTube", artist.youtubeChannelUrl)
-            HRule()
+        EpkSectionHeader(
+            title = "Connected accounts",
+            trailingNote = if (saving) "Saving…" else null,
+        )
+        if (!canEdit) {
+            Text(
+                "Couldn't read your profile, so editing is off — pull to refresh to try again.",
+                style = AppTheme.type.footnote,
+                color = colors.warm,
+            )
         }
+        // Spotify first: it is the one a client is most likely to open before
+        // deciding, and the order matches the public profile's.
+        SocialField(
+            platform = SocialPlatform.Spotify,
+            label = "Spotify",
+            value = draft.spotify,
+            placeholder = "open.spotify.com/artist/…",
+            helper = "From Spotify for Artists → Profile → Share.",
+            keyboardType = KeyboardType.Uri,
+            enabled = canEdit,
+            onChanged = onChanged,
+        )
+        SocialField(
+            platform = SocialPlatform.Instagram,
+            label = "Instagram",
+            value = draft.instagram,
+            placeholder = "@yourhandle",
+            // Text, not Uri: this field takes a handle, and a Uri keyboard puts
+            // "/" and ".com" where the artist wants letters.
+            keyboardType = KeyboardType.Text,
+            helper = "We deep-link clients straight into the Instagram app.",
+            enabled = canEdit,
+            onChanged = onChanged,
+        )
+        SocialField(
+            platform = SocialPlatform.YouTube,
+            label = "YouTube",
+            value = draft.youtube,
+            placeholder = "youtube.com/@yourchannel",
+            helper = "Channel URL — handle URLs (with @) work too.",
+            keyboardType = KeyboardType.Uri,
+            enabled = canEdit,
+            onChanged = onChanged,
+        )
+        Text(
+            // Says how to unlink, because there is no delete affordance and an
+            // artist who wants one off will otherwise go looking for a button
+            // that does not exist.
+            "Clear a field to unlink that account.",
+            style = AppTheme.type.caption,
+            color = colors.ink3,
+        )
     }
 }
 
 @Composable
-private fun SocialRow(label: String, value: String?) {
+private fun SocialField(
+    platform: SocialPlatform,
+    label: String,
+    value: String,
+    placeholder: String,
+    helper: String,
+    keyboardType: KeyboardType,
+    enabled: Boolean,
+    onChanged: (SocialPlatform, String) -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val linked = !value.isNullOrBlank()
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = space.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = AppTheme.type.callout, color = colors.ink)
-            if (linked) {
-                Text(
-                    value.orEmpty(),
-                    style = AppTheme.type.caption,
-                    color = colors.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Text(
-            if (linked) "Linked" else "Not linked",
-            style = AppTheme.type.footnote,
-            color = if (linked) colors.good else colors.ink3,
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.xs)) {
+        Text(label, style = AppTheme.type.callout, color = colors.ink)
+        EpkField(
+            value = value,
+            onValueChange = { onChanged(platform, it) },
+            placeholder = placeholder,
+            enabled = enabled,
+            textStyle = AppTheme.type.footnote,
+            keyboardType = keyboardType,
+            contentDescription = "$label link",
         )
+        Text(helper, style = AppTheme.type.caption, color = colors.ink3)
     }
 }
 

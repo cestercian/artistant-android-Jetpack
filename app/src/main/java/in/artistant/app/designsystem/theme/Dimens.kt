@@ -42,6 +42,24 @@ data class Size(
     val heroTall: Dp = 460.dp,
     val heroMed: Dp = 360.dp,
     val heroShort: Dp = 280.dp,
+    /**
+     * The cover PREVIEW card in the press-kit editor — a picture of the hero, not
+     * the hero itself.
+     *
+     * Its own value rather than a [heroShort] reuse, because the two answer to
+     * different things. A hero is sized to fill the top of a screen; this is a
+     * thumbnail inside a labelled section that has eight more sections under it,
+     * so it is sized to leave the sections visible. Taken from the reference,
+     * where the card measures 180 units between a section label and a swatch row.
+     */
+    val coverPreview: Dp = 180.dp,
+    /**
+     * One gradient swatch in the cover picker. Landscape (56×38) so a row of six
+     * reads as six little covers rather than as six buttons — the shape is the
+     * only thing telling the artist what they are choosing.
+     */
+    val swatchW: Dp = 56.dp,
+    val swatchH: Dp = 38.dp,
     /** 1pt hairline borders (Decline CTA, calendar cell chrome). */
     val hairline: Dp = 1.dp,
     /** Avatar ring / badge stroke (iOS Avatar uses fixed 2pt). */

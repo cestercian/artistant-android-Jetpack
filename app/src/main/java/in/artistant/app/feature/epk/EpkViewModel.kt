@@ -67,6 +67,49 @@ data class EpkUiState(
     val packagesHydrated: Boolean = false,
     val techHydrated: Boolean = false,
     val photosHydrated: Boolean = false,
+    /**
+     * The artist row itself was read. Gates the edits that write ITS columns —
+     * bio, cover palette, social links — for the same reason the three gates
+     * above exist: those writes are only safe when the values on screen came from
+     * the server. The social write is the sharp one, since it sends all three
+     * links every time and an un-hydrated caller would unlink two of them.
+     */
+    val identityHydrated: Boolean = false,
+
+    /**
+     * The palette the artist just picked, before the write has been confirmed.
+     * Null means "nothing picked this session, show what the row says". Kept
+     * apart from the artist row rather than folded into it so a failed write can
+     * fall back to the truth by clearing one field.
+     */
+    val coverGradientIndex: Int? = null,
+
+    /**
+     * The new-artist offer the artist just toggled, before the write confirms.
+     * Null means "show what the row says". Held apart from the artist row for the
+     * same reason [coverGradientIndex] is — one field to clear on failure.
+     */
+    val newArtistDiscountPct: Int? = null,
+
+    /**
+     * The bio as it is being typed. Held apart from `artist.bio` — which stays
+     * the last value known to have been SAVED — so the debounce has something to
+     * compare against and a re-entry to the screen can tell an unsaved edit from
+     * a published one.
+     */
+    val bioDraft: String = "",
+
+    /**
+     * The three account fields as they are being typed, held apart from the
+     * artist row for the same reason [bioDraft] is — the row stays the last
+     * SAVED state, so the debounce has something to diff against.
+     *
+     * Whole-set by construction: the write sends all three, so the draft has to
+     * carry all three, and it may only be seeded from a successful read. See
+     * [identityHydrated] — that gate is what stops a save firing against the
+     * default-constructed value and unlinking every account at once.
+     */
+    val socialDraft: SocialDraft = SocialDraft(),
 
     val techDraft: String = "",
     val linkEditor: LinkEditorState? = null,
@@ -75,6 +118,8 @@ data class EpkUiState(
     val isRefreshing: Boolean = false,
     val savingPackages: Boolean = false,
     val savingTech: Boolean = false,
+    val savingBio: Boolean = false,
+    val savingSocials: Boolean = false,
     val uploadingPhoto: Boolean = false,
     val busyLinks: Boolean = false,
 
@@ -85,7 +130,7 @@ data class EpkUiState(
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
-    val anySaveInFlight: Boolean get() = savingPackages || savingTech
+    val anySaveInFlight: Boolean get() = savingPackages || savingTech || savingBio || savingSocials
 }
 
 /**
@@ -100,8 +145,11 @@ data class EpkUiState(
  * write paths invalidates it. Hydrating the editor from it meant every save was
  * followed by a refresh that handed back the pre-save list, so a saved change
  * appeared to revert until the process restarted. The artist row is now used
- * only for the parts the editor cannot write anyway (name, bio, socials, cover
- * gradient), where staleness has no consequence.
+ * only for the parts that are not whole-set replaces — identity, plus the narrow
+ * single-column writes (bio, socials, cover palette), which are safe from the
+ * cache-staleness trap precisely because they send one field rather than
+ * rebuilding a set from a possibly-stale read. Those still gate on
+ * [EpkUiState.identityHydrated] so they never write a row nobody read.
  *
  * **2. Whole-set replaces are gated on a successful read.** Packages, the tech
  * rider and the photo order all persist by sending the complete list. The
@@ -135,6 +183,8 @@ class EpkViewModel @Inject constructor(
 
     private var packagesSaveJob: Job? = null
     private var techSaveJob: Job? = null
+    private var bioSaveJob: Job? = null
+    private var socialsSaveJob: Job? = null
 
     init {
         refresh()
@@ -197,7 +247,31 @@ class EpkViewModel @Inject constructor(
         runCatching { artists.fetchArtist(userId) }
             .onSuccess { artist ->
                 _state.update {
-                    it.copy(artist = artist, setupComplete = profile?.artistSetupComplete == true)
+                    // Refuse to overwrite typing. A pull-to-refresh landing between
+                    // a keystroke and its debounced write would otherwise replace
+                    // the half-written bio with the published one, which reads as
+                    // the field erasing itself. Only adopt the server's copy when
+                    // the artist has nothing outstanding — which is the common
+                    // case, including every first load.
+                    val pendingBio = bioNeedsSave(it.bioDraft, it.artist?.bio.orEmpty())
+                    // Same refusal for the accounts, asked of all three at once
+                    // because they save as one. On a first load both sides are
+                    // empty, so this is false and the server's values are adopted —
+                    // which is exactly what has to happen before the gate below
+                    // lets anything write them back.
+                    val pendingSocials = socialsNeedSave(it.socialDraft, savedSocials(it.artist))
+                    it.copy(
+                        artist = artist,
+                        setupComplete = profile?.artistSetupComplete == true,
+                        // A successful read is what opens the identity-column
+                        // edits, and it also drops any optimistic palette from a
+                        // previous session — the row is now the truth.
+                        identityHydrated = artist != null,
+                        coverGradientIndex = null,
+                        newArtistDiscountPct = null,
+                        bioDraft = if (pendingBio) it.bioDraft else artist?.bio.orEmpty(),
+                        socialDraft = if (pendingSocials) it.socialDraft else savedSocials(artist),
+                    )
                 }
             }
             .onFailure { failLoad() }
@@ -261,6 +335,243 @@ class EpkViewModel @Inject constructor(
     fun dismissSaveError() = _state.update { it.copy(saveError = null) }
 
     fun consumeStatusNote() = _state.update { it.copy(statusNote = null) }
+
+    // ── Cover palette ────────────────────────────────────────────────────────
+
+    /**
+     * Pick a fallback palette, optimistically.
+     *
+     * The preview switches on the tap and the write follows, because the tap's
+     * entire purpose is seeing the new colour — waiting for a round-trip would
+     * make the control feel broken on a slow connection. A failure clears the
+     * optimistic value so the preview snaps back to what is actually published
+     * rather than lying about a choice that did not land.
+     *
+     * Not debounced: this is one tap producing one decision, not a text field
+     * producing a keystroke per character, and the six-swatch row is small enough
+     * that a burst is a handful of writes at most.
+     */
+    fun onCoverGradientPicked(index: Int) {
+        val current = _state.value
+        val clamped = coverGradientPickToWrite(
+            hydrated = current.identityHydrated,
+            pending = current.coverGradientIndex,
+            published = current.artist?.coverGradientIndex ?: 0,
+            requested = index,
+        ) ?: return
+        _state.update { it.copy(coverGradientIndex = clamped, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateCoverGradient(clamped) }
+                .onSuccess { _state.update { it.copy(statusNote = "Cover saved.") } }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            coverGradientIndex = null,
+                            saveError = "Couldn't save your cover — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── New-artist offer ─────────────────────────────────────────────────────
+
+    /**
+     * Switch the public "N% off first bookings" line on or off.
+     *
+     * Optimistic and undebounced, like the palette: one tap is one decision, and
+     * the artist is entitled to see a promise made on their own profile change
+     * the moment they change it. A failure clears the optimistic value so the
+     * control snaps back to what clients are actually being shown — the one thing
+     * that must never be misreported here, since the artist honours this in their
+     * quote.
+     */
+    fun onNewArtistOfferToggled() {
+        val current = _state.value
+        if (!current.identityHydrated) return
+        val shown = shownNewArtistDiscount(
+            current.newArtistDiscountPct,
+            current.artist?.newArtistDiscountPct ?: 0,
+        )
+        val target = newArtistDiscountToggleTarget(shown)
+        _state.update { it.copy(newArtistDiscountPct = target, saveError = null) }
+        viewModelScope.launch {
+            runCatching { artists.updateNewArtistDiscount(target) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            statusNote = if (target > 0) "Offer on." else "Offer off.",
+                            artist = it.artist?.copy(newArtistDiscountPct = target),
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            newArtistDiscountPct = null,
+                            saveError = "Couldn't change your new-artist offer — check your connection and try again.",
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── Bio ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Type into the bio.
+     *
+     * Clamped on the way in so a pasted essay truncates where the artist can see
+     * it, rather than being accepted, sent, and rejected by the column.
+     */
+    fun onBioChanged(value: String) {
+        _state.update { it.copy(bioDraft = clampBioInput(value)) }
+        scheduleBioSave()
+    }
+
+    /**
+     * Debounced single-column write.
+     *
+     * Debounced for the reason the pricing set is: a bio typed at speed is one
+     * state change per character, and a PATCH per character is both wasteful and
+     * a way for an out-of-order response to land an older prefix last.
+     *
+     * Unlike pricing this is NOT a whole-set replace, so it gates on
+     * [EpkUiState.identityHydrated] rather than [canReplaceWholeSet] — there is no
+     * set to wipe, but there is still a row we must have read before writing it.
+     */
+    private fun scheduleBioSave() {
+        if (!_state.value.identityHydrated || session.currentUserId == null) return
+        bioSaveJob?.cancel()
+        bioSaveJob = viewModelScope.launch {
+            delay(SAVE_DEBOUNCE_MS)
+            persistBio()
+        }
+    }
+
+    private suspend fun persistBio() {
+        val draft = _state.value.bioDraft
+        // Nothing to say to the server: the debounce fires on any keystroke,
+        // including the ones that type a character and delete it again.
+        if (!bioNeedsSave(draft, _state.value.artist?.bio.orEmpty())) return
+        _state.update { it.copy(savingBio = true) }
+        runCatching { artists.updateBio(draft) }
+            .onSuccess {
+                _state.update {
+                    it.copy(
+                        savingBio = false,
+                        saveError = null,
+                        statusNote = "Bio saved.",
+                        // Fold the saved value into the artist row so the next
+                        // debounce has an accurate "already saved" to compare
+                        // against. Without this every later keystroke re-sends the
+                        // whole bio, because the row still holds the pre-save copy.
+                        artist = it.artist?.copy(bio = draft.trim()),
+                    )
+                }
+            }
+            .onFailure {
+                _state.update {
+                    it.copy(
+                        savingBio = false,
+                        // The draft is deliberately left alone. The artist's words
+                        // are the one thing here that cannot be re-derived, so a
+                        // failed write must never be resolved by discarding them.
+                        saveError = "Couldn't save your bio — check your connection and edit again to retry.",
+                    )
+                }
+            }
+    }
+
+    // ── Connected accounts ───────────────────────────────────────────────────
+
+    /**
+     * The row's social columns as a draft. One place that knows the mapping, so
+     * the seeding, the "has it changed" diff and the post-save fold cannot drift
+     * apart into three subtly different ideas of what is currently published.
+     */
+    private fun savedSocials(artist: Artist?): SocialDraft = socialDraftOf(
+        spotify = artist?.spotifyArtistUrl,
+        instagram = artist?.instagramHandle,
+        youtube = artist?.youtubeChannelUrl,
+    )
+
+    fun onSocialChanged(platform: SocialPlatform, value: String) {
+        _state.update { it.copy(socialDraft = it.socialDraft.with(platform, value)) }
+        scheduleSocialsSave()
+    }
+
+    /**
+     * Debounced write of all three account fields.
+     *
+     * **The hydration gate is load-bearing here in a way it is nowhere else on
+     * this screen.** `updateSocialLinks` sends every one of the three columns on
+     * every call, so it behaves like a whole-set replace even though it is a
+     * single-row PATCH: a save that fired before [loadIdentity] seeded the draft
+     * would send three empty strings, and the repository turns blank into NULL —
+     * unlinking the artist's Spotify, Instagram and YouTube in one request, from
+     * a device that never read them.
+     *
+     * Editing is disabled in the UI until the same flag is true, so this guard is
+     * the second of two locks rather than the only one. It stays anyway: the flag
+     * flips on a background refresh, and a guard that exists only in a Composable
+     * is a guard the next caller of this method will not have.
+     */
+    private fun scheduleSocialsSave() {
+        if (!_state.value.identityHydrated || session.currentUserId == null) return
+        socialsSaveJob?.cancel()
+        socialsSaveJob = viewModelScope.launch {
+            delay(SAVE_DEBOUNCE_MS)
+            persistSocials()
+        }
+    }
+
+    private suspend fun persistSocials() {
+        val draft = _state.value.socialDraft
+        if (!socialsNeedSave(draft, savedSocials(_state.value.artist))) return
+        _state.update { it.copy(savingSocials = true) }
+        runCatching {
+            // Named, not positional. The parameter order here is
+            // (instagram, spotify, youtube) while the draft and the count helper
+            // read (spotify, instagram, youtube) — positionally this compiles
+            // fine and silently files an artist's Spotify URL as their Instagram
+            // handle.
+            artists.updateSocialLinks(
+                instagram = draft.instagram,
+                spotify = draft.spotify,
+                youtube = draft.youtube,
+            )
+        }
+            .onSuccess {
+                _state.update {
+                    it.copy(
+                        savingSocials = false,
+                        saveError = null,
+                        statusNote = "Accounts saved.",
+                        // Folded in exactly as the repository stores it — trimmed,
+                        // blank as NULL — so the next diff compares like with like.
+                        // Fold it any other way and every later keystroke re-sends
+                        // all three because the row never matches the draft.
+                        artist = it.artist?.copy(
+                            spotifyArtistUrl = draft.spotify.trim().ifBlank { null },
+                            instagramHandle = draft.instagram.trim().ifBlank { null },
+                            youtubeChannelUrl = draft.youtube.trim().ifBlank { null },
+                        ),
+                    )
+                }
+            }
+            .onFailure {
+                _state.update {
+                    it.copy(
+                        savingSocials = false,
+                        // Draft left alone, like the bio's: the artist pasted these
+                        // from three other apps, and discarding them on a failed
+                        // write means going and fetching them again.
+                        saveError = "Couldn't save your accounts — check your connection and edit again to retry.",
+                    )
+                }
+            }
+    }
 
     // ── Pricing tiers ────────────────────────────────────────────────────────
 

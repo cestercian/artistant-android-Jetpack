@@ -1,7 +1,9 @@
 package `in`.artistant.app.feature.epk
 
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.feature.wizard.WIZARD_BIO_MAX
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -357,5 +359,289 @@ class EpkLogicTest {
     fun socialCount_treatsBlankAsUnlinked() {
         assertEquals(0, socialLinkCount(null, "", "   "))
         assertEquals(2, socialLinkCount("https://open.spotify.com/x", null, "https://youtube.com/@y"))
+    }
+
+    // ── Bio ──────────────────────────────────────────────────────────────────
+
+    /**
+     * The editor is the post-wizard write path for the same column, so a looser
+     * cap here would be a way around the wizard's. The constant is deliberately
+     * re-declared per feature (as the sample cap already is); this is the guard
+     * that keeps the copies honest, because a duplicated number with nothing
+     * watching it is a number that drifts.
+     */
+    @Test
+    fun bioCap_agreesWithTheWizardsCap() {
+        assertEquals(WIZARD_BIO_MAX, MAX_BIO_CHARS)
+    }
+
+    @Test
+    fun clampBio_truncatesAPasteInsteadOfAcceptingIt() {
+        val essay = "x".repeat(MAX_BIO_CHARS + 50)
+
+        assertEquals(MAX_BIO_CHARS, clampBioInput(essay).length)
+    }
+
+    @Test
+    fun clampBio_leavesAnythingWithinTheCapExactlyAsTyped() {
+        assertEquals("Bangalore four-piece.", clampBioInput("Bangalore four-piece."))
+        assertEquals("", clampBioInput(""))
+    }
+
+    @Test
+    fun bioCounter_onlyGoesLoudAtTheWall() {
+        assertFalse(bioIsAtCap(0))
+        assertFalse(bioIsAtCap(MAX_BIO_CHARS - 1))
+        assertTrue(bioIsAtCap(MAX_BIO_CHARS))
+    }
+
+    @Test
+    fun bioSave_isSkippedWhenNothingActuallyChanged() {
+        assertFalse(bioNeedsSave(draft = "Bangalore four-piece.", saved = "Bangalore four-piece."))
+        assertFalse(bioNeedsSave(draft = "", saved = ""))
+    }
+
+    /**
+     * The write trims, so an untrimmed draft that differs only in whitespace is
+     * already what the server holds. Comparing raw would make every save look
+     * like a change and re-send the bio on every debounce forever.
+     */
+    @Test
+    fun bioSave_ignoresWhitespaceTheWriteWouldHaveTrimmedAnyway() {
+        assertFalse(bioNeedsSave(draft = "  Bangalore four-piece.  ", saved = "Bangalore four-piece."))
+    }
+
+    @Test
+    fun bioSave_firesOnARealEdit_includingClearingIt() {
+        assertTrue(bioNeedsSave(draft = "Bangalore five-piece.", saved = "Bangalore four-piece."))
+        assertTrue(bioNeedsSave(draft = "", saved = "Bangalore four-piece."))
+    }
+
+    // ── Tier blockers ────────────────────────────────────────────────────────
+
+    /**
+     * The blocker has to agree with the writer exactly. If a row can be savable
+     * and still carry a "won't publish" note — or worse, be silently dropped
+     * while claiming it is fine — the note is misinformation rather than help.
+     */
+    @Test
+    fun tierBlocker_isSilentExactlyWhenTheRowWouldBeSaved() {
+        val cases = listOf(
+            row(),
+            row(name = ""),
+            row(price = ""),
+            row(price = "0"),
+            row(name = "", price = ""),
+        )
+
+        for (case in cases) {
+            assertEquals(packageRowIsSavable(case), packageRowBlocker(case) == null)
+        }
+    }
+
+    @Test
+    fun tierBlocker_namesTheHalfThatIsMissing() {
+        assertTrue(packageRowBlocker(row(price = ""))!!.contains("price"))
+        assertTrue(packageRowBlocker(row(name = ""))!!.contains("name"))
+        assertNull(packageRowBlocker(row()))
+    }
+
+    /** A zero price is a free gig, not a price — it has to read as missing. */
+    @Test
+    fun tierBlocker_treatsAZeroPriceAsNoPrice() {
+        assertTrue(packageRowBlocker(row(price = "0"))!!.contains("price"))
+    }
+
+    @Test
+    fun tierBlocker_separatesAFreshRowFromAHalfTypedOne() {
+        assertFalse(packageRowIsPartiallyFilled(row(name = "", duration = "", price = "")))
+        assertTrue(packageRowIsPartiallyFilled(row(price = "")))
+        assertTrue(packageRowIsPartiallyFilled(row(name = "", duration = "", price = "50000")))
+        // A savable row is never "partially filled" — it is just filled.
+        assertFalse(packageRowIsPartiallyFilled(row()))
+    }
+
+    // ── New-artist offer ─────────────────────────────────────────────────────
+
+    @Test
+    fun newArtistOffer_togglesBetweenOffAndTheStandardFigure() {
+        assertEquals(NEW_ARTIST_DISCOUNT_PCT, newArtistDiscountToggleTarget(0))
+        assertEquals(0, newArtistDiscountToggleTarget(NEW_ARTIST_DISCOUNT_PCT))
+    }
+
+    /**
+     * A row written by another client can hold a percentage this one never
+     * offers. Turning it off has to work anyway — the whole point of the control
+     * is being able to withdraw a promise the artist did not make here.
+     */
+    @Test
+    fun newArtistOffer_turnsOffAnyNonZeroValue_notJustTheStandardOne() {
+        assertEquals(0, newArtistDiscountToggleTarget(15))
+        assertEquals(0, newArtistDiscountToggleTarget(5))
+    }
+
+    /** The optimistic tap wins, and clearing it falls back to what is published. */
+    @Test
+    fun newArtistOffer_showsThePendingTapOverThePublishedValue() {
+        assertEquals(0, shownNewArtistDiscount(pending = 0, published = 20))
+        assertEquals(20, shownNewArtistDiscount(pending = null, published = 20))
+        assertEquals(0, shownNewArtistDiscount(pending = null, published = 0))
+    }
+
+    /**
+     * The editor must not claim a different figure than the public profile
+     * prints, so the label reads the stored percentage rather than assuming the
+     * standard one.
+     */
+    @Test
+    fun newArtistOffer_labelsWhateverIsActuallyStored() {
+        assertTrue(newArtistDiscountLabel(15).startsWith("15%"))
+        assertTrue(newArtistDiscountLabel(NEW_ARTIST_DISCOUNT_PCT).startsWith("20%"))
+    }
+
+    /** Off still has to offer a figure, or the switch has no label to turn on to. */
+    @Test
+    fun newArtistOffer_labelsTheStandardFigureWhenOff() {
+        assertTrue(newArtistDiscountLabel(0).startsWith("$NEW_ARTIST_DISCOUNT_PCT%"))
+    }
+
+    // ── Connected accounts ───────────────────────────────────────────────────
+
+    private val linked = SocialDraft(
+        spotify = "https://open.spotify.com/artist/x",
+        instagram = "@kaavya",
+        youtube = "https://youtube.com/@kaavya",
+    )
+
+    /**
+     * The seeding round-trip, which is what the hydration gate is protecting.
+     *
+     * A row where all three are NULL and a draft where all three are empty have
+     * to be the SAME state, or the very first hydrate would look like an edit and
+     * schedule a save of three blanks against a row nobody read.
+     */
+    @Test
+    fun socialDraft_treatsAnUnsetRowAsAnEmptyDraft_notAsAnEdit() {
+        val fromEmptyRow = socialDraftOf(spotify = null, instagram = null, youtube = null)
+
+        assertEquals(SocialDraft(), fromEmptyRow)
+        assertFalse(socialsNeedSave(draft = SocialDraft(), saved = fromEmptyRow))
+    }
+
+    /**
+     * The field-order guard. [SocialDraft.value] and the row mapping disagree on
+     * argument order with the repository's writer, which is the whole reason the
+     * draft exists — this asserts the mapping itself lands each value on its own
+     * platform rather than one seat over.
+     */
+    @Test
+    fun socialDraft_mapsEachColumnToItsOwnPlatform() {
+        val draft = socialDraftOf(
+            spotify = "https://open.spotify.com/artist/x",
+            instagram = "@kaavya",
+            youtube = "https://youtube.com/@kaavya",
+        )
+
+        assertEquals("https://open.spotify.com/artist/x", draft.value(SocialPlatform.Spotify))
+        assertEquals("@kaavya", draft.value(SocialPlatform.Instagram))
+        assertEquals("https://youtube.com/@kaavya", draft.value(SocialPlatform.YouTube))
+    }
+
+    @Test
+    fun socialDraft_withEditsOnlyTheOnePlatform() {
+        val edited = linked.with(SocialPlatform.Instagram, "@kaavyalive")
+
+        assertEquals("@kaavyalive", edited.instagram)
+        assertEquals(linked.spotify, edited.spotify)
+        assertEquals(linked.youtube, edited.youtube)
+    }
+
+    @Test
+    fun socialSave_isSkippedWhenNothingActuallyChanged() {
+        assertFalse(socialsNeedSave(draft = linked, saved = linked))
+        assertFalse(socialsNeedSave(draft = SocialDraft(), saved = SocialDraft()))
+    }
+
+    /** Same reason as the bio's: the write trims, so whitespace is not a change. */
+    @Test
+    fun socialSave_ignoresWhitespaceTheWriteWouldHaveTrimmedAnyway() {
+        val padded = linked.copy(instagram = "  @kaavya  ")
+
+        assertFalse(socialsNeedSave(draft = padded, saved = linked))
+    }
+
+    /**
+     * Clearing a field IS the unlink affordance, so it has to read as a change —
+     * if it did not, an artist could never remove an account.
+     */
+    @Test
+    fun socialSave_firesOnAnyOneOfTheThree_includingClearingIt() {
+        assertTrue(socialsNeedSave(draft = linked.copy(spotify = ""), saved = linked))
+        assertTrue(socialsNeedSave(draft = linked.copy(instagram = "@other"), saved = linked))
+        assertTrue(socialsNeedSave(draft = linked.copy(youtube = ""), saved = linked))
+    }
+
+    @Test
+    fun socialDraft_countsBlankFieldsAsUnlinked() {
+        assertEquals(0, SocialDraft().linkedCount)
+        assertEquals(3, linked.linkedCount)
+        assertEquals(2, linked.copy(youtube = "   ").linkedCount)
+    }
+
+    // ── Cover palette ────────────────────────────────────────────────────────
+
+    @Test
+    fun shownCover_prefersThePickOverThePublishedRow() {
+        assertEquals(3, shownCoverGradient(pending = 3, published = 1))
+        assertEquals(1, shownCoverGradient(pending = null, published = 1))
+    }
+
+    /** A row written before the palette list grew must not index off the end. */
+    @Test
+    fun shownCover_clampsAnOutOfRangePublishedIndex() {
+        val last = ArtistGradient.count - 1
+
+        assertEquals(last, shownCoverGradient(pending = null, published = 99))
+        assertEquals(0, shownCoverGradient(pending = null, published = -1))
+    }
+
+    /**
+     * The same gate the pricing whole-set replace has, for the same reason: the
+     * palette is a column on the artist row, and writing that row before reading
+     * it is how an editor overwrites a value it never showed the artist.
+     */
+    @Test
+    fun coverPick_isRefusedUntilTheArtistRowHasBeenRead() {
+        assertNull(coverGradientPickToWrite(hydrated = false, pending = null, published = 0, requested = 2))
+    }
+
+    @Test
+    fun coverPick_writesTheClampedIndexOnARealChange() {
+        assertEquals(2, coverGradientPickToWrite(hydrated = true, pending = null, published = 0, requested = 2))
+        assertEquals(
+            ArtistGradient.count - 1,
+            coverGradientPickToWrite(hydrated = true, pending = null, published = 0, requested = 99),
+        )
+    }
+
+    @Test
+    fun coverPick_isANoOpWhenItRestatesThePublishedPalette() {
+        assertNull(coverGradientPickToWrite(hydrated = true, pending = null, published = 4, requested = 4))
+    }
+
+    /**
+     * The subtle one. Re-tapping a swatch the artist already picked this session
+     * looks like nothing happening, so it has to BE nothing — comparing against
+     * the published row instead of the pending pick would spend a request per
+     * double-tap restating a value the server is already being told.
+     */
+    @Test
+    fun coverPick_isANoOpWhenItRestatesAPickTheWriteHasNotConfirmedYet() {
+        assertNull(coverGradientPickToWrite(hydrated = true, pending = 3, published = 0, requested = 3))
+    }
+
+    @Test
+    fun coverPick_allowsPickingBackToThePublishedPaletteAfterAnUnconfirmedPick() {
+        assertEquals(0, coverGradientPickToWrite(hydrated = true, pending = 3, published = 0, requested = 0))
     }
 }
