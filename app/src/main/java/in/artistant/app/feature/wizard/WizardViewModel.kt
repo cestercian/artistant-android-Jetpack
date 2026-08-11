@@ -1,85 +1,90 @@
 package `in`.artistant.app.feature.wizard
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.HandleAvailability
+import `in`.artistant.app.data.model.HandleRules
 import `in`.artistant.app.data.repository.ArtistsRepository
-import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.epk.PackageRow
+import `in`.artistant.app.feature.epk.packageDrafts
+import `in`.artistant.app.feature.epk.previewPackages
+import `in`.artistant.app.feature.epk.sanitizePriceInput
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 data class WizardUiState(
     val step: WizardStep = WizardStep.Identity,
     val stageName: String = "",
     val handle: String = "",
+    val handleStatus: WizardHandleStatus = WizardHandleStatus.Empty,
     val category: String = "",
     val genre: String = "",
     val baseCity: String = "",
-    val packageName: String = "Evening set",
-    val packageDuration: String = "2h",
-    val packagePrice: String = "25000",
+    /**
+     * Pricing tiers as editor rows, not domain packages. Prices are Strings for
+     * the same reason the EPK editor keeps them that way: a live text field has
+     * a "cleared, not yet retyped" state that an Int cannot represent, and
+     * coercing it to 0 mid-keystroke publishes a free gig.
+     */
+    val packageRows: List<PackageRow> = emptyList(),
     val techItems: Set<String> = emptySet(),
     val techDraft: String = "",
     val daysAvailable: Set<String> = setOf("Fri", "Sat"),
     val timeSlots: Set<String> = setOf("7:30 PM", "9:00 PM"),
     val coverGradientIndex: Int = 0,
-    /** Pending cover from gallery pick — uploaded after go-live. */
+    /** Pending cover from a gallery/camera pick — uploaded after go-live. */
     val pendingCover: WizardMediaCache.PendingPhoto? = null,
+    /**
+     * Absolute path of [pendingCover] on disk, resolved here rather than in the
+     * composable: the cache is a Hilt singleton the UI has no handle on, and
+     * constructing a second one to answer "where is this file" would sever the
+     * preview from the instance the upload queue actually drains.
+     */
+    val pendingCoverPath: String? = null,
     val pendingSamples: List<WizardMediaCache.PendingAudio> = emptyList(),
     val instagramHandle: String = "",
     val spotifyArtistUrl: String = "",
     val youtubeChannelUrl: String = "",
     val bio: String = "",
     val isPublishing: Boolean = false,
+    val publishPhase: WizardPublishPhase = WizardPublishPhase.Idle,
     val publishError: String? = null,
+    /** Set while the draft is being restored, so the form doesn't flash empty. */
+    val isRestoring: Boolean = true,
 ) {
-    val canAdvance: Boolean
-        get() = when (step) {
-            WizardStep.Identity ->
-                stageName.isNotBlank() && handle.isNotBlank() && category.isNotBlank()
-            WizardStep.Location -> baseCity.isNotBlank()
-            WizardStep.Pricing ->
-                packageName.isNotBlank() && packageDuration.isNotBlank() &&
-                    packagePrice.toIntOrNull()?.let { it > 0 } == true
-            WizardStep.Tech, WizardStep.Availability, WizardStep.Cover,
-            WizardStep.Socials, WizardStep.Samples, WizardStep.Preview,
-            -> true
-            WizardStep.Bio -> bio.length <= 200
-            WizardStep.Done -> false
-        }
+    val canAdvance: Boolean get() = wizardCanAdvance(this)
 
-    val previewPackages: List<ArtistPackage>
-        get() = listOf(
-            ArtistPackage(
-                id = "draft-0",
-                name = packageName,
-                duration = packageDuration,
-                price = packagePrice.toIntOrNull() ?: 0,
-                includes = emptyList(),
-                // `false`, matching the iOS default (`Models/Artist.swift` —
-                // `popular: Bool = false`, set only by the wizard's per-package
-                // toggle). The wizard publishes ONE package, so flagging it
-                // popular compared it to nothing and simply badged every row on
-                // every profile. See PackagePricing.popularBadgeIsMeaningful.
-                popular = false,
-            ),
-        )
+    /**
+     * Read-only derivation for the preview step. Unsavable rows are excluded, so
+     * a half-typed tier never flashes into the preview at a price the artist has
+     * not finished typing.
+     */
+    val previewPackages: List<ArtistPackage> get() = previewPackages(packageRows)
 }
 
 sealed interface WizardEvent {
@@ -95,6 +100,7 @@ class WizardViewModel @Inject constructor(
     private val techRider: TechRiderRepository,
     private val mediaCache: WizardMediaCache,
     private val uploadQueue: UploadQueue,
+    private val draftStore: WizardDraftStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(WizardUiState())
@@ -104,36 +110,232 @@ class WizardViewModel @Inject constructor(
     val events = _events.receiveAsFlow()
 
     init {
-        viewModelScope.launch {
-            val profile = runCatching { users.fetchSelfProfile() }.getOrNull() ?: return@launch
-            _state.update {
-                it.copy(
-                    stageName = profile.fullName.orEmpty(),
-                    handle = profile.handle.orEmpty(),
-                    baseCity = profile.city.orEmpty(),
-                )
-            }
+        viewModelScope.launch { restore() }
+        observeHandle()
+        observeDraftWrites()
+    }
+
+    // ── Restore ──────────────────────────────────────────────────────────────
+
+    /**
+     * Seed the form, saved draft first.
+     *
+     * Order matters. The `users` row is the weaker source — it only knows the
+     * signup name/handle/city — so it fills the blanks the draft left rather
+     * than overwriting what the artist typed last session. Both are best-effort:
+     * a failed read must leave an empty but usable form, never a blocked one.
+     */
+    private suspend fun restore() {
+        val ownerId = session.currentUserId?.lowercase()
+        val draft = ownerId?.let { runCatching { draftStore.load(it) }.getOrNull() }
+        val profile = runCatching { users.fetchSelfProfile() }.getOrNull()
+
+        _state.update { current ->
+            val restored = draft?.let { current.applyDraft(it) } ?: current
+            val seeded = restored.copy(
+                stageName = restored.stageName.ifBlank { profile?.fullName.orEmpty() },
+                handle = restored.handle.ifBlank { profile?.handle.orEmpty() },
+                baseCity = restored.baseCity.ifBlank { profile?.city.orEmpty() },
+                // A draft saved before the artist reached pricing has a category
+                // but no tiers. Seeding here as well as in `onCategorySelected`
+                // means resuming never lands on an empty, gated pricing step with
+                // no explanation of what it wants.
+                packageRows = restored.packageRows.ifEmpty {
+                    if (restored.category.isBlank()) emptyList() else starterPackageRows(restored.category)
+                },
+                isRestoring = false,
+            )
+            seeded.copy(handleStatus = wizardHandleSyncStatus(seeded.handle))
         }
     }
 
+    private fun WizardUiState.applyDraft(draft: WizardDraft): WizardUiState = copy(
+        // Never resume into Done. A draft is a form in progress; if one ever
+        // names the celebration step — an older build, a write that raced the
+        // publish — restoring it would show "You're live" to an artist who is
+        // not. Preview is the honest place to land: everything they typed is
+        // there and one tap publishes it for real.
+        step = wizardResumeStep(draft.step),
+        stageName = draft.stageName,
+        handle = draft.handle,
+        category = draft.category,
+        genre = draft.genre,
+        baseCity = draft.baseCity,
+        packageRows = draft.packages.map {
+            PackageRow(it.key, it.name, it.duration, it.price, it.popular)
+        },
+        techItems = draft.techItems.toSet(),
+        daysAvailable = draft.daysAvailable.toSet().ifEmpty { daysAvailable },
+        timeSlots = draft.timeSlots.toSet().ifEmpty { timeSlots },
+        coverGradientIndex = draft.coverGradientIndex.coerceIn(0, 5),
+        instagramHandle = draft.instagramHandle,
+        spotifyArtistUrl = draft.spotifyArtistUrl,
+        youtubeChannelUrl = draft.youtubeChannelUrl,
+        bio = draft.bio,
+    )
+
+    // ── Draft persistence ────────────────────────────────────────────────────
+
+    /**
+     * Mirror the form into the draft store, debounced.
+     *
+     * Debounced rather than written per keystroke because a DataStore edit is a
+     * file write plus a JSON encode, and a text field emits one state per typed
+     * character. 600ms is long enough that a burst of typing collapses to one
+     * write and short enough that a task-kill mid-form loses at most a word.
+     * `drop(1)` skips the initial empty state so an immediate kill can't
+     * overwrite a good draft with a blank one before [restore] has landed.
+     *
+     * Done is excluded, and that exclusion is load-bearing rather than tidy.
+     * Publish clears the draft and then moves the step, so a writer that still
+     * fired on Done would land 600ms later and rewrite the draft it had just
+     * deleted — with `step = Done` in it. The next launch would restore that and
+     * open the wizard on the celebration screen for a profile the artist had not
+     * published. Caught on device; the ordering is invisible from the code alone.
+     */
+    @OptIn(FlowPreview::class)
+    private fun observeDraftWrites() {
+        viewModelScope.launch {
+            _state
+                .filter { !it.isRestoring && it.step != WizardStep.Done }
+                .drop(1)
+                .debounce(600)
+                .collect { snapshot ->
+                    val ownerId = session.currentUserId?.lowercase() ?: return@collect
+                    runCatching { draftStore.save(snapshot.toDraft(ownerId)) }
+                }
+        }
+    }
+
+    private fun WizardUiState.toDraft(ownerId: String) = WizardDraft(
+        ownerId = ownerId,
+        step = step.name,
+        stageName = stageName,
+        handle = handle,
+        category = category,
+        genre = genre,
+        baseCity = baseCity,
+        packages = packageRows.map { DraftPackage(it.key, it.name, it.duration, it.price, it.popular) },
+        techItems = techItems.toList(),
+        daysAvailable = daysAvailable.toList(),
+        timeSlots = timeSlots.toList(),
+        coverGradientIndex = coverGradientIndex,
+        instagramHandle = instagramHandle,
+        spotifyArtistUrl = spotifyArtistUrl,
+        youtubeChannelUrl = youtubeChannelUrl,
+        bio = bio,
+    )
+
+    // ── Handle availability ──────────────────────────────────────────────────
+
+    /**
+     * Live handle check, mirroring the signup screen's contract.
+     *
+     * Format failures are rejected synchronously and never reach the RPC; only
+     * well-formed handles are worth a round-trip. Both the pre- and post-call
+     * guards compare against the live field because the artist keeps typing
+     * while the request is in flight, and answering for a handle they have
+     * already changed is how a stale "taken" pins a perfectly free name.
+     */
+    @OptIn(FlowPreview::class)
+    private fun observeHandle() {
+        viewModelScope.launch {
+            _state
+                .map { it.handle }
+                .distinctUntilChanged()
+                .debounce(350)
+                .filter { HandleRules.isValidFormat(it) }
+                .collect { handle ->
+                    if (_state.value.handle != handle) return@collect
+                    val result = users.handleIsAvailable(HandleRules.normalize(handle))
+                    if (_state.value.handle != handle) return@collect
+                    _state.update {
+                        it.copy(
+                            handleStatus = when (result) {
+                                HandleAvailability.Available -> WizardHandleStatus.Available
+                                HandleAvailability.Unavailable -> WizardHandleStatus.Taken
+                                is HandleAvailability.Failure -> WizardHandleStatus.Error
+                            },
+                        )
+                    }
+                }
+        }
+    }
+
+    // ── Identity ─────────────────────────────────────────────────────────────
+
     fun onStageNameChanged(value: String) = _state.update { it.copy(stageName = value) }
-    fun onHandleChanged(value: String) = _state.update { it.copy(handle = value) }
-    fun onCategorySelected(value: String) = _state.update { it.copy(category = value) }
+
+    fun onHandleChanged(raw: String) {
+        val cleaned = sanitizeHandleInput(raw)
+        _state.update { it.copy(handle = cleaned, handleStatus = wizardHandleSyncStatus(cleaned)) }
+    }
+
+    /**
+     * Picking a category seeds the pricing tiers, but only while they are
+     * untouched. Re-seeding over rows the artist has edited would silently
+     * discard their prices the moment they went back to fix a typo in the
+     * category chip.
+     */
+    fun onCategorySelected(value: String) = _state.update {
+        val seeded = it.packageRows.isEmpty() || it.packageRows == starterPackageRows(it.category)
+        it.copy(
+            category = value,
+            packageRows = if (seeded) starterPackageRows(value) else it.packageRows,
+        )
+    }
+
     fun onGenreChanged(value: String) = _state.update { it.copy(genre = value) }
-    fun onBaseCityChanged(value: String) = _state.update { it.copy(baseCity = value) }
-    fun onPackageNameChanged(value: String) = _state.update { it.copy(packageName = value) }
-    fun onPackageDurationChanged(value: String) = _state.update { it.copy(packageDuration = value) }
-    fun onPackagePriceChanged(value: String) = _state.update { it.copy(packagePrice = value) }
+
+    // ── Location ─────────────────────────────────────────────────────────────
+
+    fun onBaseCitySelected(value: String) = _state.update { it.copy(baseCity = value) }
+
+    // ── Pricing ──────────────────────────────────────────────────────────────
+
+    fun onPackageNameChanged(key: String, value: String) =
+        updateRow(key) { it.copy(name = value) }
+
+    fun onPackageDurationChanged(key: String, value: String) =
+        updateRow(key) { it.copy(duration = value) }
+
+    /** Digits only, capped — the field can never hold a value the save would reject. */
+    fun onPackagePriceChanged(key: String, value: String) =
+        updateRow(key) { it.copy(price = sanitizePriceInput(value)) }
+
+    fun onPackagePopularToggled(key: String) = updateRow(key) { it.copy(popular = !it.popular) }
+
+    fun addPackageRow() = _state.update {
+        if (it.packageRows.size >= WIZARD_MAX_PACKAGES) {
+            it
+        } else {
+            // `popular = false`. A new tier has not earned the badge, and
+            // defaulting it true is what made the badge a constant app-wide.
+            it.copy(packageRows = it.packageRows + PackageRow(key = "row-${UUID.randomUUID()}"))
+        }
+    }
+
+    fun removePackageRow(key: String) =
+        _state.update { it.copy(packageRows = it.packageRows.filterNot { row -> row.key == key }) }
+
+    private fun updateRow(key: String, transform: (PackageRow) -> PackageRow) = _state.update { state ->
+        state.copy(packageRows = state.packageRows.map { if (it.key == key) transform(it) else it })
+    }
+
+    // ── Tech rider ───────────────────────────────────────────────────────────
+
+    fun toggleTechItem(item: String) =
+        _state.update { it.copy(techItems = toggleInSet(item, it.techItems)) }
+
     fun onTechDraftChanged(value: String) = _state.update { it.copy(techDraft = value) }
+
     fun addTechItem() {
         val item = _state.value.techDraft.trim()
         if (item.isBlank()) return
-        _state.update {
-            it.copy(techItems = it.techItems + item, techDraft = "")
-        }
+        _state.update { it.copy(techItems = it.techItems + item, techDraft = "") }
     }
-    fun removeTechItem(item: String) =
-        _state.update { it.copy(techItems = it.techItems - item) }
+
+    // ── Availability ─────────────────────────────────────────────────────────
 
     fun toggleDay(day: String) =
         _state.update { it.copy(daysAvailable = toggleInSet(day, it.daysAvailable)) }
@@ -141,51 +343,73 @@ class WizardViewModel @Inject constructor(
     fun toggleTimeSlot(slot: String) =
         _state.update { it.copy(timeSlots = toggleInSet(slot, it.timeSlots)) }
 
+    // ── Cover ────────────────────────────────────────────────────────────────
+
     fun onCoverGradientSelected(index: Int) =
         _state.update { it.copy(coverGradientIndex = index.coerceIn(0, 5)) }
 
-    fun onCoverPicked(uri: android.net.Uri) {
+    fun onCoverPicked(uri: Uri) {
         viewModelScope.launch {
             runCatching {
                 val pending = mediaCache.adoptPhoto(uri)
-                _state.update { it.copy(pendingCover = pending, publishError = null) }
+                _state.update {
+                    it.copy(
+                        pendingCover = pending,
+                        pendingCoverPath = pending.file(mediaCache).absolutePath,
+                        publishError = null,
+                    )
+                }
             }.onFailure { e ->
-                _state.update { it.copy(publishError = e.message ?: "Couldn't import photo.") }
+                _state.update { it.copy(publishError = e.message ?: "Couldn't import that photo.") }
             }
         }
     }
 
-    fun clearCoverPick() = _state.update { it.copy(pendingCover = null) }
+    fun clearCoverPick() = _state.update { it.copy(pendingCover = null, pendingCoverPath = null) }
 
-    fun onSamplePicked(uri: android.net.Uri, displayName: String?) {
+    // ── Samples ──────────────────────────────────────────────────────────────
+
+    fun onSamplePicked(uri: Uri, displayName: String?) {
         viewModelScope.launch {
             runCatching {
                 val title = displayName?.substringBeforeLast('.')?.ifBlank { null } ?: "Sample"
                 val pending = mediaCache.adoptAudio(uri, title)
                 _state.update {
-                    if (it.pendingSamples.size >= 6) it
+                    if (it.pendingSamples.size >= WIZARD_MAX_SAMPLES) it
                     else it.copy(pendingSamples = it.pendingSamples + pending, publishError = null)
                 }
             }.onFailure { e ->
-                _state.update { it.copy(publishError = e.message ?: "Couldn't import audio.") }
+                _state.update { it.copy(publishError = e.message ?: "Couldn't import that audio.") }
             }
         }
+    }
+
+    fun onSampleTitleChanged(fileName: String, title: String) = _state.update { state ->
+        state.copy(
+            pendingSamples = state.pendingSamples.map {
+                if (it.fileName == fileName) it.copy(title = title) else it
+            },
+        )
     }
 
     fun removeSample(fileName: String) =
         _state.update { it.copy(pendingSamples = it.pendingSamples.filterNot { s -> s.fileName == fileName }) }
 
+    // ── Socials / bio ────────────────────────────────────────────────────────
+
     fun onInstagramChanged(value: String) = _state.update { it.copy(instagramHandle = value) }
     fun onSpotifyChanged(value: String) = _state.update { it.copy(spotifyArtistUrl = value) }
     fun onYoutubeChanged(value: String) = _state.update { it.copy(youtubeChannelUrl = value) }
-    fun onBioChanged(value: String) = _state.update { it.copy(bio = value.take(200)) }
+    fun onBioChanged(value: String) = _state.update { it.copy(bio = clampBio(value)) }
+
+    // ── Navigation ───────────────────────────────────────────────────────────
 
     fun next() {
         val current = _state.value
         if (!current.canAdvance) return
         when (current.step) {
             WizardStep.Preview -> publish()
-            WizardStep.Done -> viewModelScope.launch { _events.send(WizardEvent.Finished) }
+            WizardStep.Done -> finishFromDone()
             else -> advanceWizardStep(current.step)?.let { nextStep ->
                 _state.update { it.copy(step = nextStep, publishError = null) }
             }
@@ -198,58 +422,75 @@ class WizardViewModel @Inject constructor(
         }
     }
 
+    /** Preview's per-section edit jump. Advancing re-walks the flow back here. */
+    fun jumpTo(step: WizardStep) = _state.update { it.copy(step = step, publishError = null) }
+
     fun finishFromDone() {
         viewModelScope.launch { _events.send(WizardEvent.Finished) }
     }
 
     /**
-     * iOS ArtistPreviewStep.runPublish order:
-     * 1) artists upsert (setup_complete)
-     * 2) replace_packages + replace_tech_rider (parallel)
-     * 3) published=true (go live — never gated on media)
-     * 4) enqueue cover/samples on UploadQueue
+     * Save & exit.
+     *
+     * The wizard is a mandatory gate — there is no screen behind it to return
+     * to — so the only honest exit is to end the session. The draft is flushed
+     * synchronously first, and it survives because it lives in its own store
+     * (see [WizardDraftStore]); sign-out's `wipeAll` clears the shared one.
+     * Signing back in as the same artist resumes at the same step.
+     */
+    fun saveAndExit() {
+        viewModelScope.launch {
+            session.currentUserId?.lowercase()?.let { ownerId ->
+                runCatching { draftStore.save(_state.value.toDraft(ownerId)) }
+            }
+            runCatching { session.signOut() }
+        }
+    }
+
+    // ── Publish ──────────────────────────────────────────────────────────────
+
+    /**
+     * Publish order, mirroring iOS:
+     *  1. upsert the artist row (fast, no file transfer)
+     *  2. replace packages + tech rider in parallel
+     *  3. flip `published` — go-live is never gated on a media upload
+     *  4. enqueue cover + samples for the background drain
+     *
+     * Step 3 sits before step 4 deliberately. Deferring the publish flag behind
+     * the uploads means one bad file leaves an artist who tapped Publish, saw
+     * the success screen, and is still invisible in Discover.
      */
     private fun publish() {
-        val userId = session.currentUserId ?: run {
+        val userId = session.currentUserId?.lowercase() ?: run {
             _state.update { it.copy(publishError = "Sign in again to publish.") }
             return
         }
         val snap = _state.value
         viewModelScope.launch {
-            _state.update { it.copy(isPublishing = true, publishError = null) }
+            _state.update {
+                it.copy(
+                    isPublishing = true,
+                    publishError = null,
+                    publishPhase = WizardPublishPhase.SavingProfile,
+                )
+            }
             try {
-                val draft = buildWizardProfileDraft(snap, userId)
-                artists.publishWizardProfile(draft)
+                artists.publishWizardProfile(buildWizardProfileDraft(snap, userId))
+
+                _state.update { it.copy(publishPhase = WizardPublishPhase.SavingDetails) }
                 coroutineScope {
-                    val pkgs = async {
-                        packages.replaceAll(
-                            userId,
-                            listOf(
-                                PackageDraft(
-                                    name = snap.packageName,
-                                    durationLabel = snap.packageDuration,
-                                    priceInr = snap.packagePrice.toIntOrNull() ?: 0,
-                                    // Server-side default is false (PackagesRepository
-                                    // + iOS). Publishing a lone package as "popular"
-                                    // put an unearned badge on every artist's only
-                                    // tier; explicit here so the intent is readable.
-                                    popular = false,
-                                ),
-                            ),
-                        )
-                    }
-                    val tech = async {
-                        techRider.replaceAll(userId, snap.techItems.toList())
-                    }
+                    val pkgs = async { packages.replaceAll(userId, packageDrafts(snap.packageRows)) }
+                    val tech = async { techRider.replaceAll(userId, snap.techItems.toList()) }
                     pkgs.await()
                     tech.await()
                 }
+
+                _state.update { it.copy(publishPhase = WizardPublishPhase.GoingLive) }
                 artists.setPublished(userId, published = true)
 
-                // Media backfill — best-effort; artist is already live.
-                snap.pendingCover?.let { cover ->
-                    uploadQueue.enqueueCoverPhoto(userId, cover.file(mediaCache))
-                }
+                // Media backfill — best-effort, the artist is already live. The
+                // queue owns the staged files from here.
+                snap.pendingCover?.let { uploadQueue.enqueueCoverPhoto(userId, it.file(mediaCache)) }
                 snap.pendingSamples.forEach { sample ->
                     uploadQueue.enqueueAudioSample(
                         artistId = userId,
@@ -259,28 +500,32 @@ class WizardViewModel @Inject constructor(
                     )
                 }
 
+                // The draft has served its purpose; leaving it would resurrect a
+                // stale form if the artist ever re-entered the wizard.
+                runCatching { draftStore.clear() }
+
                 _state.update {
                     it.copy(
                         isPublishing = false,
+                        publishPhase = WizardPublishPhase.Idle,
                         step = WizardStep.Done,
                         publishError = null,
                         pendingCover = null,
+                        pendingCoverPath = null,
                         pendingSamples = emptyList(),
                     )
                 }
             } catch (e: AppError.UniqueViolation) {
-                _state.update {
-                    it.copy(isPublishing = false, publishError = "That handle is already taken.")
-                }
+                failPublish("That handle is already taken.")
             } catch (e: AppError) {
-                _state.update {
-                    it.copy(isPublishing = false, publishError = e.message ?: "Couldn't publish.")
-                }
+                failPublish(e.message ?: "Couldn't publish. Try again.")
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(isPublishing = false, publishError = e.message ?: "Couldn't publish.")
-                }
+                failPublish(e.message ?: "Couldn't publish. Try again.")
             }
         }
+    }
+
+    private fun failPublish(message: String) = _state.update {
+        it.copy(isPublishing = false, publishPhase = WizardPublishPhase.Idle, publishError = message)
     }
 }
