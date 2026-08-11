@@ -1,15 +1,19 @@
 package `in`.artistant.app.feature.booking
 
 import androidx.lifecycle.SavedStateHandle
+import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.EscrowStatus
+import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.data.repository.FakeReviewsRepository
 import `in`.artistant.app.testsupport.ARTIST_ID
+import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
+import `in`.artistant.app.testsupport.pkg
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -194,5 +198,171 @@ class BookingDetailViewModelTest {
         model.acceptRequest()
 
         assertEquals(ARTIST_ID, model.state.value.booking?.artistId)
+    }
+
+    // --- cancel routing (which `cancelled_by` stamp reaches the server) -------
+
+    /**
+     * Records which repository entry point a mutation took.
+     *
+     * The stamp is invisible from [FakeBookingsRepository] — its `declineByArtist`
+     * delegates straight to `cancel`, so both paths produce an identical row — but
+     * the stamp is the whole point: `cancel()` reaches `cancel-booking` as
+     * `cancelled_by = "client"` and `declineByArtist()` as `"artist"`, and mig 0083
+     * rejects a client claiming the artist's. So the assertion has to be on the
+     * call, not on the result.
+     */
+    private class RoutingSpy(
+        private val delegate: FakeBookingsRepository,
+    ) : BookingsRepository by delegate {
+        val calls = mutableListOf<String>()
+        var lastReason: String? = null
+
+        override suspend fun cancel(id: String, reason: String?): Booking {
+            calls += "cancel"
+            lastReason = reason
+            return delegate.cancel(id, reason)
+        }
+
+        override suspend fun declineByArtist(id: String, reason: String?): Booking {
+            calls += "declineByArtist"
+            lastReason = reason
+            return delegate.declineByArtist(id, reason)
+        }
+    }
+
+    private fun spy(vararg seed: Booking) = RoutingSpy(FakeBookingsRepository(seed.toList()))
+
+    private fun spyVm(spy: RoutingSpy) = BookingDetailViewModel(
+        savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
+        bookingsRepository = spy,
+        artistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
+        reviewsRepository = FakeReviewsRepository(),
+    )
+
+    @Test
+    fun clientCancel_routesThroughCancel_soTheRowIsBlamedOnTheClient() = runTest {
+        val spy = spy(booking(status = BookingStatus.Confirmed))
+        val model = spyVm(spy)
+
+        model.cancelBooking(BookingViewer.Client, reason = "Event cancelled")
+
+        assertEquals(listOf("cancel"), spy.calls)
+        assertEquals("Event cancelled", spy.lastReason)
+    }
+
+    @Test
+    fun artistCancel_routesThroughDeclineByArtist_soEscrowIsNotStrandedAndBlameIsCorrect() = runTest {
+        val spy = spy(booking(status = BookingStatus.Confirmed))
+        val model = spyVm(spy)
+
+        model.cancelBooking(BookingViewer.Artist, reason = "Double-booked that date")
+
+        assertEquals(listOf("declineByArtist"), spy.calls)
+        assertEquals("Double-booked that date", spy.lastReason)
+    }
+
+    @Test
+    fun declineCarriesItsReasonToTheEdgeFunction() = runTest {
+        val spy = spy(booking())
+        val model = spyVm(spy)
+
+        model.declineRequest("Not the right fit for this event")
+
+        assertEquals(listOf("declineByArtist"), spy.calls)
+        assertEquals("Not the right fit for this event", spy.lastReason)
+    }
+
+    @Test
+    fun bareCancelBooking_staysTheClientPath_soExistingCallSitesDontFlipBlame() = runTest {
+        val spy = spy(booking())
+        val model = spyVm(spy)
+
+        model.cancelBooking()
+
+        assertEquals(listOf("cancel"), spy.calls)
+    }
+
+    // --- package resolution --------------------------------------------------
+
+    @Test
+    fun packageName_resolvesByIndexIntoTheArtistsPackages() = runTest {
+        val model = BookingDetailViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
+            bookingsRepository = FakeBookingsRepository(listOf(booking())),
+            artistsRepository = FakeArtistsRepository(
+                listOf(artist(packages = listOf(pkg("p-1", name = "Evening set", price = 20_000)))),
+            ),
+            reviewsRepository = FakeReviewsRepository(),
+        )
+
+        assertEquals("Evening set", model.packageName())
+    }
+
+    @Test
+    fun packageName_isNullWhenTheIndexDangles_ratherThanMislabellingTheGig() = runTest {
+        // The artist republished their packages after the booking was made. The
+        // stored index now points past the end — the row must disappear, not
+        // borrow whatever tier happens to sit at that position now.
+        val model = BookingDetailViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
+            bookingsRepository = FakeBookingsRepository(
+                listOf(booking().copy(packageIndex = 7)),
+            ),
+            artistsRepository = FakeArtistsRepository(
+                listOf(artist(packages = listOf(pkg("p-1", name = "Evening set", price = 20_000)))),
+            ),
+            reviewsRepository = FakeReviewsRepository(),
+        )
+
+        assertNull(model.packageName())
+    }
+
+    @Test
+    fun packageName_isNullWhenTheArtistCouldNotBeFetched() = runTest {
+        val model = vm(FakeBookingsRepository(listOf(booking(artistId = OTHER_ARTIST_ID))))
+
+        assertNull(model.packageName())
+    }
+
+    // --- action sets (the screen reads these; the matrix itself is covered in
+    //     BookingDetailLogicTest) ---------------------------------------------
+
+    @Test
+    fun actions_areEmptyUntilABookingLoads_soNoCtaRendersOverNothing() = runTest {
+        val model = vm(FakeBookingsRepository(emptyList()))
+
+        assertTrue(model.actions(BookingViewer.Client).isEmpty())
+        assertTrue(model.primaryActions(BookingViewer.Artist).isEmpty())
+        assertTrue(model.manageActions(BookingViewer.Artist).isEmpty())
+    }
+
+    @Test
+    fun actions_trackTheStatusAcrossAnAccept() = runTest {
+        val bookings = FakeBookingsRepository(listOf(booking()))
+        val model = vm(bookings)
+        assertEquals(
+            listOf(BookingAction.Accept, BookingAction.Decline),
+            model.primaryActions(BookingViewer.Artist),
+        )
+
+        model.acceptRequest()
+
+        // Once accepted the artist can message and manage, and can no longer
+        // accept a request that is already confirmed.
+        assertEquals(listOf(BookingAction.Message), model.primaryActions(BookingViewer.Artist))
+        assertTrue(BookingAction.Cancel in model.manageActions(BookingViewer.Artist))
+        assertFalse(model.showAcceptDecline(isArtistViewer = true))
+    }
+
+    @Test
+    fun dismissActionError_clearsTheBannerWithoutTouchingTheBooking() = runTest {
+        val model = vm(FakeBookingsRepository(listOf(booking())))
+        model.reportActionError("Couldn't open a maps app on this device.")
+
+        model.dismissActionError()
+
+        assertNull(model.state.value.actionError)
+        assertEquals(BookingStatus.PendingConfirm, model.state.value.booking?.status)
     }
 }
