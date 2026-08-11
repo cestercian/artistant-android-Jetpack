@@ -168,7 +168,12 @@ fun ClientTabsScaffold() {
             }
             composable(ClientTab.Messages.route) {
                 TabPane(inner) {
-                    MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
+                    MessagesScreen(
+                        onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        onOpenBookings = { nav.navigate(ClientTab.Bookings.route) },
+                        bookingsLabel = ClientTab.Bookings.label,
+                    )
                 }
             }
             composable(ClientTab.Profile.route) {

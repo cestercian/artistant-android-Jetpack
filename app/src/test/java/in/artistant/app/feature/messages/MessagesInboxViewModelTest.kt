@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.messages
 
+import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeArtistsRepository
@@ -9,11 +10,14 @@ import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
+import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
 import `in`.artistant.app.testsupport.artist
+import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -61,9 +65,13 @@ class MessagesInboxViewModelTest {
         messages: MessagesRepository,
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
         viewerId: String? = CLIENT_ID,
+        bookings: StubBookings = StubBookings(),
+        flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
     ) = MessagesViewModel(
         messagesRepository = messages,
         artistsRepository = artists,
+        bookingsRepository = bookings,
+        flagsStore = flags,
         viewer = { viewerId },
     )
 
@@ -216,5 +224,230 @@ class MessagesInboxViewModelTest {
         assertNotNull(model.state.value.error)
         assertTrue(model.state.value.threads.isEmpty())
         assertFalse(model.state.value.isLoading)
+    }
+
+    // --- gig context ---------------------------------------------------------
+
+    /**
+     * The row's whole point: it should name the gig's state, not just the person.
+     * The booking is read from the seat's own list and matched by id.
+     */
+    @Test
+    fun aBookedThreadCarriesItsGigStatusDateAndVenue() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))),
+            bookings = StubBookings(
+                clientBookings = listOf(
+                    booking(id = "b-1", status = BookingStatus.Confirmed, venue = "Rooftop"),
+                ),
+            ),
+        )
+
+        val context = model.state.value.threads.single().context
+        assertEquals(BookingStatus.Confirmed, context.status)
+        assertEquals("Rooftop", context.venue)
+        assertEquals("Sat, May 16, 2026", context.dateLabel)
+    }
+
+    /** A thread with no booking must not borrow one — it is genuinely an inquiry. */
+    @Test
+    fun aBookinglessThreadStaysAnInquiry() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))),
+            bookings = StubBookings(clientBookings = listOf(booking(id = "b-1"))),
+        )
+
+        assertEquals(ThreadContext.INQUIRY, model.state.value.threads.single().context)
+    }
+
+    /**
+     * A booking the viewer can't read (RLS, or outside the loaded window) leaves
+     * the status unresolved rather than guessing one — but keeps the id so the
+     * row can still deep-link.
+     */
+    @Test
+    fun anUnreadableBookingLeavesTheStatusUnresolved() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-missing"))),
+            bookings = StubBookings(clientBookings = emptyList()),
+        )
+
+        val context = model.state.value.threads.single().context
+        assertEquals("b-missing", context.bookingId)
+        assertNull(context.status)
+    }
+
+    /** A bookings outage costs the context line, never the inbox itself. */
+    @Test
+    fun aBookingsFailureDoesNotTakeTheInboxDown() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))),
+            bookings = StubBookings(failLists = true),
+        )
+
+        assertNull(model.state.value.error)
+        assertEquals(1, model.state.value.threads.size)
+    }
+
+    /**
+     * Only the seats present in the inbox are queried. A pure client asking for
+     * artist gigs is a wasted round trip on every inbox load.
+     */
+    @Test
+    fun onlyTheSeatsInTheInboxAreQueriedForBookings() = runTest {
+        val bookings = StubBookings()
+        vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))),
+            viewerId = CLIENT_ID,
+            bookings = bookings,
+        )
+
+        assertEquals(1, bookings.clientCalls)
+        assertEquals(0, bookings.artistCalls)
+    }
+
+    /** No booked threads at all means neither list is worth asking for. */
+    @Test
+    fun anInboxOfPureInquiriesSkipsTheBookingsFetchEntirely() = runTest {
+        val bookings = StubBookings()
+        vm(StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))), bookings = bookings)
+
+        assertEquals(0, bookings.clientCalls)
+        assertEquals(0, bookings.artistCalls)
+    }
+
+    /**
+     * `pending_confirm` is the artist's decision, so only the artist seat gets
+     * the accelerator. Offering the client a "review" button for a call that
+     * isn't theirs is the same class of bug as showing them their own name.
+     */
+    @Test
+    fun onlyTheArtistSeatIsToldARequestIsWaitingOnThem() = runTest {
+        val threads = listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))
+        val pending = listOf(booking(id = "b-1", status = BookingStatus.PendingConfirm))
+
+        val asArtist = vm(
+            StaticThreads(threads),
+            viewerId = ARTIST_ID,
+            bookings = StubBookings(artistBookings = pending),
+        )
+        val asClient = vm(
+            StaticThreads(threads),
+            viewerId = CLIENT_ID,
+            bookings = StubBookings(clientBookings = pending),
+        )
+
+        assertTrue(asArtist.state.value.threads.single().context.awaitingViewer)
+        assertFalse(asClient.state.value.threads.single().context.awaitingViewer)
+    }
+
+    // --- archive, star, search ----------------------------------------------
+
+    @Test
+    fun archivedThreadsLeaveTheInboxAndAppearInTheArchive() = runTest {
+        val flags = FakeThreadFlagsStore(ThreadFlags(archived = setOf("t-2")))
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID),
+                    Thread(id = "t-2", artistId = ARTIST_ID),
+                ),
+            ),
+            flags = flags,
+        )
+
+        assertEquals(listOf("t-1"), model.state.value.activeThreads.map { it.thread.id })
+        assertEquals(listOf("t-2"), model.state.value.archivedThreads.map { it.thread.id })
+        assertEquals(listOf("t-1"), model.state.value.visibleThreads.map { it.thread.id })
+    }
+
+    /** Archived rows must not be counted by the chips they no longer appear under. */
+    @Test
+    fun archivedThreadsAreNotCountedByTheChips() = runTest {
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"),
+                    Thread(id = "t-2", artistId = ARTIST_ID, bookingId = "b-2"),
+                ),
+            ),
+            flags = FakeThreadFlagsStore(ThreadFlags(archived = setOf("t-2"))),
+        )
+
+        assertEquals(1, model.state.value.counts[MessagesFilter.Bookings])
+    }
+
+    /** Toggling a flag re-projects the loaded rows; it must not refetch. */
+    @Test
+    fun starringReProjectsWithoutRefetching() = runTest {
+        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID)))
+        val model = vm(repo, bookings = StubBookings())
+
+        model.toggleStarred("t-1")
+
+        assertTrue(model.state.value.threads.single().starred)
+    }
+
+    @Test
+    fun archivingIsReversible() = runTest {
+        val model = vm(StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))))
+
+        model.toggleArchived("t-1")
+        assertTrue(model.state.value.activeThreads.isEmpty())
+
+        model.toggleArchived("t-1")
+        assertEquals(1, model.state.value.activeThreads.size)
+    }
+
+    @Test
+    fun searchMatchesTheCounterpartNameAndThePreview() = runTest {
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, lastPreview = "See you Saturday"),
+                    Thread(id = "t-2", artistId = OTHER_ARTIST_ID, lastPreview = "Rates?"),
+                ),
+            ),
+            artists = FakeArtistsRepository(
+                listOf(
+                    artist(id = ARTIST_ID, name = "Nova Beats"),
+                    artist(id = OTHER_ARTIST_ID, name = "Kabir Sen Trio"),
+                ),
+            ),
+        )
+
+        model.setQuery("kabir")
+        assertEquals(listOf("t-2"), model.state.value.visibleThreads.map { it.thread.id })
+
+        model.setQuery("saturday")
+        assertEquals(listOf("t-1"), model.state.value.visibleThreads.map { it.thread.id })
+    }
+
+    /** A live query must not leave the chips advertising rows it filtered out. */
+    @Test
+    fun chipCountsFollowTheActiveSearch() = runTest {
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, lastPreview = "See you Saturday"),
+                    Thread(id = "t-2", artistId = ARTIST_ID, lastPreview = "Rates?"),
+                ),
+            ),
+        )
+
+        model.setQuery("saturday")
+
+        assertEquals(1, model.state.value.counts[MessagesFilter.All])
+    }
+
+    /** Support holds no conversations — a count there would read as an empty inbox. */
+    @Test
+    fun theSupportSegmentNeverMatchesAThread() = runTest {
+        val model = vm(seeded())
+
+        model.setFilter(MessagesFilter.Support)
+
+        assertTrue(model.state.value.visibleThreads.isEmpty())
+        assertEquals(0, model.state.value.counts[MessagesFilter.Support])
     }
 }
