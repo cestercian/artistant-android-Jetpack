@@ -1,0 +1,115 @@
+package `in`.artistant.app.feature.booking
+
+import `in`.artistant.app.testsupport.bookingDraft
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Checkout's three decisions.
+ *
+ * The send gate is the one that matters most: an over-eager guard here disables
+ * the only CTA in the funnel with no affordance anywhere to satisfy it, which
+ * dead-ends the entire booking flow on a grey button.
+ */
+class CheckoutLogicTest {
+
+    // --- review rows ---------------------------------------------------------
+
+    @Test
+    fun reviewRows_showTheWholeRequest_inTheOrderItWasDecided() {
+        val rows = checkoutReviewRows(bookingDraft())
+
+        assertEquals(
+            listOf("Package", "Date", "Time", "Venue", "Guests", "Directions"),
+            rows.map { it.label },
+        )
+        assertEquals("Evening set", rows.first { it.label == "Package" }.value)
+        assertEquals("Rooftop", rows.first { it.label == "Venue" }.value)
+        assertEquals("80", rows.first { it.label == "Guests" }.value)
+    }
+
+    @Test
+    fun reviewRows_wordTheEmptyOptionals_ratherThanRenderingBlanks() {
+        // Venue and directions are both optional in the booking form. A blank row
+        // reads as a rendering fault — the client can't tell whether they skipped
+        // it or the screen lost it.
+        val rows = checkoutReviewRows(bookingDraft().copy(venue = "  ", venueNotes = ""))
+
+        assertEquals("Not set", rows.first { it.label == "Venue" }.value)
+        assertEquals("None", rows.first { it.label == "Directions" }.value)
+    }
+
+    @Test
+    fun reviewRows_carryTheDirectionsWhenThereAreSome() {
+        val rows = checkoutReviewRows(bookingDraft(venueNotes = "Gate 3, load-in at the back"))
+
+        assertEquals("Gate 3, load-in at the back", rows.first { it.label == "Directions" }.value)
+    }
+
+    @Test
+    fun reviewRows_fallBackToCustom_forAnUnnamedPackage() {
+        val rows = checkoutReviewRows(bookingDraft().copy(packageName = "   "))
+
+        assertEquals("Custom", rows.first { it.label == "Package" }.value)
+    }
+
+    // --- the send gate -------------------------------------------------------
+
+    @Test
+    fun sendIsAllowedWithAnEmptyVenue() {
+        // Explicitly pinned: requiring a venue here is the guard that broke the
+        // funnel, and nothing in the UI lets the client satisfy it.
+        assertFalse(checkoutBlocked(isSubmitting = false, artistHasNoPackages = false))
+    }
+
+    @Test
+    fun sendIsBlockedWhileTheRequestIsInFlight() {
+        assertTrue(checkoutBlocked(isSubmitting = true, artistHasNoPackages = false))
+    }
+
+    @Test
+    fun sendIsBlockedForAnArtistWhoPublishesNoTiers() {
+        // There is no fixed price to request against — the custom-quote path is
+        // the honest destination.
+        assertTrue(checkoutBlocked(isSubmitting = false, artistHasNoPackages = true))
+    }
+
+    // --- narrated wait -------------------------------------------------------
+
+    @Test
+    fun waitCopy_namesTheArtistOnTheFirstHop() {
+        val copy = checkoutWaitCopy(CheckoutWaitPhase.Sending, "Nova Beats")
+
+        assertEquals("Sending your request to Nova Beats…", copy.title)
+        assertTrue(copy.subtitle.isNotBlank())
+    }
+
+    @Test
+    fun waitCopy_degradesToANoun_whenTheArtistNeverHydrated() {
+        // A deep link or a cold cache can reach this screen before the artist
+        // resolves; "Sending your request to …" with a hole in it is worse than a
+        // generic noun.
+        assertEquals(
+            "Sending your request to the artist…",
+            checkoutWaitCopy(CheckoutWaitPhase.Sending, "   ").title,
+        )
+    }
+
+    @Test
+    fun waitCopy_describesTheServerWriteOnTheSecondHop() {
+        val copy = checkoutWaitCopy(CheckoutWaitPhase.Awaiting, "Nova Beats")
+
+        assertEquals("Waiting for confirmation…", copy.title)
+    }
+
+    @Test
+    fun expectationLine_promisesANotification_notADeadline() {
+        // No response window exists on this path — `expires_at` belongs to the
+        // artist-side gig-request flow — so the copy must not invent one.
+        assertFalse(CHECKOUT_EXPECTATION.contains("24"))
+        assertFalse(CHECKOUT_EXPECTATION.contains("hour"))
+        assertTrue(CHECKOUT_EXPECTATION.contains("notify"))
+    }
+}
