@@ -63,6 +63,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.designsystem.component.Avatar
+import `in`.artistant.app.designsystem.component.avatarGradient
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.EmptyState
@@ -257,7 +258,20 @@ private fun InboxHeader(
     HRule()
 }
 
-/** Hairline search — the same shape Search uses, so the two read as one control. */
+/**
+ * The inbox's search field: a filled capsule under the title.
+ *
+ * NOT the hairline row the Search tab uses, even though the two used to share a
+ * shape here. The two surfaces are genuinely different on the reference build:
+ * Search is a bare field over a rule because it IS the screen — the field is
+ * what you came for — whereas the inbox's search is a docked control under a
+ * large title, and the reference renders that as a filled capsule. Matching the
+ * bare version made the inbox's field disappear into the page: no edge, no
+ * height of its own, and a magnifier floating in space above the chips.
+ *
+ * Measured off the reference: 44 tall, 16 side margins, a filled capsule at the
+ * `bgSoft` step (its fill samples to within two levels of that token).
+ */
 @Composable
 private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     val colors = AppTheme.colors
@@ -265,11 +279,20 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = space.lg, vertical = space.sm),
+            .padding(horizontal = space.lg, vertical = space.sm)
+            .height(AppTheme.dimens.size.rowMin)
+            .clip(CircleShape)
+            .background(colors.bgSoft)
+            .padding(horizontal = space.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.Search, contentDescription = null, tint = colors.ink3)
-        Spacer(Modifier.width(space.md))
+        Icon(
+            Icons.Filled.Search,
+            contentDescription = null,
+            tint = colors.ink3,
+            modifier = Modifier.size(AppTheme.dimens.size.iconLg),
+        )
+        Spacer(Modifier.width(space.sm))
         BasicTextField(
             value = query,
             onValueChange = onQueryChange,
@@ -573,35 +596,42 @@ private fun ThreadRow(
  * The gig's cover with the counterparty's face on it.
  *
  * This is what makes a row read as a *booking* rather than a contact: the work is
- * the subject, the person is the attribution. With no cover in the cache there is
- * nothing to attribute to, so it falls back to the plain avatar rather than
- * rendering an empty tile — an empty square would look like a broken image.
+ * the subject, the person is the attribution.
+ *
+ * The tile keeps its rounded-SQUARE silhouette whether or not a cover has landed.
+ * It used to collapse to a plain circle when the cache had no cover, which is the
+ * common case on a cold inbox — so the list changed shape as images arrived, and
+ * a row mid-hydration looked like a different kind of row. The empty tile is not
+ * empty: it takes the same name-derived gradient the initials badge does, so an
+ * un-hydrated row reads as "cover still loading", never as a broken image. Same
+ * fallback the reference uses.
  */
 @Composable
 private fun ThreadThumb(name: String, coverUrl: String?) {
-    val colors = AppTheme.colors
     val size = AppTheme.dimens.size
     Box(Modifier.size(thumbColumnWidth()).clearAndSetSemantics {}) {
-        if (coverUrl == null) {
-            Avatar(name = name, size = size.avatarMd)
-            return@Box
-        }
-        AsyncImage(
-            model = coverUrl,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
+        Box(
+            Modifier
                 .size(size.avatarMd)
                 .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                .background(colors.bgSoft),
-        )
+                .background(avatarGradient(name)),
+        ) {
+            if (coverUrl != null) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+        }
         Avatar(
             name = name,
             size = size.iconXl,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .clip(CircleShape)
-                .background(colors.bg)
+                .background(AppTheme.colors.bg)
                 .padding(AppTheme.dimens.size.hairline),
         )
     }
