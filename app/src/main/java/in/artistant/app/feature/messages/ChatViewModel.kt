@@ -8,6 +8,7 @@ import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.data.repository.ReportsRepository
@@ -32,18 +33,52 @@ data class ChatUiState(
      * incoming runs — both of which are the opposite of the viewer's own role.
      */
     val viewerIsArtist: Boolean = false,
-)
+    /**
+     * The gig this conversation is about. Without it the header carried only a
+     * name, so someone deep in a negotiation had no way to tell which booking
+     * they were negotiating — the most common reason to bounce out mid-thread.
+     */
+    val context: ThreadContext = ThreadContext.INQUIRY,
+    /** Per-thread, persisted: dismissing the notice in one chat must not hide it in all. */
+    val safetyBannerVisible: Boolean = true,
+    val starred: Boolean = false,
+    val archived: Boolean = false,
+    /**
+     * The gig's artist, for the details sheet. Only the client seat can act on
+     * it — an artist's counterpart is a client with no public profile — so the
+     * id is null for the artist seat rather than pointing at the viewer.
+     */
+    val artistId: String? = null,
+    val artistSubtitle: String = "",
+    val artistScore: Int? = null,
+    /** True once the report has been filed for this conversation. */
+    val reportSubmitted: Boolean = false,
+) {
+    /**
+     * The last of the viewer's own messages the counterparty has read. Only
+     * `Sent` rows qualify — an in-flight or failed bubble has no server row that
+     * could have been read.
+     */
+    val lastReadOwnMessageId: String? =
+        ChatTimestamps.lastReadOwnMessageId(messages, counterpartLastReadAt)
+}
 
 /**
- * Chat VM: poll-on-open + Realtime INSERT + optimistic send with 3-way reconcile
+ * Chat: poll-on-open + Realtime INSERT + optimistic send with 3-way reconcile
  * (local optimistic ↔ send RETURNING ↔ Realtime echo), matching iOS MessageStore.
+ *
+ * Beyond the transcript it resolves the gig behind the thread, so the header
+ * strip, the caption above the composer and the funnel CTA all read from one
+ * [ThreadContext] and can never disagree about the booking.
  */
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val messagesRepository: MessagesRepository,
     private val artistsRepository: ArtistsRepository,
+    private val bookingsRepository: BookingsRepository,
     private val reports: ReportsRepository,
+    private val flagsStore: ThreadFlagsStore,
     private val viewer: ViewerIdentity,
 ) : ViewModel() {
     private val threadId: String = checkNotNull(savedStateHandle["threadId"])
@@ -55,6 +90,17 @@ class ChatViewModel @Inject constructor(
     private var subscribeGeneration = 0
 
     init {
+        viewModelScope.launch {
+            flagsStore.flags.collect { flags ->
+                _state.update {
+                    it.copy(
+                        starred = threadId in flags.starred,
+                        archived = threadId in flags.archived,
+                        safetyBannerVisible = threadId !in flags.safetyDismissed,
+                    )
+                }
+            }
+        }
         refresh()
         subscribeRealtime()
     }
@@ -72,20 +118,24 @@ class ChatViewModel @Inject constructor(
             // own name directly above "You".
             val viewerId = viewer.currentUserId()
             val viewerIsArtist = thread != null && ThreadCounterpart.viewerIsArtist(thread, viewerId)
+            val artist = thread?.let { artistsRepository.find(it.artistId) }
             // No thread row (load failed / not a participant) means no seat to
             // resolve from, so stay on the neutral header rather than guessing.
             val title = thread?.let {
-                ThreadCounterpart.name(
-                    thread = it,
-                    viewerId = viewerId,
-                    artistName = artistsRepository.find(it.artistId)?.name,
-                )
-            } ?: "Chat"
+                ThreadCounterpart.name(thread = it, viewerId = viewerId, artistName = artist?.name)
+            } ?: FALLBACK_TITLE
             _state.update { state ->
                 state.copy(
                     thread = thread,
                     title = title,
                     viewerIsArtist = viewerIsArtist,
+                    // Only the client seat's counterpart has a profile to open.
+                    artistId = thread?.artistId?.takeUnless { viewerIsArtist },
+                    artistSubtitle = artist
+                        ?.let { listOf(it.category, it.genre).filter(String::isNotBlank) }
+                        ?.joinToString(ThreadContext.SEPARATOR)
+                        .orEmpty(),
+                    artistScore = artist?.score?.takeIf { it > 0 },
                     messages = ChatRealtimeLogic.mergePreservingOptimistic(
                         server = serverMessages,
                         existing = state.messages,
@@ -93,16 +143,31 @@ class ChatViewModel @Inject constructor(
                     isLoading = false,
                 )
             }
+            hydrateArtist(thread)
+            loadGigContext(thread, viewerIsArtist)
             markReadBestEffort()
         }.onFailure { e -> _state.update { it.copy(isLoading = false, error = e.message) } }
     }
 
     /**
+     * Back from the background.
+     *
+     * The socket is suspended while the app is away, so a thread left open goes
+     * silent. Refresh first — that fills the gap even if the channel is slow to
+     * rejoin — then re-establish; the generation token makes the re-subscribe
+     * idempotent against the one already in flight.
+     */
+    fun onResumed() {
+        refresh()
+        subscribeRealtime()
+    }
+
+    /**
      * Optimistic insert (`.sending`) then background write. Cap at 4000 chars —
-     * same choke point as iOS for both composer and retry.
+     * same choke point as the composer, for both first send and retry.
      */
     fun send(body: String) {
-        val capped = body.take(4000)
+        val capped = body.take(MAX_MESSAGE_CHARS)
         val text = capped.trim()
         if (text.isEmpty()) return
         val optimisticId = "optimistic-${System.currentTimeMillis()}"
@@ -168,6 +233,10 @@ class ChatViewModel @Inject constructor(
                 _state.update {
                     it.copy(messages = ChatRealtimeLogic.receiveRealtimeMessage(it.messages, incoming))
                 }
+                // An inbound message seen while the thread is open must not
+                // resurrect the unread badge on the next inbox refresh. Our own
+                // echo needs no write.
+                if (!incoming.isMine) markReadBestEffort()
             }
         }
         if (myGeneration != subscribeGeneration) {
@@ -177,18 +246,84 @@ class ChatViewModel @Inject constructor(
         subscription = sub
     }
 
+    /**
+     * The gig behind this thread.
+     *
+     * One row by id rather than the seat's whole list: the chat needs exactly one
+     * booking, and `listForArtist()` would pull every gig the artist has ever had
+     * (plus its calendar side effect) to render a status line. Failure is silent
+     * — the strip degrades to the inquiry shape, which is also what a genuinely
+     * bookingless thread shows.
+     */
+    private fun loadGigContext(thread: Thread?, viewerIsArtist: Boolean) = viewModelScope.launch {
+        val bookingId = thread?.bookingId
+        if (bookingId == null) {
+            _state.update { it.copy(context = ThreadContext.INQUIRY) }
+            return@launch
+        }
+        val booking = runCatching { bookingsRepository.fetchOne(bookingId) }.getOrNull()
+        _state.update {
+            it.copy(
+                context = booking?.let { row -> ThreadContext.from(row, viewerIsArtist) }
+                    // Keep the id even when the row can't be read, so the details
+                    // sheet can still route to the booking.
+                    ?: ThreadContext(bookingId = bookingId),
+            )
+        }
+    }
+
+    /**
+     * Pull the thread's artist into the by-id cache when it is cold, then
+     * re-project the header. Reaching the chat from a push deep link skips the
+     * inbox entirely, so this is often the first time the artist is fetched.
+     */
+    private fun hydrateArtist(thread: Thread?) = viewModelScope.launch {
+        val artistId = thread?.artistId ?: return@launch
+        if (artistsRepository.find(artistId) != null) return@launch
+        val artist = artistsRepository.ensureFull(artistId) ?: return@launch
+        _state.update { state ->
+            state.copy(
+                title = if (state.viewerIsArtist) state.title else artist.name,
+                artistSubtitle = listOf(artist.category, artist.genre)
+                    .filter(String::isNotBlank)
+                    .joinToString(ThreadContext.SEPARATOR),
+                artistScore = artist.score.takeIf { it > 0 },
+            )
+        }
+    }
+
     private fun markReadBestEffort() = viewModelScope.launch {
         runCatching { messagesRepository.markThreadRead(threadId) }
         runCatching { messagesRepository.markThreadReadReceipt(threadId) }
+        // Opening the thread also retires an explicit "mark as unread" — the
+        // reader has now, demonstrably, read it.
+        runCatching { flagsStore.clearMarkedUnread(threadId) }
         val readAt = runCatching { messagesRepository.counterpartLastRead(threadId) }.getOrNull()
         _state.update { it.copy(counterpartLastReadAt = readAt) }
     }
 
     fun openDetails() = _state.update { it.copy(showDetails = true) }
-    fun dismissDetails() = _state.update { it.copy(showDetails = false) }
+    fun dismissDetails() = _state.update { it.copy(showDetails = false, reportSubmitted = false) }
 
+    fun dismissSafetyBanner() = viewModelScope.launch { flagsStore.dismissSafetyBanner(threadId) }
+
+    fun toggleStarred() = viewModelScope.launch { flagsStore.toggleStarred(threadId) }
+
+    fun toggleArchived() = viewModelScope.launch { flagsStore.toggleArchived(threadId) }
+
+    fun markUnread() = viewModelScope.launch { flagsStore.markUnread(threadId) }
+
+    /**
+     * File a report against this conversation.
+     *
+     * `reportConversation` never throws — it soft-fails to an on-device log so a
+     * moderation outage can't block chat — which means this surface genuinely
+     * cannot tell delivered from queued. The confirmation copy is worded to be
+     * true either way rather than promising a delivery it can't confirm.
+     */
     fun reportConversation(reason: String) = viewModelScope.launch {
         runCatching { reports.reportConversation(threadId, reason) }
+        _state.update { it.copy(reportSubmitted = true) }
     }
 
     override fun onCleared() {
@@ -196,5 +331,9 @@ class ChatViewModel @Inject constructor(
         subscription?.cancel()
         subscription = null
         super.onCleared()
+    }
+
+    private companion object {
+        const val FALLBACK_TITLE = "Chat"
     }
 }

@@ -116,9 +116,11 @@ fun MessagesScreen(
             archivedCount = state.archivedThreads.size,
             onFilter = viewModel::setFilter,
             onOpenArchive = { showArchive = true },
-            // Chips only make sense once there is a list to segment; on the very
-            // first paint they would be four chips over a spinner.
-            showChips = state.hasLoaded,
+            // Chips only make sense once the first load has settled — on the very
+            // first paint they would be four chips over a spinner. A FAILED load
+            // still counts as settled, so Support stays reachable when the thread
+            // list is the thing that's broken.
+            showChips = state.hasLoaded || state.error != null,
         )
 
         // A refresh that failed while rows are already on screen is a strip, not
@@ -146,14 +148,17 @@ fun MessagesScreen(
             when {
                 state.isLoading && !state.hasLoaded -> InboxSkeleton()
 
+                // Ahead of the error branch: Support is the one surface that
+                // doesn't depend on the thread list, so a failed load is exactly
+                // when someone is most likely to want it.
+                state.filter == MessagesFilter.Support -> SupportSegment(onOpen = { showSupport = true })
+
                 state.error != null && state.threads.isEmpty() -> EmptyState(
                     title = "Couldn't load messages",
                     body = state.error,
                     actionLabel = "Retry",
                     onAction = viewModel::refresh,
                 )
-
-                state.filter == MessagesFilter.Support -> SupportSegment(onOpen = { showSupport = true })
 
                 // Distinguish "no conversations at all" from "none in this
                 // segment": the first is about the app being new to you, the
@@ -493,26 +498,35 @@ private fun ThreadRow(
                 ThreadThumb(name = item.counterpartName, coverUrl = item.coverUrl)
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            item.counterpartName,
-                            style = AppTheme.type.headline,
-                            color = colors.ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        // Star and mute are otherwise silent state — a swipe that
-                        // leaves no visible trace reads as a no-op.
-                        if (item.starred) {
-                            Spacer(Modifier.width(space.xs))
-                            Icon(
-                                Icons.Filled.Star,
-                                contentDescription = null,
-                                tint = colors.warm,
-                                modifier = Modifier.size(AppTheme.dimens.size.iconSm),
+                        // Name and star share ONE weighted run so the name can use
+                        // the whole column when the star is absent. Weighting the
+                        // name directly against a spacer would cap it at half the
+                        // width and truncate act names that would otherwise fit.
+                        Row(
+                            Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                item.counterpartName,
+                                style = AppTheme.type.headline,
+                                color = colors.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
                             )
+                            // Starring is otherwise silent state — a swipe that
+                            // leaves no visible trace reads as a no-op.
+                            if (item.starred) {
+                                Spacer(Modifier.width(space.xs))
+                                Icon(
+                                    Icons.Filled.Star,
+                                    contentDescription = null,
+                                    tint = colors.warm,
+                                    modifier = Modifier.size(AppTheme.dimens.size.iconSm),
+                                )
+                            }
                         }
-                        Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.width(space.sm))
                         Text(
                             InboxProjection.timeAgo(item.thread.lastMessageAtEpochMs, nowMs),
                             style = AppTheme.type.monoSmall,

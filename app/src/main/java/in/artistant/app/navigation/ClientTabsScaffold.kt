@@ -235,6 +235,9 @@ fun ClientTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // Only the client seat has a counterparty with a public
+                        // profile, so only this scaffold wires the participant row.
+                        onArtistClick = { id -> nav.navigate("artist/$id") },
                     )
                 }
             }
