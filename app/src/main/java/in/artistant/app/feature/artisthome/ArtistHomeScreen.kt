@@ -99,7 +99,6 @@ import java.util.Locale
 fun ArtistHomeScreen(
     onBookingClick: (bookingId: String) -> Unit,
     onGigRequestClick: (requestId: String) -> Unit = {},
-    onProfileClick: () -> Unit = {},
     onOpenWizard: () -> Unit = {},
     onScoreExplainer: () -> Unit = {},
     onManageAvailability: () -> Unit = {},
@@ -140,7 +139,6 @@ fun ArtistHomeScreen(
                     onRangeChange = viewModel::setRange,
                     onBookingClick = onBookingClick,
                     onGigRequestClick = onGigRequestClick,
-                    onProfileClick = onProfileClick,
                     onOpenWizard = onOpenWizard,
                     onScoreExplainer = onScoreExplainer,
                     onManageAvailability = onManageAvailability,
@@ -158,7 +156,6 @@ private fun Dashboard(
     onRangeChange: (EarningsRange) -> Unit,
     onBookingClick: (String) -> Unit,
     onGigRequestClick: (String) -> Unit,
-    onProfileClick: () -> Unit,
     onOpenWizard: () -> Unit,
     onScoreExplainer: () -> Unit,
     onManageAvailability: () -> Unit,
@@ -177,7 +174,6 @@ private fun Dashboard(
                 name = state.greetingName,
                 avatarName = state.avatarName,
                 dateLabel = state.todayLabel,
-                onProfileClick = onProfileClick,
             )
         }
 
@@ -250,25 +246,29 @@ private fun Dashboard(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The masthead: a dateline, the artist's name set editorially, and the way into
- * their account.
+ * The masthead: a dateline and the artist's name, set editorially.
  *
  * Same move the client side opens on — a serif line with exactly one word in
  * italic brand accent. It is the app's signature, and the artist side had no
  * equivalent at all: it opened on the word "Home", which names a tab, not a
  * person. Setting the artist's own name as the largest thing on the screen is
  * the difference between a dashboard and a control panel.
+ *
+ * The avatar here is a PORTRAIT, not a control. It used to be the way into
+ * account settings, which put that door on the dashboard — a screen about
+ * incoming work — while the screen an artist actually opens to work on their own
+ * profile had no account entry at all. The door moved to the press-kit editor's
+ * title bar, where it is the only one, and this avatar went back to doing what it
+ * looks like it does: showing whose dashboard this is.
  */
 @Composable
 private fun Greeting(
     name: String,
     avatarName: String,
     dateLabel: String,
-    onProfileClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val interaction = remember { MutableInteractionSource() }
 
     Row(
         Modifier
@@ -303,15 +303,9 @@ private fun Greeting(
             name = avatarName,
             size = AppTheme.dimens.hero.avatarSize,
             ring = true,
-            modifier = Modifier
-                .pressScale(interaction)
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = interaction,
-                    indication = null,
-                    onClick = onProfileClick,
-                )
-                .semantics { contentDescription = "Profile and settings" },
+            // No contentDescription: the greeting beside it already says whose
+            // dashboard this is, so announcing the monogram again would make a
+            // screen reader read the name twice for no added meaning.
         )
     }
 }

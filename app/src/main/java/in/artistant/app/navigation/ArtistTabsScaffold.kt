@@ -126,7 +126,6 @@ fun ArtistTabsScaffold() {
                     ArtistHomeScreen(
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
                         onGigRequestClick = { id -> nav.navigate(ArtistNavRoutes.gigRequest(id)) },
-                        onProfileClick = { nav.navigate(ArtistNavRoutes.PROFILE) },
                         onOpenWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
                         onScoreExplainer = { nav.navigate(ArtistNavRoutes.SCORE_EXPLAINER) },
                         // The dashboard's availability strip is the natural place
@@ -186,7 +185,20 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistTab.Epk.route) {
                 TabPane(inner) {
-                    EpkScreen(onEditInWizard = { nav.navigate(ArtistNavRoutes.WIZARD) })
+                    EpkScreen(
+                        onEditInWizard = { nav.navigate(ArtistNavRoutes.WIZARD) },
+                        // The artist's account surface — sign out, calendar sync,
+                        // data export, DELETE ACCOUNT — hangs off the avatar in
+                        // this screen's title bar, which is where the reference
+                        // puts it. It used to hang off the dashboard greeting
+                        // instead: a reasonable-looking place, and the wrong one,
+                        // because the screen an artist opens to work on their own
+                        // profile is the screen they go to looking for their own
+                        // account. `ProfileScreen` renames itself "Account" and
+                        // grows a back control when it is pushed rather than
+                        // rooted, so the artist gets the right chrome for free.
+                        onOpenAccount = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                    )
                 }
             }
             composable(ArtistNavRoutes.WIZARD) {

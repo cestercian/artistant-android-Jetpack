@@ -100,6 +100,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun EpkScreen(
     onEditInWizard: () -> Unit,
+    onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: EpkViewModel = hiltViewModel(),
 ) {
@@ -123,11 +124,31 @@ fun EpkScreen(
         }
     }
 
-    PullToRefreshBox(
-        isRefreshing = state.isRefreshing,
-        onRefresh = viewModel::refresh,
-        modifier = modifier.fillMaxSize().background(colors.bg),
-    ) {
+    Column(modifier.fillMaxSize().background(colors.bg)) {
+        // OUTSIDE the scroll, and outside the load/empty/error branch below.
+        //
+        // Pinned because that is what it is on the reference — navigation chrome
+        // under the status bar, not a piece of content that scrolls away. Pinned
+        // ALSO because the avatar in it is the artist's only route to account
+        // settings, and therefore to account deletion: rendering it inside the
+        // loaded branch would mean an artist whose profile failed to load, or who
+        // has not published one yet, could not reach it at all.
+        EpkTitleBar(
+            title = "Profile",
+            subtitle = "Your booking-ready profile",
+            // Falls back to a generic seed rather than a blank disc — the artist
+            // row may not have loaded, and an empty circle reads as broken.
+            avatarName = state.artist?.name?.takeIf { it.isNotBlank() } ?: "You",
+            onOpenAccount = onOpenAccount,
+            modifier = Modifier
+                .padding(horizontal = AppTheme.dimens.space.lg)
+                .padding(top = AppTheme.dimens.space.md, bottom = AppTheme.dimens.space.lg),
+        )
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         when {
             state.isLoading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -163,6 +184,7 @@ fun EpkScreen(
                     onPickAudio = { mimes -> pickAudio.launch(mimes) },
                 )
             }
+        }
         }
     }
 
