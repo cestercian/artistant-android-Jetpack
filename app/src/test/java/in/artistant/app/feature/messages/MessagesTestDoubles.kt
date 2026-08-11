@@ -111,11 +111,19 @@ class FakeBlockedUsersStore(initial: Set<String> = emptySet()) : BlockedUsersSto
     /** Set to make the next [toggle] report a failed write. */
     var failWrites: Boolean = false
 
+    /**
+     * Set to make [refresh] report that the server copy could NOT be read — the
+     * offline / signed-out / migration-missing case. The set is left alone, as
+     * the real store leaves it.
+     */
+    var refreshSucceeds: Boolean = true
+
     var refreshCount = 0
         private set
 
-    override suspend fun refresh() {
+    override suspend fun refresh(): Boolean {
         refreshCount++
+        return refreshSucceeds
     }
 
     override suspend fun toggle(userId: String): Boolean {

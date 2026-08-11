@@ -79,6 +79,17 @@ class BlockedUsersStoreTest {
     }
 
     @Test
+    fun refreshReportsWhetherTheServerCopyWasActuallyRead() = runTest {
+        // The inbox can ignore this — filtering with a stale set is safe. A
+        // screen that RENDERS the set cannot: an empty set that failed to load
+        // and an empty set that loaded look identical and mean opposite things.
+        assertTrue(store(repository = FakeBlockRepository(setOf(ARTIST_ID))).refresh())
+
+        val offline = store(repository = FakeBlockRepository().apply { signedIn = false })
+        assertFalse(offline.refresh())
+    }
+
+    @Test
     fun toggleBlocksOptimisticallyAndPersists() = runTest {
         val repository = FakeBlockRepository()
         val mirror = FakeMirror()

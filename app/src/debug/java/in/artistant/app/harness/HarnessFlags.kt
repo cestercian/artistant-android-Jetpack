@@ -28,6 +28,8 @@ import `in`.artistant.app.designsystem.theme.AppRole
  *   skip-signup-as-artist ....... boot signed-in as an artist, land on the artist tabs
  *   seed-fixture-data ........... swap the Supabase repositories for seeded in-memory fakes
  *   seed-pending-request ........ additionally seed one pending_confirm booking (artist side)
+ *   seed-blocked-user ........... boot with the fixture counterparty already blocked
+ *   block-list-unavailable ...... make every blocked-list read + write fail
  *   land-in-wizard-at-<step> .... boot an artist into the EPK wizard instead of the tabs
  *
  * ON `land-in-wizard-at-<step>`: this reports the artist's EPK setup as incomplete, which is
@@ -49,6 +51,25 @@ data class HarnessFlags(
     val skipSignupAs: AppRole? = null,
     val seedFixtureData: Boolean = false,
     val seedPendingRequest: Boolean = false,
+    /**
+     * Start with the fixture counterparty already blocked.
+     *
+     * Blocking is performed inside a chat, and a block immediately hides that
+     * chat — so "someone is already blocked" is a state the harness could not
+     * otherwise be launched into, only navigated into. It is exactly the state
+     * the blocked-accounts screen exists for, so it needs to be reachable from
+     * a cold start.
+     */
+    val seedBlockedUser: Boolean = false,
+    /**
+     * Make the block list unreadable and unwritable.
+     *
+     * Signed out, offline, and a project without migration 0087 all present as
+     * this one failure, and it is the case the blocked-accounts screen must not
+     * report as "nobody is blocked". Without a flag it is unreachable on a
+     * harness build, whose fakes never fail.
+     */
+    val blockListUnavailable: Boolean = false,
     /** Bare wizard step name (e.g. "identity"); the wizard maps it to its own step enum. */
     val landInWizardAt: String? = null,
 ) {
@@ -75,6 +96,8 @@ data class HarnessFlags(
             var reset = false
             var seedFixtureData = false
             var seedPendingRequest = false
+            var seedBlockedUser = false
+            var blockListUnavailable = false
             var wizardStep: String? = null
             // Track the two role tokens separately: iOS resolves client-before-artist when
             // both are passed, and treats a wizard flag as implying artist. Recording them
@@ -92,6 +115,8 @@ data class HarnessFlags(
                     "skip-signup-as-artist" -> { sawArtist = true; seenAny = true }
                     "seed-fixture-data" -> { seedFixtureData = true; seenAny = true }
                     "seed-pending-request" -> { seedPendingRequest = true; seenAny = true }
+                    "seed-blocked-user" -> { seedBlockedUser = true; seenAny = true }
+                    "block-list-unavailable" -> { blockListUnavailable = true; seenAny = true }
                     else ->
                         if (t.startsWith(WIZARD_PREFIX) && t.length > WIZARD_PREFIX.length) {
                             wizardStep = t.removePrefix(WIZARD_PREFIX)
@@ -118,6 +143,8 @@ data class HarnessFlags(
                 skipSignupAs = role,
                 seedFixtureData = seedFixtureData,
                 seedPendingRequest = seedPendingRequest,
+                seedBlockedUser = seedBlockedUser,
+                blockListUnavailable = blockListUnavailable,
                 landInWizardAt = wizardStep,
             )
         }

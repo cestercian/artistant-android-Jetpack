@@ -450,6 +450,25 @@ class MessagesInboxViewModelTest {
     }
 
     @Test
+    fun unblockingPutsTheConversationBackInTheInbox() = runTest {
+        // The other half of the loop, and the reason the blocked-accounts screen
+        // can exist at all: it unblocks through this same store, so the inbox
+        // has to re-project a hidden thread back into every surface — rows,
+        // counts, badge — without being told to reload.
+        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID)))
+        val blocked = FakeBlockedUsersStore(setOf(ARTIST_ID.lowercase()))
+        val model = vm(repo, blockedUsers = blocked)
+        assertTrue("precondition: blocked, so hidden", model.state.value.threads.isEmpty())
+        val loadsBefore = repo.calls
+
+        blocked.toggle(ARTIST_ID)
+
+        assertEquals(listOf("t-1"), model.state.value.threads.map { it.thread.id })
+        assertEquals(1, model.state.value.counts[MessagesFilter.All])
+        assertEquals("the inbox must re-project, not reload", loadsBefore, repo.calls)
+    }
+
+    @Test
     fun anArtistViewerBlockingAClientHidesThatConversation() = runTest {
         // The mirror case, from the other seat: `artist_id` is the artist's own
         // uid here, so only the `client_id` leg can be what matches.

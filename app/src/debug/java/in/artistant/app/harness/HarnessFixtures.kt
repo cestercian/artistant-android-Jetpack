@@ -68,6 +68,22 @@ object HarnessFixtures {
     }
 
     /**
+     * The OTHER person in the fixture thread — who a `seed-blocked-user` launch
+     * blocks.
+     *
+     * Always the opposite seat, because 0087's `blocked_users_no_self` check
+     * rejects blocking yourself: seeding the viewer's own id would produce a set
+     * the server could never contain. A null role (no `skip-signup-as-*`) means
+     * no synthetic session was installed, so the client seat is the sane default
+     * — it matches what the fixture thread's `client_id` holds.
+     */
+    fun counterpartUserId(role: AppRole?): String = when (role) {
+        AppRole.Artist -> CLIENT_ID
+        AppRole.Client -> ARTIST_ID
+        null -> CLIENT_ID
+    }
+
+    /**
      * The `public.users` row the harness pretends the server holds.
      *
      * `isComplete` must be true (role + non-blank handle) or `RootViewModel` routes to

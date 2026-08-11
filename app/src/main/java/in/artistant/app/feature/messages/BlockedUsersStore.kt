@@ -31,8 +31,18 @@ interface BlockedUsersStore {
     /** Blocked user ids, lowercased. Emits on every local change. */
     val blocked: StateFlow<Set<String>>
 
-    /** Best-effort reconcile from the server. Never widens what is visible on failure. */
-    suspend fun refresh()
+    /**
+     * Best-effort reconcile from the server. Never widens what is visible on failure.
+     *
+     * Returns true when the server copy was actually read, i.e. when [blocked] is
+     * now authoritative. False means the set is whatever we last knew — signed
+     * out, offline, or a project without 0087 applied — and a caller that is
+     * about to RENDER the set has to say so, because an empty set that failed to
+     * load and an empty set that loaded look identical and mean opposite things.
+     * The inbox ignores this (it filters with whatever it has and a stale block
+     * is a safe stale); the blocked-accounts screen cannot.
+     */
+    suspend fun refresh(): Boolean
 
     /**
      * Block or unblock, optimistically. Returns false when the server write
@@ -88,7 +98,7 @@ class ServerBlockedUsersStore(
     /** The disk mirror is read once per process; after that memory is the truth. */
     private var hydrated = false
 
-    override suspend fun refresh() {
+    override suspend fun refresh(): Boolean {
         if (!hydrated) {
             hydrated = true
             _blocked.value = readLocal()
@@ -98,11 +108,16 @@ class ServerBlockedUsersStore(
         // every one of those cases the honest answer is "I don't know", not
         // "nobody is blocked" — treating a failure as an empty set would un-hide
         // every blocked conversation the moment the network hiccuped.
-        runCatching { repository.listBlocked() }
+        //
+        // The failure is REPORTED rather than acted on: the set stays as it was,
+        // and the caller decides whether its screen can honestly claim to be
+        // showing the whole list.
+        return runCatching { repository.listBlocked() }
             .onSuccess { server ->
                 _blocked.value = server
                 persist(server)
             }
+            .isSuccess
     }
 
     override suspend fun toggle(userId: String): Boolean {
