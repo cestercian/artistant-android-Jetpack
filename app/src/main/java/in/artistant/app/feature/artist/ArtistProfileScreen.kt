@@ -1,5 +1,7 @@
 package `in`.artistant.app.feature.artist
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,8 +17,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,6 +104,7 @@ fun ArtistProfileScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val space = AppTheme.dimens.space
     val colors = AppTheme.colors
+    val context = LocalContext.current
 
     when {
         state.isLoading && state.artist == null -> {
@@ -106,7 +113,10 @@ fun ArtistProfileScreen(
             }
         }
         state.artist == null -> {
-            Column(modifier.fillMaxSize().background(colors.bg)) {
+            // The screen takes no scaffold inset (see the nav host), so every
+            // branch owes itself the status-bar padding the loaded page applies
+            // to its floating hero controls.
+            Column(modifier.fillMaxSize().background(colors.bg).statusBarsPadding()) {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
                 }
@@ -135,6 +145,7 @@ fun ArtistProfileScreen(
                             isSaved = state.isSaved,
                             onToggleSaved = viewModel::toggleSaved,
                             onMessage = { onMessage(artist.id) },
+                            onShare = { shareArtist(context, artist) },
                             onScoreClick = viewModel::openScoreSheet,
                         )
                         StatStrip(reviews = state.reviews, tier = tier)
@@ -190,6 +201,30 @@ fun ArtistProfileScreen(
 }
 
 /**
+ * Hand the artist's public link to the system share sheet.
+ *
+ * The link is the artist's handle on the marketing domain — the same address the
+ * press kit is meant to live at. The page may not be live during beta, but a
+ * shareable artist link is still the right affordance, and a handle-less artist
+ * falls back to the bare domain rather than to a broken path.
+ *
+ * `runCatching` because a device with no app able to handle `ACTION_SEND` throws
+ * on `startActivity`, and a share button is not worth crashing a profile over.
+ */
+private fun shareArtist(context: Context, artist: Artist) {
+    val handle = artist.handle.trim()
+    val url = if (handle.isEmpty()) ARTIST_SHARE_ORIGIN else "$ARTIST_SHARE_ORIGIN/$handle"
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, artist.name)
+        putExtra(Intent.EXTRA_TEXT, "Book ${artist.name} on Artistant\n$url")
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, null)) }
+}
+
+private const val ARTIST_SHARE_ORIGIN = "https://artistant.in"
+
+/**
  * Full-bleed cover with the identity resting on its bottom edge.
  *
  * The dissolve at the bottom is a gradient ending on the PAGE background, not on
@@ -208,6 +243,7 @@ private fun Hero(
     isSaved: Boolean,
     onToggleSaved: () -> Unit,
     onMessage: () -> Unit,
+    onShare: () -> Unit,
     onScoreClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -249,6 +285,11 @@ private fun Hero(
             Modifier
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
+                // The cover bleeds under the status bar, so the controls that
+                // float on it — and only they — carry the inset. Same shape as
+                // the reference build, which pads its control row by the top
+                // safe area plus one small step.
+                .statusBarsPadding()
                 .padding(horizontal = space.lg, vertical = space.xs),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -259,9 +300,9 @@ private fun Hero(
                 onClick = onBack,
                 tint = Color.White,
             )
-            // Message + Save share the hero's trailing cluster. Message lives
-            // here (not in the dock) so the bottom bar stays one row and the
-            // primary CTA never competes for width with a secondary.
+            // Message + Save + Share share the hero's trailing cluster. Message
+            // lives here (not in the dock) so the bottom bar stays one row and
+            // the primary CTA never competes for width with a secondary.
             Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                 CircleIconButton(
                     icon = Icons.Filled.Chat,
@@ -275,6 +316,16 @@ private fun Hero(
                     onClick = onToggleSaved,
                     tint = if (isSaved) colors.brand else Color.White,
                 )
+                CircleIconButton(
+                    // The tray-and-arrow glyph rather than Material's share
+                    // node: this cluster is a port of the reference build's,
+                    // and the node icon reads as a different affordance beside
+                    // the same two neighbours.
+                    icon = Icons.Filled.IosShare,
+                    contentDescription = "Share artist",
+                    onClick = onShare,
+                    tint = Color.White,
+                )
             }
         }
 
@@ -284,7 +335,10 @@ private fun Hero(
                 .fillMaxWidth()
                 .padding(horizontal = space.lg)
                 .padding(bottom = space.xl),
-            verticalArrangement = Arrangement.spacedBy(space.sm),
+            // 12, not 8: the reference stacks a 4-unit list spacing under an
+            // 8-unit bottom pad on the chip row, which lands on 12 between the
+            // chips and the name. At 8 the chips crowded the display serif.
+            verticalArrangement = Arrangement.spacedBy(space.md),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                 MediaChip(artist.category)
@@ -438,7 +492,11 @@ private fun StatStrip(reviews: List<Review>, tier: ScoreTier) {
     val average = reviews.map { it.rating }.average()
 
     Column(
-        Modifier.padding(horizontal = space.lg, vertical = space.lg),
+        // Top padding only. The block column underneath already opens with its
+        // own 24 of air, so a matching bottom pad here stacked into a 40-unit
+        // trench between the strip and About — measurably wider than the same
+        // seam on the reference build.
+        Modifier.padding(horizontal = space.lg).padding(top = space.lg),
     ) {
         HRule()
         // IntrinsicSize.Min so the hairline dividers can measure themselves
@@ -735,6 +793,11 @@ private fun ActionDock(fromPrice: Int, onBook: () -> Unit) {
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
+                // The page opts out of the scaffold insets so the cover can run
+                // under the status bar; the cost is that the dock has to clear
+                // the gesture bar itself. The fill extends under it — only the
+                // row's content is pushed up.
+                .navigationBarsPadding()
                 .padding(horizontal = space.lg, vertical = space.md),
             // The gap IS the design while both fit on one line; once the CTA
             // wraps, SpaceBetween leaves each line start-aligned, which is what
