@@ -433,6 +433,25 @@ fun monthLabelFromEpoch(epochMs: Long): String {
 }
 
 /**
+ * "Wednesday, August 12" — the heading that names the day a calendar tap has
+ * selected, so a filtered list reads as filtered rather than as a short list.
+ *
+ * The reference prints this above the selected day's schedule and it is the only
+ * thing on screen saying which day you are looking at; without it, tapping a day
+ * here narrowed the list silently and an empty day showed a bare "no bookings"
+ * line with no date attached to it.
+ *
+ * [month] is `Calendar.MONTH`, 0-based, matching every other helper in this file.
+ */
+fun selectedDayLabel(year: Int, month: Int, day: Int): String {
+    val cal = Calendar.getInstance().apply {
+        clear()
+        set(year, month, day)
+    }
+    return SimpleDateFormat("EEEE, MMMM d", Locale.US).format(cal.time)
+}
+
+/**
  * Day-of-month for [dateLabel] only when it falls in [year]/[month]
  * (Calendar.MONTH 0-based). Prevents cross-month collisions on the grid.
  */
