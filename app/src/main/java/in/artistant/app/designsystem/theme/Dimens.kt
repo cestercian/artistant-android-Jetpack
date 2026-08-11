@@ -49,6 +49,14 @@ data class Size(
     /** ArtistList row thumbnail (iOS ArtistRow thumb 62×78). */
     val listThumbW: Dp = 62.dp,
     val listThumbH: Dp = 78.dp,
+    /**
+     * Tailroom under the last row of a settings list, so the final entry — which
+     * is "Delete account", the one row nobody should have to fight the floating
+     * tab bar to read — clears the chrome and has somewhere to scroll to.
+     * Smaller than [Hero.scrollTailroom]: that one buys a horizontal rail room
+     * to overshoot, this one just buys a hairline some air.
+     */
+    val listTailroom: Dp = 56.dp,
 
     // ── Artist hero / booking funnel ──────────────────────────────────────
     /**
