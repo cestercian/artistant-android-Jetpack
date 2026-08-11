@@ -251,6 +251,17 @@ private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository 
         if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
     }
 
+    /**
+     * The harness holds one viewer, so it stores the resolved viewer-relative
+     * flag rather than the server's two columns — enough to drive the details
+     * sheet's label flip on device. The per-side column rule is asserted against
+     * `FakeMessagesRepository`, which models both columns.
+     */
+    override suspend fun setMuted(threadId: String, muted: Boolean) {
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) threads[index] = threads[index].copy(muted = muted)
+    }
+
     override suspend fun markThreadReadReceipt(threadId: String) = Unit
 
     override suspend fun counterpartLastRead(threadId: String): Long? = null

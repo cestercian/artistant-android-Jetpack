@@ -44,6 +44,13 @@ data class ChatUiState(
     val starred: Boolean = false,
     val archived: Boolean = false,
     /**
+     * The viewer's own mute state for this thread (mig 0091). Unlike starred /
+     * archived — which are device-local reading preferences — this is a server
+     * column that `send-push` honours, so it survives a reinstall and applies on
+     * every device the person signs in on.
+     */
+    val muted: Boolean = false,
+    /**
      * The gig's artist, for the details sheet. Only the client seat can act on
      * it — an artist's counterpart is a client with no public profile — so the
      * id is null for the artist seat rather than pointing at the viewer.
@@ -129,6 +136,10 @@ class ChatViewModel @Inject constructor(
                     thread = thread,
                     title = title,
                     viewerIsArtist = viewerIsArtist,
+                    // Server-owned and already resolved to the viewer's own side
+                    // by the decoder, so a refresh is the only thing that can
+                    // correct an optimistic toggle that failed.
+                    muted = thread?.muted ?: false,
                     // Only the client seat's counterpart has a profile to open.
                     artistId = thread?.artistId?.takeUnless { viewerIsArtist },
                     artistSubtitle = artist
@@ -314,6 +325,33 @@ class ChatViewModel @Inject constructor(
     fun markUnread() = viewModelScope.launch { flagsStore.markUnread(threadId) }
 
     /**
+     * Mute or unmute this conversation for the viewer only.
+     *
+     * Optimistic, then reverted on failure. The revert matters more here than it
+     * does for the device-local flags: this control claims to stop notifications
+     * arriving on the lock screen, so a toggle that flipped in the UI but never
+     * reached the server would leave someone expecting silence and getting
+     * pushes. `thread.muted` is also patched so a details sheet reopened before
+     * the next refresh doesn't read the stale row.
+     */
+    fun toggleMuted() {
+        val next = !_state.value.muted
+        _state.update { it.copy(muted = next, thread = it.thread?.copy(muted = next)) }
+        viewModelScope.launch {
+            runCatching { messagesRepository.setMuted(threadId, next) }
+                .onFailure { e ->
+                    _state.update {
+                        it.copy(
+                            muted = !next,
+                            thread = it.thread?.copy(muted = !next),
+                            error = e.message ?: MUTE_FAILED,
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
      * File a report against this conversation.
      *
      * `reportConversation` never throws — it soft-fails to an on-device log so a
@@ -335,5 +373,6 @@ class ChatViewModel @Inject constructor(
 
     private companion object {
         const val FALLBACK_TITLE = "Chat"
+        const val MUTE_FAILED = "Couldn't update notifications for this conversation."
     }
 }

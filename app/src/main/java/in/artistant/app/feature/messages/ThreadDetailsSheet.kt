@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Unarchive
@@ -75,10 +77,12 @@ fun ThreadDetailsSheet(
     viewerIsArtist: Boolean,
     starred: Boolean,
     archived: Boolean,
+    muted: Boolean,
     reportSubmitted: Boolean,
     onBookingClick: (String) -> Unit,
     onToggleStar: () -> Unit,
     onToggleArchive: () -> Unit,
+    onToggleMute: () -> Unit,
     onMarkUnread: () -> Unit,
     onReport: (reason: String) -> Unit,
     onDismiss: () -> Unit,
@@ -149,6 +153,25 @@ fun ThreadDetailsSheet(
                         icon = Icons.Filled.MarkEmailUnread,
                         tag = "threadDetails.markUnread",
                         onClick = onMarkUnread,
+                    )
+                    // Notifications, not visibility: a muted thread still shows
+                    // up in the inbox and still counts as unread — the label says
+                    // "notifications" so it can't be read as "hide this". The
+                    // caption spells out that it is one-sided, because the
+                    // obvious wrong reading of a mute in a two-person thread is
+                    // that the other person has been silenced too.
+                    ActionRow(
+                        label = if (muted) "Unmute notifications" else "Mute notifications",
+                        icon = if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
+                        tint = if (muted) colors.ink3 else colors.ink,
+                        tag = "threadDetails.mute",
+                        caption = if (muted) {
+                            "You won't get notifications about this conversation. " +
+                                "$counterpartName still gets theirs."
+                        } else {
+                            null
+                        },
+                        onClick = onToggleMute,
                     )
                     ActionRow(
                         label = if (archived) "Unarchive" else "Archive",
@@ -292,6 +315,14 @@ private fun ParticipantRow(
     HRule()
 }
 
+/**
+ * One tappable action.
+ *
+ * [caption] is the slot for a row whose consequence isn't self-evident from its
+ * label — currently mute and block, both of which people reliably assume do more
+ * than they do. It renders only when the state it describes is actually in
+ * effect, so an inert row stays a single line.
+ */
 @Composable
 private fun ActionRow(
     label: String,
@@ -299,6 +330,7 @@ private fun ActionRow(
     tag: String,
     onClick: () -> Unit,
     tint: Color = AppTheme.colors.ink,
+    caption: String? = null,
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
@@ -317,7 +349,12 @@ private fun ActionRow(
             tint = tint,
             modifier = Modifier.size(AppTheme.dimens.size.iconLg),
         )
-        Text(label, style = AppTheme.type.body, color = colors.ink)
+        Column(Modifier.weight(1f)) {
+            Text(label, style = AppTheme.type.body, color = colors.ink)
+            caption?.let {
+                Text(it, style = AppTheme.type.footnote, color = colors.ink3)
+            }
+        }
     }
     HRule()
 }

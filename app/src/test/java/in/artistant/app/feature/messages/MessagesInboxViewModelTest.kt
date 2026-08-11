@@ -55,6 +55,7 @@ class MessagesInboxViewModelTest {
         override suspend fun markThreadRead(threadId: String) = Unit
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
         override suspend fun counterpartLastRead(threadId: String): Long? = null
+        override suspend fun setMuted(threadId: String, muted: Boolean) = Unit
         override suspend fun subscribeMessages(
             threadId: String,
             onInsert: (Message) -> Unit,

@@ -94,6 +94,15 @@ class ChatViewModelTest {
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
         override suspend fun counterpartLastRead(threadId: String): Long? = 9_000L
 
+        /** Every mute value the ViewModel asked the server to write, in order. */
+        val muteWrites = mutableListOf<Boolean>()
+        var failMute: Boolean = false
+
+        override suspend fun setMuted(threadId: String, muted: Boolean) {
+            muteWrites += muted
+            if (failMute) throw IllegalStateException("network down")
+        }
+
         override suspend fun subscribeMessages(
             threadId: String,
             onInsert: (Message) -> Unit,
@@ -414,6 +423,7 @@ class ChatViewModelTest {
             override suspend fun markThreadRead(threadId: String) = Unit
             override suspend fun markThreadReadReceipt(threadId: String) = Unit
             override suspend fun counterpartLastRead(threadId: String): Long? = null
+            override suspend fun setMuted(threadId: String, muted: Boolean) = error("offline")
             override suspend fun subscribeMessages(
                 threadId: String,
                 onInsert: (Message) -> Unit,
@@ -600,5 +610,52 @@ class ChatViewModelTest {
         assertTrue(repo.listCount > listsBefore)
         assertTrue(repo.subscribeCount > subscribesBefore)
         assertTrue("the superseded channel must be torn down", repo.cancelCount > 0)
+    }
+
+    // --- per-thread mute (mig 0091) ------------------------------------------
+
+    @Test
+    fun theMuteStateIsReadFromTheViewersOwnSideOfTheThread() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID, muted = true),
+        )
+
+        val model = vm(repo)
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.muted)
+    }
+
+    @Test
+    fun mutingWritesOnceAndFlipsTheState() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        )
+        val model = vm(repo)
+        advanceUntilIdle()
+
+        model.toggleMuted()
+        advanceUntilIdle()
+
+        assertEquals(listOf(true), repo.muteWrites)
+        assertTrue(model.state.value.muted)
+    }
+
+    @Test
+    fun aFailedMuteRevertsRatherThanClaimingSilence() = runTest {
+        // The control promises no lock-screen notifications. A toggle that stuck
+        // in the UI but never reached the server would be a promise the app
+        // cannot keep, so the state goes back and the failure is surfaced.
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        ).apply { failMute = true }
+        val model = vm(repo)
+        advanceUntilIdle()
+
+        model.toggleMuted()
+        advanceUntilIdle()
+
+        assertFalse(model.state.value.muted)
+        assertNotNull(model.state.value.error)
     }
 }

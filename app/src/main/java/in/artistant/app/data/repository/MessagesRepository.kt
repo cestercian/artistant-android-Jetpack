@@ -49,6 +49,26 @@ interface MessagesRepository {
     suspend fun counterpartLastRead(threadId: String): Long?
 
     /**
+     * Mute or unmute THE VIEWER'S OWN side of a thread — migration 0091's
+     * `threads.client_muted` / `threads.artist_muted`.
+     *
+     * Per-side by design: mute is a fact about a reader, not about the
+     * conversation, so a client silencing a thread must not silence the artist.
+     * The server enforces this too (0091's `tg_threads_guard_mute` rejects a
+     * cross-side write with `insufficient_privilege`), which is exactly why this
+     * takes no column or seat argument — the implementation resolves the
+     * viewer's own column and writes only that one.
+     *
+     * The mute is real, not cosmetic: `send-push` reads the RECIPIENT's column
+     * and skips the chat-message push when it is set, so this suppresses the
+     * lock-screen notification rather than only the in-app presentation.
+     *
+     * Throws so the caller can revert an optimistic toggle — a mute that says it
+     * worked and didn't is worse than one that reports failure.
+     */
+    suspend fun setMuted(threadId: String, muted: Boolean)
+
+    /**
      * Realtime INSERT subscribe on `public.messages` for one thread. Echoes include
      * the caller's own sends — ChatViewModel dedups via [ChatRealtimeLogic].
      * Returns a no-op subscription when realtime is off, unsigned-in, or join fails
@@ -64,10 +84,21 @@ class SupabaseMessagesRepository @Inject constructor(
     override suspend fun listThreadsForUser(): List<Thread> {
         val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
         return try {
-            client.from("threads")
-                .select(THREAD_COLUMNS) { order("last_message_at", Order.DESCENDING) }
-                .decodeList<DbThread>()
-                .map { it.toDomain(userId) }
+            // 0091's mute pair is requested by name. It is live on both projects,
+            // so the retry is insurance rather than a rollout path — but this is
+            // the inbox's only load, and a missing column would empty it
+            // entirely, which is not a failure worth risking for two booleans.
+            // Same shape as the 0072 fallback in listMessages below.
+            val rows = try {
+                client.from("threads")
+                    .select(THREAD_COLUMNS_WITH_MUTE) { order("last_message_at", Order.DESCENDING) }
+                    .decodeList<DbThread>()
+            } catch (_: Throwable) {
+                client.from("threads")
+                    .select(THREAD_COLUMNS) { order("last_message_at", Order.DESCENDING) }
+                    .decodeList<DbThread>()
+            }
+            rows.map { it.toDomain(userId) }
         } catch (t: Throwable) {
             throw MessagesRepositoryError.Underlying(t)
         }
@@ -177,6 +208,54 @@ class SupabaseMessagesRepository @Inject constructor(
         }
     }
 
+    /**
+     * Write the viewer's own mute column, and only that one.
+     *
+     * The seat is READ from the row rather than inferred from anything the
+     * caller passed: `client_muted` and `artist_muted` are separately owned
+     * (0091), and the guard trigger raises `insufficient_privilege` on a
+     * cross-side write — so guessing wrong is a hard failure, not a silent one.
+     * Reading first costs one small round trip on a rare, user-initiated action.
+     *
+     * The resolved seat is then repeated in the UPDATE's own filter. That is not
+     * redundant: if the session changes between the read and the write, the
+     * write matches zero rows instead of landing on the counterparty's column.
+     */
+    override suspend fun setMuted(threadId: String, muted: Boolean) {
+        val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
+        val tid = threadId.lowercase()
+        try {
+            val seats = client.from("threads")
+                .select(Columns.list("client_id", "artist_id")) {
+                    filter { eq("id", tid) }
+                    limit(1)
+                }
+                .decodeList<ThreadSeatsRow>()
+                .firstOrNull()
+                ?: throw IllegalStateException("That conversation is no longer available.")
+
+            // `artist_id` is the artist's USER id (artists.id references users.id),
+            // so both seats are directly comparable to the session uid.
+            val viewerIsArtist = seats.artistId.equals(userId, ignoreCase = true)
+            val viewerIsClient = seats.clientId.equals(userId, ignoreCase = true)
+            if (!viewerIsArtist && !viewerIsClient) {
+                throw IllegalStateException("You're not part of this conversation.")
+            }
+
+            if (viewerIsArtist) {
+                client.from("threads").update(ArtistMutedPatch(muted)) {
+                    filter { eq("id", tid); eq("artist_id", userId) }
+                }
+            } else {
+                client.from("threads").update(ClientMutedPatch(muted)) {
+                    filter { eq("id", tid); eq("client_id", userId) }
+                }
+            }
+        } catch (t: Throwable) {
+            throw MessagesRepositoryError.Underlying(t)
+        }
+    }
+
     override suspend fun counterpartLastRead(threadId: String): Long? {
         val userId = currentUserId() ?: return null
         return try {
@@ -260,6 +339,13 @@ class SupabaseMessagesRepository @Inject constructor(
             "id", "client_id", "artist_id", "booking_id", "client_name",
             "client_unread_count", "artist_unread_count", "last_message_preview", "last_message_at",
         )
+
+        /** [THREAD_COLUMNS] plus migration 0091's per-side mute pair. */
+        private val THREAD_COLUMNS_WITH_MUTE = Columns.list(
+            "id", "client_id", "artist_id", "booking_id", "client_name",
+            "client_unread_count", "artist_unread_count", "last_message_preview", "last_message_at",
+            "client_muted", "artist_muted",
+        )
     }
 }
 
@@ -273,17 +359,34 @@ class SupabaseMessagesRepository @Inject constructor(
     @SerialName("artist_unread_count") val artistUnread: Int? = null,
     @SerialName("last_message_preview") val lastPreview: String? = null,
     @SerialName("last_message_at") val lastMessageAt: String? = null,
+    // 0091. Defaulted so the pre-0091 fallback projection still decodes; an
+    // absent column reads as unmuted, which is the server's own default.
+    @SerialName("client_muted") val clientMuted: Boolean? = null,
+    @SerialName("artist_muted") val artistMuted: Boolean? = null,
 ) {
-    fun toDomain(userId: String) = Thread(
-        id = id,
-        artistId = artistId,
-        bookingId = bookingId,
-        clientName = clientName,
-        lastPreview = lastPreview.orEmpty(),
-        lastMessageAtEpochMs = parseEpochMs(lastMessageAt),
-        unreadCount = if (artistId.equals(userId, true)) artistUnread ?: 0 else clientUnread ?: 0,
-    )
+    fun toDomain(userId: String): Thread {
+        // One seat test drives every viewer-relative field, so the unread badge
+        // and the mute state can never disagree about which side is looking.
+        val viewerIsArtist = artistId.equals(userId, true)
+        return Thread(
+            id = id,
+            artistId = artistId,
+            clientId = clientId,
+            bookingId = bookingId,
+            clientName = clientName,
+            lastPreview = lastPreview.orEmpty(),
+            lastMessageAtEpochMs = parseEpochMs(lastMessageAt),
+            unreadCount = if (viewerIsArtist) artistUnread ?: 0 else clientUnread ?: 0,
+            muted = (if (viewerIsArtist) artistMuted else clientMuted) == true,
+        )
+    }
 }
+
+/** Just the two participant ids — the seat lookup behind [SupabaseMessagesRepository.setMuted]. */
+@Serializable private data class ThreadSeatsRow(
+    @SerialName("client_id") val clientId: String,
+    @SerialName("artist_id") val artistId: String,
+)
 
 @Serializable private data class DbMessage(
     val id: String,
@@ -315,6 +418,12 @@ class SupabaseMessagesRepository @Inject constructor(
 @Serializable private data class ThreadIdRow(val id: String)
 @Serializable private data class UnreadPatch(@SerialName("client_unread_count") val count: Int)
 @Serializable private data class ArtistUnreadPatch(@SerialName("artist_unread_count") val count: Int)
+
+// One patch type per side, each holding exactly ONE column. Kept apart rather
+// than a single nullable-pair payload so there is no shape in which a write can
+// carry the counterparty's mute column at all (0091).
+@Serializable private data class ClientMutedPatch(@SerialName("client_muted") val muted: Boolean)
+@Serializable private data class ArtistMutedPatch(@SerialName("artist_muted") val muted: Boolean)
 @Serializable private data class ThreadReadRow(
     @SerialName("user_id") val userId: String,
     @SerialName("last_read_at") val lastReadAt: String,
@@ -322,14 +431,55 @@ class SupabaseMessagesRepository @Inject constructor(
 
 private fun parseEpochMs(value: String?): Long? = value?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
 
-/** In-memory twin for ViewModel tests and deterministic local behaviour. */
+/**
+ * In-memory twin for ViewModel tests and deterministic local behaviour.
+ *
+ * Mute is modelled as the server models it — TWO independently-owned columns
+ * ([clientMuted] / [artistMuted]) rather than the one viewer-relative flag the
+ * domain [Thread] exposes. That is deliberate: collapsing them here would make
+ * "a client muting must not touch the artist's column" untestable, since both
+ * sides would read back through the same field.
+ */
 class FakeMessagesRepository(
     private val userId: String = "00000000-0000-0000-0000-000000000001",
+    seedThreads: List<Thread> = emptyList(),
 ) : MessagesRepository {
-    private val threads = mutableListOf<Thread>()
+    private val threads = seedThreads.toMutableList()
     private val messages = mutableMapOf<String, MutableList<Message>>()
 
-    override suspend fun listThreadsForUser(): List<Thread> = threads.sortedByDescending { it.lastMessageAtEpochMs }
+    /** `threads.client_muted`, by thread id. Exposed so tests can assert on the raw column. */
+    val clientMuted = mutableMapOf<String, Boolean>()
+
+    /** `threads.artist_muted`, by thread id. */
+    val artistMuted = mutableMapOf<String, Boolean>()
+
+    override suspend fun listThreadsForUser(): List<Thread> =
+        threads.sortedByDescending { it.lastMessageAtEpochMs }.map(::withViewerMute)
+
+    /** Project the viewer's OWN column onto the row, exactly as the decoder does. */
+    private fun withViewerMute(thread: Thread): Thread {
+        val muted = if (thread.artistId.equals(userId, ignoreCase = true)) {
+            artistMuted[thread.id]
+        } else {
+            clientMuted[thread.id]
+        }
+        return thread.copy(muted = muted == true)
+    }
+
+    override suspend fun setMuted(threadId: String, muted: Boolean) {
+        val thread = threads.firstOrNull { it.id == threadId }
+            ?: throw MessagesRepositoryError.Underlying(NoSuchElementException(threadId))
+        when {
+            thread.artistId.equals(userId, ignoreCase = true) -> artistMuted[threadId] = muted
+            thread.clientId.equals(userId, ignoreCase = true) -> clientMuted[threadId] = muted
+            // Mirrors the real seam: a non-participant has no column of their own,
+            // and must not fall through to writing somebody else's.
+            else -> throw MessagesRepositoryError.Underlying(
+                IllegalStateException("You're not part of this conversation."),
+            )
+        }
+    }
+
     override suspend fun listMessages(threadId: String, limit: Int): List<Message> =
         messages[threadId]?.takeLast(limit)?.toList().orEmpty()
 
@@ -345,7 +495,14 @@ class FakeMessagesRepository(
 
     override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String {
         threads.firstOrNull { it.artistId.equals(artistId, true) && it.bookingId == bookingId }?.let { return it.id }
-        val thread = Thread(UUID.randomUUID().toString(), artistId.lowercase(), bookingId)
+        // Only the client seat can mint a thread (see the real impl), so the
+        // viewer IS the client here — carry that so the new row has both seats.
+        val thread = Thread(
+            id = UUID.randomUUID().toString(),
+            artistId = artistId.lowercase(),
+            clientId = userId,
+            bookingId = bookingId,
+        )
         threads.add(thread)
         return thread.id
     }

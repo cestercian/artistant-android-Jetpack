@@ -168,6 +168,7 @@ fun ChatScreen(
             artistScore = state.artistScore,
             starred = state.starred,
             archived = state.archived,
+            muted = state.muted,
             reportSubmitted = state.reportSubmitted,
             onBookingClick = onBookingClick,
             onArtistClick = onArtistClick,
@@ -176,6 +177,10 @@ fun ChatScreen(
                 viewModel.toggleArchived()
                 viewModel.dismissDetails()
             },
+            // Stays open, unlike archive: the row's own label and caption ARE
+            // the confirmation that the mute landed, so closing the sheet would
+            // hide the only feedback the action has.
+            onToggleMute = viewModel::toggleMuted,
             onMarkUnread = {
                 viewModel.markUnread()
                 viewModel.dismissDetails()
