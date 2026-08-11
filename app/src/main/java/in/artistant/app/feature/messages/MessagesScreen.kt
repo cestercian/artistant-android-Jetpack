@@ -683,7 +683,9 @@ internal fun toneColor(tone: PillTone): Color {
     val colors = AppTheme.colors
     return when (tone) {
         PillTone.Neutral -> colors.ink3
-        PillTone.Brand -> colors.brand
+        // Both brand tones resolve to the same dot: the solid/washed split is
+        // about the capsule's fill, and a bare dot has no fill to differ in.
+        PillTone.Brand, PillTone.BrandSolid -> colors.brand
         PillTone.Accent -> colors.accent
         PillTone.Good -> colors.good
         PillTone.Warm -> colors.warm

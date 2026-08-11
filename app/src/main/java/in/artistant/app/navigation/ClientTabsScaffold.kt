@@ -214,18 +214,23 @@ fun ClientTabsScaffold() {
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
                 val chatOpen: ChatOpenViewModel = hiltViewModel()
-                TabPane(inner) {
-                    ArtistProfileScreen(
-                        onBack = { nav.popBackStack() },
-                        onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
-                        onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
-                        onMessage = { artistId ->
-                            chatOpen.open(artistId, bookingId = null) { threadId ->
-                                nav.navigate(ClientNavRoutes.chat(threadId))
-                            }
-                        },
-                    )
-                }
+                // Second full-bleed destination (Discover is the other): the
+                // cover runs under the status bar, so this one also takes NO
+                // scaffold inset and applies the system-bar padding itself —
+                // to the floating hero controls at the top and to the action
+                // dock at the bottom. Wrapping it in [TabPane] pushed the whole
+                // page down by the status-bar height and left a letterbox of
+                // page background above the photo.
+                ArtistProfileScreen(
+                    onBack = { nav.popBackStack() },
+                    onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
+                    onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
+                    onMessage = { artistId ->
+                        chatOpen.open(artistId, bookingId = null) { threadId ->
+                            nav.navigate(ClientNavRoutes.chat(threadId))
+                        }
+                    },
+                )
             }
             composable(
                 route = ClientNavRoutes.CHAT,

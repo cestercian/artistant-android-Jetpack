@@ -636,7 +636,7 @@ private fun BookabilityBlock(state: ArtistHomeUiState, onScoreExplainer: () -> U
         ) {
             ScoreRing(
                 value = score,
-                size = AppTheme.dimens.size.ringLg,
+                size = AppTheme.dimens.dashboard.scoreRing,
                 showLabel = false,
                 totalGigs = breakdown.totalGigs,
             )

@@ -100,6 +100,25 @@ data class Size(
     val radioCore: Dp = 10.dp,
     /** Full-width pinned CTA (taller than `controlMin` — it is the only action). */
     val ctaTall: Dp = 52.dp,
+    /**
+     * Air under a pinned CTA bar, on top of whatever the gesture bar claims.
+     *
+     * Deliberately off the [Space] ramp, which is why it lives here: the funnel's
+     * bottom bar is the one place the app wants MORE clearance than `xl` and less
+     * than `xxl`, so that the terminal action of a paid flow is never a thumb's
+     * width from the system gesture area. Measured off the reference build, where
+     * the same bar reserves this much above its home-indicator inset.
+     */
+    val ctaBarTailroom: Dp = 28.dp,
+    /**
+     * Width kept clear at each end of a centred bar title, so it can never run
+     * under the controls flanking it.
+     *
+     * Wider than [rowMin] because the widest of those controls is a labelled
+     * pill, not an icon button, and the reservation has to be symmetric — an
+     * asymmetric one centres the title against the bar but not against the eye.
+     */
+    val barTitleReserve: Dp = 76.dp,
 )
 
 /**
@@ -237,8 +256,15 @@ data class Dashboard(
      * weekday and a numeral, and fourteen of them have to be scannable in one
      * horizontal sweep.
      */
-    val dayCellW: Dp = 46.dp,
-    val dayCellH: Dp = 54.dp,
+    val dayCellW: Dp = 42.dp,
+    val dayCellH: Dp = 50.dp,
+    /**
+     * The dashboard's own score ring — a ramp step above [Size.ringLg], which is
+     * the size the ring takes everywhere it accompanies something else. Here it
+     * IS the section: the artist's score with four meters hanging off it, and at
+     * the shared size it under-read against the four-row block beside it.
+     */
+    val scoreRing: Dp = 86.dp,
     /** The "there's a gig here" dot inside a day cell. */
     val dayDot: Dp = 3.dp,
     /** Attention dot leading a banner headline. */

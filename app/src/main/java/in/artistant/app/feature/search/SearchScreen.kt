@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -48,6 +49,7 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
+import java.util.Locale
 
 /**
  * Search tab — port of iOS `SearchView` (debounced query, facet rails, filter sheet,
@@ -130,11 +132,13 @@ fun SearchScreen(
 
         when {
             !state.hasActiveQuery -> {
+                // Sort lives with the results, not here: ordering an empty
+                // page is a control with nothing to act on, and the results
+                // list already carries its own row.
                 FacetBrowse(
                     state = state,
                     onCity = viewModel::selectCity,
                     onCategory = viewModel::toggleCategory,
-                    onSort = viewModel::setSort,
                     onRecent = viewModel::applyRecent,
                 )
             }
@@ -235,70 +239,95 @@ private fun FacetBrowse(
     state: SearchUiState,
     onCity: (String?) -> Unit,
     onCategory: (String) -> Unit,
-    onSort: (SearchSort) -> Unit,
     onRecent: (String) -> Unit,
 ) {
     val space = AppTheme.dimens.space
     LazyColumn(
-        contentPadding = PaddingValues(space.lg),
-        verticalArrangement = Arrangement.spacedBy(space.lg),
+        // Wider gutter and far more air between rails than a list would take:
+        // this is a browse surface of three short rows, and at list spacing the
+        // three labels stacked into one grey block.
+        contentPadding = PaddingValues(space.xl),
+        verticalArrangement = Arrangement.spacedBy(space.xxl),
     ) {
-        item {
-            Text("Browse", style = AppTheme.type.headline, color = AppTheme.colors.ink)
-        }
         if (state.recents.isNotEmpty()) {
             item {
-                Text("Recent", style = AppTheme.type.footnote, color = AppTheme.colors.ink3)
-                val gap = Modifier.height(space.sm)
-                Spacer(gap)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                    items(state.recents, key = { it }) { term ->
-                        Chip(label = term, selected = false, onClick = { onRecent(term) })
+                BrowseRail("Recent") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                        items(state.recents, key = { it }) { term ->
+                            Chip(
+                                label = term,
+                                selected = false,
+                                filled = false,
+                                onClick = { onRecent(term) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // Categories lead. The rails are ordered by how people actually shop for
+        // a performer — what kind of act first, then where — and the filled/
+        // hollow split below reinforces it: the categories rail is the one that
+        // reads as a set of destinations.
+        if (state.facets.categories.isNotEmpty()) {
+            item {
+                BrowseRail("Browse by category") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                        items(state.facets.categories, key = { it.label }) { facet ->
+                            Chip(
+                                label = "${facet.label} · ${facet.count}",
+                                selected = facet.label in state.categories,
+                                filled = true,
+                                onClick = { onCategory(facet.label) },
+                            )
+                        }
                     }
                 }
             }
         }
         if (state.facets.cities.isNotEmpty()) {
             item {
-                Text("Cities", style = AppTheme.type.footnote, color = AppTheme.colors.ink3)
-                val gap = Modifier.height(space.sm)
-                Spacer(gap)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                    items(state.facets.cities, key = { it.label }) { facet ->
-                        Chip(
-                            label = "${facet.label} · ${facet.count}",
-                            selected = state.city == facet.label,
-                            onClick = {
-                                onCity(if (state.city == facet.label) null else facet.label)
-                            },
-                        )
+                BrowseRail("Browse by city") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                        items(state.facets.cities, key = { it.label }) { facet ->
+                            Chip(
+                                label = "${facet.label} · ${facet.count}",
+                                selected = state.city == facet.label,
+                                filled = false,
+                                onClick = {
+                                    onCity(if (state.city == facet.label) null else facet.label)
+                                },
+                            )
+                        }
                     }
                 }
             }
         }
-        if (state.facets.categories.isNotEmpty()) {
-            item {
-                Text("Categories", style = AppTheme.type.footnote, color = AppTheme.colors.ink3)
-                val gap = Modifier.height(space.sm)
-                Spacer(gap)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                    items(state.facets.categories, key = { it.label }) { facet ->
-                        Chip(
-                            label = "${facet.label} · ${facet.count}",
-                            selected = facet.label in state.categories,
-                            onClick = { onCategory(facet.label) },
-                        )
-                    }
-                }
-            }
-        }
-        item { SortRow(sort = state.sort, onSort = onSort) }
         item {
             EmptyState(
                 title = "Search artists",
                 body = "Type a name, or pick a city / category above.",
             )
         }
+    }
+}
+
+/**
+ * One browse rail: a wide-tracked small-caps label over its row of chips.
+ *
+ * The label is the same idiom the funnel's section headers use — uppercase, ink3
+ * — but tracked wider, because these three sit alone on an otherwise empty
+ * screen and the extra letter-spacing is what stops them reading as body copy.
+ */
+@Composable
+private fun BrowseRail(label: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.md)) {
+        Text(
+            label.uppercase(Locale.US),
+            style = AppTheme.type.railLabel,
+            color = AppTheme.colors.ink3,
+        )
+        content()
     }
 }
 
@@ -316,25 +345,60 @@ private fun SortRow(sort: SearchSort, onSort: (SearchSort) -> Unit) {
     }
 }
 
+/**
+ * A browse / sort chip.
+ *
+ * [filled] is the rail's own signal, separate from [selected]: a filled chip
+ * sits on the card fill with no stroke, a hollow one is a hairline outline on
+ * the page. It is the only thing distinguishing the categories rail from the
+ * cities rail, which otherwise render the same short words at the same size.
+ *
+ * A capsule, not a rounded rect — every other chip in the app is one, and at
+ * this size an 8-unit radius reads as a small button rather than a tag. Note the
+ * `clip` before the fill: with a shaped background alone the clickable's ripple
+ * still spills into the corners.
+ */
 @Composable
-private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun Chip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    filled: Boolean = false,
+) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    // Capsule, matching every other chip in the app. Note the `clip` before the
-    // fill: previously the border was rounded but the background was not, so a
-    // selected chip painted square lime corners OUTSIDE its own rounded stroke.
-    // A shaped `background` alone would not have been enough either — the
-    // clickable's ripple would still have spilled into the corners.
-    val shape = RoundedCornerShape(dimens.radii.sm)
+    val shape = CircleShape
+    val background = when {
+        selected -> colors.brand
+        filled -> colors.bgCard
+        else -> colors.bg
+    }
     Text(
         text = label,
         style = AppTheme.type.caption,
-        color = if (selected) colors.brandInk else colors.ink2,
+        color = when {
+            selected -> colors.brandInk
+            filled -> colors.ink
+            else -> colors.ink2
+        },
         modifier = Modifier
             .clip(shape)
-            .background(if (selected) colors.brand else colors.bg)
-            .border(dimens.size.hairline, if (selected) colors.brand else colors.line, shape)
+            .background(background)
+            .then(
+                // A filled chip carries no outline: the fill already separates it
+                // from the page, and a stroke on top of it draws the eye to the
+                // container instead of the word.
+                if (filled && !selected) {
+                    Modifier
+                } else {
+                    Modifier.border(
+                        dimens.size.hairline,
+                        if (selected) colors.brand else colors.line,
+                        shape,
+                    )
+                },
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = space.md, vertical = space.sm),
     )

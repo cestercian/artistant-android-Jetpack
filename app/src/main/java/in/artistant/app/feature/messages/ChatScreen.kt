@@ -67,6 +67,7 @@ import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.bookingStatusTone
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.booking.CircleIconButton
 import kotlinx.coroutines.delay
 import java.util.Date
 
@@ -193,20 +194,33 @@ fun ChatScreen(
 private fun ChatTopBar(title: String, onBack: () -> Unit, onDetails: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    Row(
-        Modifier.fillMaxWidth().padding(start = space.xs, end = space.lg, top = space.xs),
-        verticalAlignment = Alignment.CenterVertically,
+    val dimens = AppTheme.dimens
+    // Box, not Row: the counterpart's name is centred against the BAR, the way
+    // the funnel header and the reference's inline nav bar centre theirs. Laid
+    // out as a Row child it would centre in the space left over beside the back
+    // button and visibly sit off-axis. The reservations either side are the two
+    // controls' own widths, so a long name ellipsises before it reaches either.
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = space.xs, end = space.lg, top = space.xs)
+            .height(dimens.size.rowMin),
+        contentAlignment = Alignment.Center,
     ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
-        }
         Text(
             title,
             style = AppTheme.type.headline,
             color = colors.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = dimens.size.barTitleReserve),
+        )
+        CircleIconButton(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Back",
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.CenterStart),
         )
         // A labelled pill rather than a bare avatar: the avatar exposed none of
         // the thread's context, and for an artist viewer it was inert — their
@@ -217,9 +231,10 @@ private fun ChatTopBar(title: String, onBack: () -> Unit, onDetails: () -> Unit)
             style = AppTheme.type.footnote,
             color = colors.ink,
             modifier = Modifier
+                .align(Alignment.CenterEnd)
                 .clip(CircleShape)
                 .background(colors.bgElev)
-                .border(AppTheme.dimens.size.hairline, colors.line, CircleShape)
+                .border(dimens.size.hairline, colors.line, CircleShape)
                 .clickable(onClick = onDetails)
                 .padding(horizontal = space.md, vertical = space.sm)
                 .semantics { testTag = "chat.details" },
@@ -366,7 +381,12 @@ private fun Transcript(
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = space.lg),
         state = listState,
-        verticalArrangement = Arrangement.spacedBy(space.xs),
+        // Bottom-anchored. A conversation grows upward from the composer, so a
+        // two-message thread should sit just above where you type, not pinned
+        // under the safety banner with a screenful of nothing below it. Once the
+        // transcript is taller than the viewport the alignment is a no-op and
+        // this behaves like any other list.
+        verticalArrangement = Arrangement.spacedBy(space.xs, Alignment.Bottom),
     ) {
         items(messages, key = { it.id }) { message ->
             // Every decoration renders inside its message's item so the list's

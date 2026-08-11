@@ -142,13 +142,19 @@ fun FunnelHeader(title: String, onBack: () -> Unit, modifier: Modifier = Modifie
 @Composable
 fun CtaBar(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     Column(modifier.fillMaxWidth()) {
         HRule()
         Box(
             Modifier
                 .fillMaxWidth()
                 .background(colors.bg)
-                .padding(AppTheme.dimens.space.lg),
+                // Asymmetric on purpose: 16 above, more below. The bar's own
+                // padding was symmetric, which left the CTA measurably closer to
+                // the bottom edge than the reference build puts it — the gesture
+                // inset alone does not buy back the difference.
+                .padding(start = dimens.space.lg, end = dimens.space.lg, top = dimens.space.lg)
+                .padding(bottom = dimens.size.ctaBarTailroom),
         ) { content() }
     }
 }
@@ -378,7 +384,11 @@ fun AvailabilityLegend(modifier: Modifier = Modifier) {
         modifier.semantics(mergeDescendants = true) {
             contentDescription = "Green dot means free, grey means busy"
         },
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        // One even rhythm across the whole legend — dot, gap, word, gap, dot,
+        // gap, word — which is how the reference draws it. The nested
+        // dot-to-label gap used to be 4 while the word-to-next-dot gap was 16,
+        // so the pairs read as "Free ●Busy" instead of "● Free   ● Busy".
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LegendDot(colors.good, "Free")
@@ -390,9 +400,8 @@ fun AvailabilityLegend(modifier: Modifier = Modifier) {
 private fun LegendDot(color: Color, label: String) {
     val dimens = AppTheme.dimens
     Row(
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(end = dimens.space.sm),
     ) {
         Box(
             Modifier

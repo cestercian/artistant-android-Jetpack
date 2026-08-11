@@ -209,7 +209,10 @@ private fun IdentityHeader(name: String, packageName: String, score: Int?) {
         score?.let {
             Pill(
                 it.toString(),
-                tone = PillTone.Brand,
+                // Solid, not washed: this is the only chip on the screen and the
+                // reference build fills it. A soft chip here read as decoration
+                // beside the artist's name rather than as their score.
+                tone = PillTone.BrandSolid,
                 modifier = Modifier.semantics {
                     contentDescription = "Bookability score $it"
                 },
