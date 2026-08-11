@@ -174,7 +174,13 @@ fun ArtistProfileScreen(
                     // stale on dev (a row reading ₹51,000 while a ₹22,000 package
                     // exists). `artist.price` survives only as the empty-set
                     // fallback. iOS does the same thing via `cheapestPackage`.
-                    val fromPrice = PackagePricing.fromPrice(artist.packages, fallback = artist.price)
+                    // packagesLoaded: the artist is fully hydrated here, so an
+                    // empty package set is a fact, not a mid-load state.
+                    val fromPrice = PackagePricing.dockPrice(
+                        artist.packages,
+                        fallback = artist.price,
+                        packagesLoaded = true,
+                    )
                     ActionDock(
                         fromPrice = fromPrice,
                         // Hand the tapped tier over BEFORE navigating — the route
@@ -783,7 +789,7 @@ private fun ReviewsBlock(reviews: List<Review>) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ActionDock(fromPrice: Int, onBook: () -> Unit) {
+private fun ActionDock(fromPrice: Int?, onBook: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(Modifier.fillMaxWidth().background(colors.bg)) {
@@ -818,11 +824,22 @@ private fun ActionDock(fromPrice: Int, onBook: () -> Unit) {
                     // Read as one phrase; the two stacked lines are typography,
                     // not two separate facts for a screen reader to announce.
                     .semantics(mergeDescendants = true) {
-                        contentDescription = "From ${formatInr(fromPrice)}"
+                        contentDescription = fromPrice
+                            ?.let { "From ${formatInr(it)}" }
+                            ?: "Pricing on request"
                     },
             ) {
-                Text(formatInr(fromPrice), style = AppTheme.type.monoDock, color = colors.ink)
-                Text("FROM", style = AppTheme.type.monoMicro, color = colors.ink3)
+                // No packages published means there is no minimum to quote. The
+                // Booking block above already says "Pricing on request"; the dock
+                // used to contradict it with the artist row's stale denormalized
+                // price, so one screen stated two different prices.
+                if (fromPrice != null) {
+                    Text(formatInr(fromPrice), style = AppTheme.type.monoDock, color = colors.ink)
+                    Text("FROM", style = AppTheme.type.monoMicro, color = colors.ink3)
+                } else {
+                    Text("On request", style = AppTheme.type.monoDock, color = colors.ink)
+                    Text("PRICING", style = AppTheme.type.monoMicro, color = colors.ink3)
+                }
             }
             // Intrinsic width (no fullWidth) so the CTA hugs its label and the
             // space between the two is air rather than button.
