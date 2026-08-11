@@ -135,6 +135,15 @@ data class AppType(
     // the token so every SectionLabel / WizardSectionLabel call site inherits the editorial
     // kerning without per-site changes.
     val caption: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp),
+    /**
+     * [caption] tracked wider, for a label that has to hold a screen on its own.
+     *
+     * Search's browse rails are three short words on an otherwise empty page —
+     * at the standard section kerning they read as body copy rather than as
+     * headers, which is why the reference tracks these particular labels further
+     * than the ones that sit above a dense block.
+     */
+    val railLabel: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp),
     val monoLarge: TextStyle = TextStyle(fontFamily = MonoFamily, fontSize = 24.sp, fontWeight = FontWeight.Bold),
     val monoMedium: TextStyle = TextStyle(fontFamily = MonoFamily, fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
     val monoSmall: TextStyle = TextStyle(fontFamily = MonoFamily, fontSize = 12.sp, fontWeight = FontWeight.Medium),
