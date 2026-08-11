@@ -173,7 +173,15 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistTab.Messages.route) {
                 TabPane(inner) {
-                    MessagesScreen(onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) })
+                    MessagesScreen(
+                        onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        // The inbox's inline accelerator and Support's one deep
+                        // link both land in the artist's own funnel — which this
+                        // role calls Gigs, not Bookings.
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onOpenBookings = { nav.navigate(ArtistTab.Gigs.route) },
+                        bookingsLabel = ArtistTab.Gigs.label,
+                    )
                 }
             }
             composable(ArtistTab.Epk.route) {

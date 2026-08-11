@@ -1,8 +1,10 @@
 package `in`.artistant.app.feature.messages
 
 import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.MessageKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -39,6 +41,7 @@ class ChatTimestampsTest {
         at: Long,
         mine: Boolean = false,
         kind: MessageKind = MessageKind.User,
+        delivery: MessageDelivery = MessageDelivery.Sent,
     ) = Message(
         id = id,
         threadId = "t-1",
@@ -47,6 +50,7 @@ class ChatTimestampsTest {
         sentAtEpochMs = at,
         kind = kind,
         isMine = mine,
+        delivery = delivery,
     )
 
     // --- day separators -----------------------------------------------------
@@ -217,5 +221,75 @@ class ChatTimestampsTest {
         val messages = listOf(msg("t1", at(2026, 8, 4, 9)), msg("t2", at(2026, 8, 4, 10)))
 
         assertEquals(emptySet<String>(), ChatTimestamps.outgoingRunEndIds(messages))
+    }
+
+    // --- read receipts ------------------------------------------------------
+
+    /**
+     * One caption, on the newest of the viewer's messages the counterparty has
+     * read. Reads are monotonic, so marking anything older would repeat the same
+     * fact down the thread.
+     */
+    @Test
+    fun theReceiptLandsOnTheNewestOwnMessageInsideTheCutoff() {
+        val messages = listOf(
+            msg("m1", at(2026, 8, 4, 9), mine = true),
+            msg("m2", at(2026, 8, 4, 10), mine = true),
+            msg("m3", at(2026, 8, 4, 12), mine = true),
+        )
+
+        assertEquals(
+            "m2",
+            ChatTimestamps.lastReadOwnMessageId(messages, at(2026, 8, 4, 11)),
+        )
+    }
+
+    /** A message sent exactly at the read stamp counts as read. */
+    @Test
+    fun theCutoffIsInclusive() {
+        val sentAt = at(2026, 8, 4, 10)
+        val messages = listOf(msg("m1", sentAt, mine = true))
+
+        assertEquals("m1", ChatTimestamps.lastReadOwnMessageId(messages, sentAt))
+    }
+
+    /** Their messages are not the viewer's to be told about. */
+    @Test
+    fun incomingMessagesNeverCarryTheReceipt() {
+        val messages = listOf(msg("t1", at(2026, 8, 4, 9)))
+
+        assertNull(ChatTimestamps.lastReadOwnMessageId(messages, at(2026, 8, 4, 12)))
+    }
+
+    /**
+     * An in-flight or failed bubble has no server row that could have been read,
+     * so claiming it was read would be inventing a delivery.
+     */
+    @Test
+    fun unsentBubblesAreNeverMarkedRead() {
+        val messages = listOf(
+            msg("sending", at(2026, 8, 4, 9), mine = true, delivery = MessageDelivery.Sending),
+            msg("failed", at(2026, 8, 4, 10), mine = true, delivery = MessageDelivery.Failed),
+        )
+
+        assertNull(ChatTimestamps.lastReadOwnMessageId(messages, at(2026, 8, 4, 12)))
+    }
+
+    /** A system notice is not something the viewer said. */
+    @Test
+    fun systemNoticesNeverCarryTheReceipt() {
+        val messages = listOf(
+            msg("sys", at(2026, 8, 4, 9), mine = true, kind = MessageKind.System),
+        )
+
+        assertNull(ChatTimestamps.lastReadOwnMessageId(messages, at(2026, 8, 4, 12)))
+    }
+
+    /** No receipt at all (pre-0072 server, or nothing read yet) claims nothing. */
+    @Test
+    fun withoutAReadStampNothingIsMarked() {
+        val messages = listOf(msg("m1", at(2026, 8, 4, 9), mine = true))
+
+        assertNull(ChatTimestamps.lastReadOwnMessageId(messages, null))
     }
 }

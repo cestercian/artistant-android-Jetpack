@@ -168,7 +168,12 @@ fun ClientTabsScaffold() {
             }
             composable(ClientTab.Messages.route) {
                 TabPane(inner) {
-                    MessagesScreen(onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) })
+                    MessagesScreen(
+                        onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        onOpenBookings = { nav.navigate(ClientTab.Bookings.route) },
+                        bookingsLabel = ClientTab.Bookings.label,
+                    )
                 }
             }
             composable(ClientTab.Profile.route) {
@@ -230,6 +235,9 @@ fun ClientTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // Only the client seat has a counterparty with a public
+                        // profile, so only this scaffold wires the participant row.
+                        onArtistClick = { id -> nav.navigate("artist/$id") },
                     )
                 }
             }

@@ -1,5 +1,7 @@
 package `in`.artistant.app.feature.messages
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,8 +12,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -25,35 +35,66 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.style.TextOverflow
+import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.repository.ReportReasons
+import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.score.tierColor
 
 /**
- * Thread details + report — port of iOS ThreadDetailsSheet (Airbnb trust).
- * Gig summary + participants + report reason picker. Local star/mute deferred.
+ * "What is this thread about, and who is in it" — from the chat header's Details
+ * pill.
+ *
+ * It exists because a lot of context was latent: the gig, its date, its venue,
+ * its fee, and the counterparty's standing were all one screen away with no way
+ * in. The conversation actions below it are device-local and really do persist,
+ * which is the bar for including them at all — a Star that forgets itself on
+ * relaunch is worse than no Star.
+ *
+ * Report is the last row and stays in the same neutral style as the others. It
+ * is a rare, serious action, not the sheet's primary one, and lime is this
+ * system's single "do the positive thing" signal — a filled brand button here
+ * would make reporting the loudest thing on the sheet and read as encouragement.
+ * It opens a reason picker rather than filing anything, so it cannot be a
+ * one-tap accident.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadDetailsSheet(
-    title: String,
-    bookingId: String?,
-    bookingSummary: String?,
-    counterpartLabel: String,
+    counterpartName: String,
+    context: ThreadContext,
     viewerIsArtist: Boolean,
+    starred: Boolean,
+    archived: Boolean,
+    reportSubmitted: Boolean,
     onBookingClick: (String) -> Unit,
+    onToggleStar: () -> Unit,
+    onToggleArchive: () -> Unit,
+    onMarkUnread: () -> Unit,
     onReport: (reason: String) -> Unit,
     onDismiss: () -> Unit,
+    /** Non-null only on the client seat — an artist's counterpart has no profile. */
+    artistId: String? = null,
+    artistSubtitle: String = "",
+    artistScore: Int? = null,
+    onArtistClick: (String) -> Unit = {},
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var reporting by remember { mutableStateOf(false) }
-    var submitted by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.bg,
     ) {
         Column(
@@ -61,92 +102,66 @@ fun ThreadDetailsSheet(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = space.xl)
-                .padding(bottom = space.xxl),
+                .padding(bottom = space.xxl)
+                .semantics { testTag = "chat.detailsSheet" },
         ) {
             Text("Details", style = AppTheme.type.headline, color = colors.ink)
-            Spacer(Modifier.height(space.lg))
-            HRule()
-            Spacer(Modifier.height(space.lg))
 
-            Text("Gig", style = AppTheme.type.caption, color = colors.ink3)
-            Spacer(Modifier.height(space.sm))
-            if (bookingId != null && bookingSummary != null) {
-                Text(
-                    bookingSummary,
-                    style = AppTheme.type.body,
-                    color = colors.ink2,
-                    modifier = Modifier.clickable { onBookingClick(bookingId) },
+            SectionHeader("Gig details")
+            GigCard(context = context, onBookingClick = onBookingClick)
+
+            SectionHeader("In this conversation")
+            if (artistId != null) {
+                ParticipantRow(
+                    name = counterpartName,
+                    role = ThreadCounterpart.counterpartRole(viewerIsArtist),
+                    subtitle = artistSubtitle,
+                    score = artistScore,
+                    onClick = { onArtistClick(artistId) },
                 )
             } else {
-                Text("No booking yet — inquiry", style = AppTheme.type.body, color = colors.ink3)
+                ParticipantRow(
+                    name = counterpartName,
+                    role = ThreadCounterpart.counterpartRole(viewerIsArtist),
+                )
             }
-
-            Spacer(Modifier.height(space.lg))
-            HRule()
-            Spacer(Modifier.height(space.lg))
-
-            Text("Participants", style = AppTheme.type.caption, color = colors.ink3)
-            Spacer(Modifier.height(space.sm))
-            // Each row carries its seat, so "who is who" no longer rests on name
-            // recognition alone — the roles are always opposites (iOS
-            // ThreadDetailsSheet.participants does the same).
-            ParticipantRow(
-                name = counterpartLabel,
-                role = ThreadCounterpart.counterpartRole(viewerIsArtist),
-            )
             ParticipantRow(name = "You", role = ThreadCounterpart.viewerRole(viewerIsArtist))
 
-            Spacer(Modifier.height(space.lg))
-            HRule()
-            Spacer(Modifier.height(space.lg))
-
+            SectionHeader("Conversation")
             when {
-                submitted -> Text(
-                    "Thanks — we'll review this conversation.",
-                    style = AppTheme.type.body,
-                    color = colors.brand,
+                reportSubmitted -> ReportReceipt()
+                reporting -> ReportReasonPicker(
+                    counterpartName = counterpartName,
+                    onPick = onReport,
                 )
-                reporting -> {
-                    Text("Why are you reporting?", style = AppTheme.type.callout, color = colors.ink)
-                    Spacer(Modifier.height(space.md))
-                    ReportReasons.forEach { reason ->
-                        Text(
-                            reason,
-                            style = AppTheme.type.body,
-                            color = colors.ink2,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onReport(reason)
-                                    submitted = true
-                                }
-                                .padding(vertical = space.sm),
-                        )
-                    }
-                }
-                // Reporting is a rare, serious action -- but it is NOT the sheet's
-                // primary action, and lime is this system's single "do the positive
-                // thing" signal. A full-width brand button made Report the loudest
-                // element on the sheet, inverting the hierarchy and reading as
-                // encouragement. Presented as a quiet neutral row instead (matching
-                // iOS ThreadDetailsSheet's untinted `actionRow`): a flag glyph gives
-                // it weight without alarm, and it opens the reason picker rather
-                // than filing anything, so it can't be a one-tap accident.
-                else -> Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { reporting = true }
-                        .padding(vertical = space.md),
-                    horizontalArrangement = Arrangement.spacedBy(space.md),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.Flag,
-                        contentDescription = null,
-                        tint = colors.ink,
-                        modifier = Modifier.size(AppTheme.dimens.size.iconLg),
+                else -> {
+                    // Labels flip with state so a row always reads as the action
+                    // it will perform, not the state it is in.
+                    ActionRow(
+                        label = if (starred) "Unstar" else "Star",
+                        icon = if (starred) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        tint = if (starred) colors.warm else colors.ink,
+                        tag = "threadDetails.star",
+                        onClick = onToggleStar,
                     )
-                    Text("Report conversation", style = AppTheme.type.body, color = colors.ink)
+                    ActionRow(
+                        label = "Mark as unread",
+                        icon = Icons.Filled.MarkEmailUnread,
+                        tag = "threadDetails.markUnread",
+                        onClick = onMarkUnread,
+                    )
+                    ActionRow(
+                        label = if (archived) "Unarchive" else "Archive",
+                        icon = if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive,
+                        tag = "threadDetails.archive",
+                        onClick = onToggleArchive,
+                    )
+                    ActionRow(
+                        label = "Report conversation",
+                        icon = Icons.Outlined.Flag,
+                        tag = "threadDetails.report",
+                        onClick = { reporting = true },
+                    )
                 }
             }
         }
@@ -154,15 +169,226 @@ fun ThreadDetailsSheet(
 }
 
 /**
- * One participant: name over an uppercased role caption. The role is what makes
- * the two rows unambiguous when both names are unfamiliar — iOS renders the same
- * pairing (`participantRow`, subtitle uppercased at render time).
+ * The gig, as a card.
+ *
+ * The one place card chrome earns its keep in a hairline-first design: this is a
+ * distinct object being *referenced* by the conversation, not a row of it.
  */
 @Composable
-private fun ParticipantRow(name: String, role: String) {
+private fun GigCard(context: ThreadContext, onBookingClick: (String) -> Unit) {
     val colors = AppTheme.colors
-    Column(Modifier.padding(vertical = AppTheme.dimens.space.xs)) {
-        Text(name, style = AppTheme.type.callout, color = colors.ink, maxLines = 1)
-        Text(role.uppercase(), style = AppTheme.type.monoSmall, color = colors.ink3, maxLines = 1)
+    val space = AppTheme.dimens.space
+    val bookingId = context.bookingId
+
+    if (bookingId == null) {
+        // Genuinely nothing agreed yet — say so rather than render an empty card.
+        Text(
+            "No booking yet — this is an inquiry.",
+            style = AppTheme.type.body,
+            color = colors.ink3,
+            modifier = Modifier.padding(vertical = space.sm),
+        )
+        return
     }
+
+    val shape = RoundedCornerShape(AppTheme.dimens.radii.md)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.bgCard)
+            .border(AppTheme.dimens.size.hairline, colors.line, shape)
+            .clickable { onBookingClick(bookingId) }
+            .padding(space.md)
+            .semantics { testTag = "threadDetails.gig" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(space.md),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(context.statusLabel, style = AppTheme.type.callout, color = colors.ink)
+            Text(
+                context.detailLine ?: "Details in the booking",
+                style = AppTheme.type.monoSmall,
+                color = colors.ink3,
+            )
+            context.fee?.let {
+                Spacer(Modifier.height(AppTheme.dimens.space.xs))
+                Text(
+                    "${formatInr(it)} artist fee",
+                    style = AppTheme.type.footnote,
+                    color = colors.brand,
+                )
+            }
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = colors.ink3,
+            modifier = Modifier.size(AppTheme.dimens.size.iconMd),
+        )
+    }
+}
+
+/**
+ * One participant: avatar, name, and the seat they occupy.
+ *
+ * The role caption is what makes the two rows unambiguous when both names are
+ * unfamiliar, and the roles are always opposites — see [ThreadCounterpart].
+ */
+@Composable
+private fun ParticipantRow(
+    name: String,
+    role: String,
+    subtitle: String = "",
+    score: Int? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = space.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(space.md),
+    ) {
+        Avatar(name = name, size = AppTheme.dimens.size.avatarSm)
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                style = AppTheme.type.body,
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                subtitle.ifBlank { role }.uppercase(),
+                style = AppTheme.type.monoSmall,
+                color = colors.ink3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        score?.let {
+            // Tier-coloured so the number carries the same meaning it does on the
+            // artist profile and the Discover tiles.
+            Text(
+                it.toString(),
+                style = AppTheme.type.monoMedium,
+                color = tierColor(ScoreBands.tier(it), colors),
+                modifier = Modifier.semantics { contentDescription = "Bookability score $it" },
+            )
+        }
+        if (onClick != null) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colors.ink3,
+                modifier = Modifier.size(AppTheme.dimens.size.iconMd),
+            )
+        }
+    }
+    HRule()
+}
+
+@Composable
+private fun ActionRow(
+    label: String,
+    icon: ImageVector,
+    tag: String,
+    onClick: () -> Unit,
+    tint: Color = AppTheme.colors.ink,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = space.md)
+            .semantics { testTag = tag },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(space.md),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(AppTheme.dimens.size.iconLg),
+        )
+        Text(label, style = AppTheme.type.body, color = colors.ink)
+    }
+    HRule()
+}
+
+/** Reason first, then file. Reporting should never be a single mis-tap. */
+@Composable
+private fun ReportReasonPicker(counterpartName: String, onPick: (String) -> Unit) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            "Why are you reporting this conversation?",
+            style = AppTheme.type.callout,
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(space.sm))
+        ReportReasons.forEach { reason ->
+            Text(
+                reason,
+                style = AppTheme.type.body,
+                color = colors.ink2,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                    .clickable { onPick(reason) }
+                    .padding(vertical = space.md)
+                    .semantics { testTag = "threadDetails.reason" },
+            )
+            HRule()
+        }
+        Spacer(Modifier.height(space.sm))
+        Text(
+            "This won't be shared with $counterpartName.",
+            style = AppTheme.type.footnote,
+            color = colors.ink3,
+        )
+    }
+}
+
+/**
+ * The receipt.
+ *
+ * Worded to be true whichever way the write went. The reports repository
+ * deliberately never throws — it falls back to an on-device log so a moderation
+ * outage can't block a conversation — which means this surface genuinely cannot
+ * distinguish delivered from queued, and must not claim to.
+ */
+@Composable
+private fun ReportReceipt() {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(Modifier.fillMaxWidth().padding(vertical = space.sm)) {
+        Text("Report saved.", style = AppTheme.type.callout, color = colors.ink)
+        Text(
+            "Our team reviews reports to keep Artistant trustworthy. It's never shared with them.",
+            style = AppTheme.type.footnote,
+            color = colors.ink3,
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    val space = AppTheme.dimens.space
+    Spacer(Modifier.height(space.lg))
+    Text(
+        title.uppercase(),
+        style = AppTheme.type.caption,
+        color = AppTheme.colors.ink3,
+    )
+    Spacer(Modifier.height(space.sm))
+    HRule()
+    Spacer(Modifier.height(space.sm))
 }

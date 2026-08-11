@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.messages
 
 import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.MessageKind
 import java.time.Instant
 import java.time.LocalDate
@@ -92,6 +93,30 @@ object ChatTimestamps {
             if (next == null || slotOf(next) != Slot.Mine) ids += message.id
         }
         return ids
+    }
+
+    /**
+     * The last of the viewer's own messages the counterparty has already read —
+     * the single row that gets a "Read" caption under it.
+     *
+     * One caption, not a tick per bubble: reads are monotonic, so marking the
+     * newest read message says everything the per-bubble version would, without
+     * stamping a column of identical glyphs down the thread.
+     *
+     * Three things disqualify a row and each is deliberate. A `Sending` or
+     * `Failed` bubble has no server row that could have been read. A system
+     * notice is not the viewer's message. And with no receipt at all — receipts
+     * off, nothing read yet, or a server predating the `thread_reads` table —
+     * there is nothing to claim, so it returns null rather than guessing.
+     */
+    fun lastReadOwnMessageId(messages: List<Message>, counterpartLastReadAtMs: Long?): String? {
+        val cutoff = counterpartLastReadAtMs ?: return null
+        return messages.lastOrNull { message ->
+            message.isMine &&
+                message.kind != MessageKind.System &&
+                message.delivery == MessageDelivery.Sent &&
+                message.sentAtEpochMs <= cutoff
+        }?.id
     }
 
     /**

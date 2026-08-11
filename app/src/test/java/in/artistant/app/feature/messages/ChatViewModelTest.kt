@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.messages
 
 import androidx.lifecycle.SavedStateHandle
+import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.Thread
@@ -12,10 +13,13 @@ import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
+import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -51,6 +55,8 @@ class ChatViewModelTest {
         var nextServerId: String = "server-1"
         private var listener: ((Message) -> Unit)? = null
         var cancelCount: Int = 0
+        var subscribeCount: Int = 0
+        var listCount: Int = 0
 
         /**
          * When set, `send()` parks here until the test completes it. That's the
@@ -64,7 +70,10 @@ class ChatViewModelTest {
 
         override suspend fun listThreadsForUser(): List<Thread> = listOfNotNull(thread)
 
-        override suspend fun listMessages(threadId: String, limit: Int): List<Message> = seedMessages
+        override suspend fun listMessages(threadId: String, limit: Int): List<Message> {
+            listCount++
+            return seedMessages
+        }
 
         override suspend fun send(threadId: String, body: String): Message {
             sendCount++
@@ -90,6 +99,7 @@ class ChatViewModelTest {
             onInsert: (Message) -> Unit,
         ): MessagesSubscription {
             listener = onInsert
+            subscribeCount++
             return MessagesSubscription { cancelCount++ }
         }
     }
@@ -97,11 +107,15 @@ class ChatViewModelTest {
     private fun vm(
         messages: MessagesRepository,
         viewerId: String? = CLIENT_ID,
+        bookings: StubBookings = StubBookings(),
+        flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
         artistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
+        bookingsRepository = bookings,
         reports = FakeReportsRepository(),
+        flagsStore = flags,
         viewer = { viewerId },
     )
 
@@ -378,7 +392,9 @@ class ChatViewModelTest {
             savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
             messagesRepository = ScriptedMessages(),
             artistsRepository = FakeArtistsRepository(),
+            bookingsRepository = StubBookings(),
             reports = reports,
+            flagsStore = FakeThreadFlagsStore(),
             viewer = { CLIENT_ID },
         )
 
@@ -409,5 +425,180 @@ class ChatViewModelTest {
         assertNotNull(model.state.value.error)
         assertTrue(model.state.value.messages.isEmpty())
         assertNull(model.state.value.thread)
+    }
+
+    // --- gig context ---------------------------------------------------------
+
+    /**
+     * The header's whole job beyond the name: say which gig is being negotiated.
+     * Fetched as ONE row by id — pulling the seat's entire booking list to render
+     * a status line would drag its calendar side effect along with it.
+     */
+    @Test
+    fun theGigBehindTheThreadFeedsTheContextStrip() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, bookingId = "b-1"),
+        )
+        val model = vm(
+            repo,
+            bookings = StubBookings(
+                one = booking(id = "b-1", status = BookingStatus.Confirmed, venue = "Rooftop"),
+            ),
+        )
+
+        val context = model.state.value.context
+        assertEquals(BookingStatus.Confirmed, context.status)
+        assertEquals("Rooftop", context.venue)
+        assertEquals("b-1", context.bookingId)
+    }
+
+    /** Unreadable booking: no invented status, but the id survives so Details can route. */
+    @Test
+    fun anUnreadableBookingKeepsTheIdWithoutAStatus() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, bookingId = "b-gone"),
+        )
+        val model = vm(repo, bookings = StubBookings(one = null))
+
+        assertEquals("b-gone", model.state.value.context.bookingId)
+        assertNull(model.state.value.context.status)
+    }
+
+    @Test
+    fun aBookinglessThreadStaysAnInquiry() = runTest {
+        val model = vm(ScriptedMessages())
+
+        assertEquals(ThreadContext.INQUIRY, model.state.value.context)
+    }
+
+    // --- read receipts -------------------------------------------------------
+
+    /**
+     * The counterparty read up to 9s; the viewer's message went at 5s, so it is
+     * the one that carries the caption.
+     */
+    @Test
+    fun theReceiptMarksTheNewestOwnMessageTheCounterpartHasRead() = runTest {
+        val repo = ScriptedMessages(
+            seedMessages = listOf(serverMessage("s1", "Meet at 8?", at = 5_000L, mine = true)),
+        )
+        val model = vm(repo)
+
+        assertEquals("s1", model.state.value.lastReadOwnMessageId)
+    }
+
+    // --- per-thread flags ----------------------------------------------------
+
+    /**
+     * Dismissal is per thread and persisted. Hiding the notice everywhere after
+     * one dismissal would silently opt the reader out on conversations they have
+     * never opened.
+     */
+    @Test
+    fun dismissingTheSafetyNoticeIsScopedToThisThread() = runTest {
+        val flags = FakeThreadFlagsStore()
+        val model = vm(ScriptedMessages(), flags = flags)
+        assertTrue(model.state.value.safetyBannerVisible)
+
+        model.dismissSafetyBanner()
+        assertFalse(model.state.value.safetyBannerVisible)
+
+        // Exactly one thread was recorded — a different conversation still shows it.
+        assertEquals(setOf(threadId), flags.flags.first().safetyDismissed)
+    }
+
+    @Test
+    fun aPreviouslyDismissedNoticeStaysDismissedOnReopen() = runTest {
+        val flags = FakeThreadFlagsStore(ThreadFlags(safetyDismissed = setOf(threadId)))
+
+        val model = vm(ScriptedMessages(), flags = flags)
+
+        assertFalse(model.state.value.safetyBannerVisible)
+    }
+
+    @Test
+    fun starAndArchiveRoundTripThroughTheFlagsStore() = runTest {
+        val model = vm(ScriptedMessages())
+
+        model.toggleStarred()
+        model.toggleArchived()
+        assertTrue(model.state.value.starred)
+        assertTrue(model.state.value.archived)
+
+        model.toggleStarred()
+        assertFalse(model.state.value.starred)
+    }
+
+    /**
+     * Opening a thread retires an explicit "mark as unread" — the reader has now
+     * demonstrably read it, so leaving the flag set would make the inbox argue
+     * with what just happened.
+     */
+    @Test
+    fun openingAThreadClearsAnExplicitMarkAsUnread() = runTest {
+        val flags = FakeThreadFlagsStore(ThreadFlags(markedUnread = setOf(threadId)))
+
+        vm(ScriptedMessages(), flags = flags)
+
+        assertTrue(flags.flags.first().markedUnread.isEmpty())
+    }
+
+    // --- report --------------------------------------------------------------
+
+    /**
+     * The repository soft-fails to an on-device log rather than throwing, so this
+     * surface cannot tell delivered from queued — it records that the report was
+     * filed and the copy is worded to be true either way.
+     */
+    @Test
+    fun reportingFlipsToTheReceiptState() = runTest {
+        val reports = FakeReportsRepository()
+        val model = ChatViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
+            messagesRepository = ScriptedMessages(),
+            artistsRepository = FakeArtistsRepository(),
+            bookingsRepository = StubBookings(),
+            reports = reports,
+            flagsStore = FakeThreadFlagsStore(),
+            viewer = { CLIENT_ID },
+        )
+
+        model.reportConversation("Scam or spam")
+
+        assertTrue(model.state.value.reportSubmitted)
+        assertEquals("Scam or spam", reports.conversation.single().second)
+    }
+
+    /** Closing the sheet resets the receipt so the next open starts on the actions. */
+    @Test
+    fun dismissingDetailsResetsTheReportReceipt() = runTest {
+        val model = vm(ScriptedMessages())
+        model.reportConversation("Offensive")
+
+        model.dismissDetails()
+
+        assertFalse(model.state.value.reportSubmitted)
+    }
+
+    // --- foreground resync ---------------------------------------------------
+
+    /**
+     * The socket is suspended while backgrounded, so returning has to do both:
+     * pull what was missed AND rejoin. Refresh first, because it fills the gap
+     * even if the channel is slow to come back.
+     */
+    @Test
+    fun comingBackToTheForegroundRefreshesAndReSubscribes() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo)
+        val listsBefore = repo.listCount
+        val subscribesBefore = repo.subscribeCount
+
+        model.onResumed()
+        advanceUntilIdle()
+
+        assertTrue(repo.listCount > listsBefore)
+        assertTrue(repo.subscribeCount > subscribesBefore)
+        assertTrue("the superseded channel must be torn down", repo.cancelCount > 0)
     }
 }
