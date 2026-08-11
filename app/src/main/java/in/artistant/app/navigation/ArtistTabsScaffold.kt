@@ -42,6 +42,7 @@ import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
+import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.wizard.WizardScreen
@@ -146,10 +147,16 @@ fun ArtistTabsScaffold() {
             composable(ArtistNavRoutes.PROFILE) {
                 TabPane(inner) {
                     ProfileScreen(
+                        onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                         onBack = { nav.popBackStack() },
                         onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
                     )
+                }
+            }
+            composable(ArtistNavRoutes.BLOCKED_ACCOUNTS) {
+                TabPane(inner) {
+                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {

@@ -161,6 +161,20 @@ repointed); #49 rebuilt the unit coverage the #44 prefer-ours merge deleted
 (`monthLabelFromDateLabel` could never match its own parse). **277 unit tests,
 0 failures.**
 
+**Aug 12, 2026 — blocking became reversible (`feat/blocked-accounts`).** PR #71
+shipped block with its only exit inside the conversation the block hides, so an
+accidental block was permanent from the UI. A **Blocked accounts** screen now
+hangs off the account settings list on both roles (`feature/profile/`), lists who
+you've blocked and unblocks them through the same `BlockedUsersStore` the inbox
+observes, so the thread returns immediately. `BlockedUsersStore.refresh()` now
+returns whether the SERVER copy was read, because loaded-and-empty and
+couldn't-load are the same empty list and the opposite meaning; a failed read
+renders as "couldn't load" with a retry, never as "no one is blocked". Names are
+inferred from the conversation (artist cache / `client_name`, mig 0080) and left
+null when nothing can answer — `blocked_users` (0087) stores no name. New
+debug-only harness flags: `seed-blocked-user`, `block-list-unavailable`. Device-
+walked on the emulator. **Suite 737, 0 failures.**
+
 **Still operator / follow-ups:** ExoPlayer sample/Spotify embeds, brand `.ttf`,
 `google-services.json` + `send-push` FCM, OAuth dashboard config, flip
 `subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.

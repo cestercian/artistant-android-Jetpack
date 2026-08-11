@@ -146,10 +146,31 @@ object HarnessRepositories {
     private val accountImpl: FakeAccountRepository by lazy { FakeAccountRepository() }
     private val reportsImpl: FakeReportsRepository by lazy { FakeReportsRepository() }
 
-    // Nobody is blocked in the fixture, so the harness inbox shows every seeded
+    // Nobody is blocked by default, so the harness inbox shows every seeded
     // thread; the point of the fake is that Block/Unblock round-trips offline
     // instead of throwing at a Supabase call the harness can never reach.
-    private val blockImpl: FakeBlockRepository by lazy { FakeBlockRepository() }
+    //
+    // Two launch flags move it off that default, and both exist because the
+    // states they produce cannot be navigated to from inside a harness run:
+    //
+    //  - `seed-blocked-user` pre-blocks the fixture COUNTERPARTY, resolved from
+    //    the booted role (a client blocks the artist; an artist blocks the
+    //    client). Blocking someone hides the only screen that could block them,
+    //    so "already blocked at launch" has no in-app path.
+    //  - `block-list-unavailable` flips the fake to signed-out, which is how its
+    //    reads and writes throw. That is the shape of every real failure here —
+    //    offline, signed out, 0087 not applied — and it is the case the blocked
+    //    accounts screen must render as "couldn't load", never as "empty".
+    private val blockImpl: FakeBlockRepository by lazy {
+        val seeded = if (HarnessState.flags.seedBlockedUser) {
+            setOf(HarnessFixtures.counterpartUserId(HarnessState.flags.skipSignupAs))
+        } else {
+            emptySet()
+        }
+        FakeBlockRepository(seeded).apply {
+            if (HarnessState.flags.blockListUnavailable) signedIn = false
+        }
+    }
 
     val artists: ArtistsRepository? get() = if (on) artistsImpl else null
     val bookings: BookingsRepository? get() = if (on) bookingsImpl else null

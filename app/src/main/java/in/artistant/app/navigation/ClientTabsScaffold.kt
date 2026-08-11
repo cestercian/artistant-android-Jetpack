@@ -48,6 +48,7 @@ import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ArtistListScreen
+import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
@@ -179,9 +180,15 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Profile.route) {
                 TabPane(inner) {
                     ProfileScreen(
+                        onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                         onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
                         onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
                     )
+                }
+            }
+            composable(ClientNavRoutes.BLOCKED_ACCOUNTS) {
+                TabPane(inner) {
+                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(

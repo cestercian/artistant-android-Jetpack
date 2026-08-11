@@ -43,6 +43,14 @@ object ClientNavRoutes {
     fun requestQuote(artistId: String) = "request_quote/$artistId"
     fun artistList(kind: String) = "artist_list/$kind"
     const val PAYWALL = "paywall"
+
+    /**
+     * Account settings → blocked accounts. Same literal on both roles because it
+     * is the same screen in two graphs — blocking is not role-specific, and a
+     * client who blocks an artist and an artist who blocks a client need the
+     * identical way back.
+     */
+    const val BLOCKED_ACCOUNTS = "blocked_accounts"
 }
 
 /** Artist-side pushed routes. */
@@ -67,4 +75,7 @@ object ArtistNavRoutes {
     const val WIZARD = "wizard"
     const val MANAGE_AVAILABILITY = "manage_availability"
     const val SCORE_EXPLAINER = "score_explainer"
+
+    /** See [ClientNavRoutes.BLOCKED_ACCOUNTS] — same screen, artist graph. */
+    const val BLOCKED_ACCOUNTS = "blocked_accounts"
 }

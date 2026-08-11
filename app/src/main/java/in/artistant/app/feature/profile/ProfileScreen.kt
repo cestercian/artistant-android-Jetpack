@@ -62,6 +62,14 @@ import `in`.artistant.app.designsystem.theme.AppTheme
  */
 @Composable
 fun ProfileScreen(
+    /**
+     * Deliberately has NO default, unlike the rest of these. It is the only way
+     * to reach [BlockedAccountsScreen], and that screen is the only way to undo
+     * a block — blocking removes the conversation the in-chat Unblock lives in.
+     * A default would let a new host silently ship the app without an exit from
+     * a safety action; the compiler asking the question is the point.
+     */
+    onBlockedAccounts: () -> Unit,
     onNavigateToPaywall: () -> Unit = {},
     onManageAvailability: (() -> Unit)? = null,
     onArtistList: ((ArtistListKind) -> Unit)? = null,
@@ -260,6 +268,13 @@ fun ProfileScreen(
                                         Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
                                     )
                                 }
+                                HRule()
+                                // Sits next to Privacy because it belongs to the
+                                // same question — who can see me and who I've
+                                // shut out — and ABOVE the export/calendar rows
+                                // so the way back from a block is a settings row
+                                // people scroll past, not one they hunt for.
+                                SettingsRow("Blocked accounts", onClick = onBlockedAccounts)
                                 HRule()
                                 SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
                                 HRule()
