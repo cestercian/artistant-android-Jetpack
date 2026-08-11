@@ -61,6 +61,7 @@ import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistGradient
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistMediaItem
@@ -71,6 +72,7 @@ import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.artist.ArtistPrompts
 import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.domain.artist.ServiceTags
 import kotlinx.coroutines.delay
@@ -268,6 +270,15 @@ private fun EpkEditor(
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
+        item(key = "prompts") {
+            PromptsSection(
+                drafts = state.promptDrafts,
+                canEdit = state.identityHydrated,
+                saving = state.savingPrompts,
+                onAnswer = viewModel::onPromptAnswerChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
+        }
         item(key = "services") {
             ServicesSection(
                 selected = shownServiceTags(state.serviceTags, artist.serviceTags),
@@ -286,8 +297,13 @@ private fun EpkEditor(
                     state.newArtistDiscountPct,
                     artist.newArtistDiscountPct,
                 ),
+                weekendPremiumPct = shownWeekendPremium(
+                    state.weekendPremiumPct,
+                    artist.weekendPremiumPct,
+                ),
                 canEditOffer = state.identityHydrated,
                 onToggleOffer = viewModel::onNewArtistOfferToggled,
+                onStepWeekendPremium = viewModel::onWeekendPremiumStepped,
                 onAdd = viewModel::addPackageRow,
                 onName = viewModel::onPackageName,
                 onDuration = viewModel::onPackageDuration,
@@ -847,10 +863,15 @@ private fun PricingSection(
     fallbackPrice: Int,
     hydrated: Boolean,
     saving: Boolean,
-    /** The offer lives on the artist ROW, so it has its own gate and its own value. */
+    /**
+     * Both modifiers live on the artist ROW, not in the packages table, so they
+     * share the row's gate ([canEditOffer]) rather than the tiers' hydration flag.
+     */
     discountPct: Int,
+    weekendPremiumPct: Int,
     canEditOffer: Boolean,
     onToggleOffer: () -> Unit,
+    onStepWeekendPremium: () -> Unit,
     onAdd: () -> Unit,
     onName: (String, String) -> Unit,
     onDuration: (String, String) -> Unit,
@@ -929,10 +950,19 @@ private fun PricingSection(
                 )
             }
         }
+        // The two price modifiers, adjacent and identically shaped. They are the
+        // only two things on this screen that change what a client pays relative
+        // to the tiers above, so they read as a pair rather than as two unrelated
+        // switches that happen to live in the pricing section.
         NewArtistOfferRow(
             pct = discountPct,
             enabled = canEditOffer,
             onToggle = onToggleOffer,
+        )
+        WeekendPremiumRow(
+            pct = weekendPremiumPct,
+            enabled = canEditOffer,
+            onStep = onStepWeekendPremium,
         )
     }
 }
@@ -1055,6 +1085,115 @@ private fun NewArtistOfferRow(
                 enabled = enabled,
                 onClick = onToggle,
             )
+        }
+    }
+}
+
+/**
+ * The Fri–Sun surcharge, built to match [NewArtistOfferRow] row-for-row.
+ *
+ * Same anatomy, same chip, same sub-line construction — because a client sees
+ * both applied to the same quote, and two differently-shaped controls would imply
+ * one is automatic and the other is not. Neither is: v1 has no payments path, so
+ * both are promises the artist keeps when they quote.
+ *
+ * The chip steps rather than toggles (see `weekendPremiumStepTarget`), so its
+ * label always states the current number — a stepper whose label did not change
+ * would look like a switch that failed to flip.
+ */
+@Composable
+private fun WeekendPremiumRow(
+    pct: Int,
+    enabled: Boolean,
+    onStep: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+        HRule()
+        Row(
+            Modifier.fillMaxWidth().padding(top = space.sm),
+            horizontalArrangement = Arrangement.spacedBy(space.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Weekend premium", style = AppTheme.type.callout, color = colors.ink)
+                Text(
+                    "Shown on your profile. You apply it in your quote.",
+                    style = AppTheme.type.caption,
+                    color = colors.ink3,
+                )
+            }
+            EpkChip(
+                label = weekendPremiumLabel(pct),
+                selected = pct > 0,
+                enabled = enabled,
+                onClick = onStep,
+            )
+        }
+    }
+}
+
+/**
+ * The personality deck — four fixed questions, optional answers.
+ *
+ * Fixed questions rather than artist-authored ones because the question string is
+ * the prompt's identity on the wire: an artist who reworded a question here would
+ * orphan the answer they wrote on the other client, and the profile would show
+ * both. The deck matches the reference client's exactly for that reason.
+ *
+ * Unanswered prompts are still rendered — that is what invites an answer — but
+ * only answered ones persist, so leaving all four blank stores an empty array
+ * rather than four empty rows.
+ */
+@Composable
+private fun PromptsSection(
+    drafts: List<ArtistPrompt>,
+    canEdit: Boolean,
+    saving: Boolean,
+    onAnswer: (String, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
+        EpkSectionHeader(
+            title = "In your words",
+            trailingNote = if (saving) "Saving…" else null,
+        )
+        Text(
+            "Optional. Answer what you like — clients read these before they message.",
+            style = AppTheme.type.footnote,
+            color = colors.ink3,
+        )
+        if (!canEdit) {
+            Text(
+                "Couldn't read your profile, so editing is off — pull to refresh to try again.",
+                style = AppTheme.type.footnote,
+                color = colors.warm,
+            )
+        }
+        Column {
+            HRule()
+            ArtistPrompts.questions.forEach { question ->
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = space.sm),
+                    verticalArrangement = Arrangement.spacedBy(space.xs),
+                ) {
+                    Text(question, style = AppTheme.type.footnote, color = colors.ink3)
+                    EpkField(
+                        value = ArtistPrompts.answerFor(drafts, question),
+                        onValueChange = { onAnswer(question, it) },
+                        placeholder = "Your answer",
+                        enabled = canEdit,
+                        singleLine = false,
+                        minLines = 2,
+                        textStyle = AppTheme.type.body,
+                        contentDescription = question,
+                    )
+                }
+                HRule()
+            }
         }
     }
 }

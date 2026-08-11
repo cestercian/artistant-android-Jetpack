@@ -506,6 +506,57 @@ class EpkLogicTest {
         assertTrue(newArtistDiscountLabel(0).startsWith("$NEW_ARTIST_DISCOUNT_PCT%"))
     }
 
+    // ── Weekend premium ──────────────────────────────────────────────────────
+
+    @Test
+    fun weekendPremium_stepsUpThroughTheLadder() {
+        assertEquals(10, weekendPremiumStepTarget(0))
+        assertEquals(15, weekendPremiumStepTarget(10))
+        assertEquals(30, weekendPremiumStepTarget(25))
+    }
+
+    /** Past the top the cycle has to come back to off, or it cannot be withdrawn. */
+    @Test
+    fun weekendPremium_wrapsToOffAtTheTop() {
+        assertEquals(0, weekendPremiumStepTarget(WEEKEND_PREMIUM_STEPS.last()))
+        assertEquals(0, weekendPremiumStepTarget(90))
+    }
+
+    /**
+     * The reference client offers a continuous slider, so an off-ladder value is
+     * an ordinary thing to read. A tap means "more" — snapping someone's 12% to
+     * off would be a surprising way to lose it.
+     */
+    @Test
+    fun weekendPremium_advancesPastAnOffLadderValueRatherThanResetting() {
+        assertEquals(15, weekendPremiumStepTarget(12))
+        assertEquals(10, weekendPremiumStepTarget(7))
+    }
+
+    @Test
+    fun weekendPremium_showsThePendingTapOverThePublishedValue() {
+        assertEquals(0, shownWeekendPremium(pending = 0, published = 20))
+        assertEquals(20, shownWeekendPremium(pending = null, published = 20))
+    }
+
+    /**
+     * Clamped to the COLUMN's range, not to the step ladder: rounding another
+     * client's value on read would misreport what clients are actually shown.
+     */
+    @Test
+    fun weekendPremium_clampsToTheColumnRangeButKeepsOffLadderValues() {
+        assertEquals(12, shownWeekendPremium(pending = null, published = 12))
+        assertEquals(100, shownWeekendPremium(pending = null, published = 220))
+        assertEquals(0, shownWeekendPremium(pending = null, published = -5))
+    }
+
+    /** Labels what is stored, so the editor cannot disagree with the public page. */
+    @Test
+    fun weekendPremium_labelsWhateverIsActuallyStored() {
+        assertTrue(weekendPremiumLabel(12).startsWith("12%"))
+        assertEquals("Off", weekendPremiumLabel(0))
+    }
+
     // ── Services offered ─────────────────────────────────────────────────────
 
     /** Same optimistic contract as the offer and the palette. */

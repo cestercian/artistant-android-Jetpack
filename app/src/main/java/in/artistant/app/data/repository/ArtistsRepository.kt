@@ -11,13 +11,17 @@ import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.domain.artist.ArtistPrompts
 import `in`.artistant.app.domain.artist.ServiceTags
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -96,6 +100,25 @@ interface ArtistsRepository {
      * that the difference between a findable artist and an invisible one.
      */
     suspend fun updateServiceTags(tags: List<String>)
+
+    /**
+     * `artists.weekend_premium_pct`, clamped to 0–100 to match the column's CHECK.
+     *
+     * Deliberately a sibling of [updateNewArtistDiscount] rather than one combined
+     * "pricing extras" call: they are toggled from two independent controls, and a
+     * combined write would make changing one send the other's value too — the
+     * whole-set hazard, reintroduced for two fields that never needed it.
+     */
+    suspend fun updateWeekendPremium(pct: Int)
+
+    /**
+     * `artists.prompts` — the whole deck, every time.
+     *
+     * Whole-set like [updateServiceTags], and gated the same way: the array
+     * replaces what is stored, so an un-hydrated caller would erase every answer
+     * the artist wrote on another device.
+     */
+    suspend fun updatePrompts(prompts: List<ArtistPrompt>)
 
     /**
      * The three social columns, all three every time.
@@ -249,6 +272,12 @@ class SupabaseArtistsRepository @Inject constructor(
     override suspend fun updateServiceTags(tags: List<String>) =
         patchSelf(ServiceTagsPatch(ServiceTags.normalize(tags)))
 
+    override suspend fun updateWeekendPremium(pct: Int) =
+        patchSelf(WeekendPremiumPatch(pct.coerceIn(0, MAX_PCT)))
+
+    override suspend fun updatePrompts(prompts: List<ArtistPrompt>) =
+        patchSelf(PromptsPatch(ArtistPrompts.encode(prompts)))
+
     override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
         patchSelf(
             SocialLinksPatch(
@@ -399,6 +428,15 @@ internal data class DbArtist(
     // only read, and a missing column must degrade to an empty section, not to a
     // profile that will not open.
     @SerialName("service_tags") val serviceTags: List<String>? = null,
+    @SerialName("weekend_premium_pct") val weekendPremiumPct: Int? = null,
+    /**
+     * Raw jsonb, parsed by [ArtistPrompts.decode] rather than declared as a typed
+     * list. The column has no shape constraint, so a malformed entry written by
+     * another client would make a typed decode throw — and this DTO backs the
+     * profile screen's ONLY read, so that would turn one bad prompt into an
+     * artist page that refuses to open.
+     */
+    @SerialName("prompts") val prompts: JsonElement? = null,
 ) {
     fun toArtist(
         packages: List<ArtistPackage>,
@@ -453,6 +491,11 @@ internal data class DbArtist(
             coverUrl = coverUrl,
             newArtistDiscountPct = newArtistDiscountPct ?: 0,
             serviceTags = serviceTags.orEmpty(),
+            // Clamped on READ as well as on write: the CHECK constraint bounds
+            // what this app can store, but the row predates it and an out-of-range
+            // value would render as "220% weekend premium" on a public profile.
+            weekendPremiumPct = (weekendPremiumPct ?: 0).coerceIn(0, MAX_PCT),
+            prompts = ArtistPrompts.decode(prompts),
             coverGradientIndex = ArtistGradient.clampIndex(coverGradientIndex),
         )
     }
@@ -524,6 +567,23 @@ internal data class NewArtistDiscountPatch(
 @Serializable
 internal data class ServiceTagsPatch(
     @SerialName("service_tags") val serviceTags: List<String>,
+)
+
+@Serializable
+internal data class WeekendPremiumPatch(
+    @SerialName("weekend_premium_pct") val weekendPremiumPct: Int,
+)
+
+/**
+ * The prompt deck as raw JSON.
+ *
+ * `JsonArray` rather than a typed list so exactly one place — [ArtistPrompts] —
+ * owns the `{q,a}` wire keys, and encode stays the literal inverse of the decode
+ * on the read side.
+ */
+@Serializable
+internal data class PromptsPatch(
+    @SerialName("prompts") val prompts: JsonArray,
 )
 
 @Serializable
