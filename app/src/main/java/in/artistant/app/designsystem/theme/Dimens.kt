@@ -110,6 +110,15 @@ data class Size(
      * the same bar reserves this much above its home-indicator inset.
      */
     val ctaBarTailroom: Dp = 28.dp,
+    /**
+     * Width kept clear at each end of a centred bar title, so it can never run
+     * under the controls flanking it.
+     *
+     * Wider than [rowMin] because the widest of those controls is a labelled
+     * pill, not an icon button, and the reservation has to be symmetric — an
+     * asymmetric one centres the title against the bar but not against the eye.
+     */
+    val barTitleReserve: Dp = 76.dp,
 )
 
 /**
