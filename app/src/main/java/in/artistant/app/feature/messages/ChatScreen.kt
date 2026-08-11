@@ -610,14 +610,20 @@ private fun DaySeparatorRow(sentAtEpochMs: Long, nowMs: Long, dateFormat: java.t
 }
 
 /**
- * "Asha Rao · CLIENT · 9:14 am" above the first bubble of an incoming run.
+ * "Asha Rao · Client · 9:14 am" above the first bubble of an incoming run.
  * Marked decorative for a11y: the bubble itself carries the readable content, so
  * a screen reader shouldn't announce the attribution twice.
+ *
+ * The role is NOT upper-cased here, though it is in the participant rows of the
+ * details sheet — and the reference makes the same split. Small caps in the
+ * sheet is a label on a row; inside the transcript the same treatment shouts a
+ * word that is only there to disambiguate who is speaking, and it sat louder
+ * than the sender's own name beside it.
  */
 @Composable
 private fun SenderCaption(name: String, role: String, time: String) {
     Text(
-        "$name · ${role.uppercase()} · $time",
+        "$name · $role · $time",
         style = AppTheme.type.monoSmall,
         color = AppTheme.colors.ink3,
         modifier = Modifier
