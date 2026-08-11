@@ -163,6 +163,41 @@ fun packageRowIsSavable(row: PackageRow): Boolean =
     row.name.isNotBlank() && (parsePrice(row.price) ?: 0) > 0
 
 /**
+ * Why a tier will not publish, or null when it will.
+ *
+ * [packageDrafts] DROPS unsavable rows rather than defaulting them, which is the
+ * right call — a tier auto-named "Set" at ₹0 is a free booking the artist never
+ * offered. But dropping silently is its own bug: the row sits on screen looking
+ * saved, the debounce fires, the write omits it, and the next refresh makes it
+ * vanish. The artist did the work and watched it disappear with no explanation.
+ *
+ * So the rule that decides gets a voice. Same predicate as
+ * [packageRowIsSavable], stated as the thing still missing.
+ */
+fun packageRowBlocker(row: PackageRow): String? {
+    if (packageRowIsSavable(row)) return null
+    val hasName = row.name.isNotBlank()
+    val hasPrice = (parsePrice(row.price) ?: 0) > 0
+    return when {
+        !hasName && !hasPrice -> "Add a name and a price to publish this tier."
+        !hasName -> "Add a name to publish this tier."
+        else -> "Add a price to publish this tier."
+    }
+}
+
+/**
+ * Whether the artist has put something into a row that will not publish.
+ *
+ * Splits "just tapped Add" from "typed half a tier". Both get the note; only the
+ * second gets it in a colour that interrupts, because only the second has
+ * anything to lose. A blank row shouting on the frame it was created reads as an
+ * error the artist caused by pressing the button they were meant to press.
+ */
+fun packageRowIsPartiallyFilled(row: PackageRow): Boolean =
+    !packageRowIsSavable(row) &&
+        (row.name.isNotBlank() || row.duration.isNotBlank() || row.price.isNotBlank())
+
+/**
  * Editor rows → the payload for `replace_packages`.
  *
  * Incomplete rows are DROPPED, not defaulted. The alternative — filling a blank

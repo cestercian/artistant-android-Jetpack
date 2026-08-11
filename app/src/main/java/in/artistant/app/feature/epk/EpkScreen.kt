@@ -988,6 +988,20 @@ private fun PackageEditorRow(
             )
             EpkRowAction("Remove", { onRemove(row.key) }, tone = colors.hot, enabled = enabled)
         }
+        // Why this row is not going anywhere. The save silently omits rows that
+        // are missing a name or a price, so without this the artist watches a
+        // tier they typed disappear on the next refresh and has no way to learn
+        // which half was missing.
+        packageRowBlocker(row)?.let { blocker ->
+            Text(
+                blocker,
+                style = AppTheme.type.caption,
+                // Loud only once there is something to lose. A row that has just
+                // been added is blank by definition, and warning about it on the
+                // frame it appears blames the artist for pressing Add.
+                color = if (packageRowIsPartiallyFilled(row)) colors.warm else colors.ink3,
+            )
+        }
     }
 }
 

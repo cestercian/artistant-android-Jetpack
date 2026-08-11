@@ -417,6 +417,50 @@ class EpkLogicTest {
         assertTrue(bioNeedsSave(draft = "", saved = "Bangalore four-piece."))
     }
 
+    // ── Tier blockers ────────────────────────────────────────────────────────
+
+    /**
+     * The blocker has to agree with the writer exactly. If a row can be savable
+     * and still carry a "won't publish" note — or worse, be silently dropped
+     * while claiming it is fine — the note is misinformation rather than help.
+     */
+    @Test
+    fun tierBlocker_isSilentExactlyWhenTheRowWouldBeSaved() {
+        val cases = listOf(
+            row(),
+            row(name = ""),
+            row(price = ""),
+            row(price = "0"),
+            row(name = "", price = ""),
+        )
+
+        for (case in cases) {
+            assertEquals(packageRowIsSavable(case), packageRowBlocker(case) == null)
+        }
+    }
+
+    @Test
+    fun tierBlocker_namesTheHalfThatIsMissing() {
+        assertTrue(packageRowBlocker(row(price = ""))!!.contains("price"))
+        assertTrue(packageRowBlocker(row(name = ""))!!.contains("name"))
+        assertNull(packageRowBlocker(row()))
+    }
+
+    /** A zero price is a free gig, not a price — it has to read as missing. */
+    @Test
+    fun tierBlocker_treatsAZeroPriceAsNoPrice() {
+        assertTrue(packageRowBlocker(row(price = "0"))!!.contains("price"))
+    }
+
+    @Test
+    fun tierBlocker_separatesAFreshRowFromAHalfTypedOne() {
+        assertFalse(packageRowIsPartiallyFilled(row(name = "", duration = "", price = "")))
+        assertTrue(packageRowIsPartiallyFilled(row(price = "")))
+        assertTrue(packageRowIsPartiallyFilled(row(name = "", duration = "", price = "50000")))
+        // A savable row is never "partially filled" — it is just filled.
+        assertFalse(packageRowIsPartiallyFilled(row()))
+    }
+
     // ── Connected accounts ───────────────────────────────────────────────────
 
     private val linked = SocialDraft(
