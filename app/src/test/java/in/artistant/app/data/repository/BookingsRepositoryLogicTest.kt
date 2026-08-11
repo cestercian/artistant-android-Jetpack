@@ -48,6 +48,15 @@ class BookingsRepositoryLogicTest {
     }
 
     @Test
+    fun create_snapshotsTheTierName_notJustItsIndex() = runTest {
+        // `bookings.package_name` is written on every insert. Carrying it back on
+        // the created row is what lets a booking name its tier without consulting
+        // the artist's (mutable, reorderable) package list.
+        val booking = FakeBookingsRepository().create(draft(), pay)
+        assertEquals("Evening set", booking.packageName)
+    }
+
+    @Test
     fun accept_flipsConfirmed() = runTest {
         val repo = FakeBookingsRepository()
         val created = repo.create(draft(), pay)

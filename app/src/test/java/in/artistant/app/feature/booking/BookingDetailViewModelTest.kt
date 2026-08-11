@@ -325,6 +325,71 @@ class BookingDetailViewModelTest {
         assertNull(model.packageName())
     }
 
+    @Test
+    fun packageName_survivesTheArtistReorderingTheirPackages() = runTest {
+        // The gig was booked as "Evening set" at index 0. The artist has since
+        // reordered their tiers, so index 0 is now "Acoustic hour" — resolving by
+        // index would silently relabel a booking that was already agreed.
+        // `bookings.package_name` is the server's snapshot of the tier at insert
+        // time and must win.
+        val model = BookingDetailViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
+            bookingsRepository = FakeBookingsRepository(
+                listOf(booking().copy(packageIndex = 0, packageName = "Evening set")),
+            ),
+            artistsRepository = FakeArtistsRepository(
+                listOf(
+                    artist(
+                        packages = listOf(
+                            pkg("p-2", name = "Acoustic hour", price = 12_000),
+                            pkg("p-1", name = "Evening set", price = 20_000),
+                        ),
+                    ),
+                ),
+            ),
+            reviewsRepository = FakeReviewsRepository(),
+        )
+
+        assertEquals("Evening set", model.packageName())
+    }
+
+    @Test
+    fun packageName_snapshotWinsEvenWhenTheIndexDangles() = runTest {
+        // The artist deleted tiers after the booking. The index points past the
+        // end, but the snapshot still names the gig honestly — this is the case
+        // that used to drop the Package row entirely.
+        val model = BookingDetailViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
+            bookingsRepository = FakeBookingsRepository(
+                listOf(booking().copy(packageIndex = 7, packageName = "Evening set")),
+            ),
+            artistsRepository = FakeArtistsRepository(
+                listOf(artist(packages = listOf(pkg("p-1", name = "Acoustic hour", price = 12_000)))),
+            ),
+            reviewsRepository = FakeReviewsRepository(),
+        )
+
+        assertEquals("Evening set", model.packageName())
+    }
+
+    @Test
+    fun packageName_fallsBackToTheIndexWhenTheSnapshotIsBlank() = runTest {
+        // A projection that didn't request `package_name` decodes to null; the
+        // index is still the best available answer rather than dropping the row.
+        val model = BookingDetailViewModel(
+            savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
+            bookingsRepository = FakeBookingsRepository(
+                listOf(booking().copy(packageIndex = 0, packageName = "   ")),
+            ),
+            artistsRepository = FakeArtistsRepository(
+                listOf(artist(packages = listOf(pkg("p-1", name = "Evening set", price = 20_000)))),
+            ),
+            reviewsRepository = FakeReviewsRepository(),
+        )
+
+        assertEquals("Evening set", model.packageName())
+    }
+
     // --- action sets (the screen reads these; the matrix itself is covered in
     //     BookingDetailLogicTest) ---------------------------------------------
 

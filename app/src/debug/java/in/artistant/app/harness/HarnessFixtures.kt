@@ -304,6 +304,11 @@ object HarnessFixtures {
             id = id,
             artistId = ARTIST_ID,
             packageIndex = packageIndex,
+            // The server's insert-time snapshot (`package_name`). Seeded here so
+            // the harness exercises the same read path a real booking takes —
+            // the tier name comes off the booking, not off the artist's current
+            // package list.
+            packageName = packages[packageIndex].name,
             date = dayLabel(startMs),
             time = timeLabel(startMs),
             venue = venue,

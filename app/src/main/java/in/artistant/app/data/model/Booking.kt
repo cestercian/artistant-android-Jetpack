@@ -96,6 +96,14 @@ enum class PaymentMethod(val dbValue: String) {
 data class Booking(
     val id: String,
     val artistId: String,
+    /**
+     * Position of the booked tier in the artist's package list AT THE TIME OF
+     * BOOKING — a pointer, not a fact about the gig.
+     *
+     * Kept only as the fallback behind [packageName]: an artist who reorders,
+     * renames or drops a tier leaves every past booking's index pointing at
+     * somebody else's package (or off the end of the list). See [packageName].
+     */
     val packageIndex: Int,
     val date: String,
     val time: String,
@@ -110,6 +118,19 @@ data class Booking(
     val paymentMethod: PaymentMethod,
     val protectionEnabled: Boolean,
     val createdAtEpochMs: Long,
+    /**
+     * The booked tier's name, snapshotted by the server at insert time
+     * (`bookings.package_name`, present since migration 0001 and written on every
+     * create by both clients).
+     *
+     * This is the tier's name as it was WHEN THE GIG WAS BOOKED, which is the
+     * only honest thing to display: resolving `packageIndex` into the artist's
+     * *current* package list means an artist reordering their tiers silently
+     * relabels every booking they have ever taken. Nullable purely so decoding a
+     * projection that didn't ask for the column can't fail — the column itself is
+     * `not null` on the server, so no real row is missing it.
+     */
+    val packageName: String? = null,
     /** Artist-side display name — prefer embed, else 0080 `client_name`. */
     val clientFullName: String? = null,
     val startDatetimeIso: String? = null,
