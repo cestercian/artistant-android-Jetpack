@@ -21,11 +21,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -39,6 +45,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -187,7 +196,11 @@ fun SearchScreen(
                         verticalArrangement = Arrangement.spacedBy(space.md),
                     ) {
                         item {
-                            SortRow(sort = state.sort, onSort = viewModel::setSort)
+                            ResultsHeader(
+                                state = state,
+                                onSort = viewModel::setSort,
+                                onClearFilters = viewModel::clearFilters,
+                            )
                         }
                         items(state.results.chunked(2), key = { row -> row.joinToString { it.id } }) { row ->
                             Row(
@@ -339,16 +352,188 @@ private fun BrowseRail(label: String, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * How many results the header should claim it is showing.
+ *
+ * Internal rather than private so it can be tested: the branching is small but
+ * every branch is one a user sees, and the singular case is the kind of thing
+ * that ships as "1 results".
+ *
+ * The trailing "+" is doing real work — the list pages, so the number on screen
+ * is a floor rather than a total, and a bare "12 results" above a list that
+ * keeps growing as you scroll is simply wrong.
+ */
+internal fun searchResultCountLabel(
+    count: Int,
+    isLoading: Boolean,
+    canLoadMore: Boolean,
+): String {
+    if (isLoading && count == 0) return "Searching…"
+    val base = if (count == 1) "1 result" else "$count results"
+    return if (canLoadMore) "$base+" else base
+}
+
+/**
+ * The strip above the results grid.
+ *
+ * Was three sort chips and nothing else. Three problems with that: the chips
+ * spent the accent on a control rather than on a result, they said nothing
+ * about how many results there are, and there was no way back out of a filter
+ * set from the results themselves — you had to reopen the sheet to clear it.
+ *
+ * Now: a count, the sort as a MENU (one line instead of a rail, and it scales
+ * past three options without becoming a scrolling row of pills), a clear-filters
+ * escape, then the all-inclusive-pricing line and a rule. The pricing line is
+ * the one piece of copy on this screen that pre-empts the question every quote
+ * raises, which is why it sits above the results rather than inside each card.
+ */
 @Composable
-private fun SortRow(sort: SearchSort, onSort: (SearchSort) -> Unit) {
-    val space = AppTheme.dimens.space
-    Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-        SearchSort.entries.forEach { option ->
-            Chip(
-                label = option.label,
-                selected = sort == option,
-                onClick = { onSort(option) },
+private fun ResultsHeader(
+    state: SearchUiState,
+    onSort: (SearchSort) -> Unit,
+    onClearFilters: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(space.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = searchResultCountLabel(
+                    count = state.results.size,
+                    isLoading = state.isLoading,
+                    canLoadMore = state.canLoadMore,
+                ),
+                style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.ink3,
             )
+            Spacer(Modifier.weight(1f))
+            // Hidden while a text query is live: the server ranks those by
+            // relevance, so offering a sort would promise an ordering the
+            // results are not actually in.
+            if (state.query.isBlank()) {
+                SortMenu(sort = state.sort, onSort = onSort)
+            }
+            // Gated on `activeFilterCount`, which is exactly the set
+            // `clearFilters()` clears. Gating on anything wider — the category
+            // rails, say — would show the control in states where tapping it
+            // visibly does nothing.
+            if (state.activeFilterCount > 0) {
+                Text(
+                    text = "Clear filters",
+                    style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.brand,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onClearFilters)
+                        .padding(horizontal = space.xs, vertical = space.xs),
+                )
+            }
+        }
+        // Only over actual results — on an empty search it would be reassurance
+        // about nothing.
+        if (state.results.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Verified,
+                    contentDescription = null,
+                    tint = colors.ink3,
+                    modifier = Modifier.size(dimens.size.iconSm),
+                )
+                Text(
+                    text = "Quotes are all-inclusive — no hidden fees.",
+                    style = AppTheme.type.caption,
+                    color = colors.ink3,
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(dimens.size.hairline)
+                    .background(colors.lineSoft),
+            )
+        }
+    }
+}
+
+/**
+ * Sort as a label that opens a menu, mirroring the reference.
+ *
+ * A menu rather than the old chip rail because sort is a single choice out of a
+ * set, and a rail of pills says "these are filters you can combine". It also
+ * keeps the accent off the strip: the selected sort is named in the label, so
+ * nothing here has to be lime to show which one is on.
+ */
+@Composable
+private fun SortMenu(sort: SearchSort, onSort: (SearchSort) -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .clickable { open = true }
+                .padding(horizontal = space.xs, vertical = space.xs)
+                .semantics { contentDescription = "Sort, ${sort.label}" },
+            horizontalArrangement = Arrangement.spacedBy(space.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.SwapVert,
+                contentDescription = null,
+                tint = colors.ink2,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
+            Text(
+                text = sort.label,
+                style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.ink2,
+            )
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            containerColor = colors.bgCard,
+        ) {
+            SearchSort.entries.forEach { option ->
+                val selected = option == sort
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            option.label,
+                            style = AppTheme.type.callout,
+                            color = if (selected) colors.ink else colors.ink2,
+                        )
+                    },
+                    // A tick on the live option rather than a highlight: the menu
+                    // is the only place all three are visible at once, so it is
+                    // the only place that has to say which one is on.
+                    leadingIcon = {
+                        if (selected) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = colors.brand,
+                                modifier = Modifier.size(dimens.size.iconMd),
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSort(option)
+                        open = false
+                    },
+                )
+            }
         }
     }
 }
