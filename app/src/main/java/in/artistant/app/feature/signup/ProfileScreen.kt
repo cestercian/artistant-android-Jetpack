@@ -19,9 +19,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -83,7 +82,17 @@ fun ProfileScreen(
                     .clickable(onClick = onBack).semantics { testTag = "profile.back"; contentDescription = "Back" },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Close, contentDescription = null, tint = colors.ink2, modifier = Modifier.size(AppTheme.dimens.size.iconSm))
+                // A chevron, not a cross. The control goes BACK a signup step —
+                // it does not close or abandon the flow — and a cross is the
+                // universal "dismiss this whole thing" glyph. Same glyph the
+                // other signup steps use (`SignupBackButton`), so the affordance
+                // does not change meaning halfway through the flow.
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = null,
+                    tint = colors.ink2,
+                    modifier = Modifier.size(AppTheme.dimens.size.iconLg),
+                )
             }
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -118,7 +127,7 @@ fun ProfileScreen(
                     withStyle(SpanStyle(color = colors.brand, fontStyle = FontStyle.Italic)) { append("in") }
                     withStyle(SpanStyle(color = colors.ink)) { append(".") }
                 },
-                style = AppTheme.type.title.copy(fontSize = 44.sp, fontWeight = FontWeight.Bold),
+                style = AppTheme.type.signupDisplay,
             )
             Spacer(Modifier.height(space.lg))
             Text("This is what artists see when you book.", style = AppTheme.type.footnote, color = colors.ink3)
@@ -158,7 +167,10 @@ fun ProfileScreen(
                     ) {
                         Text(
                             state.city.ifEmpty { "Choose your city" },
-                            style = AppTheme.type.body.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
+                            // Same step as a field's typed line: the city row is
+                            // one of the three inputs, and it reading a size
+                            // below the other two made it look like a caption.
+                            style = AppTheme.type.headline,
                             color = if (state.city.isEmpty()) colors.ink4 else colors.ink,
                             modifier = Modifier.weight(1f),
                         )

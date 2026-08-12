@@ -145,6 +145,26 @@ data class AppType(
         fontFamily = SansFamily, fontSize = 34.sp,
         fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp,
     ),
+    /**
+     * The one oversized sans headline in the product — the signup profile step's
+     * "A few words, then we're *in*."
+     *
+     * Its own step above [pageTitle] because it is doing a different job: that
+     * one names a screen you have arrived at, this one is the whole screen. It
+     * is the largest type the app sets, and it is SANS rather than the editorial
+     * serif — the reference deliberately switches face here, so the moment reads
+     * as a statement rather than as another editorial header.
+     *
+     * 50sp with -1 tracking, both taken from the reference. The size is the point
+     * (it was set at 44 with no tracking, which read a full ramp step quieter),
+     * and the negative tracking is what stops a headline this large from
+     * looking gappy — at display sizes the default sidebearings are tuned for
+     * body copy and show as holes between letters.
+     */
+    val signupDisplay: TextStyle = TextStyle(
+        fontFamily = SansFamily, fontSize = 50.sp,
+        fontWeight = FontWeight.Bold, letterSpacing = (-1).sp,
+    ),
     val headline: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
     val body: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 16.sp),
     val callout: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 15.sp, fontWeight = FontWeight.Medium),
