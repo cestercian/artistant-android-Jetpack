@@ -49,9 +49,22 @@ data class ArtistMediaItem(
     val width: Int? = null,
     val height: Int? = null,
     val durationSeconds: Double? = null,
+    /**
+     * A ready-made URL for this item, used instead of deriving one from
+     * [storagePath].
+     *
+     * Always null for a row that came off the server — that URL is a function of
+     * the bucket and the path, and nothing should be able to override it. The
+     * field exists for the repositories that are NOT Supabase-backed (the debug
+     * harness, test doubles) and can hand back an address directly, such as a
+     * local file. Without it, an item's URL is unavoidably an https address at
+     * the configured project, which an offline fixture can never serve.
+     */
+    val directUrl: String? = null,
 ) {
     val publicUrl: String?
         get() {
+            directUrl?.let { return it }
             val base = AppEnvironment.supabaseUrl.trimEnd('/')
             if (base.isBlank() || storagePath.isBlank()) return null
             return "$base/storage/v1/object/public/$BUCKET/$storagePath"

@@ -194,7 +194,11 @@ private fun PackageSection(
             // `popular = true` on every package, and a badge every row shares
             // distinguishes nothing.
             val badgesMeanSomething = PackagePricing.popularBadgeIsMeaningful(packages)
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+            // `optionCardGap`, not `space.md`: the cards in a picker are one
+            // block of choices, and the reference stacks them two units tighter
+            // than the ramp's nearest step. Paired with `optionCardPad` — the
+            // two together are what the reference's row pitch is made of.
+            Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.size.optionCardGap)) {
                 packages.forEachIndexed { index, pkg ->
                     PackageOptionRow(
                         pkg = pkg,

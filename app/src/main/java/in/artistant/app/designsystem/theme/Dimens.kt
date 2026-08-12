@@ -116,6 +116,26 @@ data class Size(
     /** Package-row radio: 20dp ring, 10dp filled core. */
     val radio: Dp = 20.dp,
     val radioCore: Dp = 10.dp,
+    /**
+     * A package option card: the inset inside its rim, and the gap between two
+     * stacked cards.
+     *
+     * Both are deliberately off the [Space] ramp, which is why they live here
+     * rather than as `space.lg` / `space.md` — same reasoning as
+     * [ctaBarTailroom], and the same provenance: measured off the reference
+     * build, where a matched-content package list (identical tier names, an
+     * identical one-line "includes" string) renders a 45-unit row pitch that
+     * `lg`/`md` overshoot by 6 and that `md`/`sm` would undershoot by the same
+     * amount. There is no ramp step between them, so a picker whose rows are
+     * meant to read as ONE dense block of choices — rather than as four
+     * separately-padded cards — has nowhere on the ramp to land.
+     *
+     * Scoped to this one component on purpose. Anything else that wants a card
+     * inset should still take `space.lg`; these two exist to hold a measurement,
+     * not to open a second spacing scale.
+     */
+    val optionCardPad: Dp = 14.dp,
+    val optionCardGap: Dp = 10.dp,
     /** Full-width pinned CTA (taller than `controlMin` — it is the only action). */
     val ctaTall: Dp = 52.dp,
     /**
