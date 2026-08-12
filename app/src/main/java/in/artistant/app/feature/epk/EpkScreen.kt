@@ -233,9 +233,44 @@ private fun EpkEditor(
         contentPadding = PaddingValues(bottom = dimens.hero.scrollTailroom),
         verticalArrangement = Arrangement.spacedBy(space.xl),
     ) {
+        // ── Section order ────────────────────────────────────────────────
+        // Cover, then ABOUT -> WHAT YOU OFFER -> PERSONALITY -> PHOTOS ->
+        // MUSIC SAMPLES -> CONNECTED ACCOUNTS -> PRICING TIERS -> TECH RIDER ->
+        // LINKS -> SHARE LINK, matching the reference client.
+        //
+        // The order is an argument, not a filing system, and it had drifted into
+        // the wrong one. Photos led, so the screen opened by asking for assets
+        // before it had asked who the artist is; pricing sat directly under the
+        // service tags, which reads as "here is what you do, now price it" when
+        // the tiers are actually priced against the whole kit; and connected
+        // accounts had fallen past the tech rider, stranding the proof-of-reach
+        // section among the logistics.
+        //
+        // Reference order goes identity -> offer -> voice -> evidence ->
+        // commercials -> logistics -> distribution, which is also the order an
+        // artist can actually answer in.
+        //
+        // Keys are semantic strings, so reordering keeps each item's identity
+        // and any state saved against it.
+
+        // Errors and save status ride ABOVE the cover — the reference puts its
+        // banners there, and a failure notice below the fold is a failure notice
+        // nobody reads. (The x/7 completeness counter inside this block has no
+        // reference equivalent; it is ours, and this is the one place it can sit
+        // without displacing a section.)
+        item(key = "status") {
+            StatusBlock(
+                state = state,
+                onRetry = viewModel::refresh,
+                onDismissSaveError = viewModel::dismissSaveError,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
+        }
         item(key = "cover") {
             CoverSection(
                 artist = artist,
+                // Reads the photos list, not the photos SECTION, so this is
+                // unaffected by where that section now sits.
                 coverUrl = state.photos.firstOrNull()?.publicUrl ?: artist.coverUrl,
                 selectedGradient = shownCoverGradient(state.coverGradientIndex, artist.coverGradientIndex),
                 canEdit = state.identityHydrated,
@@ -243,11 +278,28 @@ private fun EpkEditor(
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
-        item(key = "status") {
-            StatusBlock(
-                state = state,
-                onRetry = viewModel::refresh,
-                onDismissSaveError = viewModel::dismissSaveError,
+        item(key = "about") {
+            AboutSection(
+                bio = state.bioDraft,
+                canEdit = state.identityHydrated,
+                onBioChanged = viewModel::onBioChanged,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
+        }
+        item(key = "services") {
+            ServicesSection(
+                selected = shownServiceTags(state.serviceTags, artist.serviceTags),
+                canEdit = state.identityHydrated,
+                onToggle = viewModel::onServiceTagToggled,
+                modifier = Modifier.padding(horizontal = space.lg),
+            )
+        }
+        item(key = "prompts") {
+            PromptsSection(
+                drafts = state.promptDrafts,
+                canEdit = state.identityHydrated,
+                saving = state.savingPrompts,
+                onAnswer = viewModel::onPromptAnswerChanged,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
@@ -262,28 +314,20 @@ private fun EpkEditor(
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
-        item(key = "about") {
-            AboutSection(
-                bio = state.bioDraft,
-                canEdit = state.identityHydrated,
-                onBioChanged = viewModel::onBioChanged,
+        item(key = "samples") {
+            SamplesSection(
+                samples = state.samples,
+                onAdd = { onPickAudio(arrayOf("audio/*")) },
+                onDelete = viewModel::deleteSample,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
-        item(key = "prompts") {
-            PromptsSection(
-                drafts = state.promptDrafts,
+        item(key = "socials") {
+            SocialSection(
+                draft = state.socialDraft,
                 canEdit = state.identityHydrated,
-                saving = state.savingPrompts,
-                onAnswer = viewModel::onPromptAnswerChanged,
-                modifier = Modifier.padding(horizontal = space.lg),
-            )
-        }
-        item(key = "services") {
-            ServicesSection(
-                selected = shownServiceTags(state.serviceTags, artist.serviceTags),
-                canEdit = state.identityHydrated,
-                onToggle = viewModel::onServiceTagToggled,
+                saving = state.savingSocials,
+                onChanged = viewModel::onSocialChanged,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
@@ -313,14 +357,6 @@ private fun EpkEditor(
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
-        item(key = "samples") {
-            SamplesSection(
-                samples = state.samples,
-                onAdd = { onPickAudio(arrayOf("audio/*")) },
-                onDelete = viewModel::deleteSample,
-                modifier = Modifier.padding(horizontal = space.lg),
-            )
-        }
         item(key = "tech") {
             TechSection(
                 items = state.techItems,
@@ -330,15 +366,6 @@ private fun EpkEditor(
                 onToggle = viewModel::toggleTechPreset,
                 onDraft = viewModel::onTechDraft,
                 onAddDraft = viewModel::addTechDraft,
-                modifier = Modifier.padding(horizontal = space.lg),
-            )
-        }
-        item(key = "socials") {
-            SocialSection(
-                draft = state.socialDraft,
-                canEdit = state.identityHydrated,
-                saving = state.savingSocials,
-                onChanged = viewModel::onSocialChanged,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
@@ -1158,7 +1185,10 @@ private fun PromptsSection(
     val space = AppTheme.dimens.space
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
         EpkSectionHeader(
-            title = "In your words",
+            // "Personality", not "In your words" — the deck already matches the
+            // reference question-for-question, and the header was the last piece
+            // of it still saying something different.
+            title = "Personality",
             trailingNote = if (saving) "Saving…" else null,
         )
         Text(
