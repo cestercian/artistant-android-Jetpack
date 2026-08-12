@@ -30,13 +30,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.common.util.formatInrShort
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
-import `in`.artistant.app.common.util.formatInrShort
 
 /**
  * Photo-backed artist card — port of iOS `ArtistTile`.
@@ -83,12 +82,29 @@ fun ArtistTile(
                 .fillMaxSize()
                 .padding(space.md),
         ) {
+            // Same unconstrained-SpaceBetween shape the price row below had, and it
+            // failed the same way at rail width: Row measures in order, so a long
+            // category ("Indie Band") took what it wanted and the score capsule was
+            // measured against the remainder — a few dp short of its own content,
+            // which rendered the badge as a sliced "8|2".
+            //
+            // The capsule is the load-bearing half here (it IS the Bookability
+            // score, the hero metric), so it keeps its intrinsic width and the
+            // category yields, mirroring the iOS HStack where the pill truncates
+            // and the capsule stays whole. Only the rail tile is tight enough to
+            // spend the ellipsis; the wider search-grid tile still shows the
+            // category in full.
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Pill(text = artist.category, tone = PillTone.Neutral)
+                Pill(
+                    text = artist.category,
+                    tone = PillTone.Neutral,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(space.sm))
                 ScoreCapsule(score = artist.score, gigs = artist.gigs)
             }
             // Flex spacer so the name strip sits at the bottom.
@@ -214,9 +230,10 @@ private fun ScoreCapsule(score: Int, gigs: Int) {
                 .clip(CircleShape)
                 .background(tierColor(tier, colors)),
         )
-        // softWrap = false: the capsule is sized by its content, and without this a
-        // two-digit score could break onto a second line inside the pill on the
-        // narrowest tiles — the badge is never wide enough to justify wrapping.
+        // softWrap = false / maxLines = 1 keep the number on one line, but they are
+        // only a guard: they cannot MAKE room, and on their own they turned the old
+        // two-line "8/2" break into a mid-glyph clip instead. What actually keeps
+        // the digits whole is the caller giving this capsule its intrinsic width.
         Text(
             text = label,
             style = AppTheme.type.monoSmall,

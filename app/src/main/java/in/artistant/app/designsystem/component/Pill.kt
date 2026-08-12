@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.data.model.BookingStatus
 
@@ -42,6 +43,13 @@ fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.
         text = text,
         style = AppTheme.type.caption,
         color = fg,
+        // A capsule that breaks onto a second line is not a capsule — it is a
+        // lozenge with a fold in it. Every label we put in one is a chip-length
+        // noun (a category, a status, a weekday, a score), so when a caller hands
+        // the pill less room than it wants the honest answer is to elide, not to
+        // grow taller than the row it sits in.
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = modifier
             .clip(CircleShape)
             .background(bg)
