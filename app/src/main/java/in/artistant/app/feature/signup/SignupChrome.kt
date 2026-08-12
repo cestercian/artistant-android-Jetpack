@@ -15,26 +15,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -111,7 +109,8 @@ fun SignupInputRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(space.sm)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -122,37 +121,48 @@ fun SignupInputRow(
             )
             trailing?.invoke()
         }
-        // The typed line uses a transparent-container TextField so only our 1dp rule shows —
-        // Material's default filled/outlined chrome would break the hairline aesthetic.
         val ruleColor = underline ?: if (value.isEmpty()) colors.line else colors.brand.copy(alpha = 0.4f)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (prefix != null) {
-                Text(prefix, style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold), color = colors.ink3)
-                Spacer(Modifier.width(6.dp))
+        val typed = AppTheme.type.headline.copy(color = colors.ink)
+        // `BasicTextField`, not Material's `TextField`, for the same reason
+        // `EpkField` gives: Material ships a container fill, an indicator line
+        // AND a 56dp minimum height. The first two can be recoloured to
+        // transparent — the minimum cannot, and it is invisible, so a field
+        // whose ink is one 18sp line still reserved 56dp of column. Across four
+        // rows that was the whole difference between this step and the
+        // reference's: ~28dp of dead air per field, none of it drawn.
+        //
+        // The rule is an overlay on the typed line rather than a third child of
+        // the spaced Column, which is what it used to be — as a sibling it
+        // collected the Column's own gap and put 8dp between a field and its
+        // own underline.
+        Box(contentAlignment = Alignment.BottomStart) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = space.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (prefix != null) {
+                    Text(prefix, style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold), color = colors.ink3)
+                    Spacer(Modifier.width(space.sm))
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = typed,
+                    cursorBrush = SolidColor(colors.brand),
+                    visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (value.isEmpty()) Text(placeholder, style = typed, color = colors.ink4)
+                            inner()
+                        }
+                    },
+                )
             }
-            TextField(
-                value = value,
-                onValueChange = onValueChange,
-                placeholder = { Text(placeholder, color = colors.ink4) },
-                singleLine = true,
-                textStyle = LocalTextStyle.current.copy(
-                    color = colors.ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                ),
-                visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    cursorColor = colors.brand,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f),
-            )
+            Box(Modifier.fillMaxWidth().height(dimens.size.hairline).background(ruleColor))
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(ruleColor))
     }
 }
 
