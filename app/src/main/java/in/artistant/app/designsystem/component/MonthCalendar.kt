@@ -18,10 +18,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,6 +101,17 @@ fun MonthCalendarHeader(
     modifier: Modifier = Modifier,
     onPrevMonth: (() -> Unit)? = null,
     onNextMonth: (() -> Unit)? = null,
+    /**
+     * Jump straight to a month of the DISPLAYED year (0-based, `Calendar.MONTH`).
+     *
+     * Null keeps the month name inert, which is what the plain group-header use
+     * below the grid wants. Wired, the name becomes a menu — because stepping is
+     * fine for "next month" and useless for "March": from August that is five
+     * taps, and the steppers give no indication they would ever get you there.
+     * The steppers stay regardless; they are the only control that crosses a
+     * year boundary, since picking a month holds the year fixed.
+     */
+    onSelectMonth: ((Int) -> Unit)? = null,
 ) {
     val space = AppTheme.dimens.space
     // "August 2026" arrives as one string, but it is TWO pieces of information
@@ -117,11 +136,15 @@ fun MonthCalendarHeader(
         // centring two wildly different type sizes floats the small one.
         verticalAlignment = Alignment.Bottom,
     ) {
-        Text(
-            text = month,
-            style = AppTheme.type.displayTitle,
-            color = AppTheme.colors.ink,
-        )
+        if (onSelectMonth != null) {
+            MonthMenu(monthName = month, onSelectMonth = onSelectMonth)
+        } else {
+            Text(
+                text = month,
+                style = AppTheme.type.displayTitle,
+                color = AppTheme.colors.ink,
+            )
+        }
         if (isYear) {
             Spacer(Modifier.width(space.sm))
             Text(
@@ -139,6 +162,87 @@ fun MonthCalendarHeader(
         }
         onNextMonth?.let {
             MonthStepButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next month", it)
+        }
+    }
+}
+
+/**
+ * The month name as a dropdown trigger: the name at the display step with a
+ * small caret after it, opening a list of all twelve.
+ *
+ * The caret is deliberately quiet (`ink3`, one caption step) — the month name is
+ * the calendar's masthead and the affordance should hang off it, not compete
+ * with it. A tick marks the live month so the open menu still answers "where am
+ * I" without the header behind it.
+ *
+ * Picking holds the YEAR fixed, matching the reference. That is why this never
+ * replaces the steppers: they remain the only way across a year boundary, which
+ * is exactly the case a December gig makes.
+ */
+@Composable
+private fun MonthMenu(monthName: String, onSelectMonth: (Int) -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    var open by remember { mutableStateOf(false) }
+    // `getDisplayNames` rather than a hardcoded list — the grid's own labels are
+    // already locale-formatted, and a menu of English months under a localised
+    // header is the kind of seam nobody notices until it ships.
+    val months = remember {
+        val symbols = java.text.DateFormatSymbols.getInstance(Locale.getDefault())
+        symbols.months.filter { it.isNotBlank() }
+    }
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(dimens.radii.sm))
+                .clickable { open = true }
+                .semantics { contentDescription = "$monthName, choose month" },
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(text = monthName, style = AppTheme.type.displayTitle, color = colors.ink)
+            Icon(
+                Icons.Filled.ArrowDropDown,
+                contentDescription = null,
+                tint = colors.ink3,
+                modifier = Modifier
+                    .size(dimens.size.iconLg)
+                    // Sits on the name's baseline rather than under its
+                    // descender, same nudge the year token takes.
+                    .padding(bottom = space.sm),
+            )
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            containerColor = colors.bgCard,
+        ) {
+            months.forEachIndexed { index, name ->
+                val selected = name.equals(monthName, ignoreCase = true)
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            name,
+                            style = AppTheme.type.callout,
+                            color = if (selected) colors.ink else colors.ink2,
+                        )
+                    },
+                    leadingIcon = {
+                        if (selected) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = colors.brand,
+                                modifier = Modifier.size(dimens.size.iconMd),
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSelectMonth(index)
+                        open = false
+                    },
+                )
+            }
         }
     }
 }

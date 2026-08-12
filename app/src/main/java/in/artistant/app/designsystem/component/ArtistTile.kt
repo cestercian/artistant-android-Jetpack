@@ -1,6 +1,7 @@
 package `in`.artistant.app.designsystem.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -12,7 +13,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +35,7 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
+import `in`.artistant.app.domain.score.tierColor
 
 /**
  * Photo-backed artist card — port of iOS `ArtistTile`.
@@ -151,20 +155,45 @@ private fun ArtistCoverBackground(artist: Artist) {
     }
 }
 
+/**
+ * The score badge that rides on the tile's cover photo.
+ *
+ * A dark translucent capsule with a TIER-COLOURED DOT, not a solid brand fill.
+ * Two reasons, and both are why the reference draws it this way:
+ *
+ *  - Accent is one signal per screen. A grid of twelve tiles each carrying a
+ *    solid lime chip spends the accent twelve times over and it stops meaning
+ *    anything — least of all "this artist scores well", since a 61 and a 98 got
+ *    the same lime.
+ *  - The dot is where the tier actually lives. Filling the whole capsule with
+ *    the accent throws away the one channel that separates Elite from Rising,
+ *    so the badge could only ever say "here is a number".
+ *
+ * The fill is the page background at 70% rather than an opaque swatch: it sits
+ * on artwork, and a solid chip reads as a sticker stuck onto the photo where a
+ * scrim reads as part of it.
+ */
 @Composable
 private fun ScoreCapsule(score: Int, gigs: Int) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     val tier = ScoreBands.tier(score, gigs)
     val label = if (tier == ScoreTier.New) "New" else score.toString()
-    Text(
-        text = label,
-        style = AppTheme.type.caption,
-        color = AppTheme.colors.brandInk,
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-            .background(AppTheme.colors.brand)
-            .padding(
-                horizontal = AppTheme.dimens.space.sm,
-                vertical = AppTheme.dimens.space.xs,
-            ),
-    )
+            .clip(CircleShape)
+            .background(colors.bg.copy(alpha = 0.7f))
+            .border(dimens.size.hairline, colors.glassLine, CircleShape)
+            .padding(horizontal = dimens.space.sm, vertical = dimens.space.xs),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(dimens.size.dot)
+                .clip(CircleShape)
+                .background(tierColor(tier, colors)),
+        )
+        Text(text = label, style = AppTheme.type.monoSmall, color = Color.White)
+    }
 }

@@ -4,11 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.repository.ReportReasons
@@ -117,6 +120,9 @@ fun ThreadDetailsSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.bg,
     ) {
+        // Outside the scrolling Column on purpose: it is the sheet's bar, and a
+        // title that scrolls away takes the only dismiss control with it.
+        SheetHeader(title = "Details", onDone = onDismiss)
         Column(
             Modifier
                 .fillMaxWidth()
@@ -125,8 +131,6 @@ fun ThreadDetailsSheet(
                 .padding(bottom = space.xxl)
                 .semantics { testTag = "chat.detailsSheet" },
         ) {
-            Text("Details", style = AppTheme.type.headline, color = colors.ink)
-
             SectionHeader("Gig details")
             GigCard(context = context, onBookingClick = onBookingClick)
 
@@ -522,6 +526,51 @@ private fun ReportReceipt() {
             style = AppTheme.type.footnote,
             color = colors.ink3,
         )
+    }
+}
+
+/**
+ * The sheet's bar: title centred, an explicit Done at the trailing edge.
+ *
+ * The drag handle alone was the only way out of here, and a grabber is a hint
+ * about a gesture rather than a control — it is discoverable if you already know
+ * the pattern and invisible if you don't. It stays (the reference shows one too);
+ * this just adds the affordance that names the action.
+ *
+ * Centred rather than left-aligned because with something at one end and nothing
+ * at the other, a left title makes the bar look like it lost a control. The Done
+ * target is padded out to the row minimum — the word is short and the glyph-free
+ * hit area would otherwise be about half a thumb.
+ */
+@Composable
+private fun SheetHeader(title: String, onDone: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = space.xl)
+            .padding(bottom = space.sm),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(title, style = AppTheme.type.headline, color = colors.ink)
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .clip(CircleShape)
+                .clickable(onClick = onDone)
+                .heightIn(min = dimens.size.rowMin)
+                .padding(horizontal = space.sm)
+                .semantics { contentDescription = "Done" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Done",
+                style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.brand,
+            )
+        }
     }
 }
 
