@@ -28,6 +28,7 @@ import `in`.artistant.app.designsystem.component.MonthDayGrid
 import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
+import `in`.artistant.app.designsystem.component.selectedDayLabel
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.component.bookingStatusTone
@@ -112,6 +113,20 @@ fun BookingsScreen(
                         },
                     )
                     Spacer(Modifier.height(space.lg))
+                    // Picking a day filters the list, and until now nothing said
+                    // so — the reference names the selected day above its
+                    // schedule, and that heading is what tells you a short list
+                    // is short because you filtered it. It also gives the empty
+                    // case a date to be empty about.
+                    selectedDay?.let { day ->
+                        Text(
+                            selectedDayLabel(year, month, day),
+                            style = AppTheme.type.headline,
+                            color = colors.ink,
+                            modifier = Modifier.padding(horizontal = space.lg),
+                        )
+                        Spacer(Modifier.height(space.sm))
+                    }
                     if (selectedDay != null && filtered.isEmpty()) {
                         Text(
                             "No bookings on this day",

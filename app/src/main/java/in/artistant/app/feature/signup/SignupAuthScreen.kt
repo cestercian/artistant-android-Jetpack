@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Autorenew
@@ -88,7 +89,7 @@ fun SignupAuthScreen(
         )
 
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = space.xl).padding(bottom = space.xxl),
+            modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = space.xl).padding(bottom = space.xxl),
         ) {
             if (mode == SignupMode.Signup) {
                 SignupProgressDots(bar = ProgressBar(1, 5), modifier = Modifier.padding(top = space.sm))

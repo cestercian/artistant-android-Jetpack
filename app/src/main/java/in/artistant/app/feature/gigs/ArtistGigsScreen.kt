@@ -27,6 +27,7 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
 import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.selectedDayLabel
 import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.dayOfMonthInMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
@@ -131,6 +132,20 @@ fun ArtistGigsScreen(
                             state.items.filter {
                                 dayOfMonthInMonth(it.booking.date, year, month) == selectedDay
                             }
+                        }
+                        // Same as the client calendar: a day tap filters, so the
+                        // day it filtered to has to be on screen. The reference
+                        // heads the selected day's schedule with its full date
+                        // and that heading is the only "you are filtered" signal
+                        // either app gives.
+                        selectedDay?.let { day ->
+                            Text(
+                                selectedDayLabel(year, month, day),
+                                style = AppTheme.type.headline,
+                                color = colors.ink,
+                                modifier = Modifier.padding(horizontal = space.lg),
+                            )
+                            Spacer(Modifier.height(space.sm))
                         }
                         if (selectedRows != null && selectedRows.isEmpty()) {
                             Text(
