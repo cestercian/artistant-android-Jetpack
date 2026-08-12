@@ -60,6 +60,12 @@ fun ArtistGigsScreen(
         displayedMonth = displayedMonth.stepped(delta)
         selectedDay = null
     }
+    // Same clear-the-selection rule as stepping. The year is held: the menu
+    // offers months, and the steppers stay the only way across a year boundary.
+    val pickMonth: (Int) -> Unit = { picked ->
+        displayedMonth = displayedMonth.copy(month = picked)
+        selectedDay = null
+    }
     val busyDays = remember(state.items, year, month) {
         state.items.mapNotNull { dayOfMonthInMonth(it.booking.date, year, month) }.toSet()
     }
@@ -106,6 +112,7 @@ fun ArtistGigsScreen(
                             monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
                             onPrevMonth = { stepMonth(-1) },
                             onNextMonth = { stepMonth(1) },
+                            onSelectMonth = pickMonth,
                         )
                         MonthDayGrid(
                             year = year,

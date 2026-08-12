@@ -57,6 +57,12 @@ fun BookingsScreen(
         displayedMonth = displayedMonth.stepped(delta)
         selectedDay = null
     }
+    // Same clear-the-selection rule as stepping, for the same reason. The year is
+    // held: the menu offers months, and the steppers remain the way across a year.
+    val pickMonth: (Int) -> Unit = { picked ->
+        displayedMonth = displayedMonth.copy(month = picked)
+        selectedDay = null
+    }
     val busyDays = remember(state.items, year, month) {
         state.items.mapNotNull { dayOfMonthInMonth(it.booking.date, year, month) }.toSet()
     }
@@ -102,6 +108,7 @@ fun BookingsScreen(
                         monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
                         onPrevMonth = { stepMonth(-1) },
                         onNextMonth = { stepMonth(1) },
+                        onSelectMonth = pickMonth,
                     )
                     MonthDayGrid(
                         year = year,
