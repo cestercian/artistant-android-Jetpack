@@ -1,16 +1,19 @@
 package `in`.artistant.app.harness
 
+import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.ArtistLinksRepository
+import `in`.artistant.app.data.repository.ArtistMediaAspect
+import `in`.artistant.app.data.repository.ArtistMediaItem
+import `in`.artistant.app.data.repository.ArtistMediaKind
 import `in`.artistant.app.data.repository.ArtistMediaRepository
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.FakeAccountRepository
 import `in`.artistant.app.data.repository.FakeArtistLinksRepository
-import `in`.artistant.app.data.repository.FakeArtistMediaRepository
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.data.repository.FakePackagesRepository
@@ -70,6 +73,22 @@ object HarnessRepositories {
      */
     private fun seedBlocking(block: suspend () -> Unit) = runBlocking { block() }
 
+    /**
+     * The roster with its generated cover art attached — the list every
+     * artist-shaped fake is seeded from.
+     *
+     * Applied here rather than baked into [HarnessFixtures] so that file stays a
+     * pure, Android-free data object: the URIs are device paths that only exist
+     * once [HarnessCoverArt] has run, and a data fixture that depends on a
+     * `Context` is a fixture that can't be read from a unit test. `by lazy` also
+     * settles the ordering — nothing touches this until DI provisions a
+     * repository, which is after the installer's pre-create hook.
+     */
+    private val roster: List<Artist> by lazy { HarnessCoverArt.withCovers(HarnessFixtures.roster) }
+
+    /** The fixture artist, cover and all. [HarnessFixtures.roster] leads with it. */
+    private val coveredArtist: Artist get() = roster.first()
+
     // --- Users: the seam the auth bypass depends on ---------------------------------------
     // RootViewModel asks this for the signed-in profile the moment the synthetic session
     // lands. Returning a COMPLETE profile is what moves the gate from Onboarding to the tab
@@ -86,7 +105,7 @@ object HarnessRepositories {
         // seedFull (not the constructor's plain seed) marks the row HYDRATED, so
         // `fetchArtist` returns the full profile — packages, samples, tech rider and all —
         // instead of a tile-shaped partial that would render a half-empty EPK.
-        FakeArtistsRepository().apply { seedFull(listOf(HarnessFixtures.artist)) }
+        FakeArtistsRepository().apply { seedFull(listOf(coveredArtist)) }
     }
 
     private val bookingsImpl: FakeBookingsRepository by lazy {
@@ -131,10 +150,13 @@ object HarnessRepositories {
         }
     }
 
-    // The media fake starts empty on purpose: seeding it would need real uploaded files, and
-    // an empty gallery is a legitimate state the EPK renders (gradient cover fallback). What
-    // matters is that it does NOT hit Storage with the synthetic token and surface an error.
-    private val artistMediaImpl: FakeArtistMediaRepository by lazy { FakeArtistMediaRepository() }
+    // Seeded with the generated covers, so the EPK renders a populated gallery and its cover
+    // agrees with the one Discover shows for the same artist (the server's rule too — the
+    // cover IS position 0). It used to start empty, which meant the EPK only ever showed its
+    // gradient fallback and the photo grid only ever showed its empty state.
+    private val artistMediaImpl: ArtistMediaRepository by lazy {
+        HarnessArtistMediaRepository(HarnessFixtures.ARTIST_ID, HarnessCoverArt.galleryFor(0))
+    }
 
     // FakeSamplesRepository can only be seeded through `upload(File, …)`, which would mean
     // fabricating audio files on disk just to populate a list. This tiny read-only stand-in is
@@ -191,7 +213,7 @@ object HarnessRepositories {
     // group by category and the filter sheet derives its facets from the distinct categories
     // and cities present, so a one-card roster would render neither.
     private val searchImpl: FakeSearchRepository by lazy {
-        FakeSearchRepository(HarnessFixtures.roster)
+        FakeSearchRepository(roster)
     }
 
     private val reviewsImpl: FakeReviewsRepository by lazy {
@@ -300,6 +322,78 @@ private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository 
         threadId: String,
         onInsert: (Message) -> Unit,
     ): MessagesSubscription = MessagesSubscription {}
+}
+
+/**
+ * In-memory [ArtistMediaRepository] over locally-generated cover art.
+ *
+ * Exists rather than reusing the shared `FakeArtistMediaRepository` for the same
+ * reason [HarnessSamplesRepository] does: that fake's only way in is
+ * `uploadPhoto(File, …)`, which mints its own Supabase storage path, and a path
+ * is not a picture — the URL it derives points at a bucket this process cannot
+ * reach. These rows carry their image address directly (`directUrl`), which is
+ * what lets a device with no network render a real gallery.
+ *
+ * Writes mutate only this list, so the EPK's add / delete / reorder affordances
+ * behave while an operator is poking at the screen. An uploaded photo takes the
+ * file it was handed as its own URL — the picker already produced a local file,
+ * so the round trip shows the actual image instead of a placeholder.
+ */
+private class HarnessArtistMediaRepository(
+    private val artistId: String,
+    covers: List<String>,
+) : ArtistMediaRepository {
+
+    private val rows = covers.mapIndexed { index, url ->
+        ArtistMediaItem(
+            id = "harness-photo-$index",
+            artistId = artistId.lowercase(),
+            kind = ArtistMediaKind.photo,
+            aspect = ArtistMediaAspect.portrait,
+            position = index,
+            // Blank on purpose: there is no object in any bucket behind this
+            // row, and a plausible-looking path would invite someone to go
+            // looking for one.
+            storagePath = "",
+            mimeType = "image/jpeg",
+            width = 480,
+            height = 600,
+            directUrl = url,
+        )
+    }.toMutableList()
+
+    override suspend fun list(artistId: String): List<ArtistMediaItem> =
+        if (artistId.equals(this.artistId, ignoreCase = true)) rows.toList() else emptyList()
+
+    override suspend fun uploadPhoto(
+        jpegFile: File,
+        artistId: String,
+        position: Int?,
+    ): ArtistMediaItem {
+        val item = ArtistMediaItem(
+            id = "harness-photo-${System.nanoTime()}",
+            artistId = artistId.lowercase(),
+            kind = ArtistMediaKind.photo,
+            aspect = ArtistMediaAspect.portrait,
+            position = position ?: rows.size,
+            storagePath = "",
+            mimeType = "image/jpeg",
+            directUrl = jpegFile.toURI().toString(),
+        )
+        rows.add(item)
+        return item
+    }
+
+    override suspend fun delete(item: ArtistMediaItem) {
+        rows.removeAll { it.id == item.id }
+    }
+
+    override suspend fun reorder(ids: List<String>) {
+        val byId = rows.associateBy { it.id }
+        val reordered = ids.mapNotNull(byId::get) + rows.filter { it.id !in ids.toSet() }
+        rows.clear()
+        rows.addAll(reordered.mapIndexed { index, item -> item.copy(position = index) })
+    }
 }
 
 /**

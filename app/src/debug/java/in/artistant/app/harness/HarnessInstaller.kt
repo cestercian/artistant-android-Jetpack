@@ -123,6 +123,12 @@ private class HarnessLifecycleCallbacks(
         installed = true
         HarnessState.install(flags)
         Timber.i("[harness] active: $flags")
+        // Before anything can ask for a repository, so the seeded roster already
+        // has cover URIs to hand out. Synchronous by necessity — see
+        // [HarnessCoverArt]. No-ops on every launch after the first.
+        if (HarnessState.useFakes) {
+            HarnessCoverArt.install(app, HarnessFixtures.roster.size)
+        }
         HarnessSession.bootstrap(app, flags)
     }
 
