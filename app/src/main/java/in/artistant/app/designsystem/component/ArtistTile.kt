@@ -36,6 +36,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
+import `in`.artistant.app.common.util.formatInrShort
 
 /**
  * Photo-backed artist card — port of iOS `ArtistTile`.
@@ -114,20 +115,39 @@ fun ArtistTile(
             }
             val gap = Modifier.height(space.sm)
             Spacer(gap)
+            // Both children used to be unconstrained under SpaceBetween, which is
+            // fine until the price is long: on a narrow rail tile a lakh-grouped
+            // figure (₹2,10,000) and a duration have no room to sit apart, so they
+            // ran into each other. The price is the load-bearing half — it takes
+            // the flexible width and truncates; the duration keeps its intrinsic
+            // size so it never gets squeezed to an unreadable stub.
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Compact form (₹2.1L), not the full grouping. A rail tile is ~150dp
+                // wide and a lakh-scale price plus a duration simply do not both
+                // fit: the full form either collided with the duration (before) or
+                // truncated to "₹2,10…" (after constraining it), and a price cut
+                // mid-number is no more use than one that overlaps. The hero strip
+                // already quotes the short form, so this also makes the two agree.
                 Text(
-                    text = formatInr(artist.price),
+                    text = formatInrShort(artist.price),
                     style = AppTheme.type.monoSmall,
                     color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 if (artist.duration.isNotBlank()) {
+                    Spacer(Modifier.width(space.sm))
                     Text(
                         text = artist.duration,
                         style = AppTheme.type.caption,
                         color = Color.White.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -194,6 +214,15 @@ private fun ScoreCapsule(score: Int, gigs: Int) {
                 .clip(CircleShape)
                 .background(tierColor(tier, colors)),
         )
-        Text(text = label, style = AppTheme.type.monoSmall, color = Color.White)
+        // softWrap = false: the capsule is sized by its content, and without this a
+        // two-digit score could break onto a second line inside the pill on the
+        // narrowest tiles — the badge is never wide enough to justify wrapping.
+        Text(
+            text = label,
+            style = AppTheme.type.monoSmall,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
