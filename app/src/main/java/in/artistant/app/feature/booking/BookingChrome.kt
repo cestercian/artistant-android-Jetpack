@@ -296,7 +296,11 @@ fun PackageOptionRow(
             .background(fill)
             .border(dimens.size.hairline, rim, shape)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(space.lg),
+            // `optionCardPad`, not `space.lg` — see the token's own note. A
+            // matched-content measurement against the reference (same tier
+            // names, same one-line includes string) put our row 4 units taller
+            // than its counterpart, all of it this inset.
+            .padding(dimens.size.optionCardPad),
         horizontalArrangement = Arrangement.spacedBy(space.md),
     ) {
         Box(
