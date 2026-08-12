@@ -53,6 +53,7 @@ import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.repository.ReportReasons
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.hairlineBottom
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.tierColor
@@ -176,20 +177,19 @@ fun ThreadDetailsSheet(
                         tag = "threadDetails.star",
                         onClick = onToggleStar,
                     )
+                    // Mute sits second, directly under Star, matching the
+                    // reference's order — the two rows that change how loudly a
+                    // conversation reaches you belong together, above the two
+                    // that change where it sits.
+                    //
+                    // Labelled "Mute", not "Mute notifications": one word is
+                    // what the reference says, and the longer label was doing a
+                    // job the caption already does properly. A muted thread
+                    // still shows in the inbox and still counts as unread, and
+                    // the obvious wrong reading — that the other person has been
+                    // silenced too — needs a sentence, not an extra noun.
                     ActionRow(
-                        label = "Mark as unread",
-                        icon = Icons.Filled.MarkEmailUnread,
-                        tag = "threadDetails.markUnread",
-                        onClick = onMarkUnread,
-                    )
-                    // Notifications, not visibility: a muted thread still shows
-                    // up in the inbox and still counts as unread — the label says
-                    // "notifications" so it can't be read as "hide this". The
-                    // caption spells out that it is one-sided, because the
-                    // obvious wrong reading of a mute in a two-person thread is
-                    // that the other person has been silenced too.
-                    ActionRow(
-                        label = if (muted) "Unmute notifications" else "Mute notifications",
+                        label = if (muted) "Unmute" else "Mute",
                         icon = if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
                         tint = if (muted) colors.ink3 else colors.ink,
                         tag = "threadDetails.mute",
@@ -200,6 +200,12 @@ fun ThreadDetailsSheet(
                             null
                         },
                         onClick = onToggleMute,
+                    )
+                    ActionRow(
+                        label = "Mark as unread",
+                        icon = Icons.Filled.MarkEmailUnread,
+                        tag = "threadDetails.markUnread",
+                        onClick = onMarkUnread,
                     )
                     ActionRow(
                         label = if (archived) "Unarchive" else "Archive",
@@ -321,6 +327,9 @@ private fun ParticipantRow(
         Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            // The rule belongs to the row rather than following it, so the row's
+            // pitch is its height — see [hairlineBottom].
+            .hairlineBottom()
             .padding(vertical = space.md),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(space.md),
@@ -361,7 +370,6 @@ private fun ParticipantRow(
             )
         }
     }
-    HRule()
 }
 
 /**
@@ -387,6 +395,11 @@ private fun ActionRow(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            // Drawn on the row's bottom edge rather than laid out under it, so a
+            // run of these rows has no per-row unit of divider height in it —
+            // see [hairlineBottom]. This was the whole of the remaining pitch
+            // difference against the reference on this sheet.
+            .hairlineBottom()
             .padding(vertical = space.md)
             .semantics { testTag = tag },
         verticalAlignment = Alignment.CenterVertically,
@@ -405,7 +418,6 @@ private fun ActionRow(
             }
         }
     }
-    HRule()
 }
 
 /** Reason first, then file. Reporting should never be a single mis-tap. */
