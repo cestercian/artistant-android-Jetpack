@@ -45,10 +45,36 @@ data class WizardDraft(
     val daysAvailable: List<String> = emptyList(),
     val timeSlots: List<String> = emptyList(),
     val coverGradientIndex: Int = 0,
+    /**
+     * Filename of the staged cover inside `WizardMediaCache`, or blank for none.
+     *
+     * Only the name, never a path: the cache directory is resolved from a
+     * `Context` at read time, and an absolute path baked into a draft would go
+     * stale the moment the app is reinstalled or moved between users.
+     */
+    val coverFileName: String = "",
+    val samples: List<DraftSample> = emptyList(),
     val instagramHandle: String = "",
     val spotifyArtistUrl: String = "",
     val youtubeChannelUrl: String = "",
     val bio: String = "",
+)
+
+/**
+ * A staged audio sample inside the draft.
+ *
+ * The title has to be written down because it cannot be recovered: the file is
+ * named with a UUID, and the title is either derived from the picked document's
+ * display name or typed by the artist afterwards. Without this the sample comes
+ * back from a restart called "Sample" and the artist's edit is silently undone.
+ * Duration is here for the same reason — it is read from the media at pick time,
+ * not from the filename.
+ */
+@Serializable
+data class DraftSample(
+    val fileName: String,
+    val title: String = "",
+    val durationSeconds: Double = 0.0,
 )
 
 /**
