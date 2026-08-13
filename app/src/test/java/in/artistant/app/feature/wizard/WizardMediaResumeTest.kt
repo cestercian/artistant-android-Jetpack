@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.wizard
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -110,6 +111,68 @@ class WizardMediaResumeTest {
         )
 
         assertEquals(listOf("audio-stale.m4a", "photo-stale.jpg"), orphans.sorted())
+    }
+
+    // ── Who is allowed to authorize a sweep ──────────────────────────────────
+    //
+    // The sweep deletes files, and its reference set comes from the draft. So
+    // "I read no draft" must not be one answer — the cache is a singleton whose
+    // files deliberately outlive sign-out, and an empty reference set derived
+    // from someone else's draft (or an unparseable one) reads as "delete every
+    // staged file on this device".
+
+    private fun draft(owner: String) = WizardDraft(ownerId = owner, coverFileName = "photo-a.jpg")
+
+    @Test
+    fun `my own draft reads as mine`() {
+        val read = classifyWizardDraftRead(
+            rawPresent = true,
+            decoded = draft("abc-123"),
+            ownerId = "abc-123",
+        )
+        assertEquals(WizardDraftRead.Mine(draft("abc-123")), read)
+    }
+
+    @Test
+    fun `owner matching ignores case, because uids arrive both ways`() {
+        val read = classifyWizardDraftRead(
+            rawPresent = true,
+            decoded = draft("ABC-123"),
+            ownerId = "abc-123",
+        )
+        assertTrue(read is WizardDraftRead.Mine)
+    }
+
+    @Test
+    fun `an empty slot is Empty, and only an empty slot is`() {
+        assertEquals(
+            WizardDraftRead.Empty,
+            classifyWizardDraftRead(rawPresent = false, decoded = null, ownerId = "abc-123"),
+        )
+    }
+
+    @Test
+    fun `another artist's draft is unclaimable, not empty`() {
+        // Sign out, someone else signs in, opens the wizard. Their reference set
+        // is empty; the previous artist's cover is still the only copy there is.
+        val read = classifyWizardDraftRead(
+            rawPresent = true,
+            decoded = draft("someone-else"),
+            ownerId = "abc-123",
+        )
+        assertEquals(WizardDraftRead.Unclaimable, read)
+    }
+
+    @Test
+    fun `a draft that will not decode is unclaimable, not empty`() {
+        // Bytes are there, so media is staged for somebody — we just cannot say
+        // whose or which files. Guessing "none" would delete all of them.
+        val read = classifyWizardDraftRead(
+            rawPresent = true,
+            decoded = null,
+            ownerId = "abc-123",
+        )
+        assertEquals(WizardDraftRead.Unclaimable, read)
     }
 
     @Test

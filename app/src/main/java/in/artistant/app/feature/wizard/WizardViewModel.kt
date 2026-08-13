@@ -129,7 +129,11 @@ class WizardViewModel @Inject constructor(
      */
     private suspend fun restore() {
         val ownerId = session.currentUserId?.lowercase()
-        val draft = ownerId?.let { runCatching { draftStore.load(it) }.getOrNull() }
+        // No session means no perspective to read the slot from, which is the
+        // same "I cannot enumerate what is staged" position as a corrupt draft.
+        val read = ownerId?.let { runCatching { draftStore.read(it) }.getOrNull() }
+            ?: WizardDraftRead.Unclaimable
+        val draft = (read as? WizardDraftRead.Mine)?.draft
         val profile = runCatching { users.fetchSelfProfile() }.getOrNull()
 
         // Staged media is resolved off the main thread: this stats one file per
@@ -142,7 +146,12 @@ class WizardViewModel @Inject constructor(
                     isOnDisk = mediaCache::exists,
                 )
             } ?: RestoredWizardMedia(coverFileName = null, samples = emptyList())
-            runCatching { sweepOrphanMedia(resolved) }
+            // Sweep only when the reference set is positively known. The cache is
+            // a singleton whose files deliberately outlive sign-out, so it can
+            // hold another artist's only copy of a photo; an Unclaimable read
+            // means someone has media here that this session cannot enumerate,
+            // and an empty reference set would read as "delete all of it".
+            if (read !is WizardDraftRead.Unclaimable) runCatching { sweepOrphanMedia(resolved) }
             resolved
         }
 
