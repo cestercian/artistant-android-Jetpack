@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.domain.sample.SamplePlayback
 import `in`.artistant.app.domain.sample.SampleTap
+import `in`.artistant.app.domain.sample.playbackIsOrphaned
 import `in`.artistant.app.domain.sample.sampleTapAction
 import kotlinx.coroutines.delay
 
@@ -37,7 +38,7 @@ import kotlinx.coroutines.delay
  * stop by every consumer, and the failure mode of forgetting is an artist's clip
  * still playing over the next screen.
  *
- * ## The three things this gets right that are easy to miss
+ * ## The four things this gets right that are easy to miss
  *
  * 1. **Backgrounding pauses.** Without the lifecycle observer, navigating away
  *    or locking the phone leaves audio playing from a screen that is gone. This
@@ -46,12 +47,15 @@ import kotlinx.coroutines.delay
  * 2. **Audio focus is requested.** `handleAudioFocus = true` makes the platform
  *    pause us for a phone call and duck us for a navigation prompt, and stops us
  *    from playing over whatever the user already had going.
- * 3. **Position polling only runs while playing.** A permanent ticker would keep
+ * 3. **The player follows the sample list.** [samples] is a parameter rather
+ *    than something the caller reconciles, so a clip whose row is deleted stops
+ *    instead of playing on with no visible control to stop it.
+ * 4. **Position polling only runs while playing.** A permanent ticker would keep
  *    the composition recomposing at 10Hz forever on a screen where most visits
  *    never press play.
  */
 @Composable
-fun rememberSamplePlayer(): SamplePlayerHandle {
+fun rememberSamplePlayer(samples: List<Sample>): SamplePlayerHandle {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val playback = remember { mutableStateOf(SamplePlayback()) }
@@ -71,12 +75,29 @@ fun rememberSamplePlayer(): SamplePlayerHandle {
     // Backgrounding stops playback — see the KDoc. ON_STOP rather than ON_PAUSE
     // so a transient overlay (a permission dialog, the share sheet) doesn't cut
     // the clip off mid-listen.
+    //
+    // Unconditional, NOT guarded on `isPlaying`. That flag is false while the
+    // player is still buffering even though playback has been requested, so a
+    // guarded pause skips exactly the case that matters: background during the
+    // buffer and `playWhenReady` stays set, then the clip starts audibly once
+    // the buffer fills — from a screen the user has already left. `pause()` on
+    // an idle player is a no-op, so there is nothing to protect against here.
     DisposableEffect(lifecycleOwner, player) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && player.isPlaying) player.pause()
+            if (event == Lifecycle.Event.ON_STOP) player.pause()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // A clip must not outlive its row. Deleting the playing sample in the EPK
+    // removes the only pause control while the audio keeps going, so the player
+    // follows the list rather than each call site remembering to stop it.
+    LaunchedEffect(samples) {
+        if (playbackIsOrphaned(playback.value.sampleId, samples.map { it.id })) {
+            player.stop()
+            playback.value = SamplePlayback()
+        }
     }
 
     // Position ticker, alive only while something is actually playing. The

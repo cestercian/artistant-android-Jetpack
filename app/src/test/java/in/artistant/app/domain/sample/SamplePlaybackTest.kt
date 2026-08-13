@@ -148,3 +148,31 @@ class SamplePlaybackTest {
         assertEquals("1:45", label)
     }
 }
+
+/**
+ * The player must not outlive the row that controls it.
+ *
+ * Split out because the failure is silent and specific: delete the clip you are
+ * playing and the audio continues with nothing on screen to stop it.
+ */
+class SamplePlaybackOrphanTest {
+
+    @Test
+    fun `deleting the playing sample orphans the player`() {
+        assertTrue(playbackIsOrphaned("s1", listOf("s2", "s3")))
+        assertTrue(playbackIsOrphaned("s1", emptyList()))
+    }
+
+    @Test
+    fun `a sample still in the list is not orphaned`() {
+        assertFalse(playbackIsOrphaned("s1", listOf("s1", "s2")))
+    }
+
+    @Test
+    fun `idle is not orphaned, even against an empty list`() {
+        // Nothing is loaded, so there is nothing to stop — and stopping an
+        // already-stopped player on every list change would fight the ticker.
+        assertFalse(playbackIsOrphaned(null, emptyList()))
+        assertFalse(playbackIsOrphaned(null, listOf("s1")))
+    }
+}

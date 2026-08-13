@@ -1351,7 +1351,7 @@ private fun SamplesSection(
             // The artist gets the same playable row a client sees on the public
             // profile, so "what does this sound like on my page" is answered here
             // rather than by publishing and looking.
-            val player = rememberSamplePlayer()
+            val player = rememberSamplePlayer(samples)
             val playback by player.playback
             Column {
                 HRule()

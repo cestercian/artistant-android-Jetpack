@@ -124,3 +124,18 @@ fun sampleDurationLabel(sample: Sample, playback: SamplePlayback): String? {
     }
     return sample.duration.takeIf { it.isNotBlank() && it != "0:00" }
 }
+
+/**
+ * Whether the player is loaded with a sample that is no longer in the list.
+ *
+ * Deleting the playing clip in the EPK removes its row — and with it the only
+ * pause control on screen — while the audio carries on. So the player follows
+ * the list, and this is the rule it follows: something is loaded, and nothing in
+ * the list is it.
+ *
+ * Idle is not orphaned. A null id means nothing is loaded, which is true of an
+ * empty list too, and stopping a player that is already stopped on every list
+ * change would fight the ticker for no reason.
+ */
+fun playbackIsOrphaned(activeSampleId: String?, sampleIds: List<String>): Boolean =
+    activeSampleId != null && activeSampleId !in sampleIds

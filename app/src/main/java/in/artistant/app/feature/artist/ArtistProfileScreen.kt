@@ -672,7 +672,7 @@ private fun ServicesBlock(tags: List<String>) {
 private fun SoundBlock(samples: List<Sample>) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val player = rememberSamplePlayer()
+    val player = rememberSamplePlayer(samples)
     val playback by player.playback
 
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
