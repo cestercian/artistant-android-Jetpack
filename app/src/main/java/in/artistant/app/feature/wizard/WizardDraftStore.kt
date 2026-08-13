@@ -45,10 +45,36 @@ data class WizardDraft(
     val daysAvailable: List<String> = emptyList(),
     val timeSlots: List<String> = emptyList(),
     val coverGradientIndex: Int = 0,
+    /**
+     * Filename of the staged cover inside `WizardMediaCache`, or blank for none.
+     *
+     * Only the name, never a path: the cache directory is resolved from a
+     * `Context` at read time, and an absolute path baked into a draft would go
+     * stale the moment the app is reinstalled or moved between users.
+     */
+    val coverFileName: String = "",
+    val samples: List<DraftSample> = emptyList(),
     val instagramHandle: String = "",
     val spotifyArtistUrl: String = "",
     val youtubeChannelUrl: String = "",
     val bio: String = "",
+)
+
+/**
+ * A staged audio sample inside the draft.
+ *
+ * The title has to be written down because it cannot be recovered: the file is
+ * named with a UUID, and the title is either derived from the picked document's
+ * display name or typed by the artist afterwards. Without this the sample comes
+ * back from a restart called "Sample" and the artist's edit is silently undone.
+ * Duration is here for the same reason — it is read from the media at pick time,
+ * not from the filename.
+ */
+@Serializable
+data class DraftSample(
+    val fileName: String,
+    val title: String = "",
+    val durationSeconds: Double = 0.0,
 )
 
 /**
@@ -72,6 +98,53 @@ data class DraftPackage(
 // the `artistant.state` store: see the class KDoc above.
 private val Context.wizardDraftStore by preferencesDataStore(name = "artistant.wizard")
 
+/**
+ * The outcome of reading the draft slot, as three distinct answers.
+ *
+ * This used to be a nullable `WizardDraft`, which collapsed three situations
+ * with opposite meanings into the same `null`: the slot is empty, the slot holds
+ * a draft that cannot be decoded, and the slot holds *somebody else's* draft.
+ * Every one of those reads as "you have no draft", which is harmless for filling
+ * in a form and actively destructive for the resume sweep — an empty reference
+ * set is indistinguishable from "delete every staged file", including files that
+ * are still the other artist's only copy.
+ *
+ * So the caller gets to see which it was. [Empty] is the only "nothing staged"
+ * answer safe to act destructively on; [Unclaimable] means *someone* has media
+ * here and we cannot enumerate it, so leave the disk alone.
+ */
+sealed interface WizardDraftRead {
+    /** A decodable draft owned by the caller. */
+    data class Mine(val draft: WizardDraft) : WizardDraftRead
+
+    /** The slot is genuinely empty — nothing is staged for anybody. */
+    data object Empty : WizardDraftRead
+
+    /** A draft is there but this caller can't claim it: another owner's, or corrupt. */
+    data object Unclaimable : WizardDraftRead
+}
+
+/**
+ * Classify a draft-slot read. Pure so the distinction that the sweep depends on
+ * is covered without a DataStore.
+ *
+ * [rawPresent] is deliberately separate from [decoded]: "no bytes" and "bytes
+ * that would not parse" are the two cases the old nullable return could not tell
+ * apart, and they need opposite answers.
+ */
+fun classifyWizardDraftRead(
+    rawPresent: Boolean,
+    decoded: WizardDraft?,
+    ownerId: String,
+): WizardDraftRead = when {
+    !rawPresent -> WizardDraftRead.Empty
+    // Present but unreadable — an older/newer schema, or a truncated write. The
+    // owner is unknown, so the media on disk may be anyone's.
+    decoded == null -> WizardDraftRead.Unclaimable
+    !decoded.ownerId.equals(ownerId, ignoreCase = true) -> WizardDraftRead.Unclaimable
+    else -> WizardDraftRead.Mine(decoded)
+}
+
 @Singleton
 class WizardDraftStore @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -79,17 +152,14 @@ class WizardDraftStore @Inject constructor(
     private val draftKey = stringPreferencesKey("draft")
 
     // Tolerant reader: a draft written by an older build must not crash the
-    // wizard, it must read as "no draft" and let the artist start over.
+    // wizard. It reads as Unclaimable rather than Empty — see WizardDraftRead.
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    /**
-     * The saved draft for [ownerId], or null when there isn't one, it belongs to
-     * somebody else, or it can't be decoded.
-     */
-    suspend fun load(ownerId: String): WizardDraft? {
-        val raw = context.wizardDraftStore.data.first()[draftKey] ?: return null
-        val draft = runCatching { json.decodeFromString<WizardDraft>(raw) }.getOrNull() ?: return null
-        return draft.takeIf { it.ownerId.equals(ownerId, ignoreCase = true) }
+    /** Read the draft slot from the perspective of [ownerId]. */
+    suspend fun read(ownerId: String): WizardDraftRead {
+        val raw = context.wizardDraftStore.data.first()[draftKey]
+        val decoded = raw?.let { runCatching { json.decodeFromString<WizardDraft>(it) }.getOrNull() }
+        return classifyWizardDraftRead(rawPresent = raw != null, decoded = decoded, ownerId = ownerId)
     }
 
     suspend fun save(draft: WizardDraft) {

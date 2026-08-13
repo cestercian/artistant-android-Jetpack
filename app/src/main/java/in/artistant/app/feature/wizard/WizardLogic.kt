@@ -107,6 +107,55 @@ fun wizardResumeStep(rawStepName: String?): WizardStep =
         else -> step
     }
 
+// ── Staged media resume ──────────────────────────────────────────────────────
+
+/** What a restart is allowed to adopt back into the form. */
+data class RestoredWizardMedia(
+    val coverFileName: String?,
+    val samples: List<DraftSample>,
+)
+
+/**
+ * Which of a draft's staged media references are still usable.
+ *
+ * Every reference is checked against the disk before it is adopted, because the
+ * files live in `cacheDir` and the OS is *entitled* to reclaim that directory
+ * under storage pressure — that is the contract of the directory, not an edge
+ * case. Restoring a reference to a reclaimed file would render a broken preview
+ * on the Cover step and hand the upload queue a job with nothing behind it, so a
+ * missing file reads as "not picked" and the artist is simply asked again.
+ *
+ * [isOnDisk] is a parameter rather than a `File.exists()` call so the decision
+ * stays testable without a filesystem; the ViewModel passes the cache's own
+ * lookup.
+ */
+fun restoredWizardMedia(
+    coverFileName: String?,
+    samples: List<DraftSample>,
+    isOnDisk: (String) -> Boolean,
+): RestoredWizardMedia = RestoredWizardMedia(
+    coverFileName = coverFileName?.takeIf { it.isNotBlank() && isOnDisk(it) },
+    // Truncate rather than trust the draft: the picker enforces the cap, so an
+    // over-long list means an older or hand-edited draft, and handing the media
+    // step more rows than it will let the artist delete back down to strands
+    // them above a limit they cannot satisfy.
+    samples = samples.filter { it.fileName.isNotBlank() && isOnDisk(it.fileName) }
+        .take(WIZARD_MAX_SAMPLES),
+)
+
+/**
+ * Staged files nothing references any more.
+ *
+ * Left behind by an abandoned wizard, by a pick the artist removed from the
+ * form, or by the pre-fix builds that lost their in-memory references on every
+ * process death. They are photo- and audio-sized and no code path will ever name
+ * them again, so resume sweeps them.
+ */
+fun orphanWizardMediaFiles(
+    onDisk: List<String>,
+    referenced: Set<String>,
+): List<String> = onDisk.filterNot { it in referenced }
+
 // ── Catalogs ─────────────────────────────────────────────────────────────────
 
 /** The seven categories the server's `category` enum accepts. */

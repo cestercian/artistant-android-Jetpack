@@ -20,6 +20,7 @@ import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 
@@ -127,11 +129,34 @@ class WizardViewModel @Inject constructor(
      */
     private suspend fun restore() {
         val ownerId = session.currentUserId?.lowercase()
-        val draft = ownerId?.let { runCatching { draftStore.load(it) }.getOrNull() }
+        // No session means no perspective to read the slot from, which is the
+        // same "I cannot enumerate what is staged" position as a corrupt draft.
+        val read = ownerId?.let { runCatching { draftStore.read(it) }.getOrNull() }
+            ?: WizardDraftRead.Unclaimable
+        val draft = (read as? WizardDraftRead.Mine)?.draft
         val profile = runCatching { users.fetchSelfProfile() }.getOrNull()
 
+        // Staged media is resolved off the main thread: this stats one file per
+        // reference, and the sweep below lists a directory.
+        val media = withContext(Dispatchers.IO) {
+            val resolved = draft?.let {
+                restoredWizardMedia(
+                    coverFileName = it.coverFileName,
+                    samples = it.samples,
+                    isOnDisk = mediaCache::exists,
+                )
+            } ?: RestoredWizardMedia(coverFileName = null, samples = emptyList())
+            // Sweep only when the reference set is positively known. The cache is
+            // a singleton whose files deliberately outlive sign-out, so it can
+            // hold another artist's only copy of a photo; an Unclaimable read
+            // means someone has media here that this session cannot enumerate,
+            // and an empty reference set would read as "delete all of it".
+            if (read !is WizardDraftRead.Unclaimable) runCatching { sweepOrphanMedia(resolved) }
+            resolved
+        }
+
         _state.update { current ->
-            val restored = draft?.let { current.applyDraft(it) } ?: current
+            val restored = draft?.let { current.applyDraft(it, media) } ?: current
             val seeded = restored.copy(
                 stageName = restored.stageName.ifBlank { profile?.fullName.orEmpty() },
                 handle = restored.handle.ifBlank { profile?.handle.orEmpty() },
@@ -149,7 +174,42 @@ class WizardViewModel @Inject constructor(
         }
     }
 
-    private fun WizardUiState.applyDraft(draft: WizardDraft): WizardUiState = copy(
+    /**
+     * Delete staged files nothing points at any more.
+     *
+     * The reference set is the restored draft **plus every file the upload queue
+     * still holds**, and that second half is not optional: publish enqueues the
+     * staged cover and samples and then clears the draft, so between publish and
+     * the queue draining there is a window where the files are referenced only by
+     * the queue. Sweeping on the draft alone would delete the artist's cover out
+     * from under an upload that had already been told to send it.
+     *
+     * Failed tasks count as referenced too — they are retryable, and a retry
+     * needs its file.
+     */
+    private fun sweepOrphanMedia(media: RestoredWizardMedia) {
+        val queued = uploadQueue.state.value.let { it.pending + it.failed }
+            .mapNotNull { task ->
+                when (task) {
+                    is UploadQueue.Task.CoverPhoto -> task.filePath
+                    is UploadQueue.Task.AudioSample -> task.filePath
+                }
+            }
+            .map { it.substringAfterLast('/') }
+
+        val referenced = buildSet {
+            media.coverFileName?.let(::add)
+            media.samples.forEach { add(it.fileName) }
+            addAll(queued)
+        }
+        val orphans = orphanWizardMediaFiles(mediaCache.stagedFileNames(), referenced)
+        if (orphans.isNotEmpty()) mediaCache.delete(orphans)
+    }
+
+    private fun WizardUiState.applyDraft(
+        draft: WizardDraft,
+        media: RestoredWizardMedia,
+    ): WizardUiState = copy(
         // Never resume into Done. A draft is a form in progress; if one ever
         // names the celebration step — an older build, a write that raced the
         // publish — restoring it would show "You're live" to an artist who is
@@ -168,6 +228,15 @@ class WizardViewModel @Inject constructor(
         daysAvailable = draft.daysAvailable.toSet().ifEmpty { daysAvailable },
         timeSlots = draft.timeSlots.toSet().ifEmpty { timeSlots },
         coverGradientIndex = draft.coverGradientIndex.coerceIn(0, 5),
+        // Only files the sweep above confirmed are still on disk. The path is
+        // re-resolved from the cache rather than stored, so it survives the app
+        // moving between installs.
+        pendingCover = media.coverFileName?.let { WizardMediaCache.PendingPhoto(it) },
+        pendingCoverPath = media.coverFileName
+            ?.let { WizardMediaCache.PendingPhoto(it).file(mediaCache).absolutePath },
+        pendingSamples = media.samples.map {
+            WizardMediaCache.PendingAudio(it.fileName, it.title, it.durationSeconds)
+        },
         instagramHandle = draft.instagramHandle,
         spotifyArtistUrl = draft.spotifyArtistUrl,
         youtubeChannelUrl = draft.youtubeChannelUrl,
@@ -220,6 +289,14 @@ class WizardViewModel @Inject constructor(
         daysAvailable = daysAvailable.toList(),
         timeSlots = timeSlots.toList(),
         coverGradientIndex = coverGradientIndex,
+        // Media refs travel in the draft too. The bytes were always safe — the
+        // cache writes them to disk — but the *references* lived only here, so a
+        // process kill left the photo on disk with nothing pointing at it and the
+        // artist looking at an empty Cover step.
+        coverFileName = pendingCover?.fileName.orEmpty(),
+        samples = pendingSamples.map {
+            DraftSample(it.fileName, it.title, it.durationSeconds)
+        },
         instagramHandle = instagramHandle,
         spotifyArtistUrl = spotifyArtistUrl,
         youtubeChannelUrl = youtubeChannelUrl,
