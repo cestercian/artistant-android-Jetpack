@@ -533,8 +533,12 @@ internal data class DbSample(
     @SerialName("artist_id") val artistId: String,
     val title: String,
     @SerialName("duration_label") val durationLabel: String = "",
+    // The stitch selects every column, so this was arriving from the server and
+    // being dropped at decode simply because the DTO didn't name it — which is
+    // why the profile could list an artist's samples but never play one.
+    @SerialName("audio_url") val audioUrl: String? = null,
 ) {
-    fun toSample() = Sample(id = id, title = title, duration = durationLabel)
+    fun toSample() = Sample(id = id, title = title, duration = durationLabel, audioUrl = audioUrl)
 }
 
 @Serializable

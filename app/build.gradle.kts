@@ -160,9 +160,10 @@ dependencies {
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
 
-    // Cover video trim (Media3 Transformer)
+    // Cover video trim (Media3 Transformer) + audio-sample playback (ExoPlayer)
     implementation(libs.media3.transformer)
     implementation(libs.media3.common)
+    implementation(libs.media3.exoplayer)
 
     // Play Billing seam (flag-gated)
     implementation(libs.billing.ktx)
