@@ -93,6 +93,15 @@ data class Sample(
     val id: String,
     val title: String,
     val duration: String,
+    /**
+     * Public CDN URL of the clip in the `artist-samples` bucket, or null.
+     *
+     * Nullable because `samples.audio_url` is: rows written before the upload
+     * path existed, and rows whose upload never drained, carry a title with no
+     * file. Playback treats those as unplayable rather than offering a control
+     * that does nothing.
+     */
+    val audioUrl: String? = null,
 )
 
 data class Review(

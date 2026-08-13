@@ -203,7 +203,10 @@ private data class SampleRow(
     @SerialName("duration_label") val durationLabel: String = "",
     @SerialName("audio_url") val audioUrl: String? = null,
 ) {
-    fun toDomain() = Sample(id = id, title = title, duration = durationLabel)
+    // audioUrl was already being fetched here and then discarded on the way to
+    // the domain model, so the EPK knew where every clip lived and still had no
+    // way to play one.
+    fun toDomain() = Sample(id = id, title = title, duration = durationLabel, audioUrl = audioUrl)
 }
 
 @Serializable

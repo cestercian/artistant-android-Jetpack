@@ -63,6 +63,9 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
+import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.designsystem.component.SampleRow
+import `in`.artistant.app.platform.media.rememberSamplePlayer
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.domain.artist.PackagePricing
@@ -163,6 +166,13 @@ fun ArtistProfileScreen(
                             }
                             if (artist.prompts.isNotEmpty()) {
                                 PromptsBlock(prompts = artist.prompts)
+                            }
+                            // Above Booking on purpose: hearing the act is the
+                            // question a client has before "what does it cost",
+                            // and this page previously had no answer to it at all
+                            // — the samples were fetched and then never rendered.
+                            if (artist.samples.isNotEmpty()) {
+                                SoundBlock(samples = artist.samples)
                             }
                             BookingBlock(artist = artist)
                             PackagesBlock(
@@ -642,6 +652,40 @@ private fun ServicesBlock(tags: List<String>) {
                         .border(dimens.size.hairline, colors.line, CircleShape)
                         .padding(horizontal = space.md, vertical = space.sm),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * What the artist sounds like.
+ *
+ * The samples were already being fetched into `Artist.samples` and then never
+ * rendered, so a client could read every word about an act and not hear a second
+ * of it — on a page whose entire job is deciding whether to book them.
+ *
+ * One player for the block, not one per row: the handle holds a single ExoPlayer,
+ * so starting a second clip replaces the first rather than layering two. Leaving
+ * the screen disposes it and the audio stops with the page.
+ */
+@Composable
+private fun SoundBlock(samples: List<Sample>) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    val player = rememberSamplePlayer()
+    val playback by player.playback
+
+    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+        Text("Listen", style = AppTheme.type.displaySmall, color = colors.ink)
+        Column {
+            HRule()
+            samples.forEach { sample ->
+                SampleRow(
+                    sample = sample,
+                    playback = playback,
+                    onTap = { player.onTap(sample) },
+                )
+                HRule()
             }
         }
     }

@@ -63,6 +63,8 @@ import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.designsystem.component.SampleRow
+import `in`.artistant.app.platform.media.rememberSamplePlayer
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistMediaItem
 import `in`.artistant.app.designsystem.component.BottomDarkenScrim
@@ -1346,27 +1348,20 @@ private fun SamplesSection(
                 color = colors.ink3,
             )
         } else {
+            // The artist gets the same playable row a client sees on the public
+            // profile, so "what does this sound like on my page" is answered here
+            // rather than by publishing and looking.
+            val player = rememberSamplePlayer()
+            val playback by player.playback
             Column {
                 HRule()
                 samples.forEach { sample ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = space.sm),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                sample.title,
-                                style = AppTheme.type.callout,
-                                color = colors.ink,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (sample.duration.isNotBlank()) {
-                                Text(sample.duration, style = AppTheme.type.monoSmall, color = colors.ink3)
-                            }
-                        }
-                        EpkRowAction("Remove", { onDelete(sample) }, tone = colors.hot)
-                    }
+                    SampleRow(
+                        sample = sample,
+                        playback = playback,
+                        onTap = { player.onTap(sample) },
+                        trailing = { EpkRowAction("Remove", { onDelete(sample) }, tone = colors.hot) },
+                    )
                     HRule()
                 }
             }
