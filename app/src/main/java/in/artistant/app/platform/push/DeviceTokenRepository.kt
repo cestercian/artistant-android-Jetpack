@@ -4,22 +4,24 @@ import android.os.Build
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
-import `in`.artistant.app.common.util.lowercaseUuid
-import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Persists this device's FCM registration token to `public.device_tokens` so the backend's
- * `send-push` path can address it (port of the iOS APNs upsert in `PushService.persistToken`).
+ * This device's row in `public.device_tokens` — the address the backend's `send-push` path
+ * delivers to. Ports the iOS claim/delete pair (`PushService.persistToken` +
+ * `AuthService.unregisterPushToken`).
  *
- * SEAM STATUS (issue #38, phase P2a): INERT until P2b (a Firebase `FirebaseMessagingService`
- * produces the token) + P1 (backend adds the `device_tokens.fcm_token` column). It COMPILES now
- * and is covered by [FakeDeviceTokenRepository] in tests; the real impl only runs at runtime in
- * P2b/P4, so the not-yet-existing `fcm_token` column is fine (the write is never issued yet).
+ * The two calls are a matched pair and BOTH have to fire, or pushes follow the wrong account:
+ * [unregister] on sign-out (while the leaving user's session is still live — RLS scopes the
+ * delete to their own row), [register] on every completed sign-in (so the device is re-claimed
+ * for whoever is here now). [PushService] owns that lifecycle.
  */
 interface DeviceTokenRepository {
-    /** Upsert this device's row for [fcmToken]. Idempotent. No-op when not signed in. */
+    /** Claim this device's row for the signed-in user. Idempotent. No-op when not signed in. */
     suspend fun register(fcmToken: String)
 
     /** Delete this device's row (e.g. on sign-out / token invalidation). Idempotent. */
@@ -31,50 +33,61 @@ class SupabaseDeviceTokenRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : DeviceTokenRepository {
 
-    // Explicit-column write (no `*`), matching the house rule + the iOS `Row` shape.
-    @Serializable
-    private data class Row(
-        val user_id: String,
-        val fcm_token: String,
-        val device_model: String?,
-        val os_version: String?,
-    )
-
     override suspend fun register(fcmToken: String) {
-        // No session → can't attribute the token to a user; skip silently (iOS `persistToken` does
-        // the same). P2b re-registers on the next sign-in, so nothing is lost.
-        val userId = selfId() ?: return
-        client.postgrest.from("device_tokens").upsert(
-            Row(
-                user_id = userId,
-                fcm_token = fcmToken,
-                device_model = Build.MODEL,
-                os_version = Build.VERSION.RELEASE,
-            ),
-        ) {
-            // Conflict on the token, UPDATE (don't ignore): when the SAME device token is upserted
-            // by a different user_id (account switch on this device), the row's ownership MOVES to
-            // the new user. `ignoreDuplicates` would leave the token mapped to the prior user and
-            // misroute their pushes — the exact iOS CodeRabbit-Critical fix on PR #44.
-            onConflict = "fcm_token"
+        // No session → the RPC derives the owner from auth.uid(), so there's nothing to claim
+        // the row TO; skip silently (iOS `persistToken` does the same). PushService re-registers
+        // on the next completed sign-in, so nothing is lost.
+        if (client.auth.currentSessionOrNull()?.user == null) return
+        // Deliberately NOT a plain `device_tokens` upsert. Under the device_tokens_owner policy
+        // (0002: `USING (auth.uid() = user_id)`) an ON CONFLICT DO UPDATE that targets a row
+        // still owned by the PRIOR user fails the UPDATE USING check → 42501, so on an account
+        // switch the new user's registration silently failed and they got NO pushes while the
+        // stale row survived. `claim_device_token` (mig 0075) is SECURITY DEFINER and bypasses
+        // that check: possession of the opaque push token IS the proof of device ownership, so
+        // the signed-in caller reclaims the row regardless of who held it. Exactly one of
+        // p_apns / p_fcm (0069's XOR) — Android always sends FCM.
+        val params = buildJsonObject {
+            put("p_apns", JsonNull)
+            put("p_fcm", fcmToken)
+            put("p_device_model", Build.MODEL)
+            put("p_os_version", Build.VERSION.RELEASE)
         }
+        client.postgrest.rpc("claim_device_token", params)
     }
 
     override suspend fun unregister(fcmToken: String) {
+        // No SECURITY DEFINER escape hatch here: device_tokens_owner scopes the delete to the
+        // caller's own row, which is exactly what we want (one account can't unregister
+        // another's device) and exactly why this has to run BEFORE `auth.signOut()`.
         client.postgrest.from("device_tokens").delete {
             filter { eq("fcm_token", fcmToken) }
         }
     }
-
-    private fun selfId(): String? = client.auth.currentSessionOrNull()?.user?.id?.lowercaseUuid()
 }
 
 /**
- * In-memory [DeviceTokenRepository] for tests (mirrors the other `Fake*` repos). Records the last
- * registered/unregistered token so a test can assert the seam was exercised, without a Supabase.
+ * In-memory [DeviceTokenRepository] for tests (mirrors the other `Fake*` repos). Models the one
+ * thing about `device_tokens` that decides where a push lands: which user a token currently
+ * addresses.
+ *
+ * [currentUserId] stands in for the session the real impl reads through `auth.uid()`, so a test
+ * can replay an account switch on one device — including the RLS rule that a delete only reaches
+ * the caller's OWN row, which is the reason the release has to beat the sign-out.
  */
 class FakeDeviceTokenRepository : DeviceTokenRepository {
-    val registered = mutableSetOf<String>()
-    override suspend fun register(fcmToken: String) { registered.add(fcmToken) }
-    override suspend fun unregister(fcmToken: String) { registered.remove(fcmToken) }
+    /** The signed-in user, or null once signed out. */
+    var currentUserId: String? = null
+
+    /** fcm_token → owning user id. Empty means the backend has nowhere to send. */
+    val owners = mutableMapOf<String, String>()
+
+    override suspend fun register(fcmToken: String) {
+        val uid = currentUserId ?: return // no session → nothing to claim to
+        owners[fcmToken] = uid // claim_device_token reclaims regardless of the prior owner
+    }
+
+    override suspend fun unregister(fcmToken: String) {
+        val uid = currentUserId ?: return // no session → RLS shows the caller no rows at all
+        if (owners[fcmToken] == uid) owners.remove(fcmToken)
+    }
 }

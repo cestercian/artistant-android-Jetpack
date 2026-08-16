@@ -40,6 +40,8 @@ import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.platform.push.DeviceTokenRepository
+import `in`.artistant.app.platform.push.SupabaseDeviceTokenRepository
 
 /**
  * Binds each repository interface → its Supabase impl. Repositories land here as their
@@ -111,6 +113,10 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindMessages(impl: SupabaseMessagesRepository): MessagesRepository
+
+    /** This device's `device_tokens` row — claimed on sign-in, released on sign-out. */
+    @Binds
+    abstract fun bindDeviceTokens(impl: SupabaseDeviceTokenRepository): DeviceTokenRepository
 
     /** Dormant mock payments — real Razorpay is a later one-line swap. */
     @Binds

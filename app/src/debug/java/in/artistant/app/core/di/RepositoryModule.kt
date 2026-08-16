@@ -41,6 +41,8 @@ import `in`.artistant.app.data.repository.SupabaseUsersRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.harness.HarnessRepositories
+import `in`.artistant.app.platform.push.DeviceTokenRepository
+import `in`.artistant.app.platform.push.SupabaseDeviceTokenRepository
 import javax.inject.Singleton
 
 /**
@@ -152,6 +154,14 @@ object RepositoryModule {
     @Singleton
     fun provideMessages(real: SupabaseMessagesRepository): MessagesRepository =
         HarnessRepositories.messages ?: real
+
+    /**
+     * This device's `device_tokens` row. No harness hook: FCM is inert in fixture runs (no
+     * `google-services.json`), so the real impl is never reached. Unchanged from release.
+     */
+    @Provides
+    @Singleton
+    fun provideDeviceTokens(impl: SupabaseDeviceTokenRepository): DeviceTokenRepository = impl
 
     /** Dormant mock payments — real Razorpay is a later one-line swap. Unchanged from release. */
     @Provides

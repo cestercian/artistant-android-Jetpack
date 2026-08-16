@@ -235,12 +235,18 @@ class SessionManager @Inject constructor(
     /** Sign out + drop the analytics identity + wipe local prefs (DPDP §11 parity). The
      *  status observer also resets analytics, but wiping prefs is this method's job. */
     suspend fun signOut() {
+        // FIRST, before anything else: hand this device's push token back. The delete is
+        // RLS-scoped to the caller's own `device_tokens` row, so it needs the session
+        // `client.auth.signOut()` is about to tear down, and it needs the cached FCM token
+        // that `prefs.wipeAll()` is about to clear. Ports the iOS `AuthService.signOut()`
+        // ordering — without it the departing account keeps receiving this phone's message
+        // previews, gig requests and booking pushes.
+        pushService.onSigningOut()
         client.auth.signOut()
         analytics.reset()
         crash.setUser(null)
         prefs.wipeAll()
         savedStore.reset()
-        pushService.onSignedOut()
     }
 
     // MARK: - Deep link
@@ -295,6 +301,14 @@ class SessionManager @Inject constructor(
     /** Bump the generation on a genuine (non-refresh) completed sign-in. Idempotent per call. */
     private fun completedSignIn() {
         _signInGeneration.value += 1
+        // Re-claim this device's push token for whoever just signed in. Every sign-in path
+        // funnels through here, and none of them passes through `ArtistantApplication.onCreate`
+        // — the only other registration site — so without this a returning user gets no pushes
+        // at all, and an in-process account switch leaves the token still mapped to the account
+        // that just left. `claim_device_token` is SECURITY DEFINER, so the new owner takes the
+        // row regardless of who held it (mig 0075). Deliberately here rather than on the
+        // sessionStatus observer: a background token Refresh must not re-issue the claim.
+        pushService.registerIfPermitted()
     }
 
     /** GoTrue matches the stored (lowercased, trimmed) email; normalize before every call so a

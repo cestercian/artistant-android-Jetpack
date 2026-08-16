@@ -17,7 +17,7 @@ class ArtistantApplication : Application(), Configuration.Provider {
         super.onCreate()
         if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
         // Soft-fail when Firebase isn't configured; cheap when permission not granted.
-        pushEntryPoint(this).pushService().registerOnLaunchIfPermitted()
+        pushEntryPoint(this).pushService().registerIfPermitted()
     }
 
     override val workManagerConfiguration: Configuration
