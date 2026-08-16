@@ -44,6 +44,8 @@ import `in`.artistant.app.feature.epk.EpkRowAction
 import `in`.artistant.app.feature.epk.EpkSectionHeader
 import `in`.artistant.app.feature.epk.PackageRow
 import `in`.artistant.app.feature.epk.TECH_PRESETS
+import `in`.artistant.app.feature.epk.packageRowBlocker
+import `in`.artistant.app.feature.epk.packageRowIsPartiallyFilled
 import `in`.artistant.app.feature.epk.popularBadgeWouldMeanSomething
 import `in`.artistant.app.feature.epk.previewPackages
 import `in`.artistant.app.feature.signup.SignupInputRow
@@ -298,6 +300,20 @@ private fun PackageRowCard(
                     uncheckedBorderColor = colors.line,
                 ),
                 modifier = Modifier.semantics { testTag = "wizard.pricing.popular" },
+            )
+        }
+        // Why this tier will not publish. The gate only asks for ONE savable row
+        // and `packageDrafts` drops the rest, so an artist who fills three tiers
+        // and leaves one price blank advances, publishes, and that tier is never
+        // written — the row looked finished right up until it was gone.
+        packageRowBlocker(row)?.let { blocker ->
+            Text(
+                blocker,
+                style = AppTheme.type.caption,
+                // Loud only once there is something to lose. A row that has just
+                // been added is blank by definition, and warning about it on the
+                // frame it appears blames the artist for pressing Add.
+                color = if (packageRowIsPartiallyFilled(row)) colors.warm else colors.ink3,
             )
         }
     }

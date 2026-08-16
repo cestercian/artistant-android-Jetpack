@@ -223,6 +223,27 @@ class WizardGateTest {
         assertEquals(emptySet<String>(), toggleInSet("Fri", once))
     }
 
+    // --- Save & exit ---------------------------------------------------------
+
+    @Test
+    fun `save and exit refuses to write while the form is still restoring`() {
+        // Save & exit lives in the top bar, which is NOT behind the restore
+        // spinner, and until the restore lands the state behind it is the
+        // constructor default — Identity, blank name and handle, no tiers, no
+        // media references. Writing that replaces the artist's real draft with a
+        // blank one and signs them out; on the next sign-in the blank draft
+        // restores, references nothing, and the orphan sweep deletes the staged
+        // cover and every sample off disk. Unrecoverable, from one tap during a
+        // profile read that has no timeout.
+        assertFalse(wizardExitMaySaveDraft(WizardUiState()))
+        assertFalse(wizardExitMaySaveDraft(state(WizardStep.Pricing).copy(isRestoring = true)))
+    }
+
+    @Test
+    fun `save and exit writes the form once the restore has landed`() {
+        assertTrue(wizardExitMaySaveDraft(state(WizardStep.Pricing).copy(isRestoring = false)))
+    }
+
     // --- Publish payload -----------------------------------------------------
 
     @Test

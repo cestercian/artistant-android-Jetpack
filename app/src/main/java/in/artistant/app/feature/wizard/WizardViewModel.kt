@@ -515,11 +515,21 @@ class WizardViewModel @Inject constructor(
      * synchronously first, and it survives because it lives in its own store
      * (see [WizardDraftStore]); sign-out's `wipeAll` clears the shared one.
      * Signing back in as the same artist resumes at the same step.
+     *
+     * The write is skipped while the form is still restoring — see
+     * [wizardExitMaySaveDraft]. The control is live during that window (the top
+     * bar is not behind the spinner), and the state behind it is the blank
+     * default, so writing it would destroy the very draft this button exists to
+     * protect. Exiting still signs out: the artist asked to leave, and the saved
+     * draft is already what they would come back to.
      */
     fun saveAndExit() {
+        val snapshot = _state.value
         viewModelScope.launch {
-            session.currentUserId?.lowercase()?.let { ownerId ->
-                runCatching { draftStore.save(_state.value.toDraft(ownerId)) }
+            if (wizardExitMaySaveDraft(snapshot)) {
+                session.currentUserId?.lowercase()?.let { ownerId ->
+                    runCatching { draftStore.save(snapshot.toDraft(ownerId)) }
+                }
             }
             runCatching { session.signOut() }
         }

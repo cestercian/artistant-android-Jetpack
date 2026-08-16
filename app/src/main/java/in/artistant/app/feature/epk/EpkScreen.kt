@@ -73,6 +73,7 @@ import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.designsystem.component.SampleRow
 import `in`.artistant.app.domain.sample.SamplePlayback
+import `in`.artistant.app.platform.media.WizardMediaCache
 import `in`.artistant.app.platform.media.rememberSamplePlayer
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistMediaItem
@@ -365,7 +366,11 @@ private fun EpkEditor(
                 // every section in the editor.
                 playback = player.playback,
                 onPlay = player::onTap,
-                onAdd = { onPickAudio(arrayOf("audio/*")) },
+                // Only what the samples bucket accepts (migration 0010). `audio/*`
+                // offered WAV and OGG, which stage and publish and then 400 in the
+                // upload queue — three retries later, on a failure set no screen
+                // reads. The adopt path re-checks; a picker filter is a hint.
+                onAdd = { onPickAudio(WizardMediaCache.ACCEPTED_AUDIO_MIME_TYPES.toTypedArray()) },
                 onDelete = viewModel::deleteSample,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
