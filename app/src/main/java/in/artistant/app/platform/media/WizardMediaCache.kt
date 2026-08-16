@@ -2,6 +2,7 @@ package `in`.artistant.app.platform.media
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.UUID
@@ -31,6 +32,30 @@ class WizardMediaCache @Inject constructor(
     ) {
         fun file(cache: WizardMediaCache): File = File(cache.root, fileName)
     }
+
+    /**
+     * The picked file's human name, or null when the provider won't say.
+     *
+     * `Uri.lastPathSegment` is NOT this. A `OpenDocument()` pick hands back a
+     * document URI whose last segment is a provider-defined id — `audio:1000000042`
+     * from the media documents provider, `primary:Music/song` from the storage one
+     * — so using it as a sample title puts a provider's internal identifier on the
+     * artist's public profile, with no rename anywhere in the EPK to undo it. Only
+     * `OpenableColumns.DISPLAY_NAME` answers the question that was actually asked.
+     *
+     * Blocking (a content-provider query), so callers belong off the main thread —
+     * the same contract [adoptPhoto] and [adoptAudio] already carry. A provider
+     * that refuses the query or has no such column returns null rather than
+     * throwing: a missing name is a fallback, not a failed import.
+     */
+    fun displayName(uri: Uri): String? = runCatching {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+            }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 
     fun adoptPhoto(uri: Uri): PendingPhoto {
         val name = "photo-${UUID.randomUUID()}.jpg"

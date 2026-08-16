@@ -43,6 +43,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,7 @@ import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.designsystem.component.SampleRow
+import `in`.artistant.app.domain.sample.SamplePlayback
 import `in`.artistant.app.platform.media.rememberSamplePlayer
 import `in`.artistant.app.data.repository.ArtistLink
 import `in`.artistant.app.data.repository.ArtistMediaItem
@@ -125,8 +127,12 @@ fun EpkScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
 
+    // The Uri alone. `uri.lastPathSegment` looks like a filename and is not one —
+    // SAF returns a document id ("audio:1000000042"), which used to become the
+    // clip's title on the artist's public profile. The ViewModel resolves the real
+    // display name off the main thread instead.
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.onSamplePicked(uri, uri.lastPathSegment)
+        if (uri != null) viewModel.onSamplePicked(uri)
     }
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.onPhotoPicked(uri)
@@ -237,6 +243,22 @@ private fun EpkEditor(
     val artist = state.artist ?: return
     val dimens = AppTheme.dimens
     val space = dimens.space
+    // Remembered HERE, above the lazy container, not inside the samples section.
+    //
+    // That section is one `item`, and a lazy item's composition ends the moment it
+    // scrolls out of the viewport — which released the ExoPlayer, and with it the
+    // only control that could stop the clip, mid-listen. Five tall sections sit
+    // below samples, so an artist who pressed play and scrolled to check their
+    // pricing lost the audio inside one screen of scrolling, with no explanation
+    // and no way back other than scrolling up and restarting from 0:00. Scoped to
+    // the screen it matches both the public profile (a plain scrolling Column,
+    // which is why the same block behaves correctly there) and the player's own
+    // documented lifetime: leave the SCREEN and the clip is done.
+    //
+    // Built unconditionally rather than only for an artist who has clips: an idle
+    // ExoPlayer holds no codec until `prepare`, and making it conditional buys one
+    // thread back in exchange for a nullable handle threaded through the section.
+    val player = rememberSamplePlayer(state.samples)
 
     LazyColumn(
         Modifier
@@ -282,6 +304,8 @@ private fun EpkEditor(
                 state = state,
                 onRetry = viewModel::refresh,
                 onDismissSaveError = viewModel::dismissSaveError,
+                onRetrySampleUpload = viewModel::retryFailedSampleUploads,
+                onDismissSampleUploadError = viewModel::dismissSampleUploadError,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
@@ -336,6 +360,11 @@ private fun EpkEditor(
         item(key = "samples") {
             SamplesSection(
                 samples = state.samples,
+                // The State, not its value: read inside the section so a position
+                // tick five times a second recomposes one row group rather than
+                // every section in the editor.
+                playback = player.playback,
+                onPlay = player::onTap,
                 onAdd = { onPickAudio(arrayOf("audio/*")) },
                 onDelete = viewModel::deleteSample,
                 modifier = Modifier.padding(horizontal = space.lg),
@@ -597,6 +626,8 @@ private fun StatusBlock(
     state: EpkUiState,
     onRetry: () -> Unit,
     onDismissSaveError: () -> Unit,
+    onRetrySampleUpload: () -> Unit,
+    onDismissSampleUploadError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
@@ -622,6 +653,19 @@ private fun StatusBlock(
         }
         state.saveError?.let {
             EpkBanner(message = it, onDismiss = onDismissSaveError)
+        }
+        // The queue gave up on a clip. Its own banner rather than a `saveError`,
+        // because unlike every other failure here the file is still staged and the
+        // drain can simply be told to go again — and because until this existed a
+        // sample that failed three times said nothing at all, leaving "it never
+        // showed up" as the artist's only clue.
+        if (state.sampleUploadFailed) {
+            EpkBanner(
+                message = "A sample didn't finish uploading — check your connection and try again.",
+                actionLabel = "Retry upload",
+                onAction = onRetrySampleUpload,
+                onDismiss = onDismissSampleUploadError,
+            )
         }
         Row(
             Modifier.fillMaxWidth(),
@@ -1347,6 +1391,8 @@ private fun PackageEditorRow(
 @Composable
 private fun SamplesSection(
     samples: List<Sample>,
+    playback: State<SamplePlayback>,
+    onPlay: (Sample) -> Unit,
     onAdd: () -> Unit,
     onDelete: (Sample) -> Unit,
     modifier: Modifier = Modifier,
@@ -1370,16 +1416,16 @@ private fun SamplesSection(
         } else {
             // The artist gets the same playable row a client sees on the public
             // profile, so "what does this sound like on my page" is answered here
-            // rather than by publishing and looking.
-            val player = rememberSamplePlayer(samples)
-            val playback by player.playback
+            // rather than by publishing and looking. The player itself belongs to
+            // the screen, not to this item — see [EpkEditor].
+            val current by playback
             Column {
                 HRule()
                 samples.forEach { sample ->
                     SampleRow(
                         sample = sample,
-                        playback = playback,
-                        onTap = { player.onTap(sample) },
+                        playback = current,
+                        onTap = { onPlay(sample) },
                         trailing = { EpkRowAction("Remove", { onDelete(sample) }, tone = colors.hot) },
                     )
                     HRule()

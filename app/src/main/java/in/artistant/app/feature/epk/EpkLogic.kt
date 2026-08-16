@@ -4,6 +4,8 @@ import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.domain.artist.ServiceTags
+import `in`.artistant.app.platform.media.UploadQueue
+import kotlinx.coroutines.CancellationException
 
 /**
  * Every decision the EPK editor makes, extracted from the Composables and the
@@ -483,6 +485,74 @@ fun canAddSample(currentCount: Int, uploadInFlight: Boolean): Boolean =
 
 fun canAddPhoto(currentCount: Int, uploadInFlight: Boolean): Boolean =
     !uploadInFlight && currentCount < MAX_PHOTOS
+
+// ── Sample uploads ───────────────────────────────────────────────────────────
+
+/** What an unnameable clip is called. Matches what the repository defaults to. */
+const val DEFAULT_SAMPLE_TITLE: String = "Sample"
+
+/**
+ * The title a picked clip is published under.
+ *
+ * [displayName] must be the provider's `DISPLAY_NAME`, never `lastPathSegment` —
+ * see `WizardMediaCache.displayName` for why the two are not the same string.
+ * Falling back to [DEFAULT_SAMPLE_TITLE] when the provider has nothing to say is
+ * deliberate: this value lands in `samples.title` and is rendered on the artist's
+ * PUBLIC profile by the same row a client taps, and the EPK offers no rename, so
+ * a neutral placeholder beats a plausible-looking wrong name that cannot be
+ * corrected without deleting the clip and re-uploading it.
+ *
+ * The extension is dropped, but only when there is one — `substringBeforeLast`
+ * returns the whole string on a name with no '.', which is exactly how a
+ * document id used to survive this step intact.
+ */
+fun sampleTitleFrom(displayName: String?): String {
+    val name = displayName?.trim().orEmpty()
+    if (name.isEmpty()) return DEFAULT_SAMPLE_TITLE
+    return name.substringBeforeLast('.').trim().ifBlank { DEFAULT_SAMPLE_TITLE }
+}
+
+/**
+ * How many uploads the queue has given up on that this screen is answerable for.
+ *
+ * The queue is shared with the wizard, which puts a COVER PHOTO through it. A
+ * count that ignored the task type would raise "that sample didn't upload" over
+ * a failed photo — a banner offering a retry for something the artist never
+ * added here.
+ */
+fun failedSampleCount(failed: List<UploadQueue.Task>): Int =
+    failed.count { it is UploadQueue.Task.AudioSample }
+
+// ── Saving ───────────────────────────────────────────────────────────────────
+
+/**
+ * Run a save, and say which kind of "it didn't finish" happened.
+ *
+ * Every persist path on this screen is launched into a Job that the NEXT edit
+ * cancels — a second preset chip tapped 200ms after the first, a keystroke
+ * landing while a debounced write is already in flight. `kotlin.runCatching`
+ * catches **Throwable**, so those cancellations arrived at `onFailure` and
+ * painted "Couldn't save your tech rider" over a save that had merely been
+ * superseded by a newer one, which was itself about to succeed.
+ *
+ * So a cancellation is rethrown rather than reported. It is structured
+ * concurrency working, not a failure the artist can act on, and swallowing it
+ * also leaves the coroutine unable to observe its own cancellation —
+ * `AuthViewModel.errorFor` and `SignupViewModel.save` refuse it for the same
+ * reason. Everything else still comes back as `Result.failure`, so call sites
+ * keep their `onSuccess`/`onFailure` shape.
+ *
+ * `Exception` rather than `Throwable`: an OOM or a linkage error is not a
+ * "check your connection" banner.
+ */
+suspend fun <T> saveCatching(block: suspend () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
 
 // ── Completeness ─────────────────────────────────────────────────────────────
 
