@@ -49,11 +49,18 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Everything on this screen has a defensible default.
+ *
+ * That is deliberate, and it is what lets the read below fail quietly: with no
+ * booking loaded the screen still reads "Request sent." over a pending_confirm
+ * timeline, which is exactly what just happened. There is no `isLoading` here
+ * because there is nothing to withhold while the read is in flight.
+ */
 data class ConfirmedUiState(
     val artistName: String = "",
     val date: String = "",
     val status: BookingStatus = BookingStatus.PendingConfirm,
-    val isLoading: Boolean = true,
 )
 
 @HiltViewModel
@@ -68,14 +75,27 @@ class ConfirmedViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val booking = bookingsRepository.fetchOne(bookingId)
+            // Guarded the same way BookingDetailViewModel.refresh guards it, and
+            // for a sharper reason. `fetchOne` wraps EVERY transport failure in
+            // BookingRepositoryError.Underlying and rethrows — it returns null
+            // only for a genuine zero-row read — and viewModelScope carries no
+            // CoroutineExceptionHandler, so an unguarded throw here walks out to
+            // the thread's uncaught handler and kills the process. Losing
+            // connectivity a second after the request lands would crash the one
+            // screen whose entire job is to tell the client their request went
+            // through, over a booking the server already has.
+            //
+            // The read is decoration: it names the artist and the date. We only
+            // ever arrive here from a create that came back with an id, so a
+            // failure degrades to "The artist will respond soon" rather than
+            // showing an error over a request that did, in fact, send.
+            val booking = runCatching { bookingsRepository.fetchOne(bookingId) }.getOrNull()
             val artist = booking?.let { artistsRepository.find(it.artistId) }
             _state.update {
                 it.copy(
                     artistName = artist?.name.orEmpty(),
                     date = booking?.date.orEmpty(),
                     status = booking?.status ?: BookingStatus.PendingConfirm,
-                    isLoading = false,
                 )
             }
         }
