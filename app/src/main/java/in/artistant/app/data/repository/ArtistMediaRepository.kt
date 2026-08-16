@@ -2,6 +2,8 @@ package `in`.artistant.app.data.repository
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
@@ -217,7 +219,7 @@ class SupabaseArtistMediaRepository @Inject constructor(
             val original = BitmapFactory.decodeFile(file.absolutePath)
                 ?: error("Could not decode image")
             val scale = maxOf(original.width, original.height).toFloat() / MAX_DIM
-            val bitmap = if (scale > 1f) {
+            val scaled = if (scale > 1f) {
                 val w = (original.width / scale).toInt().coerceAtLeast(1)
                 val h = (original.height / scale).toInt().coerceAtLeast(1)
                 Bitmap.createScaledBitmap(original, w, h, true).also {
@@ -226,12 +228,60 @@ class SupabaseArtistMediaRepository @Inject constructor(
             } else {
                 original
             }
+            // Turn AFTER the downscale: the scale factor is max(w, h), which no
+            // rotation can change, so the result is identical either way — but
+            // this turns a 2048px copy instead of holding two full 12MP bitmaps.
+            val bitmap = uprighted(scaled, file)
+            if (bitmap !== scaled) scaled.recycle()
             val out = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
             val w = bitmap.width
             val h = bitmap.height
-            if (bitmap !== original) bitmap.recycle() else original.recycle()
+            bitmap.recycle()
             return NormalizedJpeg(out.toByteArray(), w, h)
+        }
+
+        /**
+         * The source file's EXIF orientation, baked into the pixels.
+         *
+         * [BitmapFactory] decodes the stored pixels and ignores the Orientation
+         * tag; [Bitmap.compress] then writes a JPEG carrying no EXIF at all — so
+         * an un-applied hint isn't deferred to the viewer, it's destroyed. A
+         * portrait phone shot (landscape pixels + `ORIENTATION_ROTATE_90`) would
+         * upload sideways on the profile hero, the Discover tile and the EPK
+         * grid, with no way to fix it in-app, and [ArtistMediaAspect.classify]
+         * would measure the aspect on the swapped axis and store `landscape`.
+         * iOS encodes through `UIImage`, which applies orientation first — this
+         * is what keeps the two clients agreeing on the same source photo.
+         *
+         * Unreadable EXIF is treated as "already upright" rather than fatal: an
+         * un-rotated upload beats a failed one.
+         */
+        private fun uprighted(bitmap: Bitmap, file: File): Bitmap {
+            val orientation = runCatching {
+                ExifInterface(file.absolutePath)
+                    .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+            val matrix = Matrix()
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    matrix.postRotate(90f)
+                    matrix.postScale(-1f, 1f)
+                }
+                ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    matrix.postRotate(270f)
+                    matrix.postScale(-1f, 1f)
+                }
+                else -> return bitmap
+            }
+            return runCatching {
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            }.getOrDefault(bitmap)
         }
     }
 }

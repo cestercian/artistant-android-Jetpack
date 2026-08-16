@@ -210,7 +210,13 @@ private data class DbGigRequestWithClient(
     data class ClientEmbed(@SerialName("full_name") val fullName: String? = null)
 
     fun toStoredRequest(): StoredRequest {
-        val clientName = client?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "Client"
+        // Null, not "Client". The embed only resolves on the CLIENT's own path
+        // (`users_select_self`); on the artist's path RLS nulls it, and
+        // `gig_requests` carries no denormalized `client_name` to fall back to
+        // the way `bookings` does (0080). Stamping a literal there made every
+        // inbound quote render under the same name — a fact about nobody. The
+        // renderers show the request's own date/offer instead.
+        val clientName = client?.fullName?.trim()?.takeIf { it.isNotEmpty() }
         return StoredRequest(
             raw = GigRequest(
                 id = id,

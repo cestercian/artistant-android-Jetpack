@@ -99,8 +99,22 @@ fun GigRequestDetailScreen(
                             .padding(space.lg),
                         verticalArrangement = Arrangement.spacedBy(space.lg),
                     ) {
-                        Text(request.raw.client, style = AppTheme.type.displaySmall, color = colors.ink)
-                        Text(request.raw.date, style = AppTheme.type.footnote, color = colors.ink3)
+                        // The headline is the requester when we can name them.
+                        // We usually can't: `users` is self-only under RLS, so
+                        // the embed comes back null on the artist's side, and
+                        // `gig_requests` carries no denormalized `client_name`
+                        // the way `bookings` does (0080). The gig's date takes
+                        // the slot instead of a placeholder that would read the
+                        // same on every request the artist opens.
+                        val requester = request.requesterName
+                        Text(
+                            requester ?: request.raw.date.ifBlank { "Gig request" },
+                            style = AppTheme.type.displaySmall,
+                            color = colors.ink,
+                        )
+                        if (requester != null) {
+                            Text(request.raw.date, style = AppTheme.type.footnote, color = colors.ink3)
+                        }
                         Pill(request.raw.packageLabel, tone = PillTone.Brand)
                         if (state.clashes.isNotEmpty()) {
                             Column(
