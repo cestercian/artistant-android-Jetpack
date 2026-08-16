@@ -17,7 +17,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ScoreBreakdown
@@ -71,7 +70,6 @@ fun ScoreBreakdownSheet(
                 ScoreRing(
                     value = ring,
                     size = AppTheme.dimens.size.ringMd,
-                    stroke = 6.dp,
                     // The tier is spelled out beside the title now, so the ring's
                     // own label would print it twice.
                     showLabel = false,

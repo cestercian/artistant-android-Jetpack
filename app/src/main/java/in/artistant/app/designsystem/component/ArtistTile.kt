@@ -51,6 +51,7 @@ fun ArtistTile(
     width: Dp = 192.dp,
     height: Dp = 252.dp,
 ) {
+    val colors = AppTheme.colors
     val radii = AppTheme.dimens.radii
     val space = AppTheme.dimens.space
     val interaction = remember { MutableInteractionSource() }
@@ -124,7 +125,7 @@ fun ArtistTile(
                 Text(
                     text = subtitle,
                     style = AppTheme.type.footnote,
-                    color = Color.White.copy(alpha = 0.75f),
+                    color = colors.inkOnMedia,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -161,7 +162,7 @@ fun ArtistTile(
                     Text(
                         text = artist.duration,
                         style = AppTheme.type.caption,
-                        color = Color.White.copy(alpha = 0.6f),
+                        color = colors.inkOnMediaSoft,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

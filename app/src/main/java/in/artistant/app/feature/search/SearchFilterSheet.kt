@@ -323,7 +323,7 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
                 RoundedCornerShape(AppTheme.dimens.radii.xl),
             )
             .border(
-                width = if (selected) 0.dp else 1.dp,
+                width = if (selected) 0.dp else AppTheme.dimens.size.hairline,
                 color = colors.line,
                 shape = RoundedCornerShape(AppTheme.dimens.radii.xl),
             )
@@ -335,12 +335,17 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun PriceHistogram(buckets: List<PriceBucket>, min: Int, max: Int) {
     val colors = AppTheme.colors
+    val dashboard = AppTheme.dimens.dashboard
     val peak = buckets.maxOf { it.count }.coerceAtLeast(1)
+    // One source for the drawing box. Written twice — once as the row's height,
+    // once as a bare Float in the bar math — the two drift apart the moment
+    // either is retuned, and the tallest bar stops reaching its own ceiling.
+    val barBox = 48.dp
     Row(
         Modifier
             .fillMaxWidth()
-            .height(48.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+            .height(barBox),
+        horizontalArrangement = Arrangement.spacedBy(dashboard.barGap),
         verticalAlignment = Alignment.Bottom,
     ) {
         buckets.forEach { b ->
@@ -348,7 +353,7 @@ private fun PriceHistogram(buckets: List<PriceBucket>, min: Int, max: Int) {
             Box(
                 Modifier
                     .weight(1f)
-                    .height((48f * b.count / peak).dp.coerceAtLeast(2.dp))
+                    .height((barBox * b.count / peak).coerceAtLeast(dashboard.barGap))
                     .background(if (inRange) colors.brand else colors.ink4),
             )
         }

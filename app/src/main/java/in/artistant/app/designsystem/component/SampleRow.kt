@@ -158,13 +158,15 @@ private fun PlayControl(
     onTap: () -> Unit,
 ) {
     val colors = AppTheme.colors
+    val size = AppTheme.dimens.size
     val interaction = remember { MutableInteractionSource() }
+    // The disc stays 36dp and the clickable node under it is `controlMin` — the
+    // touch floor is a hit area, not a size, and this is the only control on a
+    // sample row, so missing it means the clip doesn't play.
     Box(
         Modifier
-            .size(36.dp)
-            .pressScale(interaction)
+            .size(size.controlMin)
             .clip(CircleShape)
-            .background(if (playing) colors.brand else colors.ink.copy(alpha = 0.08f))
             .clickable(
                 interactionSource = interaction,
                 indication = ripple(color = if (playing) colors.bg else colors.ink),
@@ -177,19 +179,28 @@ private fun PlayControl(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (buffering) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-                color = if (playing) colors.bg else colors.ink2,
-            )
-        } else {
-            Icon(
-                imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = null,
-                tint = if (playing) colors.bg else colors.ink,
-                modifier = Modifier.size(18.dp),
-            )
+        Box(
+            Modifier
+                .size(36.dp)
+                .pressScale(interaction)
+                .clip(CircleShape)
+                .background(if (playing) colors.brand else colors.ink.copy(alpha = 0.08f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (buffering) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(size.iconMd),
+                    strokeWidth = size.stroke,
+                    color = if (playing) colors.bg else colors.ink2,
+                )
+            } else {
+                Icon(
+                    imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = if (playing) colors.bg else colors.ink,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }
@@ -202,17 +213,18 @@ private fun PlayControl(
 @Composable
 private fun PlaybackBar(progress: Float) {
     val colors = AppTheme.colors
+    val stroke = AppTheme.dimens.size.stroke
     val animated by animateFloatAsState(targetValue = progress, label = "sampleProgress")
     Box(
         Modifier
             .fillMaxWidth()
-            .height(2.dp)
+            .height(stroke)
             .background(colors.ink.copy(alpha = 0.12f)),
     ) {
         Box(
             Modifier
                 .fillMaxWidth(animated.coerceIn(0f, 1f))
-                .height(2.dp)
+                .height(stroke)
                 .background(colors.brand),
         )
     }

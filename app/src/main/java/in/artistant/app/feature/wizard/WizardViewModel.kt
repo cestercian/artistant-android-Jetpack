@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.result.AppError
+import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.HandleAvailability
 import `in`.artistant.app.data.model.HandleRules
@@ -227,7 +228,7 @@ class WizardViewModel @Inject constructor(
         techItems = draft.techItems.toSet(),
         daysAvailable = draft.daysAvailable.toSet().ifEmpty { daysAvailable },
         timeSlots = draft.timeSlots.toSet().ifEmpty { timeSlots },
-        coverGradientIndex = draft.coverGradientIndex.coerceIn(0, 5),
+        coverGradientIndex = ArtistGradient.clampIndex(draft.coverGradientIndex),
         // Only files the sweep above confirmed are still on disk. The path is
         // re-resolved from the cache rather than stored, so it survives the app
         // moving between installs.
@@ -423,7 +424,7 @@ class WizardViewModel @Inject constructor(
     // ── Cover ────────────────────────────────────────────────────────────────
 
     fun onCoverGradientSelected(index: Int) =
-        _state.update { it.copy(coverGradientIndex = index.coerceIn(0, 5)) }
+        _state.update { it.copy(coverGradientIndex = ArtistGradient.clampIndex(index)) }
 
     fun onCoverPicked(uri: Uri) {
         viewModelScope.launch {

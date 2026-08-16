@@ -2,7 +2,6 @@ package `in`.artistant.app.feature.availability
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -31,7 +31,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.HRule
@@ -107,14 +109,18 @@ fun ManageAvailabilityScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
                                 .background(colors.bgSoft)
-                                .border(1.dp, colors.lineSoft, RoundedCornerShape(AppTheme.dimens.radii.md))
+                                .border(
+                                    AppTheme.dimens.size.hairline,
+                                    colors.lineSoft,
+                                    RoundedCornerShape(AppTheme.dimens.radii.md),
+                                )
                                 .padding(space.md),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(space.md),
                         ) {
                             Box(
                                 Modifier
-                                    .size(34.dp)
+                                    .size(AppTheme.dimens.size.avatarSm)
                                     .clip(CircleShape)
                                     .background(colors.brandSoft),
                                 contentAlignment = Alignment.Center,
@@ -142,24 +148,25 @@ fun ManageAvailabilityScreen(
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                             WizardWeekdays.forEach { day ->
                                 val on = day in state.days
-                                if (on) {
-                                    Pill(
-                                        text = day,
-                                        tone = PillTone.Brand,
-                                        modifier = Modifier.clickable { viewModel.toggleDay(day) },
-                                    )
-                                } else {
-                                    Text(
-                                        day,
-                                        style = AppTheme.type.caption,
-                                        color = colors.ink2,
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .background(colors.bgSoft)
-                                            .clickable { viewModel.toggleDay(day) }
-                                            .padding(horizontal = space.md, vertical = space.xs),
-                                    )
-                                }
+                                // One component in both states, with only the tone
+                                // changing: the off branch used to be a hand-built
+                                // copy of PillTone.Neutral, and swapping components
+                                // per state re-measured the chip under the finger
+                                // that had just tapped it.
+                                Pill(
+                                    text = day,
+                                    tone = if (on) PillTone.Brand else PillTone.Neutral,
+                                    modifier = Modifier
+                                        .toggleable(
+                                            value = on,
+                                            role = Role.Checkbox,
+                                            onValueChange = { viewModel.toggleDay(day) },
+                                        )
+                                        .semantics {
+                                            contentDescription =
+                                                "$day, ${if (on) "open" else "closed"}"
+                                        },
+                                )
                             }
                         }
 
@@ -169,24 +176,20 @@ fun ManageAvailabilityScreen(
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                             DefaultTimeSlots.forEach { slot ->
                                 val on = slot in state.times
-                                if (on) {
-                                    Pill(
-                                        text = slot,
-                                        tone = PillTone.Brand,
-                                        modifier = Modifier.clickable { viewModel.toggleTime(slot) },
-                                    )
-                                } else {
-                                    Text(
-                                        slot,
-                                        style = AppTheme.type.monoSmall,
-                                        color = colors.ink2,
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .background(colors.bgSoft)
-                                            .clickable { viewModel.toggleTime(slot) }
-                                            .padding(horizontal = space.md, vertical = space.xs),
-                                    )
-                                }
+                                Pill(
+                                    text = slot,
+                                    tone = if (on) PillTone.Brand else PillTone.Neutral,
+                                    modifier = Modifier
+                                        .toggleable(
+                                            value = on,
+                                            role = Role.Checkbox,
+                                            onValueChange = { viewModel.toggleTime(slot) },
+                                        )
+                                        .semantics {
+                                            contentDescription =
+                                                "$slot, ${if (on) "on" else "off"}"
+                                        },
+                                )
                             }
                         }
 
@@ -198,7 +201,7 @@ fun ManageAvailabilityScreen(
                             Spacer(Modifier.height(space.md))
                             Text("Saved.", style = AppTheme.type.footnote, color = colors.brand)
                         }
-                        Spacer(Modifier.height(120.dp))
+                        Spacer(Modifier.height(AppTheme.dimens.size.listTailroom))
                     }
                 }
 

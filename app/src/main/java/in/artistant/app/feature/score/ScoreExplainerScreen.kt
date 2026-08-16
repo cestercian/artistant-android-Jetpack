@@ -10,9 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,6 +45,8 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.designsystem.component.Sparkline
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.domain.score.ScoreTier
+import `in`.artistant.app.domain.score.tierColor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -154,16 +157,31 @@ fun ScoreExplainerScreen(
                     Text("Tiers", style = AppTheme.type.caption, color = colors.ink3)
                     Spacer(Modifier.height(space.sm))
                     listOf(
-                        "New" to "0–60",
-                        "Rising" to "60–75",
-                        "Trusted" to "75–90",
-                        "Elite" to "90+",
-                    ).forEach { (label, range) ->
+                        ScoreTier.New to "0–60",
+                        ScoreTier.Rising to "60–75",
+                        ScoreTier.Trusted to "75–90",
+                        ScoreTier.Elite to "90+",
+                    ).forEach { (tier, range) ->
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = space.xs),
                             horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(label, style = AppTheme.type.callout, color = colors.ink)
+                            // The dot carries the tier colour, same as the ring
+                            // above and every tile's score capsule. Without it the
+                            // legend explains a ring it shares nothing with.
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(space.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(size.dot)
+                                        .clip(CircleShape)
+                                        .background(tierColor(tier, colors)),
+                                )
+                                Text(tier.label, style = AppTheme.type.callout, color = colors.ink)
+                            }
                             Text(range, style = AppTheme.type.monoSmall, color = colors.ink3)
                         }
                     }
@@ -215,8 +233,8 @@ private fun MetricBar(name: String, weight: Int, value: Int) {
             progress = { value / 100f },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp)),
+                .height(AppTheme.dimens.dashboard.meterHeight)
+                .clip(CircleShape),
             color = colors.brand,
             trackColor = colors.bgSoft,
         )

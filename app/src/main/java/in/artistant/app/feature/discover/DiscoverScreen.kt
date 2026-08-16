@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -77,6 +78,7 @@ import `in`.artistant.app.designsystem.theme.MotionSpecs
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
 import kotlinx.coroutines.delay
 
@@ -347,7 +349,18 @@ private fun HeroSlide(
                     // The name sits directly on a photo, so it gets a soft drop
                     // shadow rather than relying on the scrim alone — a light
                     // shirt behind a white serif is otherwise unreadable.
-                    shadow = Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 3f), 16f),
+                    //
+                    // `Shadow` measures in PIXELS, so the offset and the blur are
+                    // converted from dp rather than written raw: raw, the 16 that
+                    // matches iOS's 16pt would land as 5dp of blur on a 3x phone
+                    // and 16dp on a 1x one — legibility that depends on density.
+                    shadow = with(LocalDensity.current) {
+                        Shadow(
+                            color = Color.Black.copy(alpha = 0.45f),
+                            offset = Offset(0f, 3.dp.toPx()),
+                            blurRadius = 16.dp.toPx(),
+                        )
+                    },
                 ),
                 color = Color.White,
                 maxLines = 2,
@@ -420,7 +433,7 @@ private fun HeroMetaLine(artist: Artist) {
     val space = AppTheme.dimens.space
     val tier = ScoreBands.tier(artist.score, artist.gigs)
     val tint = tierColor(tier, colors)
-    val ink = Color.White.copy(alpha = 0.82f)
+    val ink = colors.inkOnMedia
     // The strip must survive a long category or city on a narrow screen. Rather
     // than shrink the whole line (which would desync it from every other mono
     // run on the page), the two free-text fields are the ones allowed to
@@ -445,8 +458,16 @@ private fun HeroMetaLine(artist: Artist) {
                     .clip(CircleShape)
                     .background(tint),
             )
+            // A New-tier artist's number is not a score, it is an absence — under
+            // five gigs there is nothing to rank. Printing it gives a fresh
+            // profile "● 0 NEW", which is the one thing the tile capsule and the
+            // ring both go out of their way to avoid.
             Text(
-                "${artist.score} ${tier.label.uppercase()}",
+                if (tier == ScoreTier.New) {
+                    tier.label.uppercase()
+                } else {
+                    "${artist.score} ${tier.label.uppercase()}"
+                },
                 style = AppTheme.type.heroMeta.copy(fontWeight = FontWeight.Bold),
                 color = tint,
                 maxLines = 1,
@@ -476,7 +497,7 @@ private fun MetaDot() {
         Modifier
             .size(AppTheme.dimens.hero.separatorDot)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.4f)),
+            .background(AppTheme.colors.inkOnMediaSoft),
     )
 }
 
@@ -519,11 +540,17 @@ private fun HeroMasthead(
 }
 
 /**
- * The profile chip: a brand-gradient disc with a ringed edge.
+ * The profile chip: an accent→brand gradient disc with a ringed edge.
  *
  * Distinct from the shared `Avatar` on purpose — that one derives a per-name hue
  * so strangers are visually distinguishable, which is exactly wrong here. This
- * chip always represents *you*, so it always wears the brand.
+ * chip always represents *you*.
+ *
+ * The violet stop is not a slip and is deliberately NOT swapped for a brand-only
+ * ramp: iOS fills the same circle with `[.accent, .brand]` (DiscoverView, the
+ * masthead button), and this screen is client-only, so the disc runs from the
+ * fixed accent into the session's own lime. What ties it to the role is the rim
+ * and the initial, both of which are brand.
  */
 @Composable
 private fun MastheadAvatar(initial: String, size: Dp) {
@@ -684,14 +711,19 @@ private fun FeatureFrame(artist: Artist, onClick: () -> Unit) {
                 Text(
                     artist.category.uppercase(),
                     style = AppTheme.type.frameMeta,
-                    color = Color.White.copy(alpha = 0.82f),
+                    color = colors.inkOnMedia,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 MetaDot()
+                // Same rule as the hero: no number for an unranked artist.
                 Text(
-                    "${artist.score} ${tier.label.uppercase()}",
+                    if (tier == ScoreTier.New) {
+                        tier.label.uppercase()
+                    } else {
+                        "${artist.score} ${tier.label.uppercase()}"
+                    },
                     style = AppTheme.type.frameMeta.copy(fontWeight = FontWeight.Bold),
                     color = tint,
                     maxLines = 1,
@@ -700,7 +732,7 @@ private fun FeatureFrame(artist: Artist, onClick: () -> Unit) {
                 Text(
                     "FROM ${formatInrShort(artist.packages.firstOrNull()?.price ?: artist.price)}",
                     style = AppTheme.type.frameMeta,
-                    color = Color.White.copy(alpha = 0.82f),
+                    color = colors.inkOnMedia,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                 )

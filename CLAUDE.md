@@ -102,8 +102,9 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 # fast unit tests (pure logic: money math, score bands, planner)
 ./gradlew :app:testDebugUnitTest
 
-# lint (run before a PR; don't let it rot)
-./gradlew :app:lintDebug
+# lint (run before a PR; don't let it rot). Flavors exist (dev/prod/staging),
+# so bare lintDebug is ambiguous — lint the dev variant.
+./gradlew :app:lintDevDebug
 ```
 
 **Environment boundary — be honest about it.** This machine can **compile + run

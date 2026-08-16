@@ -51,6 +51,12 @@ data class ProfileUiState(
      * simply omitted then rather than showing a blank value.
      */
     val email: String? = null,
+    /**
+     * The calendar year this account was created, off the same cached auth
+     * session as [email]. Null when there is no session to read — a provider can
+     * withhold the date, and a signed-out state has none at all.
+     */
+    val joinedYear: Int? = null,
     /** Profile stats — Bookings = still live (see [liveBookingsCount]), Completed = finished. */
     val bookingsCount: Int = 0,
     val savedCount: Int = 0,
@@ -62,12 +68,19 @@ data class ProfileUiState(
     val displayName: String
         get() = profile?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
 
+    /**
+     * The year the identity strip and [subtitle] print. [joinedYear] when the
+     * session answered, otherwise today — the least-surprising fallback, and the
+     * one iOS uses, since a made-up vintage is worse than a current one.
+     */
+    val vintageYear: Int
+        get() = joinedYear ?: Calendar.getInstance().get(Calendar.YEAR)
+
     val subtitle: String
         get() {
             val city = profile?.city?.trim().orEmpty()
             val roleNoun = if (role == AppRole.Client) "Host" else "Artist"
-            val year = Calendar.getInstance().get(Calendar.YEAR)
-            val suffix = "$roleNoun since $year"
+            val suffix = "$roleNoun since $vintageYear"
             return if (city.isBlank()) suffix else "$city · $suffix"
         }
 
@@ -147,12 +160,20 @@ class ProfileViewModel @Inject constructor(
         _state.update { it.copy(isLoading = true, error = null) }
         val role = prefs.role.first()
         // Off the cached session, not a network call — safe to read on every
-        // refresh, and it is the only place the account email exists (the
-        // `public.users` row has no email column). Published BEFORE the profile
-        // fetch so the identity row survives a failed refresh: the email is
-        // already known locally, and blanking it because an unrelated request
-        // 500'd would be inventing a gap.
-        _state.update { it.copy(email = session.currentUser?.email) }
+        // refresh, and it is the only place the account email and the signup
+        // date exist (the `public.users` row carries neither). Published BEFORE
+        // the profile fetch so the identity row survives a failed refresh: both
+        // are already known locally, and blanking them because an unrelated
+        // request 500'd would be inventing a gap.
+        val user = session.currentUser
+        _state.update {
+            it.copy(
+                email = user?.email,
+                joinedYear = user?.createdAt?.toEpochMilliseconds()?.let { ms ->
+                    Calendar.getInstance().apply { timeInMillis = ms }.get(Calendar.YEAR)
+                },
+            )
+        }
         runCatching { users.fetchSelfProfile() }
             .onSuccess { profile ->
                 _state.update {

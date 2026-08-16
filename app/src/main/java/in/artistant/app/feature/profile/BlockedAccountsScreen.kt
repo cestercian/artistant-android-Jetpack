@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -237,8 +239,13 @@ private fun BlockedAccountRowUi(
             style = AppTheme.type.callout,
             color = colors.brand,
             modifier = Modifier
+                // A word is not a button, so nothing gives it a touch target for
+                // free: the word keeps its size and the tap node around it is
+                // grown to the floor. This is the only action on a safety screen.
+                .heightIn(min = AppTheme.dimens.size.rowMin)
                 .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
                 .clickable(onClick = onUnblock)
+                .wrapContentHeight()
                 .padding(horizontal = space.md, vertical = space.sm)
                 .semantics { testTag = "blockedAccounts.unblock" },
         )
@@ -267,8 +274,12 @@ private fun StaleNotice(onRetry: () -> Unit) {
             style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Bold),
             color = colors.brand,
             modifier = Modifier
+                // Same reason as Unblock: a footnote-sized word needs the tap
+                // node grown around it to clear the touch floor.
+                .heightIn(min = AppTheme.dimens.size.rowMin)
                 .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
                 .clickable(onClick = onRetry)
+                .wrapContentHeight()
                 .padding(vertical = space.xs)
                 .semantics { testTag = "blockedAccounts.retry" },
         )

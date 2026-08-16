@@ -5,7 +5,6 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -28,6 +28,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -194,7 +197,18 @@ fun DateCell(
                 if (isSelected) Color.Transparent else colors.lineSoft,
                 shape,
             )
-            .clickable(
+            // Both of this cell's states are carried by paint alone — selection by
+            // the brand fill plus a 1.06 scale, availability by a dot colour and a
+            // dim — so neither reaches a screen reader unless it is said out loud.
+            // `selectable` (not `clickable`) is what publishes the Selected
+            // property; the dot's meaning has to be spelled out, in the same word
+            // the strip's own Free/Busy legend uses.
+            .semantics {
+                contentDescription = "${lines.weekday} ${lines.day}".trim()
+                if (!isFree) stateDescription = "Busy"
+            }
+            .selectable(
+                selected = isSelected,
                 enabled = enabled,
                 interactionSource = interaction,
                 indication = null,

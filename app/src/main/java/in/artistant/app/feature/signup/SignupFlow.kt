@@ -3,7 +3,6 @@ package `in`.artistant.app.feature.signup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -32,6 +31,8 @@ import androidx.compose.ui.semantics.testTag
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.motionTween
 
 /**
  * The signup container (iOS `SignupFlowView`): switches on `step` with a crossfade, ships the
@@ -82,9 +83,13 @@ fun SignupFlow(
     }
 
     Box(modifier = modifier.fillMaxSize().background(AppTheme.colors.bg)) {
+        // Built here rather than inside `transitionSpec`, which is not a composable scope.
+        // motionTween owns the reduce-motion branch, so the step swap is instant for a user who
+        // has asked the system to stop animating — a raw `tween` animated regardless.
+        val fade = motionTween<Float>(AppTheme.motion.tabSwitch)
         AnimatedContent(
             targetState = state.step,
-            transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(250)) },
+            transitionSpec = { fadeIn(fade) togetherWith fadeOut(fade) },
             label = "signupStep",
         ) { step ->
             when (step) {

@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
@@ -92,6 +93,8 @@ fun HelpFeedbackSheet(
             value = body,
             onValueChange = { body = it },
             textStyle = AppTheme.type.body.copy(color = colors.ink),
+            // The default caret is black, which on `bgSoft` is no caret at all.
+            cursorBrush = SolidColor(colors.brand),
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))

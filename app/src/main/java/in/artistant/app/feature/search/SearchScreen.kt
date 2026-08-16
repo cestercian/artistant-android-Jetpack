@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -48,6 +50,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -103,6 +106,12 @@ fun SearchScreen(
                 singleLine = true,
                 textStyle = AppTheme.type.callout.copy(color = colors.ink),
                 cursorBrush = SolidColor(colors.brand),
+                // The results are already live off the debounce; the Search key is
+                // here to say "this one was a search", which is the only thing that
+                // records a recent. Without it the rail filled with the prefixes
+                // typed on the way to a word.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { viewModel.submitQuery() }),
                 modifier = Modifier.weight(1f),
                 decorationBox = { inner ->
                     Box {
@@ -122,18 +131,29 @@ fun SearchScreen(
                     Icon(Icons.Filled.Clear, contentDescription = "Clear", tint = colors.ink3)
                 }
             }
-            IconButton(onClick = { showFilters = true }) {
+            // The badge is silent on its own: the button merges its descendants and
+            // the icon's own description wins, so the count inside it is never read.
+            // It rides on the button instead — the same thing iOS speaks as the
+            // control's value.
+            val filterCount = state.activeFilterCount
+            IconButton(
+                onClick = { showFilters = true },
+                modifier = Modifier.semantics {
+                    contentDescription =
+                        if (filterCount > 0) "Filters, $filterCount active" else "Filters"
+                },
+            ) {
                 Box {
-                    Icon(Icons.Filled.Tune, contentDescription = "Filters", tint = colors.ink2)
-                    if (state.activeFilterCount > 0) {
+                    Icon(Icons.Filled.Tune, contentDescription = null, tint = colors.ink2)
+                    if (filterCount > 0) {
                         Text(
-                            state.activeFilterCount.toString(),
+                            filterCount.toString(),
                             style = AppTheme.type.monoSmall,
                             color = colors.brandInk,
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .background(colors.brand, RoundedCornerShape(AppTheme.dimens.radii.xl))
-                                .padding(horizontal = 4.dp),
+                                .padding(horizontal = space.xs),
                         )
                     }
                 }
@@ -143,7 +163,7 @@ fun SearchScreen(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = space.xl)
-                .height(1.dp)
+                .height(AppTheme.dimens.size.hairline)
                 .background(colors.line),
         )
 
@@ -211,8 +231,10 @@ fun SearchScreen(
                                     ArtistTile(
                                         artist = artist,
                                         onClick = { onArtistClick(artist.id) },
+                                        // No `width`: the weighted slot hands the
+                                        // tile fixed width constraints, so anything
+                                        // passed here was only ever coerced away.
                                         modifier = Modifier.weight(1f),
-                                        width = 160.dp,
                                         height = 220.dp,
                                     )
                                 }

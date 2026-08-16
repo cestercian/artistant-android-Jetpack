@@ -32,7 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
@@ -290,8 +292,12 @@ fun EpkChip(
                 enabled = enabled,
                 interactionSource = interaction,
                 indication = null,
+                role = Role.Checkbox,
                 onClick = onClick,
             )
+            // The fill is the whole state signal, and a screen reader cannot see a
+            // fill: without this the chip reads out identically ticked or not.
+            .semantics { this.selected = selected }
             .pressScale(interaction)
             .padding(horizontal = dimens.space.md, vertical = dimens.space.sm),
         verticalAlignment = Alignment.CenterVertically,
@@ -351,8 +357,14 @@ fun EpkBanner(
                     contentDescription = "Dismiss",
                     tint = colors.ink3,
                     modifier = Modifier
-                        .size(dimens.size.iconLg)
-                        .clickable(onClick = onDismiss),
+                        // The glyph stays 20dp; the tap node around it grows to the
+                        // touch floor, the same way the title bar's avatar does. It
+                        // matters here because this X is the only way to clear a
+                        // save error.
+                        .sizeIn(minWidth = dimens.size.rowMin, minHeight = dimens.size.rowMin)
+                        .clickable(onClick = onDismiss)
+                        .wrapContentSize()
+                        .size(dimens.size.iconLg),
                 )
             }
         }

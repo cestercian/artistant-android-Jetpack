@@ -42,7 +42,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import `in`.artistant.app.designsystem.component.PrimaryButton
@@ -62,7 +61,8 @@ fun DoneScreen(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     // Spring pop-in the checkmark on appear (iOS scale 0.6 → 1.0).
     var popped by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -80,16 +80,16 @@ fun DoneScreen(
         Spacer(Modifier.height(80.dp))
 
         Box(
-            Modifier.size(64.dp).scale(scale).clip(CircleShape).background(colors.brand),
+            Modifier.size(dimens.size.avatarLg).scale(scale).clip(CircleShape).background(colors.brand),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brandInk, modifier = Modifier.size(28.dp))
+            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brandInk, modifier = Modifier.size(dimens.size.iconXl))
         }
         Spacer(Modifier.height(space.xxl + space.sm))
 
         Text(
             if (firstName.isBlank()) "You're in." else "You're in, $firstName.",
-            style = AppTheme.type.displayTitle.copy(fontSize = 40.sp),
+            style = AppTheme.type.displayHero,
             color = colors.ink,
             textAlign = TextAlign.Center,
             modifier = Modifier.alpha(alpha),
@@ -111,7 +111,7 @@ fun DoneScreen(
 
         // Score primer — no card chrome, just the ring + two lines.
         Row(modifier = Modifier.fillMaxWidth().padding(bottom = space.xl), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(space.md)) {
-            ScoreRing(value = 94, size = 48.dp, stroke = 4.dp, showLabel = false)
+            ScoreRing(value = 94, size = dimens.size.avatarMd, stroke = 4.dp, showLabel = false)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Bookability Score™", style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Black), color = colors.ink)
                 Text("Every artist rated for reliability — not just talent.", style = AppTheme.type.caption, color = colors.ink3)

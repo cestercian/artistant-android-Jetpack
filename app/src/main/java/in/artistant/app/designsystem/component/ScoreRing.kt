@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -58,9 +59,17 @@ fun ScoreRing(
     } else {
         "Bookability score $numeric out of 100, ${tier.label} tier"
     }
+    // The centre glyph is measured against the RING, so it is converted through
+    // the density rather than tagged `.sp`: a Dp magnitude read as sp scales with
+    // the user's font setting while the ring around it does not, and at 2.0 the
+    // numeral rendered wider than the hole it sits in — over the arc, since the
+    // Box does not clip.
+    val density = LocalDensity.current
+    val numeralSize = with(density) { (size * 0.32f).toSp() }
+    val labelSize = with(density) { (size * 0.22f).toSp() }
 
     Column(
-        modifier = modifier.semantics { contentDescription = a11y },
+        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = a11y },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -105,7 +114,7 @@ fun ScoreRing(
                 Text(
                     "NEW",
                     style = AppTheme.type.monoSmall.copy(
-                        fontSize = (size.value * 0.22f).sp,
+                        fontSize = labelSize,
                         letterSpacing = 1.2.sp,
                     ),
                     color = arcColor,
@@ -113,7 +122,7 @@ fun ScoreRing(
             } else {
                 Text(
                     "$numeric",
-                    style = AppTheme.type.monoMedium.copy(fontSize = (size.value * 0.32f).sp),
+                    style = AppTheme.type.monoMedium.copy(fontSize = numeralSize),
                     color = colors.ink,
                 )
             }

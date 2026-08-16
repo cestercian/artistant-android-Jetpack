@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.SpanStyle
@@ -444,24 +449,37 @@ private fun AxisLabels(range: EarningsRange) {
 private fun RangePicker(selected: EarningsRange, onSelect: (EarningsRange) -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val size = AppTheme.dimens.size
     Row(horizontalArrangement = Arrangement.spacedBy(space.xs)) {
         EarningsRange.entries.forEach { range ->
             val active = range == selected
-            Text(
-                range.label,
-                style = AppTheme.type.monoMicro,
-                color = if (active) colors.brandInk else colors.ink3,
-                modifier = Modifier
+            // A 9sp chip inside a 44dp tap target rather than grown to one — the
+            // touch floor is a hit area, not a size. The selected state is a
+            // property rather than a suffix on the description, so a screen
+            // reader hears it the way it hears every other picker.
+            Box(
+                Modifier
+                    .defaultMinSize(minWidth = size.rowMin, minHeight = size.rowMin)
                     .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                    .background(if (active) colors.brand else colors.bgSoft)
                     .clickable { onSelect(range) }
-                    .padding(horizontal = space.sm, vertical = space.xs)
                     .semantics {
                         testTag = "artistHome.range.${range.label}"
-                        contentDescription =
-                            "${range.label} window${if (active) ", selected" else ""}"
+                        contentDescription = "${range.label} window"
+                        this.selected = active
+                        role = Role.Button
                     },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    range.label,
+                    style = AppTheme.type.monoMicro,
+                    color = if (active) colors.brandInk else colors.ink3,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                        .background(if (active) colors.brand else colors.bgSoft)
+                        .padding(horizontal = space.sm, vertical = space.xs),
+                )
+            }
         }
     }
 }
@@ -768,12 +786,16 @@ private fun AvailabilityStrip(state: ArtistHomeUiState, onManage: () -> Unit) {
             )
             Row(
                 Modifier
+                    // The label stays micro; the row it is tapped through clears
+                    // the 44dp floor.
+                    .heightIn(min = AppTheme.dimens.size.rowMin)
                     .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
                     .clickable(onClick = onManage)
                     .padding(horizontal = space.sm, vertical = space.xs)
                     .semantics {
                         testTag = "artistHome.manageAvailability"
                         contentDescription = "Manage availability"
+                        role = Role.Button
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {

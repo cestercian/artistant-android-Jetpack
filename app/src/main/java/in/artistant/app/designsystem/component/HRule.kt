@@ -6,13 +6,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.unit.dp
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /** A 1dp hairline in the `line` token — the HRule port. */
 @Composable
 fun HRule(modifier: Modifier = Modifier) {
-    HorizontalDivider(modifier = modifier, thickness = 1.dp, color = AppTheme.colors.line)
+    HorizontalDivider(
+        modifier = modifier,
+        thickness = AppTheme.dimens.size.hairline,
+        color = AppTheme.colors.line,
+    )
 }
 
 /**

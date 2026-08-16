@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -68,47 +70,51 @@ fun ProfileScreen(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     var cityOpen by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize().background(colors.bg).statusBarsPadding()) {
-        // Top chrome: hairline back chevron + compact right-aligned 5-segment progress (step 4).
+        // Top chrome: hairline back chevron over the flow's shared progress bar.
+        //
+        // The bar was a second implementation of it inlined here — narrow
+        // right-aligned segments with a third "past" state — so the indicator
+        // changed shape and colour semantics between consecutive steps of one
+        // flow. One component owns the treatment; this step only names its index.
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = space.xl, end = space.xl, top = space.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).border(1.dp, colors.line, RoundedCornerShape(15.dp))
-                    .clickable(onClick = onBack).semantics { testTag = "profile.back"; contentDescription = "Back" },
+                // The 30dp disc sits inside a `rowMin` tap target rather than being
+                // grown to it — the touch floor is a hit area, not a size. Same
+                // shape `SignupBackButton` takes on the other steps.
+                Modifier
+                    .size(dimens.size.rowMin)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack)
+                    .semantics { testTag = "profile.back"; contentDescription = "Back" },
                 contentAlignment = Alignment.Center,
             ) {
-                // A chevron, not a cross. The control goes BACK a signup step —
-                // it does not close or abandon the flow — and a cross is the
-                // universal "dismiss this whole thing" glyph. Same glyph the
-                // other signup steps use (`SignupBackButton`), so the affordance
-                // does not change meaning halfway through the flow.
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = null,
-                    tint = colors.ink2,
-                    modifier = Modifier.size(AppTheme.dimens.size.iconLg),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                repeat(5) { i ->
-                    Box(
-                        Modifier.width(16.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(
-                            when {
-                                i == 3 -> colors.brand
-                                i < 3 -> colors.brand.copy(alpha = 0.45f)
-                                else -> Color.White.copy(alpha = 0.16f)
-                            },
-                        ),
+                Box(
+                    Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).border(1.dp, colors.line, RoundedCornerShape(15.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // A chevron, not a cross. The control goes BACK a signup step —
+                    // it does not close or abandon the flow — and a cross is the
+                    // universal "dismiss this whole thing" glyph. Same glyph the
+                    // other signup steps use (`SignupBackButton`), so the affordance
+                    // does not change meaning halfway through the flow.
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = null,
+                        tint = colors.ink2,
+                        modifier = Modifier.size(AppTheme.dimens.size.iconLg),
                     )
                 }
             }
         }
+        SignupProgressDots(bar = progressIndex(SignupStep.Profile, state.mode))
 
         Column(
             modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = space.xl).padding(top = space.lg),
@@ -197,10 +203,17 @@ fun ProfileScreen(
         }
 
         // Outlined lime CTA (kept local so only this step is outlined, matching iOS).
+        //
+        // `navigationBarsPadding().imePadding()` for the same reason WizardFooter
+        // carries them: the window is edge-to-edge and does not resize for the
+        // keyboard, so without the ime inset the CTA — and the bottom of the
+        // scroll region above it, which is weighted against this bar — sit under
+        // the keyboard the moment Handle or Name takes focus.
         val disabled = state.isSaving || !state.profileValid
         Box(
             modifier = Modifier
-                .fillMaxWidth().padding(horizontal = space.xl).padding(bottom = space.xxl).height(54.dp)
+                .fillMaxWidth().navigationBarsPadding().imePadding()
+                .padding(horizontal = space.xl).padding(bottom = space.xxl).height(54.dp)
                 .clip(RoundedCornerShape(16.dp))
                 .border(1.5.dp, if (disabled) colors.line else colors.brand, RoundedCornerShape(16.dp))
                 .clickable(enabled = !disabled, onClick = onContinue)

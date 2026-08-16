@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 
 // Ambient token holders — composables read these via the AppTheme accessors.
 val LocalAppColors: ProvidableCompositionLocal<AppColors> =
@@ -39,6 +40,24 @@ fun ArtistantTheme(
         onBackground = colors.ink,
         surface = colors.bgCard,
         onSurface = colors.ink,
+        // The rest of the surface/outline/error family, because "stray Material
+        // components" reach for more than six roles and everything left unmapped
+        // keeps M3's BASELINE PURPLE. Two of them were on screen: a
+        // `ModalBottomSheet` takes its container from `surfaceContainerLow` and
+        // its drag handle from `onSurfaceVariant`, so every sheet in the app drew
+        // a lavender handle over a purple-tinted pane.
+        surfaceVariant = colors.bgSoft,
+        onSurfaceVariant = colors.ink2,
+        surfaceContainerLowest = colors.bg,
+        surfaceContainerLow = colors.bgElev,
+        surfaceContainer = colors.bgElev,
+        surfaceContainerHigh = colors.bgCard,
+        surfaceContainerHighest = colors.bgSoft,
+        outline = colors.line,
+        outlineVariant = colors.lineSoft,
+        error = colors.hot,
+        onError = colors.bg,
+        scrim = Color.Black,
     )
     // Resolved here, at the single root every surface sits under, so no screen
     // has to remember to read the accessibility setting for itself. (Two screens

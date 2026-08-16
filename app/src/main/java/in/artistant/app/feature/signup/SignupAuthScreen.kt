@@ -4,8 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,13 +31,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -47,6 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.ui.auth.AuthViewModel
 import `in`.artistant.app.ui.auth.EmailAuthSheet
+import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -91,9 +90,11 @@ fun SignupAuthScreen(
         Column(
             modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = space.xl).padding(bottom = space.xxl),
         ) {
-            if (mode == SignupMode.Signup) {
-                SignupProgressDots(bar = ProgressBar(1, 5), modifier = Modifier.padding(top = space.sm))
-            }
+            // The bar comes from the step machine, not from a literal. Login has its own
+            // 2-segment ramp that starts here; hiding it meant a returning user first saw the
+            // bar — already full — on the notification step. `SignupProgressDots` no-ops on the
+            // null `progressIndex` returns for a step that carries no bar.
+            SignupProgressDots(bar = progressIndex(SignupStep.Auth, mode), modifier = Modifier.padding(top = space.sm))
 
             Spacer(Modifier.height(space.xl))
             // Editorial headline — signup leans into the marquee, login is warm.
@@ -116,7 +117,7 @@ fun SignupAuthScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
                         .background(colors.brandSoft)
                         .padding(horizontal = space.md, vertical = space.sm)
                         .semantics { testTag = "auth.notice" },
@@ -185,7 +186,8 @@ fun SignupAuthScreen(
  * Uniform auth button (iOS `authLabel`): centred icon+title group, one height. Apple is the
  * single solid-white button (App Store 4.8 — first + most prominent); Google/Email are hairline
  * "glass" (a frosted look isn't a Compose primitive, so a translucent card + hairline border is
- * the faithful approximation). Press-scale mirrors the iOS button feedback.
+ * the faithful approximation). Press feedback comes from the shared [pressScale] modifier, so
+ * these buttons settle exactly like every other pressable and go still under reduce-motion.
  */
 @Composable
 private fun AuthButton(
@@ -197,28 +199,27 @@ private fun AuthButton(
     onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     val shape = RoundedCornerShape(16.dp)
     val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.98f else 1f, label = "authPress")
     val fg = if (solid) Color.Black else colors.ink
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .scale(scale)
+            .height(dimens.size.ctaTall)
+            .pressScale(interaction)
             .clip(shape)
-            .then(if (solid) Modifier.background(Color.White) else Modifier.background(colors.bgCard.copy(alpha = 0.6f)).border(1.dp, Color.White.copy(alpha = 0.18f), shape))
+            .then(if (solid) Modifier.background(Color.White) else Modifier.background(colors.bgCard.copy(alpha = 0.6f)).border(dimens.size.hairline, Color.White.copy(alpha = 0.18f), shape))
             .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick)
-            .semantics { this.testTag = testTag; contentDescription = title },
+            .semantics(mergeDescendants = true) { this.testTag = testTag; contentDescription = title },
         contentAlignment = Alignment.Center,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(dimens.space.md), verticalAlignment = Alignment.CenterVertically) {
             // The Apple/Google brand glyphs aren't bundled yet (see follow-ups); use a tinted
             // initial box as a stand-in so the layout + a11y are correct until the assets drop.
             glyph?.invoke() ?: Box(
-                Modifier.size(AppTheme.dimens.size.iconLg),
+                Modifier.size(dimens.size.iconLg).clearAndSetSemantics {},
                 contentAlignment = Alignment.Center,
             ) {
                 Text(title.substringAfter("with ").trim().take(1), color = fg, fontWeight = FontWeight.Bold)
