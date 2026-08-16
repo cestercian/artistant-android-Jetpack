@@ -108,6 +108,16 @@ fun MessagesScreen(
     var showArchive by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
 
+    // Chat is a sibling destination, so opening one leaves this ViewModel alive
+    // with the payload it loaded BEFORE the conversation was read: come back and
+    // the row still carries the unread rail, the old preview, and the old place
+    // in `last_message_at` order. Nothing else can correct it — the flags store
+    // only clears a device-local "mark as unread", never the server's count — so
+    // returning to the inbox re-reads it. Every resume is delivered; the
+    // ViewModel decides which ones to act on, because it is the half of this
+    // screen that survives the push — see MessagesViewModel.onResumed.
+    ResumeEffect(onResumed = viewModel::onResumed)
+
     Column(modifier.fillMaxSize().background(colors.bg)) {
         InboxHeader(
             query = state.query,

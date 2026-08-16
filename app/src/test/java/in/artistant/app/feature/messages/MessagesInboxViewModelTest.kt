@@ -13,6 +13,8 @@ import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
 import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,19 +43,25 @@ class MessagesInboxViewModelTest {
      * can't stamp `client_name` or fail a list call, which is what these rows need.
      */
     private class StaticThreads(
-        private val threads: List<Thread> = emptyList(),
+        /** Swappable, so a test can model the server changing between two loads. */
+        var threads: List<Thread> = emptyList(),
         private val failList: Boolean = false,
     ) : MessagesRepository {
         /** Load count — proves a re-projection didn't secretly go back to the network. */
         var calls = 0
             private set
 
+        /** When set, a load parks here until the test completes it — in-flight state. */
+        var listGate: CompletableDeferred<Unit>? = null
+
         override suspend fun listThreadsForUser(): List<Thread> {
             calls++
+            listGate?.await()
             if (failList) throw IllegalStateException("offline")
             return threads
         }
-        override suspend fun listMessages(threadId: String, limit: Int): List<Message> = emptyList()
+        override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> =
+            emptyList()
         override suspend fun send(threadId: String, body: String): Message = error("unused")
         override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String =
             threads.firstOrNull()?.id ?: "t-new"
@@ -231,6 +239,112 @@ class MessagesInboxViewModelTest {
 
         assertNotNull(model.state.value.error)
         assertTrue(model.state.value.threads.isEmpty())
+        assertFalse(model.state.value.isLoading)
+    }
+
+    // --- coming back to the inbox -------------------------------------------
+
+    /**
+     * Reading a conversation happens on ANOTHER screen. The chat zeroes the
+     * server's unread count and the reply moves the row up the `last_message_at`
+     * order, but this ViewModel is retained while the chat sits on top of it, so
+     * on the way back it is still holding the payload from before the thread was
+     * opened — an unread rail and a stale preview on a conversation the user has
+     * just read and answered. Nothing else can correct that: the flags store
+     * only clears a device-local "mark as unread", never `unreadCount`.
+     *
+     * So the screen hands EVERY ON_RESUME to [MessagesViewModel.onResumed] and
+     * the return re-reads. Driven through `onResumed` rather than `refresh`
+     * because the trigger is the half that was broken: the screen's composition
+     * is disposed behind the chat and rebuilt on the way back, so a latch living
+     * over there would reset and swallow the resume that arrives with it.
+     */
+    @Test
+    fun returningFromAChatRereadsTheInbox() = runTest {
+        val stale = Thread(
+            id = "t-1",
+            artistId = ARTIST_ID,
+            clientId = CLIENT_ID,
+            lastPreview = "Are you free on the 16th?",
+            lastMessageAtEpochMs = 1_000L,
+            unreadCount = 2,
+        )
+        val repo = StaticThreads(listOf(stale))
+        val model = vm(repo)
+        assertTrue(model.state.value.threads.single().unread)
+        assertEquals(1, repo.calls)
+
+        // The resume that arrives with the first paint: `init` just loaded.
+        model.onResumed()
+        assertEquals("entering the inbox must not load it twice", 1, repo.calls)
+
+        // The chat marked it read and sent a reply, and the screen composes
+        // fresh on the way back — but this ViewModel, and its latch, survived.
+        repo.threads = listOf(
+            stale.copy(
+                lastPreview = "Yes — 8pm works.",
+                lastMessageAtEpochMs = 2_000L,
+                unreadCount = 0,
+            ),
+        )
+        model.onResumed()
+
+        assertEquals("returning must re-read the inbox", 2, repo.calls)
+        val row = model.state.value.threads.single()
+        assertFalse("a row the server says was read must stop claiming unread", row.unread)
+        assertEquals("Yes — 8pm works.", row.thread.lastPreview)
+    }
+
+    /**
+     * Backgrounding and returning is the same event as coming back from a chat,
+     * and every one after the first counts — the inbox is stale after each.
+     */
+    @Test
+    fun everyLaterResumeRereadsToo() = runTest {
+        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID)))
+        val model = vm(repo)
+
+        model.onResumed()
+        model.onResumed()
+        model.onResumed()
+
+        assertEquals(3, repo.calls)
+    }
+
+    /**
+     * Nobody asked for the resync, so it must not raise the pull-to-refresh
+     * indicator — [MessagesScreen] drives that off `isLoading` once the first
+     * load has landed, and backing out of a chat should update the row, not
+     * animate a spinner at it. The gesture and the retry taps still do.
+     */
+    @Test
+    fun theResyncDoesNotRaiseTheRefreshIndicator() = runTest {
+        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID)))
+        val model = vm(repo)
+        model.onResumed() // the first paint's resume
+        repo.listGate = CompletableDeferred()
+
+        model.onResumed()
+
+        assertEquals("the resync must be in flight", 2, repo.calls)
+        assertFalse("a re-read nobody asked for must not spin", model.state.value.isLoading)
+        repo.listGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(model.state.value.isLoading)
+    }
+
+    /** The gesture still owns its own signal: a pull shows the indicator. */
+    @Test
+    fun aPullToRefreshStillShowsTheIndicator() = runTest {
+        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID)))
+        val model = vm(repo)
+        repo.listGate = CompletableDeferred()
+
+        model.refresh()
+
+        assertTrue(model.state.value.isLoading)
+        repo.listGate!!.complete(Unit)
+        advanceUntilIdle()
         assertFalse(model.state.value.isLoading)
     }
 

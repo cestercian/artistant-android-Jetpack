@@ -45,7 +45,8 @@ class BlockedAccountsViewModelTest {
             return threads
         }
 
-        override suspend fun listMessages(threadId: String, limit: Int): List<Message> = emptyList()
+        override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> =
+            emptyList()
         override suspend fun send(threadId: String, body: String): Message = error("unused")
         override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String =
             error("unused")

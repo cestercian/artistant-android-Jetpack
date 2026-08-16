@@ -99,7 +99,7 @@ fun ChatScreen(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
 
-    RefreshOnResume(onResumed = viewModel::onResumed)
+    ResumeEffect(onResumed = viewModel::onResumed)
 
     Column(
         modifier
@@ -146,6 +146,7 @@ fun ChatScreen(
                     state = state,
                     onBookingClick = onBookingClick,
                     onRetry = viewModel::retryFailedMessage,
+                    onLoadOlder = viewModel::loadOlder,
                 )
             }
         }
@@ -367,6 +368,7 @@ private fun Transcript(
     state: ChatUiState,
     onBookingClick: (String) -> Unit,
     onRetry: (String) -> Unit,
+    onLoadOlder: () -> Unit,
 ) {
     val space = AppTheme.dimens.space
     val messages = state.messages
@@ -388,6 +390,7 @@ private fun Transcript(
     val dateFormat = remember(context) { DateFormat.getMediumDateFormat(context) }
 
     FollowTail(listState = listState, messages = messages)
+    LoadOlderAtTop(listState = listState, onLoadOlder = onLoadOlder)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = space.lg),
@@ -447,7 +450,9 @@ private fun Transcript(
  * arriving messages could update it, a new message would flip the flag false
  * between the list growing and this effect reading it, and the thread would stop
  * following exactly when it matters. Sending always re-arms the follow, because
- * pressing send is an unambiguous statement about where you want to be.
+ * pressing send is an unambiguous statement about where you want to be — but only
+ * when the NEWEST message actually changed, so a scroll-back page arriving at the
+ * head of the list leaves the reader where they are.
  */
 @Composable
 private fun FollowTail(
@@ -457,6 +462,12 @@ private fun FollowTail(
     // Held in a plain holder, read only inside effects: nothing composes against
     // it, so tracking scroll position costs no recomposition.
     val followTail = remember { mutableStateOf(true) }
+    // The newest message the last auto-scroll was for. Scroll-back grows the list
+    // at the HEAD, which leaves this unchanged — and prepended history must never
+    // move the viewport, least of all when the newest message is the viewer's own
+    // and the own-send rule below would otherwise yank them out of the history
+    // they scrolled up to read.
+    val tailId = remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
@@ -469,6 +480,10 @@ private fun FollowTail(
 
     LaunchedEffect(messages.lastOrNull()?.id, messages.size) {
         if (messages.isEmpty()) return@LaunchedEffect
+        val newest = messages.last().id
+        val tailChanged = newest != tailId.value
+        tailId.value = newest
+        if (!tailChanged) return@LaunchedEffect
         val ownSend = messages.last().isMine
         if (ownSend) followTail.value = true
         if (!followTail.value) return@LaunchedEffect
@@ -478,6 +493,33 @@ private fun FollowTail(
             listState.scrollToItem(messages.lastIndex)
         } else {
             listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+}
+
+/**
+ * Walk back through history when the reader reaches the top.
+ *
+ * The transcript only ever loads the newest page, so without this the messages
+ * before it are unreachable — scrolling up simply stopped at the 50th-newest.
+ * Fires when a scroll SETTLES with the oldest loaded message on screen: the same
+ * "only decide when the gesture ends" discipline [FollowTail] uses, and what
+ * keeps a fresh open — which lands pinned at the bottom — from fetching a page
+ * nobody asked for. A transcript that fits on screen has no scroll-back to do
+ * and is skipped. Repeat ticks are cheap: the ViewModel owns the one-at-a-time
+ * and reached-the-beginning guards ([ChatViewModel.loadOlder]).
+ */
+@Composable
+private fun LoadOlderAtTop(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onLoadOlder: () -> Unit,
+) {
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (scrolling) return@collect
+            val info = listState.layoutInfo
+            if (info.visibleItemsInfo.size >= info.totalItemsCount) return@collect
+            if (listState.firstVisibleItemIndex == 0) onLoadOlder()
         }
     }
 }
@@ -775,25 +817,32 @@ private fun gigCaption(context: ThreadContext, nowMs: Long): String? {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Re-sync when the app comes back to the foreground.
+ * Every ON_RESUME this destination sees, handed to [onResumed] unfiltered.
  *
- * Android suspends the WebSocket while backgrounded, so a chat left open goes
- * quiet until something re-subscribes. The very first ON_RESUME is skipped —
- * the ViewModel's `init` already did that load, and refreshing again on entry
- * would double every open.
+ * Two things bring a screen back and both matter here: the app returning to the
+ * foreground (Android suspends the WebSocket while it is away, so a chat left
+ * open goes quiet until something re-subscribes) and a destination pushed on
+ * top of it going away (the inbox's rows go stale the moment a chat is read
+ * over them — see [MessagesScreen]).
+ *
+ * Deliberately dumb: it does NOT try to swallow the resume that arrives with
+ * the first paint, even though every caller wants that resume ignored because
+ * its `init` has already loaded. That latch belongs to the ViewModel
+ * ([ChatViewModel.onResumed], [MessagesViewModel.onResumed]) because the
+ * ViewModel is what SURVIVES. Navigation composes each destination through an
+ * `AnimatedContent`, so pushing on top of this screen disposes its content once
+ * the transition ends and re-composes it on the way back; a latch held in this
+ * composable would reset there and then swallow the single ON_RESUME the
+ * restored entry delivers — the one resume that most needs a re-sync. The
+ * retained ViewModel is the only thing on this path that can tell "first ever"
+ * from "back again".
  */
 @Composable
-private fun RefreshOnResume(onResumed: () -> Unit) {
+internal fun ResumeEffect(onResumed: () -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        var seenFirstResume = false
         val observer = LifecycleEventObserver { _, event ->
-            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
-            if (!seenFirstResume) {
-                seenFirstResume = true
-                return@LifecycleEventObserver
-            }
-            onResumed()
+            if (event == Lifecycle.Event.ON_RESUME) onResumed()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
