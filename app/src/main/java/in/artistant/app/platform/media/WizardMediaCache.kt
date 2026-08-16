@@ -90,7 +90,8 @@ class WizardMediaCache @Inject constructor(
      *
      * `artist-samples` accepts exactly [ACCEPTED_AUDIO_MIME_TYPES] and caps
      * objects at [MAX_AUDIO_BYTES] (migration 0010). The picker used to offer
-     * `audio/*` and nothing checked afterwards, so a WAV — the format a recorded
+     * the wildcard audio MIME and nothing checked afterwards, so a WAV — the
+     * format a recorded
      * live take arrives in — staged fine, sat in the samples list, published
      * fine, and then 400'd three times in the upload queue, which parks failures
      * in a set no screen reads. The artist saw "You're live" and the clip simply

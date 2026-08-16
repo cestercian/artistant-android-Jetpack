@@ -12,7 +12,7 @@ import java.io.File
  * Which picked clips are allowed to become staged samples.
  *
  * `WizardMediaCache` needs a Context, but the decision does not — and the
- * decision is the whole bug. The samples picker offered `audio/*` while the
+ * decision is the whole bug. The samples picker offered the wildcard audio MIME while the
  * `artist-samples` bucket accepts only `audio/mpeg, audio/mp4, audio/aac,
  * audio/m4a, audio/x-m4a` under a 10 MiB cap (migration 0010). So a WAV — the
  * format a recorded live take arrives in — was copied into the cache, listed in
