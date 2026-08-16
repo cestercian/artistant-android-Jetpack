@@ -25,7 +25,12 @@ class FakeArtistsRepository(
     /** When true, [fetchArtist] throws so callers can exercise degrade paths. */
     var failFetch: Boolean = false
 
-    /** Set by [publishWizardProfile] — what tests assert on Done. */
+    /**
+     * Set by [setPublished], NOT by [publishWizardProfile] — mirroring the real
+     * repository, where `setup_complete` rides the same PATCH as `published` so a
+     * publish that dies between the two calls cannot strand the artist past the
+     * wizard gate but invisible in Discover.
+     */
     var setupComplete: Boolean = false
         private set
 
@@ -64,7 +69,6 @@ class FakeArtistsRepository(
         }
 
     override suspend fun publishWizardProfile(draft: WizardProfileDraft) {
-        setupComplete = true
         lastPublishedDraft = draft
         val id = draft.artistId.lowercase()
         byId[id] = FakeArtistsRepository.sample(
@@ -78,6 +82,12 @@ class FakeArtistsRepository(
             bio = draft.bio,
             daysAvailable = draft.daysAvailable,
             timeSlots = draft.timeSlots,
+            // The palette rides the row like every other column: the real upsert
+            // now always sends `cover_gradient_index`, so a fake that dropped it
+            // would let a "the artist's palette choice landed" test pass on a
+            // write that never carried one.
+            coverGradientIndex = ArtistGradient.clampIndex(draft.coverGradientIndex),
+            gradient = ArtistGradient.palette(draft.coverGradientIndex),
             instagramHandle = draft.instagramHandle,
             spotifyArtistUrl = draft.spotifyArtistUrl,
             youtubeChannelUrl = draft.youtubeChannelUrl,
@@ -93,6 +103,7 @@ class FakeArtistsRepository(
 
     override suspend fun setPublished(artistId: String, published: Boolean) {
         this.published = published
+        setupComplete = true
     }
 
     override suspend fun fetchSelfAvailability(): AvailabilityDraft? = lastAvailability

@@ -531,12 +531,18 @@ class WizardViewModel @Inject constructor(
      * Publish order, mirroring iOS:
      *  1. upsert the artist row (fast, no file transfer)
      *  2. replace packages + tech rider in parallel
-     *  3. flip `published` — go-live is never gated on a media upload
+     *  3. flip `published` + `setup_complete` — go-live is never gated on a media upload
      *  4. enqueue cover + samples for the background drain
      *
      * Step 3 sits before step 4 deliberately. Deferring the publish flag behind
      * the uploads means one bad file leaves an artist who tapped Publish, saw
      * the success screen, and is still invisible in Discover.
+     *
+     * The three calls are not atomic, so `setup_complete` is written by step 3
+     * alone and never by step 1 (see [ArtistsRepository.setPublished]). A drop
+     * between round trips then just sends the artist back into the wizard with
+     * their draft intact — the alternative was a row marked finished but never
+     * published, which nothing in the app can flip live afterwards.
      */
     private fun publish() {
         val userId = session.currentUserId?.lowercase() ?: run {
