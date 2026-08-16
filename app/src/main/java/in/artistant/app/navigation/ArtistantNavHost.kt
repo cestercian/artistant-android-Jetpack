@@ -57,6 +57,7 @@ fun ArtistantNavHost() {
                     startStep = SignupStep.Welcome,
                     startMode = SignupMode.Signup,
                     onFinished = viewModel::markSignupComplete,
+                    signedIn = false,
                     reduceMotion = reduceMotion,
                     viewModel = signupVm,
                 )
@@ -67,6 +68,10 @@ fun ArtistantNavHost() {
             // an incomplete profile must walk the full profile → notif → done tail, which only
             // exists in the signup order (a login-mode user who landed here still needs it).
             // (Incomplete-EPK artists are [RootGate.ArtistWizard], not this branch.)
+            //
+            // `signedIn = true` is what this tier MEANS — the router only reaches it from an
+            // Authenticated session. The flow needs it stated, because re-routing to this same
+            // `data object` is conflated by MutableStateFlow and re-fires none of its keys.
             ArtistantTheme(role = signupState.role) {
                 SignupFlow(
                     startStep = SignupStep.Profile,
@@ -74,6 +79,7 @@ fun ArtistantNavHost() {
                     onFinished = viewModel::markSignupComplete,
                     profileHydrationError = hydrationError,
                     onRetryHydration = viewModel::retryRouting,
+                    signedIn = true,
                     reduceMotion = reduceMotion,
                     viewModel = signupVm,
                 )

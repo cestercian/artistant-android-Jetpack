@@ -6,9 +6,10 @@ package `in`.artistant.app.feature.signup
  *   signup: welcome → role → auth → profile → notif → done
  *   login:  welcome → auth → notif → done
  *
- * iOS also carries the "am I signed in" bit inside the same store; on Android that bit is owned
- * by SessionManager/RootViewModel (the gate), so this machine is *only* the screen ordering.
- * Extracted as a top-level enum + pure functions so [SignupViewModel]'s transitions are
+ * iOS also carries the "am I signed in" bit inside the same store; on Android that bit is OWNED
+ * by SessionManager/RootViewModel (the gate) and only passed down here, as the `signedIn`
+ * argument that retires the two pre-auth steps — this machine still holds no session state of
+ * its own. Extracted as a top-level enum + pure functions so [SignupViewModel]'s transitions are
  * unit-testable without a coroutine/StateFlow.
  */
 enum class SignupStep { Welcome, Role, Auth, Profile, Notif, Done }
@@ -27,18 +28,40 @@ fun stepOrder(mode: SignupMode): List<SignupStep> = when (mode) {
     )
 }
 
-/** Next step in the mode's order, or the same step if already at the end (iOS `advance`). */
-fun nextStep(step: SignupStep, mode: SignupMode): SignupStep {
+/**
+ * The steps a live session retires. `.Auth` has no forward control of its own — it only ever
+ * moves when a sign-in completes — and `.Welcome`'s two actions are "Get started" (restarts the
+ * walk) and "Sign in" (switches to the LOGIN order, which skips the profile step a signed-in-
+ * but-incomplete user still owes). Either one is a dead end for a user who is already signed in,
+ * so both transitions step over them rather than parking anyone there.
+ */
+private fun retiredSteps(signedIn: Boolean): Set<SignupStep> =
+    if (signedIn) setOf(SignupStep.Welcome, SignupStep.Auth) else emptySet()
+
+/**
+ * Next step in the mode's order, or the same step if already at the end (iOS `advance`).
+ * With [signedIn] the retired pre-auth steps are skipped, so role → profile jumps straight over
+ * `.Auth` and a bounce ONTO `.Auth` resolves forward to the step that actually follows it.
+ */
+fun nextStep(step: SignupStep, mode: SignupMode, signedIn: Boolean = false): SignupStep {
     val order = stepOrder(mode)
     val i = order.indexOf(step)
-    return if (i in 0 until order.lastIndex) order[i + 1] else step
+    if (i < 0) return step
+    val retired = retiredSteps(signedIn)
+    return order.drop(i + 1).firstOrNull { it !in retired } ?: step
 }
 
-/** Previous step in the mode's order, or the same step if already at the start (iOS `back`). */
-fun prevStep(step: SignupStep, mode: SignupMode): SignupStep {
+/**
+ * Previous step in the mode's order, or the same step if there is no earlier one the user can
+ * still act on (iOS `back`). With [signedIn] the retired pre-auth steps are skipped, so the
+ * profile step's back chevron lands on `.Role` instead of stranding the user on `.Auth`.
+ */
+fun prevStep(step: SignupStep, mode: SignupMode, signedIn: Boolean = false): SignupStep {
     val order = stepOrder(mode)
     val i = order.indexOf(step)
-    return if (i > 0) order[i - 1] else step
+    if (i < 0) return step
+    val retired = retiredSteps(signedIn)
+    return order.take(i).lastOrNull { it !in retired } ?: step
 }
 
 /**

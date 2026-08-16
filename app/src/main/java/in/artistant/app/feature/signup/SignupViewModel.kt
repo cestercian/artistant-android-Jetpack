@@ -28,8 +28,9 @@ import javax.inject.Inject
 enum class HandleStatus { Empty, Invalid, Checking, Available, Taken, Error }
 
 /**
- * The signup flow's observable state (the iOS `OnboardingStore` @Published surface, minus the
- * `isSignedIn` bit — that lives in the gate). One immutable snapshot the container renders from.
+ * The signup flow's observable state (the iOS `OnboardingStore` @Published surface). One
+ * immutable snapshot the container renders from. [signedIn] mirrors the iOS store's own
+ * `isSignedIn` bit, but the GATE still owns the truth — this copy is only what it told us.
  */
 data class SignupUiState(
     val step: SignupStep = SignupStep.Welcome,
@@ -47,8 +48,18 @@ data class SignupUiState(
     val authNotice: String? = null,
     /** ACCT-05 — community pledge agreed (persisted). Gates Role → RoleScreen. */
     val communityAgreed: Boolean = false,
+    /** A live session exists. Owned by the gate (RootViewModel) and fed in by [SignupFlow] —
+     *  the flow itself never reads supabase-kt. Retires the two pre-auth steps so nothing can
+     *  park a signed-in user on `.Auth` (or send them back to `.Welcome`, whose "Sign in"
+     *  would drop them into the LOGIN order and skip the profile step they still owe). */
+    val signedIn: Boolean = false,
 ) {
     val firstName: String get() = name.trim().substringBefore(' ').ifBlank { name.trim() }
+
+    /** Whether `back()` can actually move. False once every earlier step is retired (a signed-in
+     *  user standing on `.Role` has nothing behind them), so the system back handler can stand
+     *  down instead of swallowing the gesture and doing nothing. */
+    val canGoBack: Boolean get() = prevStep(step, mode, signedIn) != step
 
     /** `.Error` counts as available: a transient RPC blip shouldn't wedge Continue — the
      *  upsert's unique constraint is the real backstop (iOS `handleIsAvailable`). */
@@ -151,8 +162,8 @@ class SignupViewModel @Inject constructor(
     fun startSignup() = _state.update { it.copy(mode = SignupMode.Signup, step = SignupStep.Role) }
     fun startLogin() = _state.update { it.copy(mode = SignupMode.Login, step = SignupStep.Auth) }
 
-    fun advance() = _state.update { it.copy(step = nextStep(it.step, it.mode)) }
-    fun back() = _state.update { it.copy(step = prevStep(it.step, it.mode)) }
+    fun advance() = _state.update { it.copy(step = nextStep(it.step, it.mode, it.signedIn)) }
+    fun back() = _state.update { it.copy(step = prevStep(it.step, it.mode, it.signedIn)) }
 
     /**
      * Role picker commit: set the role + fire the haptic. The container themes off this state
@@ -173,13 +184,26 @@ class SignupViewModel @Inject constructor(
     }
 
     /**
+     * The gate's live "a session exists" bit (see [SignupUiState.signedIn]). Called by
+     * [SignupFlow] whenever the bit OR the step changes — this is the Android call site for
+     * [onAuthCompleted], the port of iOS `RootView.handleAuthChange` → `didCompleteAuth`.
+     * Without it nothing in production ever moved the flow off `.Auth`: the gate re-routes to
+     * an equal `RootGate.Onboarding`, which MutableStateFlow conflates, so a re-auth re-fired
+     * no keys and the user was stranded on the auth screen with no forward control.
+     */
+    fun setSignedIn(signedIn: Boolean) {
+        _state.update { it.copy(signedIn = signedIn) }
+        if (signedIn) onAuthCompleted()
+    }
+
+    /**
      * Called when the auth screen reports a completed sign-in. Advances past `.Auth` and clears
      * the session-lost banner. On LOGIN, RootViewModel's routing already hydrates role/name/city
      * from the server, so we don't re-fetch here (that split is the Android gate's job, not the
      * flow's — see RootViewModel.routeSignedIn).
      */
     fun onAuthCompleted() = _state.update {
-        if (it.step == SignupStep.Auth) it.copy(step = nextStep(it.step, it.mode), authNotice = null)
+        if (it.step == SignupStep.Auth) it.copy(step = nextStep(it.step, it.mode, it.signedIn), authNotice = null)
         else it.copy(authNotice = null)
     }
 
@@ -208,7 +232,9 @@ class SignupViewModel @Inject constructor(
      * Upsert the drafted profile then advance (iOS `saveAndAdvance`). Distinguishes the two
      * recoverable failures: a raced handle bounces the user back to the handle field; a lost
      * session bounces to the auth step with a banner (the session lives in supabase-kt's store,
-     * the step in our state — they can desync on a relaunch, exactly as iOS documents).
+     * the step in our state — they can desync on a relaunch, exactly as iOS documents), unless
+     * the gate says the session IS live, in which case the same error is an RLS denial and the
+     * auth step would be a dead end (see the catch below).
      */
     fun saveProfile() {
         val s = _state.value
@@ -223,7 +249,7 @@ class SignupViewModel @Inject constructor(
                     role = s.role,
                     termsAccepted = s.termsAccepted,
                 )
-                _state.update { it.copy(isSaving = false, step = nextStep(it.step, it.mode)) }
+                _state.update { it.copy(isSaving = false, step = nextStep(it.step, it.mode, it.signedIn)) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: AppError.UniqueViolation) {
@@ -237,10 +263,15 @@ class SignupViewModel @Inject constructor(
                     )
                 }
             } catch (e: AppError.NotFoundOrUnauthorized) {
-                // No live session at save time — bounce to auth with an explainer. The draft
-                // fields persist in state so the flow lands right back here after re-auth.
+                // Two causes read identically here — PGRST116 is "row missing OR blocked by
+                // RLS", by design. Only the dead-session one is worth bouncing to `.Auth` for:
+                // there the auth screen is the recovery, and the draft fields persist in state
+                // so the flow lands right back here after re-auth. With a session still live
+                // that step has nothing to offer (and the signed-in flow retires it), so an
+                // RLS denial surfaces inline instead of flashing a banner nobody can read.
                 _state.update {
-                    it.copy(
+                    if (it.signedIn) it.copy(isSaving = false, saveError = "Couldn't save your profile. Try again.")
+                    else it.copy(
                         isSaving = false,
                         step = SignupStep.Auth,
                         authNotice = "Please sign in again to save your profile.",
