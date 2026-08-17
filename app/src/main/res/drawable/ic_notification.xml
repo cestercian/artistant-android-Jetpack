@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar mark: the same placeholder "A" as ic_launcher_foreground, redrawn to
+     fill a 24dp status-bar icon instead of an adaptive icon's safe zone. White because
+     the system tints small icons from the alpha channel and ignores the fill colour.
+     ponytail: swap for the real brand asset when design ships it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,2 L18.67,22 L14.92,22 L13.46,17 L10.54,17 L9.08,22 L5.33,22 Z M12,8.67 L11.17,14.08 L12.83,14.08 Z" />
+</vector>

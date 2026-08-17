@@ -797,20 +797,46 @@ class EpkLogicTest {
     )
 
     /**
-     * The queue is shared with the wizard, which puts a cover photo through it.
-     * Counting every failed task would offer "a sample didn't upload — retry" for
-     * a photo the artist never added on this screen.
+     * The queue is shared with the wizard, which puts the cover photo through it on
+     * publish. Reporting every failure as "a sample didn't upload" would send the
+     * artist to the samples section over a photo, so the message names the kind.
      */
     @Test
-    fun failedSamples_ignoreTheWizardsCoverPhoto() {
-        assertEquals(0, failedSampleCount(listOf(photoTask())))
-        assertEquals(1, failedSampleCount(listOf(photoTask(), audioTask())))
-        assertEquals(2, failedSampleCount(listOf(audioTask("a-1"), audioTask("a-2"))))
+    fun failedUpload_namesTheClipWhenAClipStalled() {
+        assertEquals(
+            "A sample didn't finish uploading — check your connection and try again.",
+            failedUploadMessage(listOf(audioTask())),
+        )
+        assertEquals(
+            "2 samples didn't finish uploading — check your connection and try again.",
+            failedUploadMessage(listOf(audioTask("a-1"), audioTask("a-2"))),
+        )
+    }
+
+    /**
+     * The regression this replaced: a cover photo that burned its three attempts was
+     * counted as zero failed samples, so the profile went live with no cover, no
+     * banner, and a staged file kept on disk for a retry nobody could request.
+     */
+    @Test
+    fun failedUpload_reportsTheWizardsCoverPhoto() {
+        assertEquals(
+            "Your cover photo didn't finish uploading — check your connection and try again.",
+            failedUploadMessage(listOf(photoTask())),
+        )
     }
 
     @Test
-    fun failedSamples_areZeroWhenNothingHasGivenUp() {
-        assertEquals(0, failedSampleCount(emptyList()))
+    fun failedUpload_staysVagueWhenBothKindsStalled() {
+        assertEquals(
+            "Some of your uploads didn't finish — check your connection and try again.",
+            failedUploadMessage(listOf(photoTask(), audioTask())),
+        )
+    }
+
+    @Test
+    fun failedUpload_isSilentWhenNothingHasGivenUp() {
+        assertNull(failedUploadMessage(emptyList()))
     }
 
     // ── Save guard ───────────────────────────────────────────────────────────

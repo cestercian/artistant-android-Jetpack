@@ -62,8 +62,15 @@ class PushService @Inject constructor(
     }
 
     /**
-     * Notification tap / data-message routing. Clears prior transients first so
-     * a stale pending* can't leak across events (iOS PushService contract).
+     * Notification **TAP** routing — `MainActivity`'s launcher/`onNewIntent` extras, and
+     * nothing else. Clears prior transients first so a stale pending* can't leak across
+     * events (iOS PushService contract).
+     *
+     * Deliberately NOT called when a push arrives: this ends in [TabRouter.apply], which
+     * selects a tab and sets the pending deep-link id, so calling it from
+     * `FirebaseMessagingService.onMessageReceived` navigated the user on RECEIPT — off a
+     * half-finished booking form and into a thread they never asked for. Receipt posts a
+     * notification instead ([ArtistantMessagingService]); this runs when the user taps it.
      */
     fun handleNotificationPayload(data: Map<String, String>) {
         scope.launch {
