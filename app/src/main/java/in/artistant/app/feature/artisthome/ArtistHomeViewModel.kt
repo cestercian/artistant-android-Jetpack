@@ -147,10 +147,11 @@ class ArtistHomeViewModel @Inject constructor(
                 // hold the others. Only the bookings read is allowed to fail the
                 // whole screen: an empty list rendered after a failed fetch is
                 // indistinguishable from a genuinely empty dashboard, and would
-                // paint booked days as open. The quote and score reads degrade to
-                // their own truthful defaults; the profile read carries its outcome
-                // forward instead, because "the read failed" and "the field is
-                // empty" are different answers and the banners below depend on which.
+                // paint booked days as open. The quote read degrades to its own
+                // truthful default; the profile and score reads carry their
+                // outcome forward instead, because "the read failed" and "the
+                // field is empty" are different answers and both the banners and
+                // the standing card below depend on which.
                 val loaded = coroutineScope {
                     val bookingsJob = async { bookingsRepository.listForArtist() }
                     val quotesJob = async { runCatching { requestsRepository.listForArtist() }.getOrDefault(emptyList()) }
@@ -159,7 +160,13 @@ class ArtistHomeViewModel @Inject constructor(
                     // network/RLS failure, and the completeness banner below means
                     // something different in each case.
                     val profileJob = async { runCatching { usersRepository.fetchSelfProfile() } }
-                    val breakdownJob = async { runCatching { scoreRepository.breakdownForSelf() }.getOrNull() }
+                    // Same treatment, same reason. Flattened to null this read was
+                    // indistinguishable from a real zero-gig artist, and the write
+                    // below substituted `ScoreBreakdown.NewArtist` for it — so one
+                    // blipped read repainted an Elite 92 as "—" / "NEW" with all
+                    // four metric rows collapsed to em-dashes, silently, because
+                    // nothing folded it into the failure banner either.
+                    val breakdownJob = async { runCatching { scoreRepository.breakdownForSelf() } }
                     LoadedDashboard(
                         bookings = bookingsJob.await(),
                         quotes = quotesJob.await(),
@@ -180,11 +187,16 @@ class ArtistHomeViewModel @Inject constructor(
                 // A read that failed is the artist's business: it's why half the
                 // screen looks thinner than it should. The existing refresh-failure
                 // banner already carries a Retry, so reuse it rather than inventing
-                // a second failure surface.
-                val partialFailure = if (loaded.profile.isFailure || artistResult?.isFailure == true) {
-                    "Couldn't load your profile details. Check your connection and try again."
-                } else {
-                    null
+                // a second failure surface — but name the half that didn't land,
+                // because the detail line is the only thing telling the artist why
+                // their standing (or their name, or the completeness flag) looks
+                // wrong. Profile first when both fail: it's the wider outage.
+                val partialFailure = when {
+                    loaded.profile.isFailure || artistResult?.isFailure == true ->
+                        "Couldn't load your profile details. Check your connection and try again."
+                    loaded.breakdown.isFailure ->
+                        "Couldn't load your Bookability Score. Check your connection and try again."
+                    else -> null
                 }
 
                 // Inert unless the operator has flipped subscriptions on; the
@@ -223,7 +235,10 @@ class ArtistHomeViewModel @Inject constructor(
                         },
                         todayLabel = todayLabel(),
                         openQuotes = openGigRequests(loaded.quotes),
-                        breakdown = loaded.breakdown ?: ScoreBreakdown.NewArtist,
+                        // Same rule as the identity above: a blipped read is not
+                        // news that the artist is new. `NewArtist` is the
+                        // pre-hydration default only — never a failure fallback.
+                        breakdown = loaded.breakdown.getOrNull() ?: prev.breakdown,
                         profileGaps = gaps ?: prev.profileGaps,
                         showSubscribeBanner = showSubscribe,
                         isLoading = false,
@@ -266,7 +281,8 @@ class ArtistHomeViewModel @Inject constructor(
         val quotes: List<StoredRequest>,
         /** success(null) = no users row; failure = the read threw. Not interchangeable. */
         val profile: Result<SelfProfile?>,
-        val breakdown: ScoreBreakdown?,
+        /** success = the row was read (zeros included); failure = the read threw. */
+        val breakdown: Result<ScoreBreakdown>,
     )
 
     private companion object {

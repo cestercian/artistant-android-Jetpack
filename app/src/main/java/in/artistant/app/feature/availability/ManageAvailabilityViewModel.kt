@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.availability
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import `in`.artistant.app.common.util.availabilityKicker
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.wizard.WizardWeekdays
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import javax.inject.Inject
 
 data class ManageAvailabilityUiState(
@@ -22,13 +24,23 @@ data class ManageAvailabilityUiState(
     val error: String? = null,
     val saved: Boolean = false,
 ) {
-    /** Discover-style soonest-day label for the live preview. */
-    val previewLabel: String?
-        get() {
-            if (days.isEmpty()) return null
-            val soonest = WizardWeekdays.firstOrNull { it in days } ?: return null
-            return "Open $soonest"
-        }
+    /**
+     * The badge clients actually see, driven by the current selection — the whole
+     * job of the "HOW CLIENTS SEE YOU" box, so it delegates to the same helper
+     * Discover's hero pill renders rather than deriving a second answer.
+     *
+     * It used to pick the first weekday in canonical Mon→Sun order and label it
+     * "Open Mon". [availabilityKicker] scans forward from [today] instead, so on a
+     * Saturday with `days = {Mon, Sat}` Discover said "AVAILABLE TODAY" while this
+     * preview said "Open Mon" — wrong day AND wrong copy, on the one screen whose
+     * stated purpose is showing the artist that badge before they save. iOS shares
+     * the formatter for exactly this reason (`ManageAvailabilityView.previewLabel`).
+     *
+     * [today] is injected and defaulted the same way the helper does it, so the
+     * preview is assertable without touching the system clock.
+     */
+    fun previewLabel(today: LocalDate = LocalDate.now()): String? =
+        availabilityKicker(days, today)
 }
 
 @HiltViewModel

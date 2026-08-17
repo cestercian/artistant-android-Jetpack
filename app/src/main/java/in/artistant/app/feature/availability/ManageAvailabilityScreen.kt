@@ -129,7 +129,7 @@ fun ManageAvailabilityScreen(
                             }
                             Column {
                                 Text("Your profile", style = AppTheme.type.footnote, color = colors.ink)
-                                val label = state.previewLabel
+                                val label = state.previewLabel()
                                 if (label != null) {
                                     Text(label, style = AppTheme.type.monoSmall, color = colors.ink)
                                 } else {

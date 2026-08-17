@@ -257,10 +257,25 @@ fun SearchScreen(
     }
 
     if (showFilters) {
+        // Closing the sheet IS applying it, however it closes.
+        //
+        // The sheet mutates the ViewModel live but none of those setters
+        // re-search, so `onDismiss` — which ModalBottomSheet also routes the
+        // swipe-down, the scrim tap and the back gesture to — used to leave the
+        // badge and the RPC arguments changed while the grid still showed the
+        // pre-edit page. The next `loadMore()` then fetched page 2 under the new
+        // bounds and appended it to page 1 of the old ones: one list, two filter
+        // sets. iOS has no such split — every filter mutation re-runs the search
+        // off `SearchStore.queryKey`, so there "dismissed" and "applied" are the
+        // same event too, and its Apply button is a bare `dismiss()`.
+        val closeAndApply = {
+            viewModel.applyFilters()
+            showFilters = false
+        }
         SearchFilterSheet(
             state = state,
             cityOptions = state.facets.cities.map { it.label },
-            onDismiss = { showFilters = false },
+            onDismiss = closeAndApply,
             onSelectCity = viewModel::selectCity,
             onSetDate = viewModel::setDate,
             onSetFlex = viewModel::setFlexDays,
@@ -269,10 +284,7 @@ fun SearchScreen(
             onSetPrice = viewModel::setPriceRange,
             onSetScore = viewModel::setMinScore,
             onClear = viewModel::clearFilters,
-            onApply = {
-                viewModel.applyFilters()
-                showFilters = false
-            },
+            onApply = closeAndApply,
         )
     }
 }
@@ -441,9 +453,9 @@ private fun ResultsHeader(
                 SortMenu(sort = state.sort, onSort = onSort)
             }
             // Gated on `activeFilterCount`, which is exactly the set
-            // `clearFilters()` clears. Gating on anything wider — the category
-            // rails, say — would show the control in states where tapping it
-            // visibly does nothing.
+            // `clearFilters()` clears — categories included, since a category
+            // picked from the rail above is precisely what this list replaced,
+            // so this is the only escape from it once the rail is off-screen.
             if (state.activeFilterCount > 0) {
                 Text(
                     text = "Clear filters",
