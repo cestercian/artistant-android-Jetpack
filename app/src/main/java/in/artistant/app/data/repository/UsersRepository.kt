@@ -37,8 +37,18 @@ interface UsersRepository {
      *  local role) rather than mis-route — the [returning-login] distinction. */
     suspend fun fetchSelfProfile(): SelfProfile?
 
-    /** Upserts the profile row (idempotent, onConflict=id). Throws
-     *  [AppError.UniqueViolation] when the handle was just taken. */
+    /**
+     * Upserts the profile row (idempotent, onConflict=id). Throws
+     * [AppError.UniqueViolation] when the handle was just taken.
+     *
+     * [termsAccepted] is an ASSERTION, not a state: true stamps
+     * `terms_accepted_at`, false means "this client has no consent to record" and
+     * leaves whatever the column already holds. It can never clear a stored
+     * timestamp — the flow re-enters at the profile step (after a process kill, or
+     * on the `Degrade` route for a complete user whose fetch failed) with the
+     * checkbox out of reach, and a re-save must not erase a legal consent the user
+     * gave on another device or another day.
+     */
     suspend fun upsertSelfProfile(
         handle: String,
         fullName: String,
@@ -65,16 +75,6 @@ class SupabaseUsersRepository @Inject constructor(
 
     @Serializable
     private data class ArtistRow(@SerialName("setup_complete") val setupComplete: Boolean? = null)
-
-    @Serializable
-    private data class UpsertRow(
-        val id: String,
-        val handle: String,
-        @SerialName("full_name") val fullName: String,
-        val city: String,
-        val role: String,
-        @SerialName("terms_accepted_at") val termsAcceptedAt: String?,
-    )
 
     override suspend fun handleIsAvailable(handle: String): HandleAvailability =
         try {
@@ -135,13 +135,15 @@ class SupabaseUsersRepository @Inject constructor(
         val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
             ?: throw AppError.NotFoundOrUnauthorized
 
-        val row = UpsertRow(
+        val row = UserUpsertRow(
             id = userId,
             handle = handle.trim().lowercase(),
             fullName = fullName,
             city = city,
             role = role.dbValue,
-            // ISO8601 with a fractional-seconds-tolerant parser server-side.
+            // ISO8601 with a fractional-seconds-tolerant parser server-side. Null
+            // when there is no consent to assert, which drops the key entirely —
+            // see [UserUpsertRow].
             termsAcceptedAt = if (termsAccepted) Clock.System.now().toString() else null,
         )
 
@@ -154,3 +156,36 @@ class SupabaseUsersRepository @Inject constructor(
         }
     }
 }
+
+/**
+ * The signup profile write. **`terms_accepted_at` carries a default and the other
+ * five deliberately do not.**
+ *
+ * kotlinx encodes with `encodeDefaults = false`, and supabase-kt installs no
+ * serializer that changes that (`SupabaseClientFactory.create()` leaves it on
+ * `Json.Default`), so a property holding its declared default is dropped from the
+ * body. PostgREST upserts as `INSERT … ON CONFLICT (id) DO UPDATE SET <keys
+ * present>` — a dropped key is not "write null", it is "keep what is stored", and
+ * on a fresh INSERT the column simply takes its own default.
+ *
+ * That is exactly the semantics consent needs. `explicitNulls` is on by default,
+ * so declaring this field WITHOUT a default put `"terms_accepted_at": null` in
+ * every body that had no consent to assert — i.e. an `ON CONFLICT DO UPDATE SET
+ * terms_accepted_at = NULL`, erasing a previously recorded acceptance. The flow
+ * re-saves from the profile step on a process-death resume and on the `Degrade`
+ * route (a COMPLETE user whose profile fetch failed), neither of which has been
+ * anywhere near the terms checkbox, so the erase was reachable on an ordinary
+ * relaunch — on a legal-consent column, on a DPDP-scoped product.
+ *
+ * The other five fields are the profile the user just typed and must overwrite
+ * what is stored, so they stay default-free and are always sent.
+ */
+@Serializable
+internal data class UserUpsertRow(
+    val id: String,
+    val handle: String,
+    @SerialName("full_name") val fullName: String,
+    val city: String,
+    val role: String,
+    @SerialName("terms_accepted_at") val termsAcceptedAt: String? = null,
+)

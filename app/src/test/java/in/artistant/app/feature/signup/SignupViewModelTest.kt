@@ -6,7 +6,7 @@ import `in`.artistant.app.data.repository.FakeUsersRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.platform.observability.NoopAnalytics
-import `in`.artistant.app.platform.storage.CommunityPledgeStore
+import `in`.artistant.app.platform.storage.SignupConsentStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +20,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -40,20 +41,27 @@ class SignupViewModelTest {
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    private class FakePledgeStore(
+    private class FakeConsentStore(
         agreed: Boolean = false,
-    ) : CommunityPledgeStore {
+        terms: Boolean = false,
+    ) : SignupConsentStore {
         private val _agreed = MutableStateFlow(agreed)
         override val communityAgreed: StateFlow<Boolean> = _agreed.asStateFlow()
         override suspend fun setCommunityAgreed(agreed: Boolean) {
             _agreed.value = agreed
         }
+
+        private val _terms = MutableStateFlow(terms)
+        override val termsAccepted: StateFlow<Boolean> = _terms.asStateFlow()
+        override suspend fun setTermsAccepted(accepted: Boolean) {
+            _terms.value = accepted
+        }
     }
 
     private fun vm(
         users: UsersRepository = FakeUsersRepository(),
-        pledge: CommunityPledgeStore = FakePledgeStore(),
-    ) = SignupViewModel(users, NoopAnalytics(), pledge)
+        consents: SignupConsentStore = FakeConsentStore(),
+    ) = SignupViewModel(users, NoopAnalytics(), consents)
 
     /** Minimal test double: reports every valid-format handle available, and lets the caller
      *  pick what upsert throws — enough to model the "available-then-raced/lost-session" paths
@@ -122,21 +130,116 @@ class SignupViewModelTest {
 
     @Test
     fun `communityAgreed hydrates from pledge store`() = runTest(dispatcher) {
-        val vm = vm(pledge = FakePledgeStore(agreed = true))
+        val vm = vm(consents = FakeConsentStore(agreed = true))
         advanceUntilIdle()
         assertTrue(vm.state.value.communityAgreed)
     }
 
     @Test
     fun `agreeCommunity persists pledge and flips state`() = runTest(dispatcher) {
-        val pledge = FakePledgeStore(agreed = false)
-        val vm = vm(pledge = pledge)
+        val consents = FakeConsentStore(agreed = false)
+        val vm = vm(consents = consents)
         advanceUntilIdle()
         assertFalse(vm.state.value.communityAgreed)
         vm.agreeCommunity()
         advanceUntilIdle()
         assertTrue(vm.state.value.communityAgreed)
-        assertTrue(pledge.communityAgreed.value)
+        assertTrue(consents.communityAgreed.value)
+    }
+
+    @Test
+    fun `ticking the terms box persists it`() = runTest(dispatcher) {
+        // The checkbox is the ONLY place consent is collected, and the flow can be
+        // re-entered past the screen it lives on, so the answer has to outlive the
+        // process.
+        val consents = FakeConsentStore()
+        val vm = vm(consents = consents)
+        advanceUntilIdle()
+
+        vm.setTerms(true)
+        advanceUntilIdle()
+        assertTrue(consents.termsAccepted.value)
+
+        vm.setTerms(false)
+        advanceUntilIdle()
+        assertFalse(consents.termsAccepted.value)
+    }
+
+    @Test
+    fun `a flow entered at the profile step still records the consent already given`() = runTest(dispatcher) {
+        // Process death mid-signup (or a fresh install with an incomplete `users`
+        // row): the gate presents the flow at `.Profile`, skipping the welcome
+        // screen. With the flag held only in memory, the save asserted no consent
+        // for a user who had ticked the box a screen earlier.
+        val users = FakeUsersRepository()
+        val vm = vm(users = users, consents = FakeConsentStore(terms = true))
+        vm.resumeAt(SignupStep.Profile)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.termsAccepted)
+
+        vm.setName("Yash"); vm.setCity("Bangalore"); vm.setHandle("free_handle")
+        advanceUntilIdle()
+        vm.saveProfile()
+        advanceUntilIdle()
+
+        assertEquals(SignupStep.Notif, vm.state.value.step)
+        assertNotNull(users.termsAcceptedAt)
+    }
+
+    @Test
+    fun `a re-save with no local consent leaves a recorded acceptance alone`() = runTest(dispatcher) {
+        val users = FakeUsersRepository()
+        val consents = FakeConsentStore(terms = true)
+        val vm = vm(users = users, consents = consents)
+        vm.resumeAt(SignupStep.Profile)
+        vm.setName("Yash"); vm.setCity("Bangalore"); vm.setHandle("free_handle")
+        advanceUntilIdle()
+        vm.saveProfile()
+        advanceUntilIdle()
+        val stamped = users.termsAcceptedAt
+        assertNotNull(stamped)
+
+        // Now the same row is re-saved from a device that holds no consent — the
+        // `Degrade` route sends a COMPLETE user back through the profile step. The
+        // write must not erase a legal consent it simply doesn't know about.
+        consents.setTermsAccepted(false)
+        advanceUntilIdle()
+        vm.resumeAt(SignupStep.Profile)
+        vm.saveProfile()
+        advanceUntilIdle()
+
+        assertEquals(stamped, users.termsAcceptedAt)
+    }
+
+    @Test
+    fun `reset wipes the departing accounts draft but keeps the device pledge`() = runTest(dispatcher) {
+        // This VM is activity-scoped, so ONE instance serves every signup in the
+        // process: after a sign-out its state is what the next person's form starts
+        // from. Their name, city, @handle and ticked terms box may not survive.
+        val vm = vm(consents = FakeConsentStore(agreed = true))
+        advanceUntilIdle()
+        vm.hydrate(AppRole.Artist, "Asha Rao", "Mumbai", "asha")
+        vm.setTerms(true)
+        vm.resumeAt(SignupStep.Profile)
+        vm.setSignedIn(true)
+        advanceUntilIdle()
+
+        vm.reset()
+
+        val s = vm.state.value
+        assertEquals("", s.name)
+        assertEquals("", s.city)
+        assertEquals("", s.handle)
+        assertEquals(AppRole.Client, s.role)
+        assertFalse(s.termsAccepted)
+        assertFalse(s.signedIn)
+        assertEquals(SignupStep.Welcome, s.step)
+        assertEquals(SignupMode.Signup, s.mode)
+        // The pledge is not a draft — it mirrors a device-level DataStore flag that
+        // sign-out wipes on its own. Dropping the mirror here would re-present the
+        // pledge screen whose Agree writes the value the store already holds, which
+        // emits nothing, so nothing would move the screen on.
+        assertTrue(s.communityAgreed)
     }
 
     @Test

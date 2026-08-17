@@ -6,6 +6,7 @@ import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.designsystem.theme.AppRole
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -44,5 +45,18 @@ class FakeUsersRepositoryTest {
             repo.upsertSelfProfile("dupe", "X", "Y", AppRole.Client, true)
             fail("expected upsert to reject a taken handle")
         } catch (e: AppError.UniqueViolation) { /* expected */ }
+    }
+
+    @Test
+    fun `consent is recorded once and no later save can clear it`() = runTest {
+        val repo = FakeUsersRepository()
+        repo.upsertSelfProfile("yash_01", "Yash", "Mumbai", AppRole.Client, termsAccepted = true)
+        val stamped = repo.termsAcceptedAt
+        assertNotNull(stamped)
+
+        // `termsAccepted = false` means "no consent to assert", not "revoke": the real
+        // write omits the column, so it keeps whatever the row already holds.
+        repo.upsertSelfProfile("yash_01", "Yash", "Mumbai", AppRole.Client, termsAccepted = false)
+        assertEquals(stamped, repo.termsAcceptedAt)
     }
 }

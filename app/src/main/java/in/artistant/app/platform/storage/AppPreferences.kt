@@ -24,24 +24,41 @@ private val Context.dataStore by preferencesDataStore(name = "artistant.state")
 private val Context.calendarStore by preferencesDataStore(name = "artistant.calendar")
 
 /**
+ * The two consents the signup flow collects, both persisted.
+ *
+ * The terms bit has to outlive the process for the same reason the pledge does:
+ * the gate can enter the flow directly at the profile step — after a process
+ * kill, or for a signed-in user whose `users` row is incomplete — which skips the
+ * welcome screen where the checkbox lives. Held only in memory, the profile save
+ * then had nothing to assert and the consent the user really did give was never
+ * recorded on a DPDP-scoped product. [AppPreferences.wipeAll] clears both on
+ * sign-out, so neither consent is ever inherited by the next account on the
+ * device.
+ */
+interface SignupConsentStore {
+    /** ACCT-05 — one-time community pledge before role pick. */
+    val communityAgreed: Flow<Boolean>
+    suspend fun setCommunityAgreed(agreed: Boolean)
+
+    /** Terms + privacy policy accepted on the welcome screen. */
+    val termsAccepted: Flow<Boolean>
+    suspend fun setTermsAccepted(accepted: Boolean)
+}
+
+/**
  * Thin DataStore (Preferences) wrapper — replaces iOS UserDefaults/Persistence.
  * Holds the role plus a generic string get/set for small snapshots. `wipeAll()`
  * clears the main store on sign-out / delete-account; the calendar store is
  * separate and only `wipeCalendar()` clears it.
  */
-interface CommunityPledgeStore {
-    /** ACCT-05 — one-time community pledge before role pick. */
-    val communityAgreed: Flow<Boolean>
-    suspend fun setCommunityAgreed(agreed: Boolean)
-}
-
 @Singleton
 class AppPreferences @Inject constructor(
     private val context: Context,
-) : CommunityPledgeStore {
+) : SignupConsentStore {
     private val roleKey = stringPreferencesKey("role")
     private val communityAgreedKey = booleanPreferencesKey("community.agreed")
     private val communityAgreedDateKey = longPreferencesKey("community.agreedDate")
+    private val termsAcceptedKey = booleanPreferencesKey("terms.accepted")
 
     val role: Flow<AppRole> = context.dataStore.data.map { prefs ->
         when (prefs[roleKey]) {
@@ -58,6 +75,13 @@ class AppPreferences @Inject constructor(
             prefs[communityAgreedKey] = agreed
             if (agreed) prefs[communityAgreedDateKey] = System.currentTimeMillis()
         }
+    }
+
+    override val termsAccepted: Flow<Boolean> =
+        context.dataStore.data.map { it[termsAcceptedKey] == true }
+
+    override suspend fun setTermsAccepted(accepted: Boolean) {
+        context.dataStore.edit { it[termsAcceptedKey] = accepted }
     }
 
     suspend fun setRole(role: AppRole) {
