@@ -59,8 +59,10 @@ import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
+import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.InlineBanner
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.data.model.Sample
@@ -126,8 +128,11 @@ fun ArtistProfileScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
                 }
                 EmptyState(
-                    title = "Artist not found",
-                    body = state.loadError,
+                    // The message IS the headline: it already says whether the row
+                    // is missing or the read failed. A fixed "Artist not found"
+                    // title asserted the first for a dropped request too, and then
+                    // repeated itself in the body.
+                    title = state.loadError ?: ARTIST_NOT_FOUND,
                     actionLabel = "Retry",
                     onAction = viewModel::refresh,
                 )
@@ -158,6 +163,24 @@ fun ArtistProfileScreen(
                             Modifier.padding(horizontal = space.lg, vertical = space.xl),
                             verticalArrangement = Arrangement.spacedBy(space.xl),
                         ) {
+                            // A profile can be drawn from the Discover/Search TILE
+                            // when hydration failed, and the tile carries no
+                            // packages, bio, samples or reviews — so every block
+                            // below states an absence it cannot actually vouch for
+                            // ("Pricing on request", "No reviews yet."). The
+                            // failure has to be visible and retryable here; the
+                            // Retry on the empty state only exists for the
+                            // nothing-loaded case, and there is no other refresh
+                            // affordance on this screen.
+                            state.loadError?.let { message ->
+                                InlineBanner(
+                                    title = message,
+                                    detail = "Pricing and packages may be missing.",
+                                    tone = BannerTone.Failure,
+                                    actionLabel = "Retry",
+                                    onAction = viewModel::refresh,
+                                )
+                            }
                             if (artist.bio.isNotBlank()) {
                                 AboutBlock(bio = artist.bio)
                             }

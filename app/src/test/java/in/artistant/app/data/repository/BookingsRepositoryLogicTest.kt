@@ -168,14 +168,82 @@ class BookingsRepositoryLogicTest {
         assertEquals("2026-03-06T14:30:00.000Z", start)
     }
 
+    /**
+     * The two label dialects name the same instant. `parseTimeOfDay` tries
+     * `"h:mm a"` then `"HH:mm"`, and the slot an artist publishes decides which —
+     * so a gig booked off a 12-hour chip and the same gig booked off a 24-hour one
+     * must not land 12 hours apart in `start_datetime`.
+     */
+    @Test
+    fun startEndIso_twelveAndTwentyFourHourLabelsAgree() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"))
+        val day = dayInDeviceZone(2026, Calendar.MARCH, 6)
+
+        assertEquals(
+            SupabaseBookingsRepository.startEndIso(timedDraft(day, "20:30")),
+            SupabaseBookingsRepository.startEndIso(timedDraft(day, "8:30 PM")),
+        )
+    }
+
+    /**
+     * Midnight and noon, the two labels a 12-hour clock gets wrong most easily:
+     * "12:00 AM" is hour ZERO and "12:00 PM" is hour TWELVE, and reading
+     * `Calendar.HOUR` instead of `HOUR_OF_DAY` (or a lenient re-parse) silently
+     * swaps them — a late-night gig stamped for the following lunchtime, or vice
+     * versa, on the columns the server's overlap guard and the calendar mirror
+     * both key off.
+     */
+    @Test
+    fun startEndIso_midnightIsTheStartOfTheDay_noonIsTheMiddle() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"))
+        val day = dayInDeviceZone(2026, Calendar.MARCH, 6)
+
+        // 00:00 IST on the 6th = 18:30Z on the 5th; +2h = 20:30Z on the 5th.
+        assertEquals(
+            "2026-03-05T18:30:00.000Z" to "2026-03-05T20:30:00.000Z",
+            SupabaseBookingsRepository.startEndIso(timedDraft(day, "12:00 AM")),
+        )
+        // 12:00 IST on the 6th = 06:30Z; +2h = 08:30Z.
+        assertEquals(
+            "2026-03-06T06:30:00.000Z" to "2026-03-06T08:30:00.000Z",
+            SupabaseBookingsRepository.startEndIso(timedDraft(day, "12:00 PM")),
+        )
+    }
+
+    /**
+     * The end is exactly two hours after the start (the iOS placeholder until
+     * package-duration parsing lands) and both are zeroed below the minute —
+     * `bookings_no_overlap` compares these instants, so stray seconds off the
+     * device clock would make two identical slots not-quite-adjacent.
+     */
+    @Test
+    fun startEndIso_endsTwoHoursLater_withSecondsAndMillisZeroed() {
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"))
+        val (start, end) = SupabaseBookingsRepository.startEndIso(
+            timedDraft(dayInDeviceZone(2026, Calendar.MARCH, 6), "9:45 PM"),
+        )
+        assertEquals("2026-03-06T16:15:00.000Z", start)
+        assertEquals("2026-03-06T18:15:00.000Z", end)
+    }
+
+    /**
+     * An unparseable label throws instead of silently stamping an epoch — the Send
+     * button has to fail loudly, because `start_datetime` is what every reader of
+     * the booking trusts.
+     */
     @Test
     fun startEndIso_malformedTime_throws() {
-        val err = runCatching {
-            SupabaseBookingsRepository.startEndIso(
-                timedDraft(dayInDeviceZone(2026, Calendar.MARCH, 6), "sunset"),
+        for (label in listOf("sunset", "TBD", "", "  ", "25:00", "8.30 PM")) {
+            val err = runCatching {
+                SupabaseBookingsRepository.startEndIso(
+                    timedDraft(dayInDeviceZone(2026, Calendar.MARCH, 6), label),
+                )
+            }.exceptionOrNull()
+            assertTrue(
+                "expected MalformedTime for \"$label\", got $err",
+                err is BookingRepositoryError.MalformedTime,
             )
-        }.exceptionOrNull()
-        assertTrue(err is BookingRepositoryError.MalformedTime)
+        }
     }
 
     private fun isoUtcOf(epochMs: Long): String =

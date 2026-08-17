@@ -113,7 +113,7 @@ class PushPayloadMatrixTest {
 
         router.apply(route("message", threadId = "t-1", role = AppRole.Artist))
 
-        assertEquals(ArtistDeepTab.Messages, router.artistTab.value)
+        assertEquals(ArtistDeepTab.Messages, router.consumePendingArtistTab())
         assertEquals("t-1", router.consumePendingThread())
     }
 }
