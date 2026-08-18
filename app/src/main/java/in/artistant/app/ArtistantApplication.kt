@@ -5,21 +5,29 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
 import `in`.artistant.app.navigation.pushEntryPoint
+import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.push.NotificationChannels
 import timber.log.Timber
 import javax.inject.Inject
 
 /**
  * Hilt root + WorkManager (UploadQueue drain) + debug logging + notification channels
- * + FCM re-register.
+ * + FCM re-register + the launch analytics event.
  */
 @HiltAndroidApp
 class ArtistantApplication : Application(), Configuration.Provider {
     @Inject lateinit var workerFactory: HiltWorkerFactory
 
+    /** Injected in `super.onCreate()`, so it's only safe to touch after that line. */
+    @Inject lateinit var analytics: Analytics
+
     override fun onCreate() {
         super.onCreate()
         if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
+        // Funnel entry — iOS fires this from `ArtistantApp.init` (ArtistantApp.swift:49), and
+        // it's the denominator every other event is read against. Dark-until-key, so with no
+        // POSTHOG_API_KEY this is a no-op that still keeps the allowlist honest.
+        analytics.capture("app_open")
         // Before anything can post: on API 26+ a notify() naming a channel that was never
         // created is DROPPED by the platform, so `ArtistantMessagingService` showing an
         // arriving push depends on this line. Idempotent — re-creating a channel is a no-op.

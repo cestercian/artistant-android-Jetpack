@@ -22,7 +22,7 @@ import `in`.artistant.app.data.model.BookingStatus
  * rather than a state — a Bookability score beside the artist you are about to
  * request. Washed, that badge lost against the row it sits in.
  */
-enum class PillTone { Neutral, Brand, BrandSolid, Accent, Good, Warm, Hot }
+enum class PillTone { Neutral, Brand, BrandSolid, Good, Warm, Hot }
 
 /** Small capsule label — the Pill port. Mono-ish caption text, no border. */
 @Composable
@@ -32,8 +32,6 @@ fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.
         PillTone.Neutral -> colors.bgSoft to colors.ink2
         PillTone.Brand -> colors.brandSoft to colors.brand
         PillTone.BrandSolid -> colors.brand to colors.brandInk
-        // Fixed violet accent — distinct from the role-reactive brand (iOS `.accent`).
-        PillTone.Accent -> colors.accentSoft to colors.accentInk
         // The status trio has no `*Soft` token of its own, so the wash is derived
         // from the status colour rather than hand-mixed — retune `good`/`warm`/
         // `hot` and the fills follow.

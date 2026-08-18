@@ -9,12 +9,10 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,47 +40,16 @@ import java.time.format.TextStyle
 import java.util.Calendar
 import java.util.Locale
 
-/**
- * Horizontal ~30-day date strip with a per-day availability dot (port of iOS
- * `DateScroller`). [daysAvailable] is the artist's wizard weekday prefs (EEE
- * abbreviations, "Fri"/"Sat"); days NOT in the set render a dim "busy" dot, days
- * in it (or the empty/no-signal case) render a bright "free" dot — empty means
- * "no preference", NOT all-busy, so the whole flow doesn't get blocked. Selecting
- * a cell fills it brand and springs its scale. No `partial` state — there's no
- * half-busy data source yet (the legend keeps it for when per-date load lands).
- */
-@Composable
-fun DateScroller(
-    selected: LocalDate,
-    onSelect: (LocalDate) -> Unit,
-    modifier: Modifier = Modifier,
-    dayCount: Int = 30,
-    daysAvailable: List<String>? = null,
-    contentPadding: PaddingValues = PaddingValues(horizontal = AppTheme.dimens.space.lg),
-) {
-    val today = remember { LocalDate.now() }
-    val days = remember(today, dayCount) { (0 until dayCount).map { today.plusDays(it.toLong()) } }
-
-    LazyRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.sm),
-        contentPadding = contentPadding,
-    ) {
-        items(days.size) { i ->
-            val free = isFree(days[i], daysAvailable)
-            DateCell(
-                lines = dateChipLines(days[i]),
-                isSelected = days[i] == selected,
-                isFree = free,
-                // A busy day is dimmed AND inert. Dimming alone leaves a live
-                // control, so a client could still select — and then request —
-                // a date the artist marked unavailable.
-                enabled = free,
-                onClick = { onSelect(days[i]) },
-            )
-        }
-    }
-}
+// Port of iOS `DateScroller.swift`, kept as the pieces the app actually builds strips
+// from: the chip anatomy (DateChipLines + its formatters) and one date card (DateCell).
+// The strip itself belongs to its callers — BookingScreen and RequestQuoteScreen lay out
+// their own LazyRow over server-supplied chips (BookingSlots.upcomingDateChips, which
+// owns the availability rule: an artist with no weekday prefs is free, not busy, and a
+// busy day is dimmed AND inert so a client cannot request a date the artist blocked).
+// A second strip lived here with its own `remember { LocalDate.now() }` window and no
+// caller; it was deleted rather than fixed, because a 30-day window pinned at first
+// composition still shows yesterday as day one after midnight, and there was no screen
+// to prove the fix against.
 
 /**
  * The two lines a date chip renders: an uppercase weekday abbreviation over the
@@ -249,10 +216,3 @@ private const val BUSY_CELL_ALPHA = 0.45f
  * rhythm without overlapping its neighbours (the strip's gap is `space.sm`).
  */
 private const val SELECTED_CELL_SCALE = 1.06f
-
-// EEE abbreviation match against days_available (same Locale.US key the wizard
-// writes + availabilityKicker reads). Empty/null → free (no-signal default).
-private fun isFree(date: LocalDate, daysAvailable: List<String>?): Boolean {
-    if (daysAvailable.isNullOrEmpty()) return true
-    return daysAvailable.contains(date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US))
-}

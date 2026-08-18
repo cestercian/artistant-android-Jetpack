@@ -1,7 +1,6 @@
 package `in`.artistant.app.testsupport
 
 import `in`.artistant.app.data.model.Artist
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingDraft
@@ -10,6 +9,7 @@ import `in`.artistant.app.data.model.EscrowStatus
 import `in`.artistant.app.data.model.PaymentMethod
 import `in`.artistant.app.data.payments.PaymentEscrowState
 import `in`.artistant.app.data.payments.PaymentResult
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher

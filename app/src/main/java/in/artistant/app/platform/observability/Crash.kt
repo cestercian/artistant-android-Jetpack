@@ -1,16 +1,12 @@
 package `in`.artistant.app.platform.observability
 
 /**
- * Crash-reporting seam. No Sentry dependency in M0 — no-op until a DSN is wired.
- * The real impl will run the same PII-scrub regex as iOS in a BeforeSend hook.
+ * Crash-reporting seam. No Sentry dependency yet — [SentryCrash] (bound in `AppModule`)
+ * is a guarded no-op until a DSN is wired, and it runs the same PII-scrub regex as iOS
+ * over every reported throwable regardless. There is no separate no-op impl: a second
+ * do-nothing class would only be a second thing to keep in sync.
  */
 interface Crash {
     fun record(throwable: Throwable)
     fun setUser(userId: String?)
-}
-
-/** Does nothing. Bound by ObservabilityModule until Sentry is added. */
-class NoopCrash : Crash {
-    override fun record(throwable: Throwable) = Unit
-    override fun setUser(userId: String?) = Unit
 }

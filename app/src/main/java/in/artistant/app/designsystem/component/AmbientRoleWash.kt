@@ -1,7 +1,5 @@
 package `in`.artistant.app.designsystem.component
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -55,16 +53,6 @@ fun Modifier.ambientRoleWash(brand: Color, background: Color): Modifier =
             ),
         )
     }
-
-/**
- * Composable form for callers that want the wash as a standalone backdrop layer
- * inside an existing `Box` (e.g. a scaffold container) rather than as a modifier
- * on the content itself.
- */
-@Composable
-fun AmbientRoleWash(brand: Color, background: Color, modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize().ambientRoleWash(brand, background))
-}
 
 // Tuned against the reference build. Kept private to this file: they are the
 // wash's internal shape, not app-wide design tokens — no other surface should

@@ -46,9 +46,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.feature.epk.EpkRowAction
 import `in`.artistant.app.feature.epk.EpkSectionHeader
 import `in`.artistant.app.feature.signup.SignupInputRow

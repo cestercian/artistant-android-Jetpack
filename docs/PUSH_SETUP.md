@@ -129,10 +129,19 @@ The function currently signs an APNs JWT and POSTs to `api.push.apple.com`. Add,
 ```json
 { "message": {
     "token": "<fcm_token>",
-    "notification": { "title": "...", "body": "<redacted preview>" },
-    "data": { "artistant_event": "message", "artistant_thread_id": "<uuid>" },
+    "data": { "artistant_event": "message", "title": "...", "body": "<preview>",
+              "artistant_thread_id": "<uuid>" },
     "android": { "priority": "high" } } }
 ```
+- **DATA-ONLY — no `notification` block.** This is what the shipped `sendOneFCMPush`
+  does, and the client depends on it: with a `notification` block FCM posts the
+  notification ITSELF on a background arrival, on the channel named by
+  `android_channel_id` / the manifest default (neither exists) — i.e. an auto-created
+  "Miscellaneous" channel, which throws away the messages/bookings/gigs split
+  `NotificationChannels` registers and the per-category muting that split exists for.
+  Data-only means `onMessageReceived` fires for every arrival, so
+  `pushNotificationPlan` picks the channel and `ArtistantMessagingService` posts it.
+  Title and body ride inside `data`.
 - Return 503 if `FCM_SERVICE_ACCOUNT` is unset (so triggers retry) — same pattern as
   the APNs-missing 503. Leave APNs untouched so iOS is unaffected.
 

@@ -1,4 +1,4 @@
-package `in`.artistant.app.data.model
+package `in`.artistant.app.designsystem.theme
 
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
@@ -37,5 +37,13 @@ class ArtistGradientTest {
     fun `distinct in-range indices are distinct palettes`() {
         assertNotEquals(ArtistGradient.palette(0), ArtistGradient.palette(1))
         assertNotEquals(ArtistGradient.palette(2), ArtistGradient.palette(3))
+    }
+
+    @Test
+    fun `the write path clamps onto the published palette range`() {
+        assertEquals(6, ArtistGradient.count)
+        assertEquals(0, ArtistGradient.clampIndex(-1))
+        assertEquals(3, ArtistGradient.clampIndex(3))
+        assertEquals(5, ArtistGradient.clampIndex(6))
     }
 }

@@ -1,8 +1,10 @@
 package `in`.artistant.app.designsystem.component
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.Calendar
+import java.util.Locale
 
 /**
  * `monthLabelFromDateLabel` is the key behind `groupedByMonth()` on both the
@@ -13,6 +15,13 @@ import java.util.Calendar
  * fallbacks.
  */
 class MonthLabelTest {
+
+    private val defaultLocale: Locale = Locale.getDefault()
+
+    @After
+    fun restoreLocale() {
+        Locale.setDefault(defaultLocale)
+    }
 
     // --- canonical shape -----------------------------------------------------
     // `BookingDateFormat.PATTERN` = "EEE, MMM d, yyyy" — what the app writes and
@@ -151,4 +160,39 @@ class MonthLabelTest {
         // what would otherwise make this drift by a day depending on the clock.
         assertEquals("Tuesday, February 29", selectedDayLabel(2028, 1, 29))
     }
+
+    // --- the month dropdown --------------------------------------------------
+    // `MonthMenu` renders `monthNames` and marks the live month by comparing an
+    // entry against the header's own name, while `onSelectMonth(index)` is
+    // positional. So the list has to be the header's twelve strings in
+    // `Calendar.MONTH` order — nothing else makes either half sound.
+
+    @Test
+    fun `the month menu's twelve names are the header's, in Calendar order`() {
+        assertEquals(12, monthNames.size)
+        monthNames.forEachIndexed { index, name ->
+            assertEquals("$name 2026", monthLabelFromEpoch(firstOfMonth(2026, index)))
+        }
+    }
+
+    @Test
+    fun `the calendar surface does not follow the device locale`() {
+        // Regression: the menu was built from
+        // `DateFormatSymbols.getInstance(Locale.getDefault())` while every other
+        // label here formats with `Locale.US`. On a hi-IN device — a shipping
+        // locale in this market — the header read "August" and the menu "अगस्त",
+        // so the comparison could never match: no tick, and an open menu that no
+        // longer answered "where am I".
+        Locale.setDefault(Locale.forLanguageTag("hi-IN"))
+        assertEquals("August", monthNames[Calendar.AUGUST])
+        assertEquals("August 2026", monthLabelFromEpoch(firstOfMonth(2026, Calendar.AUGUST)))
+        assertEquals("Wednesday, August 12", selectedDayLabel(2026, Calendar.AUGUST, 12))
+        assertEquals("August 2026", monthLabelFromDateLabel("Wed, Aug 12, 2026"))
+    }
+
+    private fun firstOfMonth(year: Int, month: Int): Long =
+        Calendar.getInstance().apply {
+            clear()
+            set(year, month, 1)
+        }.timeInMillis
 }

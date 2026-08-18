@@ -7,7 +7,6 @@ import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
 import `in`.artistant.app.data.model.Artist
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.SearchCursor
 import `in`.artistant.app.data.model.SearchFacet
 import `in`.artistant.app.data.model.SearchFacets
@@ -16,6 +15,7 @@ import `in`.artistant.app.data.model.SearchPage
 import `in`.artistant.app.data.model.SearchSort
 import `in`.artistant.app.data.model.SearchTuning
 import `in`.artistant.app.data.model.PriceBucket
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNull

@@ -86,8 +86,8 @@ firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "hiltWork" }
 androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltWork" }
-# Media3 Transformer — cover video trim ≤10s
-media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
+# Media3 — audio sample playback (ExoPlayer). Transformer lands back here with the
+# cover-video pick that needs it.
 media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 # Play Billing — inert until subscriptionsEnabled

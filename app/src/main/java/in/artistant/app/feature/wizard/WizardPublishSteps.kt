@@ -38,7 +38,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
@@ -46,6 +45,7 @@ import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.feature.epk.EpkSectionHeader
 import `in`.artistant.app.feature.signup.EditorialHeadline
 import java.io.File

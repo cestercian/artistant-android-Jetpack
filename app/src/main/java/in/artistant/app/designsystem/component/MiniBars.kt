@@ -23,10 +23,14 @@ import `in`.artistant.app.designsystem.theme.AppTheme
  * something this small is real cost on a low-end device, and the draw here is
  * one pass of rounded rects with no measurement of its own.
  *
- * Empty and all-zero inputs draw nothing — the caller decides whether an absent
- * chart or a flat row of stubs is the honest state, and for a count series a row
- * of zero-height bars reads as "we drew a chart of nothing" rather than "there
- * is nothing".
+ * An EMPTY input draws nothing — the caller decides whether an absent chart or a
+ * flat row of stubs is the honest state, and for a count series a row of
+ * zero-height bars reads as "we drew a chart of nothing" rather than "there is
+ * nothing".
+ *
+ * An all-zero series is a different statement and does draw: every bucket takes
+ * the track-coloured stub the loop below gives a zero day, so a quiet week reads
+ * as "seven days, none of which had work" rather than as a missing chart.
  */
 @Composable
 fun MiniBars(

@@ -5,6 +5,7 @@ import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.EscrowStatus
 import `in`.artistant.app.data.model.PaymentMethod
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -65,6 +66,76 @@ class CalendarSyncPlannerTest {
         val actions = CalendarSyncPlanner.plan(listOf(booking), map)
         assertEquals(1, actions.size)
         assertTrue(actions.first() is CalendarSyncPlanner.Action.Update)
+    }
+
+    /**
+     * The planner used to parse dates itself, with one pattern and a lenient
+     * formatter, so a confirmed gig whose `date_label` is the short "MMM d, yyyy"
+     * form another client wrote — no `start_datetime` on the row — resolved to null
+     * and was silently absent from the calendar, from `busyDays` and from every
+     * clash warning, while every list screen in the app rendered it fine.
+     */
+    @Test
+    fun plan_mirrorsAConfirmedGigWhoseDateLabelIsTheShortForm() {
+        val b = sample(id = "b1", status = BookingStatus.Confirmed).copy(
+            date = "Jul 11, 2026",
+            time = "7:30 PM",
+            startDatetimeIso = null,
+            endDatetimeIso = null,
+        )
+
+        assertEquals(
+            listOf(CalendarSyncPlanner.Action.Create("b1")),
+            CalendarSyncPlanner.plan(listOf(b), emptyMap()),
+        )
+        assertTrue(CalendarSyncPlanner.busyDays(listOf(b)).isNotEmpty())
+    }
+
+    /** No time on the row is not "no gig": the model falls back to start-of-day. */
+    @Test
+    fun plan_mirrorsAConfirmedGigThatCarriesOnlyADateLabel() {
+        val b = sample(id = "b1", status = BookingStatus.Confirmed).copy(
+            time = "",
+            startDatetimeIso = null,
+            endDatetimeIso = null,
+        )
+
+        assertEquals(
+            listOf(CalendarSyncPlanner.Action.Create("b1")),
+            CalendarSyncPlanner.plan(listOf(b), emptyMap()),
+        )
+    }
+
+    /**
+     * The other half of adopting the canonical parser: the old lenient formatter
+     * rolled an impossible date over (Feb 30 → Mar 2) and would have written a real
+     * calendar event on a day the gig is not on. Strict parsing declines instead.
+     */
+    @Test
+    fun plan_skipsAGigWhoseDateLabelIsImpossible() {
+        val b = sample(id = "b1", status = BookingStatus.Confirmed).copy(
+            date = "Mon, Feb 30, 2026",
+            time = "7:30 PM",
+            startDatetimeIso = null,
+            endDatetimeIso = null,
+        )
+
+        assertNull(CalendarSyncPlanner.resolvedStartEpochMs(b))
+        assertTrue(CalendarSyncPlanner.plan(listOf(b), emptyMap()).isEmpty())
+    }
+
+    /** End is the row's own when it has one, else a 2h placeholder after the start. */
+    @Test
+    fun resolvedEnd_fallsBackToTwoHoursAfterTheStart() {
+        val withEnd = sample(id = "b1", status = BookingStatus.Confirmed)
+        val withoutEnd = withEnd.copy(endDatetimeIso = null)
+        val start = CalendarSyncPlanner.resolvedStartEpochMs(withoutEnd)!!
+
+        assertEquals(
+            java.time.Instant.parse("2026-07-10T16:00:00Z").toEpochMilli(),
+            CalendarSyncPlanner.resolvedEndEpochMs(withEnd),
+        )
+        assertEquals(start + 2 * 60 * 60 * 1000L, CalendarSyncPlanner.resolvedEndEpochMs(withoutEnd))
     }
 
     @Test

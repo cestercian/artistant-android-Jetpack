@@ -17,6 +17,15 @@ data class Artist(
     val price: Int,
     val duration: String,
     val score: Int,
+    /**
+     * Cover fallback stops, already resolved from [coverGradientIndex] by the
+     * mapper (`ArtistGradient.palette`, in `designsystem/theme`).
+     *
+     * The one Compose type in this file, and iOS carries the same field
+     * (`Artist.swift` `let gradient: [Color]`) for the same reason: the palette
+     * table is design data with one owner, so the mapper reads it once instead of
+     * every tile/hero re-resolving an index.
+     */
     val gradient: List<Color>,
     val bio: String = "",
     val followers: String = "",
@@ -113,35 +122,3 @@ data class Review(
     val createdAt: String? = null,
     val categories: Map<String, Int>? = null,
 )
-
-/**
- * Six brand cover gradients indexed by `artists.cover_gradient_index` (0–5).
- * Port of iOS `ArtistGradient` — the never-empty fallback behind every tile/hero.
- */
-object ArtistGradient {
-    private val palettes: List<List<Color>> = listOf(
-        listOf(Color(0xFFFF6B9D), Color(0xFF7C5CFF), Color(0xFF0F1014)),
-        listOf(Color(0xFF22D3EE), Color(0xFF7C5CFF), Color(0xFF0F1014)),
-        listOf(Color(0xFFFFB547), Color(0xFFFF5A6E), Color(0xFF0F1014)),
-        listOf(Color(0xFF34D399), Color(0xFF5BB7FF), Color(0xFF0F1014)),
-        listOf(Color(0xFFFF6FAE), Color(0xFFFFB547), Color(0xFF0F1014)),
-        listOf(Color(0xFF7C5CFF), Color(0xFF22D3EE), Color(0xFF0F1014)),
-    )
-
-    /** How many palettes the picker may offer. */
-    val count: Int get() = palettes.size
-
-    fun palette(index: Int): List<Color> =
-        palettes[index.coerceIn(0, palettes.lastIndex)]
-
-    /**
-     * Clamp an index onto the palette range.
-     *
-     * The read path coerces already, so this exists for the WRITE path: an index
-     * that is out of range here would persist a number the app cannot render, and
-     * every later read would silently show palette 0 while the column said
-     * otherwise. Refusing at the boundary keeps the stored value and the rendered
-     * cover the same fact.
-     */
-    fun clampIndex(index: Int): Int = index.coerceIn(0, palettes.lastIndex)
-}

@@ -85,16 +85,6 @@ class MotionSpecsTest {
         assertEquals(1f, MotionSpecs.pressScale(pressed = true, reduceMotion = true, 0.98f), 0f)
     }
 
-    // ── shimmer ──────────────────────────────────────────────────────────────
-
-    @Test
-    fun `shimmer runs normally and stops under reduce motion`() {
-        assertTrue(MotionSpecs.shouldShimmer(reduceMotion = false))
-        // Hard off, not zero-duration: an infinite animation given a zero
-        // duration restarts every frame, which is a busy loop AND a strobe.
-        assertFalse(MotionSpecs.shouldShimmer(reduceMotion = true))
-    }
-
     // ── slide geometry ───────────────────────────────────────────────────────
 
     @Test

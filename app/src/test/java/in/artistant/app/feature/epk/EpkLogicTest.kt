@@ -1,9 +1,9 @@
 package `in`.artistant.app.feature.epk
 
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.data.repository.SupabaseSamplesRepository
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.feature.wizard.WIZARD_BIO_MAX

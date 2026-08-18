@@ -1,7 +1,6 @@
 package `in`.artistant.app.harness
 
 import `in`.artistant.app.data.model.Artist
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
@@ -19,6 +18,7 @@ import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.ScoreHistoryPoint
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone

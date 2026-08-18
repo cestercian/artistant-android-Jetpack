@@ -7,7 +7,9 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.core.content.ContextCompat
 
 /**
@@ -37,9 +39,16 @@ fun rememberNotificationPermissionRequest(onResult: (granted: Boolean) -> Unit):
         contract = ActivityResultContracts.RequestPermission(),
         onResult = onResult,
     )
+    // The returned lambda is remembered against `launcher`, which never changes — so a
+    // plain capture would pin the FIRST composition's `onResult` forever. That is invisible
+    // on API 33+ (rememberLauncherForActivityResult wraps its own callback in
+    // rememberUpdatedState) and live on API 26-32, where the pre-Tiramisu branch calls the
+    // captured copy directly: a caller closing over changing state (a wizard step, say)
+    // would be answered with the value from first composition.
+    val latestOnResult by rememberUpdatedState(onResult)
     return remember(launcher) {
         {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onResult(true)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) latestOnResult(true)
             else launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }

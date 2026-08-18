@@ -1,10 +1,8 @@
 package `in`.artistant.app.core.di
 
-import android.content.Context
+import dagger.Binds
 import dagger.Module
-import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
@@ -14,31 +12,38 @@ import `in`.artistant.app.platform.storage.AppPreferences
 import `in`.artistant.app.platform.storage.SignupConsentStore
 import `in`.artistant.app.feature.search.DataStoreSearchRecents
 import `in`.artistant.app.feature.search.SearchRecents
-import javax.inject.Singleton
 
 /**
- * App-level provides: DataStore prefs + the observability seams. Kept as one small
- * module rather than three so the wiring stays in one place.
+ * App-level bindings: the DataStore prefs seams + the observability seams. Kept as one
+ * small module rather than three so the wiring stays in one place.
+ *
+ * `@Binds`, never a hand-built `@Provides`. Every impl bound here already carries
+ * `@Singleton @Inject constructor`, and a `@Provides` that calls that constructor
+ * itself leaves the CONCRETE type's just-in-time binding standing alongside it: the
+ * `Crash` key got the module's instance while anything injecting `SentryCrash`
+ * directly got a second singleton — one whose `attachedUserId` `SessionManager` never
+ * reaches, because it only ever touches the `Crash`-bound copy. Aliasing instead of
+ * constructing leaves exactly one instance per impl. `AppPreferences` needs no entry
+ * at all now that its constructor asks for `@ApplicationContext`; Hilt builds it from
+ * its own `@Singleton @Inject constructor`.
+ *
+ * Abstract so `@Binds` has a home (same shape as `RepositoryModule`).
  */
 @Module
 @InstallIn(SingletonComponent::class)
-object AppModule {
-    @Provides
-    @Singleton
-    fun provideAppPreferences(@ApplicationContext context: Context): AppPreferences =
-        AppPreferences(context)
+abstract class AppModule {
+    /** [AppPreferences] IS the consent store — the interface only keeps signup unit-testable. */
+    @Binds
+    abstract fun bindSignupConsentStore(prefs: AppPreferences): SignupConsentStore
 
-    @Provides
-    @Singleton
-    fun provideSignupConsentStore(prefs: AppPreferences): SignupConsentStore = prefs
-
-    @Provides
-    @Singleton
-    fun provideSearchRecents(prefs: AppPreferences): SearchRecents =
-        DataStoreSearchRecents(prefs)
+    @Binds
+    abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents
 
     // Real observability wrappers — DARK-UNTIL-KEY: a guarded no-op until the
     // operator sets POSTHOG_API_KEY / SENTRY_DSN (see the wrapper class headers).
-    @Provides @Singleton fun provideAnalytics(): Analytics = PostHogAnalytics()
-    @Provides @Singleton fun provideCrash(): Crash = SentryCrash()
+    @Binds
+    abstract fun bindAnalytics(impl: PostHogAnalytics): Analytics
+
+    @Binds
+    abstract fun bindCrash(impl: SentryCrash): Crash
 }

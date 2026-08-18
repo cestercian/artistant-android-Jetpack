@@ -29,14 +29,30 @@ private fun groupIndian(amount: Int): String {
 /**
  * Compact form: ₹1.5L / ₹12K / ₹500. Lakh at ≥1,00,000, thousand at ≥1,000.
  * Drops a trailing ".0" so ₹2L reads clean, not ₹2.0L.
+ *
+ * The band is picked from the ROUNDED figure, not the raw amount: ₹99,999 rounds to
+ * 100 thousands, and "₹100K" *is* one lakh written in the band the next rung up
+ * exists to express, so it promotes to "₹1L". Only the rounding promotes — ₹95,000
+ * still reads "₹95K" — and the K band still keys off the raw amount so exact rupees
+ * below ₹1,000 stay exact ("₹999", not a rounded "₹1K").
+ *
+ * A negative delegates to [formatInr]. The compact bands exist for prices, which are
+ * never negative, and the bare `else` used to emit an ungrouped "₹-150000" where
+ * every other path in this file groups.
  */
-fun formatInrShort(amount: Int): String = when {
-    amount >= 100_000 -> "₹${trimDot(amount / 100_000.0)}L"
-    amount >= 1_000 -> "₹${trimDot(amount / 1_000.0)}K"
-    else -> "₹$amount"
+fun formatInrShort(amount: Int): String {
+    if (amount < 0) return formatInr(amount)
+    val thousands = round1(amount / 1_000.0)
+    return when {
+        thousands >= 100.0 -> "₹${trimDot(round1(amount / 100_000.0))}L"
+        amount >= 1_000 -> "₹${trimDot(thousands)}K"
+        else -> "₹$amount"
+    }
 }
 
-private fun trimDot(v: Double): String {
-    val oneDp = (Math.round(v * 10) / 10.0)
-    return if (oneDp % 1.0 == 0.0) oneDp.toInt().toString() else oneDp.toString()
-}
+/** One decimal place, half-up — the precision both compact bands render at. */
+private fun round1(v: Double): Double = Math.round(v * 10) / 10.0
+
+/** Drops a trailing ".0" from an ALREADY-rounded value (see [round1]). */
+private fun trimDot(v: Double): String =
+    if (v % 1.0 == 0.0) v.toInt().toString() else v.toString()
