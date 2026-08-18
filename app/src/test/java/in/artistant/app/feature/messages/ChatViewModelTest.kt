@@ -44,6 +44,11 @@ class ChatViewModelTest {
     /**
      * Scriptable messages seam: [failSend] flips the write path, [emit] pushes a
      * row through the Realtime callback the ViewModel registered.
+     *
+     * [seedMessages] is the whole server-side transcript, and it is PAGED here
+     * the way the real seam pages it — newest `limit` rows no newer than the
+     * cursor — so scroll-back is exercised against the same shape production
+     * gets rather than against a double that always returns everything.
      */
     private inner class ScriptedMessages(
         private val seedMessages: List<Message> = emptyList(),
@@ -58,6 +63,18 @@ class ChatViewModelTest {
         var subscribeCount: Int = 0
         var listCount: Int = 0
 
+        /** Every body handed to the write path, in order. */
+        val sentBodies = mutableListOf<String>()
+
+        /** Every `before` cursor asked for, in order — null is the newest page. */
+        val cursors = mutableListOf<Long?>()
+
+        /** Fails only the SCROLL-BACK fetches, leaving the open's page alone. */
+        var failOlder: Boolean = false
+
+        /** When set, a scroll-back page parks here until the test completes it. */
+        var olderGate: CompletableDeferred<Unit>? = null
+
         /**
          * When set, `send()` parks here until the test completes it. That's the
          * only way to hold the write genuinely in flight — optimistic bubble on
@@ -70,20 +87,30 @@ class ChatViewModelTest {
 
         override suspend fun listThreadsForUser(): List<Thread> = listOfNotNull(thread)
 
-        override suspend fun listMessages(threadId: String, limit: Int): List<Message> {
+        override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> {
             listCount++
+            cursors += before
+            if (before != null) {
+                olderGate?.await()
+                if (failOlder) throw IllegalStateException("network down")
+            }
             return seedMessages
+                .filter { before == null || it.sentAtEpochMs <= before }
+                .takeLast(limit)
         }
 
         override suspend fun send(threadId: String, body: String): Message {
             sendCount++
+            sentBodies += body
             sendGate?.await()
             if (failSend) throw IllegalStateException("network down")
             return Message(
                 id = nextServerId,
                 threadId = threadId,
                 senderId = "me",
-                body = body,
+                // The real seam trims before it inserts, so both the RETURNING
+                // row and the row Postgres broadcasts carry the trimmed text.
+                body = body.trim(),
                 sentAtEpochMs = 5_000L,
                 isMine = true,
             )
@@ -254,6 +281,41 @@ class ChatViewModelTest {
         assertEquals(MessageDelivery.Sent, model.state.value.messages.single().delivery)
     }
 
+    /**
+     * The same race, with the whitespace a soft keyboard leaves behind after a
+     * word suggestion — and the reason this is a separate test: the seam TRIMS
+     * before it inserts, so the row Postgres broadcasts back carries the trimmed
+     * body, while the collapse only fires when the bodies match. Holding the raw
+     * draft locally meant the echo appended instead: two bubbles for the whole
+     * round trip, and — when the insert lands but its response is lost — a
+     * permanent "Not sent · Tap to retry" beside a message that was delivered,
+     * whose retry posts a real duplicate.
+     */
+    @Test
+    fun anEchoCollapsesIntoABubbleSentWithTrailingWhitespace() = runTest {
+        val repo = ScriptedMessages().apply { sendGate = CompletableDeferred() }
+        val model = vm(repo)
+
+        model.send("Meet at 8? ")
+
+        // Local bubble and the write both carry what the server will store.
+        val inFlight = model.state.value.messages.single()
+        assertEquals("Meet at 8?", inFlight.body)
+        assertEquals(listOf("Meet at 8?"), repo.sentBodies)
+
+        repo.emit(serverMessage("server-1", "Meet at 8?", at = System.currentTimeMillis()))
+
+        val duringFlight = model.state.value.messages
+        assertEquals("the echo of the trimmed row must collapse, not append", 1, duringFlight.size)
+        assertEquals("server-1", duringFlight.single().id)
+        assertEquals(MessageDelivery.Sent, duringFlight.single().delivery)
+
+        repo.sendGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(listOf("server-1"), model.state.value.messages.map { it.id })
+    }
+
     @Test
     fun anOlderEchoWithTheSameTextDoesNotSwallowTheInFlightBubble() = runTest {
         // Same body, but far outside the 15s collapse window — a *different*
@@ -384,6 +446,115 @@ class ChatViewModelTest {
         assertTrue("failed bubble kept", ids.any { it.startsWith("optimistic-") })
     }
 
+    // --- scroll-back ---------------------------------------------------------
+    //
+    // Opening a thread fetches ONE page. Without a cursor the messages before it
+    // were unreachable in this client — scrolling up stopped at the 50th-newest
+    // and everything earlier in a long negotiation was simply gone. iOS has
+    // shipped the cursor (`listMessages(threadID:limit:before:)` + `loadOlder`)
+    // since the store was written.
+
+    /** 120 messages, one per second, oldest first — a thread with real history. */
+    private fun history(count: Int) = (1..count).map { n ->
+        serverMessage("m$n", "line $n", at = n * 1_000L, mine = false)
+    }
+
+    @Test
+    fun openingAThreadLoadsOnlyTheNewestPage() = runTest {
+        val model = vm(ScriptedMessages(seedMessages = history(120)))
+
+        assertEquals(50, model.state.value.messages.size)
+        assertEquals("m71", model.state.value.messages.first().id)
+        assertEquals("m120", model.state.value.messages.last().id)
+    }
+
+    @Test
+    fun scrollingBackPagesInTheHistoryBehindTheNewestPage() = runTest {
+        val repo = ScriptedMessages(seedMessages = history(120))
+        val model = vm(repo)
+
+        model.loadOlder()
+        advanceUntilIdle()
+
+        val ids = model.state.value.messages.map { it.id }
+        // Paged from the oldest row in memory, and the older page landed AHEAD
+        // of the window rather than replacing it. The open itself carries no
+        // cursor — it is always the newest page.
+        assertEquals(listOf(null, 71_000L), repo.cursors)
+        assertEquals("m22", ids.first())
+        assertEquals("m120", ids.last())
+        // The cursor is inclusive, so the boundary row comes back on the wire —
+        // and must collapse by id rather than render twice.
+        assertEquals(1, ids.count { it == "m71" })
+        assertEquals(99, ids.size)
+    }
+
+    @Test
+    fun aShortPageMeansTheStartOfTheThreadAndRetiresPaging() = runTest {
+        val repo = ScriptedMessages(seedMessages = history(60))
+        val model = vm(repo)
+
+        model.loadOlder()
+        advanceUntilIdle()
+        assertEquals(60, model.state.value.messages.size)
+        val fetches = repo.listCount
+
+        model.loadOlder()
+        advanceUntilIdle()
+
+        assertEquals("the beginning only has to be found once", fetches, repo.listCount)
+    }
+
+    @Test
+    fun aFailedPageIsRetriedRatherThanTakenForTheStartOfTheThread() = runTest {
+        // A dropped request says nothing about history. Treating it as "you've
+        // reached the beginning" would kill scroll-back for the whole session.
+        val repo = ScriptedMessages(seedMessages = history(120)).apply { failOlder = true }
+        val model = vm(repo)
+
+        model.loadOlder()
+        advanceUntilIdle()
+        assertEquals("a failed page must not disturb the window", 50, model.state.value.messages.size)
+
+        repo.failOlder = false
+        model.loadOlder()
+        advanceUntilIdle()
+
+        assertEquals(99, model.state.value.messages.size)
+    }
+
+    @Test
+    fun onlyOnePageIsInFlightAtATime() = runTest {
+        // The trigger is "a scroll settled at the top", which fires again on
+        // every settle while the page is still loading.
+        val repo = ScriptedMessages(seedMessages = history(120)).apply {
+            olderGate = CompletableDeferred()
+        }
+        val model = vm(repo)
+        val fetchesAfterOpen = repo.listCount
+
+        model.loadOlder()
+        model.loadOlder()
+        model.loadOlder()
+
+        assertEquals(fetchesAfterOpen + 1, repo.listCount)
+
+        repo.olderGate!!.complete(Unit)
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun anEmptyTranscriptHasNothingToPageBefore() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo)
+        val fetches = repo.listCount
+
+        model.loadOlder()
+        advanceUntilIdle()
+
+        assertEquals(fetches, repo.listCount)
+    }
+
     // --- details + report ---------------------------------------------------
 
     @Test
@@ -420,7 +591,8 @@ class ChatViewModelTest {
     fun aLoadFailureSurfacesAnErrorInsteadOfAnEmptyTranscript() = runTest {
         val failing = object : MessagesRepository {
             override suspend fun listThreadsForUser(): List<Thread> = error("offline")
-            override suspend fun listMessages(threadId: String, limit: Int): List<Message> = emptyList()
+            override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> =
+                emptyList()
             override suspend fun send(threadId: String, body: String): Message = error("offline")
             override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String = error("offline")
             override suspend fun markThreadRead(threadId: String) = Unit
@@ -600,11 +772,16 @@ class ChatViewModelTest {
      * The socket is suspended while backgrounded, so returning has to do both:
      * pull what was missed AND rejoin. Refresh first, because it fills the gap
      * even if the channel is slow to come back.
+     *
+     * The screen delivers every ON_RESUME, so the first call here is the one
+     * that arrives with the first paint — see the test below.
      */
     @Test
     fun comingBackToTheForegroundRefreshesAndReSubscribes() = runTest {
         val repo = ScriptedMessages()
         val model = vm(repo)
+        model.onResumed() // the first paint's resume
+        advanceUntilIdle()
         val listsBefore = repo.listCount
         val subscribesBefore = repo.subscribeCount
 
@@ -614,6 +791,28 @@ class ChatViewModelTest {
         assertTrue(repo.listCount > listsBefore)
         assertTrue(repo.subscribeCount > subscribesBefore)
         assertTrue("the superseded channel must be torn down", repo.cancelCount > 0)
+    }
+
+    /**
+     * Opening a chat must cost ONE load and ONE join: `init` does them, and the
+     * resume that comes with the first paint has to be swallowed. The latch is
+     * on the ViewModel because it is the half that survives a push — the screen
+     * is disposed behind a booking pushed on top and composed again on the way
+     * back, and that return genuinely is a resync.
+     */
+    @Test
+    fun theFirstPaintsResumeDoesNotReloadTheThread() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo)
+        advanceUntilIdle()
+        val listsAfterInit = repo.listCount
+        val subscribesAfterInit = repo.subscribeCount
+
+        model.onResumed()
+        advanceUntilIdle()
+
+        assertEquals(listsAfterInit, repo.listCount)
+        assertEquals(subscribesAfterInit, repo.subscribeCount)
     }
 
     // --- per-thread mute (mig 0091) ------------------------------------------

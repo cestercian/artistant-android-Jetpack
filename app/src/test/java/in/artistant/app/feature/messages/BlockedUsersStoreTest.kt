@@ -4,6 +4,7 @@ import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeBlockRepository
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
+import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,6 +39,11 @@ class BlockedUsersStoreTest {
         mirror: FakeMirror = FakeMirror(),
         viewerId: String? = CLIENT_ID,
     ) = ServerBlockedUsersStore(repository, mirror, ViewerIdentity { viewerId })
+
+    /** A session that can change under the store, the way sign-out/sign-in does. */
+    private class SwitchableViewer(var userId: String?) : ViewerIdentity {
+        override fun currentUserId(): String? = userId
+    }
 
     @Test
     fun refreshAdoptsTheServerSet() = runTest {
@@ -76,6 +82,51 @@ class BlockedUsersStoreTest {
         store.refresh()
 
         assertTrue(store.blocked.value.isEmpty())
+    }
+
+    @Test
+    fun theSetDoesNotFollowTheDeviceToTheNextAccountSignedIn() = runTest {
+        // The store is a @Singleton and signing out does not restart the process,
+        // so the disk stamp alone protects nothing: the copy every surface reads
+        // is the one in memory. Without this the next account filters ITS inbox
+        // with the previous account's ids — conversations quietly missing, and no
+        // UI anywhere that could explain why.
+        val viewer = SwitchableViewer(CLIENT_ID)
+        val repository = FakeBlockRepository()
+        val mirror = FakeMirror()
+        val store = ServerBlockedUsersStore(repository, mirror, viewer)
+        store.toggle(ARTIST_ID)
+        assertEquals(setOf(ARTIST_ID.lowercase()), store.blocked.value)
+
+        // Sign out (the prefs go with the session), then sign in as someone else
+        // who can't reach the server yet — the case where a leaked set would
+        // otherwise never be corrected.
+        mirror.value = null
+        repository.signedIn = false
+        viewer.userId = "99999999-9999-9999-9999-999999999999"
+
+        store.refresh()
+
+        assertTrue("one account's block list must not follow the device", store.blocked.value.isEmpty())
+    }
+
+    @Test
+    fun theNextAccountsFirstBlockDoesNotPersistTheInheritedIds() = runTest {
+        // The leak's worst form: a toggle WRITES memory back to disk, so a set
+        // adopted from the previous account would be re-stamped under the new
+        // owner's name and survive a restart.
+        val viewer = SwitchableViewer(CLIENT_ID)
+        val mirror = FakeMirror()
+        val store = ServerBlockedUsersStore(FakeBlockRepository(), mirror, viewer)
+        store.toggle(ARTIST_ID)
+
+        val next = "99999999-9999-9999-9999-999999999999"
+        viewer.userId = next
+        mirror.value = null
+        store.toggle(OTHER_ARTIST_ID)
+
+        assertEquals(setOf(OTHER_ARTIST_ID.lowercase()), store.blocked.value)
+        assertEquals("$next\n${OTHER_ARTIST_ID.lowercase()}", mirror.value)
     }
 
     @Test

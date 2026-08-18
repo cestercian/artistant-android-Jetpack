@@ -106,6 +106,15 @@ class ChatViewModel @Inject constructor(
     /** Bumped on each subscribe attempt so a superseded join is discarded. */
     private var subscribeGeneration = 0
 
+    /** One scroll-back page in flight at a time — see [loadOlder]. */
+    private var loadingOlder = false
+
+    /** Whether the screen's first ON_RESUME has been seen — see [onResumed]. */
+    private var resumedOnce = false
+
+    /** A page came back short: the thread has no history behind what's loaded. */
+    private var reachedStartOfHistory = false
+
     init {
         viewModelScope.launch {
             flagsStore.flags.collect { flags ->
@@ -140,7 +149,9 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(isLoading = true, error = null) }
         runCatching {
             val thread = messagesRepository.listThreadsForUser().firstOrNull { it.id == threadId }
-            val messages = messagesRepository.listMessages(threadId)
+            // The newest page only. Anything older is reached through [loadOlder],
+            // and `mergePreservingOptimistic` keeps whatever it already pulled in.
+            val messages = messagesRepository.listMessages(threadId, PAGE_SIZE)
             thread to messages
         }.onSuccess { (thread, serverMessages) ->
             // Same seat-aware rule as the inbox row — see ThreadCounterpart. The
@@ -190,14 +201,63 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Back from the background.
+     * Scroll-back: the page of history immediately older than what's on screen.
+     *
+     * [refresh] only ever fetches the newest page, so without this everything
+     * before the 50th-newest message is unreachable — scrolling to the top of a
+     * long conversation simply stopped. The cursor is the oldest message in
+     * memory and the merge is the same one refresh uses, so a re-fetched
+     * boundary row collapses by id and in-flight bubbles survive.
+     *
+     * Two guards, and the difference between them matters: a page SHORTER than
+     * the one asked for means the thread has no more history, so paging retires
+     * for good; a FAILED page means nothing about history, so it only unlocks
+     * and the next scroll to the top tries again. Reading a dropped request as
+     * "you've reached the beginning" would kill scroll-back for the session.
+     */
+    fun loadOlder() {
+        if (loadingOlder || reachedStartOfHistory) return
+        // Nothing on screen yet: the first page is [refresh]'s job, and there is
+        // no cursor to page before.
+        val oldest = _state.value.messages.minOfOrNull { it.sentAtEpochMs } ?: return
+        loadingOlder = true
+        viewModelScope.launch {
+            runCatching { messagesRepository.listMessages(threadId, PAGE_SIZE, before = oldest) }
+                .onSuccess { older ->
+                    reachedStartOfHistory = older.size < PAGE_SIZE
+                    _state.update {
+                        it.copy(
+                            messages = ChatRealtimeLogic.mergePreservingOptimistic(
+                                server = older,
+                                existing = it.messages,
+                            ),
+                        )
+                    }
+                }
+            loadingOlder = false
+        }
+    }
+
+    /**
+     * Back on screen — from the background, or from a destination pushed on top.
      *
      * The socket is suspended while the app is away, so a thread left open goes
      * silent. Refresh first — that fills the gap even if the channel is slow to
      * rejoin — then re-establish; the generation token makes the re-subscribe
      * idempotent against the one already in flight.
+     *
+     * The FIRST call is swallowed: that is the resume that arrives with the
+     * screen's first paint, and `init` has already loaded and subscribed for it.
+     * The latch lives here rather than in [ResumeEffect] because navigation
+     * disposes a destination's composition behind a pushed screen while this
+     * ViewModel survives — a latch over there would reset and skip the resume on
+     * the way back. Same rule, same reason, in [MessagesViewModel.onResumed].
      */
     fun onResumed() {
+        if (!resumedOnce) {
+            resumedOnce = true
+            return
+        }
         refresh()
         subscribeRealtime()
     }
@@ -205,22 +265,31 @@ class ChatViewModel @Inject constructor(
     /**
      * Optimistic insert (`.sending`) then background write. Cap at 4000 chars —
      * same choke point as the composer, for both first send and retry.
+     *
+     * The bubble carries the TRIMMED text, not the raw draft, because the seam
+     * trims before it inserts (`SupabaseMessagesRepository.send`) — so the row
+     * Postgres broadcasts back carries the trimmed body too. The Realtime echo
+     * collapses into an in-flight bubble only when the bodies match
+     * ([ChatRealtimeLogic.receiveRealtimeMessage]), so a soft keyboard's trailing
+     * space would otherwise leave the echo beside the placeholder: two bubbles
+     * for the whole round trip, and a permanent phantom "Not sent · Tap to retry"
+     * next to the delivered message if the insert lands but its response is lost.
+     * Cap first, then trim, so the 4000-char ceiling still bounds the write.
      */
     fun send(body: String) {
-        val capped = body.take(MAX_MESSAGE_CHARS)
-        val text = capped.trim()
+        val text = body.take(MAX_MESSAGE_CHARS).trim()
         if (text.isEmpty()) return
         val optimisticId = "optimistic-${System.currentTimeMillis()}"
         val optimistic = Message(
             id = optimisticId,
             threadId = threadId,
-            body = capped,
+            body = text,
             sentAtEpochMs = System.currentTimeMillis(),
             isMine = true,
             delivery = MessageDelivery.Sending,
         )
         _state.update { it.copy(messages = it.messages + optimistic, error = null) }
-        deliver(optimisticId, capped)
+        deliver(optimisticId, text)
     }
 
     fun retryFailedMessage(messageId: String) {
@@ -430,5 +499,12 @@ class ChatViewModel @Inject constructor(
         const val FALLBACK_TITLE = "Chat"
         const val MUTE_FAILED = "Couldn't update notifications for this conversation."
         const val BLOCK_FAILED = "Couldn't update your block list. Nothing changed."
+
+        /**
+         * Rows per fetch, for the newest page and every scroll-back page alike —
+         * they have to agree, because "shorter than a page" is what tells
+         * [loadOlder] it has reached the start of the thread.
+         */
+        const val PAGE_SIZE = 50
     }
 }

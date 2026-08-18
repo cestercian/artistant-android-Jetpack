@@ -261,8 +261,10 @@ private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository 
     override suspend fun listThreadsForUser(): List<Thread> =
         threads.sortedByDescending { it.lastMessageAtEpochMs ?: 0L }
 
-    override suspend fun listMessages(threadId: String, limit: Int): List<Message> =
-        messages[threadId]?.takeLast(limit)?.toList().orEmpty()
+    override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> =
+        messages[threadId].orEmpty()
+            .filter { before == null || it.sentAtEpochMs <= before }
+            .takeLast(limit)
 
     override suspend fun send(threadId: String, body: String): Message {
         val text = body.trim()

@@ -78,12 +78,14 @@ class PreferencesBlockedUsersMirror(private val prefs: AppPreferences) : Blocked
 /**
  * [BlockedUsersStore] over [BlockRepository] plus a DataStore mirror.
  *
- * The mirror is stamped with the OWNER's uid and ignored when it doesn't match
- * the current session. Sign-out already wipes this DataStore, so in the normal
- * path the stamp is redundant — it exists for the path where it isn't: a
- * blocked-list mirror inherited by the next person to sign in on a shared device
- * would silently hide their own conversations, with no UI anywhere that could
- * explain why. A trust & safety set is exactly the wrong thing to leak sideways.
+ * Both copies of the set — the one on disk and the one in memory — are stamped
+ * with the OWNER's uid and dropped when it doesn't match the current session.
+ * Sign-out already wipes this DataStore, so for the disk copy the stamp is
+ * belt-and-braces; for the memory copy it is the only guard there is, because
+ * this is a @Singleton and signing out does not restart the process. A
+ * blocked-list inherited by the next person to sign in on a shared device would
+ * silently hide their own conversations, with no UI anywhere that could explain
+ * why. A trust & safety set is exactly the wrong thing to leak sideways.
  */
 @Singleton
 class ServerBlockedUsersStore(
@@ -95,14 +97,23 @@ class ServerBlockedUsersStore(
     private val _blocked = MutableStateFlow<Set<String>>(emptySet())
     override val blocked: StateFlow<Set<String>> = _blocked.asStateFlow()
 
-    /** The disk mirror is read once per process; after that memory is the truth. */
-    private var hydrated = false
+    /**
+     * Whose set is in memory. The disk mirror is read once per ACCOUNT; after
+     * that memory is the truth, until the session changes underneath it.
+     *
+     * Keyed on the uid rather than a plain "have I read disk yet" flag for two
+     * reasons. Sign-out wipes the prefs but cannot wipe this object, so without
+     * the stamp the next account signed in on the device filters ITS inbox with
+     * the previous account's ids — and the first block it performs would then
+     * persist that inherited set back to disk under its own name. And on a cold
+     * start the first hydrate can land while the session is still being
+     * restored, which used to latch an empty set for the whole process; a uid
+     * change now re-reads instead.
+     */
+    private var owner: String? = null
 
     override suspend fun refresh(): Boolean {
-        if (!hydrated) {
-            hydrated = true
-            _blocked.value = readLocal()
-        }
+        hydrate()
         // Deliberately no `onFailure` branch. Signed out, offline, or a table
         // that hasn't been applied to this project yet all land here, and in
         // every one of those cases the honest answer is "I don't know", not
@@ -121,6 +132,10 @@ class ServerBlockedUsersStore(
     }
 
     override suspend fun toggle(userId: String): Boolean {
+        // Before touching the set, make sure it is this account's set: a toggle
+        // is the one path that WRITES memory back to disk, so acting on an
+        // inherited set here is what would make the leak permanent.
+        hydrate()
         val id = userId.lowercase()
         val wasBlocked = id in _blocked.value
         update(if (wasBlocked) _blocked.value - id else _blocked.value + id)
@@ -144,22 +159,41 @@ class ServerBlockedUsersStore(
     }
 
     /**
+     * Adopt the current session's set, re-reading the mirror whenever the
+     * session that owns the in-memory copy is not the one asking. A no-op on
+     * every call after the first for a given account, so this stays the
+     * "read disk once" path it always was.
+     *
+     * Signed out resolves to the empty set rather than to whatever was last
+     * held: there is no inbox to filter while signed out, and holding somebody
+     * else's ids across the gap is the whole failure this guards.
+     */
+    private suspend fun hydrate() {
+        val viewerId = viewer.currentUserId()?.lowercase()
+        if (viewerId == owner) return
+        owner = viewerId
+        _blocked.value = readLocal(viewerId)
+    }
+
+    /**
      * Stored as `owner\nid\nid…`. Ids are server UUIDs and the owner is one too,
      * so no value can contain the separator and the encoding needs no escaping —
      * the same reasoning that keeps [PreferencesThreadFlagsStore] off JSON.
      */
     private suspend fun persist(ids: Set<String>) {
-        val owner = viewer.currentUserId()?.lowercase() ?: return
-        mirror.write((listOf(owner) + ids).joinToString(SEPARATOR))
+        // The LIVE session stamps the write, never the cached [owner]: a mirror
+        // is only ever ours to claim for whoever is signed in right now.
+        val ownerId = viewer.currentUserId()?.lowercase() ?: return
+        mirror.write((listOf(ownerId) + ids).joinToString(SEPARATOR))
     }
 
-    private suspend fun readLocal(): Set<String> {
-        val owner = viewer.currentUserId()?.lowercase() ?: return emptySet()
+    private suspend fun readLocal(viewerId: String?): Set<String> {
+        if (viewerId == null) return emptySet()
         val parts = mirror.read()?.split(SEPARATOR)?.filter { it.isNotBlank() }
             ?: return emptySet()
         // First field is the owner; a mismatch means this mirror belongs to
         // somebody else who used this device, so it is not ours to act on.
-        if (parts.firstOrNull() != owner) return emptySet()
+        if (parts.firstOrNull() != viewerId) return emptySet()
         return parts.drop(1).toSet()
     }
 

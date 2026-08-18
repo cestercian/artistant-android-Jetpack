@@ -83,6 +83,9 @@ class MessagesViewModel @Inject constructor(
     private var flags: ThreadFlags = ThreadFlags()
     private var blockedIds: Set<String> = emptySet()
 
+    /** Whether the screen's first ON_RESUME has been seen — see [onResumed]. */
+    private var resumedOnce = false
+
     init {
         // Flags arrive from DataStore asynchronously and change under us as the
         // user stars/archives, so this is a subscription, not a one-shot read.
@@ -103,12 +106,50 @@ class MessagesViewModel @Inject constructor(
         refresh()
     }
 
+    /**
+     * Back on screen — from the background, or from the chat that was pushed on
+     * top of the inbox.
+     *
+     * Reading a conversation happens one screen away: the chat zeroes the
+     * server's unread count and a reply moves the row up the `last_message_at`
+     * order, while this ViewModel is retained and still holds the payload from
+     * before the thread was opened. Without a re-read on the way back, the row
+     * you just answered keeps its unread rail, its stale preview and its old
+     * place in the list until someone pulls to refresh. Nothing else can correct
+     * it — the flags store only clears a device-local "mark as unread", never
+     * `unreadCount`.
+     *
+     * The FIRST call is swallowed: that resume arrives with the screen's first
+     * paint, which `init`'s [refresh] has already served, so acting on it would
+     * load the inbox twice on every entry. The latch is here rather than in
+     * [ResumeEffect] because navigation disposes this screen's composition
+     * behind the chat while this ViewModel survives — a latch over there resets
+     * on the way back and swallows the very resume that needs to re-read.
+     */
+    fun onResumed() {
+        if (!resumedOnce) {
+            resumedOnce = true
+            return
+        }
+        load(quiet = true)
+    }
+
     fun setFilter(filter: MessagesFilter) = _state.update { it.copy(filter = filter) }
 
     fun setQuery(query: String) = _state.update { it.copy(query = query) }
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(isLoading = true, error = null) }
+    /** The pull gesture, the retry taps and the first load. */
+    fun refresh() = load(quiet = false)
+
+    /**
+     * @param quiet a resync nobody asked for ([onResumed]). It must not raise the
+     * pull-to-refresh indicator over rows that are already on screen — that
+     * signal belongs to the gesture — so it leaves `isLoading` alone once the
+     * first load has landed. Failure is still reported: a strip over stale rows
+     * is the only thing that can explain an inbox that stopped updating.
+     */
+    private fun load(quiet: Boolean) = viewModelScope.launch {
+        _state.update { it.copy(isLoading = !quiet || !it.hasLoaded, error = null) }
         // Reconciled alongside the threads, and deliberately before them: the
         // rows are filtered against this set, so pulling it late would paint a
         // blocked conversation for one frame. It swallows its own failures and

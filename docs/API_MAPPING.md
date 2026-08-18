@@ -126,7 +126,13 @@ discipline). Prefer: `id, thread_id, sender_id, sender_role, body, kind,
 action_route, sent_at` (plus receipt fields as needed).
 
 - list → `from("messages").select(<explicit columns>)
-  .eq("thread_id",tid).order("sent_at")`
+  .eq("thread_id",tid).order("sent_at")` — one PAGE (newest 50, reversed for
+  display). Scroll-back adds `lt("sent_at", cursor)`, where the cursor is the
+  oldest loaded `sent_at` rounded UP to the end of its millisecond: the domain
+  model carries epoch ms while the column is microsecond `timestamptz`, so an
+  exact `<` would skip older rows sharing that millisecond. The boundary row
+  comes back twice and is deduped by id (iOS uses an inclusive `.lte` for the
+  same reason).
 - send → `from("messages").insert({thread_id, sender_id, body, …})
   .select(<explicit>).single()` — `body` stores **verbatim**; no client redactor.
 - Messages are immutable (no UPDATE/DELETE).

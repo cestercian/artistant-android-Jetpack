@@ -41,7 +41,24 @@ fun interface MessagesSubscription { fun cancel() }
 
 interface MessagesRepository {
     suspend fun listThreadsForUser(): List<Thread>
-    suspend fun listMessages(threadId: String, limit: Int = 50): List<Message>
+
+    /**
+     * One PAGE of a thread's messages, oldest-first (the display order).
+     *
+     * [before] is the scroll-back cursor, in the same epoch milliseconds
+     * [Message.sentAtEpochMs] carries: null asks for the newest [limit] rows —
+     * the default open — and a non-null value asks for the newest [limit] rows
+     * at or older than that instant, i.e. the next page UP. Without it the
+     * client could only ever show the newest 50 messages of a conversation and
+     * everything before them was unreachable (iOS ships the same cursor as
+     * `listMessages(threadID:limit:before:)`).
+     *
+     * The result is always ONE page, never the whole history, so callers merge
+     * it rather than replace with it (`ChatRealtimeLogic.mergePreservingOptimistic`),
+     * which also collapses the boundary row the cursor deliberately re-fetches.
+     */
+    suspend fun listMessages(threadId: String, limit: Int = 50, before: Long? = null): List<Message>
+
     suspend fun send(threadId: String, body: String): Message
     suspend fun findOrCreateThread(artistId: String, bookingId: String? = null): String
     suspend fun markThreadRead(threadId: String)
@@ -104,14 +121,27 @@ class SupabaseMessagesRepository @Inject constructor(
         }
     }
 
-    override suspend fun listMessages(threadId: String, limit: Int): List<Message> {
+    override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> {
         val userId = currentUserId() ?: throw MessagesRepositoryError.NotSignedIn
+        val tid = threadId.lowercase()
+        // The scroll-back bound is the END of the cursor's millisecond, not the
+        // cursor instant itself. `sent_at` is a microsecond `timestamptz` while
+        // the cursor is a domain `sentAtEpochMs` that lost those microseconds on
+        // the way in, so an exclusive `< cursor` would permanently skip any
+        // OLDER sibling sharing the cursor's millisecond. Overshooting by one
+        // millisecond re-fetches the boundary row instead, and the caller merges
+        // by id — one duplicate on the wire, no hole in the history. Same
+        // reasoning as iOS's inclusive `.lte` cursor.
+        val cursor = before?.let { Instant.ofEpochMilli(it + 1).toString() }
         return try {
             // 0072 columns are optional during rollout. Retry the base projection if absent.
             val rows = try {
                 client.from("messages")
                     .select(MESSAGE_COLUMNS_WITH_SYSTEM) {
-                        filter { eq("thread_id", threadId.lowercase()) }
+                        filter {
+                            eq("thread_id", tid)
+                            if (cursor != null) lt("sent_at", cursor)
+                        }
                         order("sent_at", Order.DESCENDING)
                         limit(limit.toLong())
                     }
@@ -119,7 +149,10 @@ class SupabaseMessagesRepository @Inject constructor(
             } catch (_: Throwable) {
                 client.from("messages")
                     .select(MESSAGE_COLUMNS) {
-                        filter { eq("thread_id", threadId.lowercase()) }
+                        filter {
+                            eq("thread_id", tid)
+                            if (cursor != null) lt("sent_at", cursor)
+                        }
                         order("sent_at", Order.DESCENDING)
                         limit(limit.toLong())
                     }
@@ -480,8 +513,11 @@ class FakeMessagesRepository(
         }
     }
 
-    override suspend fun listMessages(threadId: String, limit: Int): List<Message> =
-        messages[threadId]?.takeLast(limit)?.toList().orEmpty()
+    /** One page, same shape as the real seam: the newest [limit] rows no newer than [before]. */
+    override suspend fun listMessages(threadId: String, limit: Int, before: Long?): List<Message> =
+        messages[threadId].orEmpty()
+            .filter { before == null || it.sentAtEpochMs <= before }
+            .takeLast(limit)
 
     override suspend fun send(threadId: String, body: String): Message {
         val text = body.trim()
