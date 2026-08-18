@@ -305,8 +305,8 @@ private fun EpkEditor(
                 state = state,
                 onRetry = viewModel::refresh,
                 onDismissSaveError = viewModel::dismissSaveError,
-                onRetrySampleUpload = viewModel::retryFailedSampleUploads,
-                onDismissSampleUploadError = viewModel::dismissSampleUploadError,
+                onRetryUpload = viewModel::retryFailedUploads,
+                onDismissUploadError = viewModel::dismissUploadError,
                 modifier = Modifier.padding(horizontal = space.lg),
             )
         }
@@ -631,8 +631,8 @@ private fun StatusBlock(
     state: EpkUiState,
     onRetry: () -> Unit,
     onDismissSaveError: () -> Unit,
-    onRetrySampleUpload: () -> Unit,
-    onDismissSampleUploadError: () -> Unit,
+    onRetryUpload: () -> Unit,
+    onDismissUploadError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
@@ -659,17 +659,19 @@ private fun StatusBlock(
         state.saveError?.let {
             EpkBanner(message = it, onDismiss = onDismissSaveError)
         }
-        // The queue gave up on a clip. Its own banner rather than a `saveError`,
+        // The queue gave up on a staged upload — a clip, or the cover photo the
+        // wizard handed it on publish. Its own banner rather than a `saveError`,
         // because unlike every other failure here the file is still staged and the
-        // drain can simply be told to go again — and because until this existed a
-        // sample that failed three times said nothing at all, leaving "it never
-        // showed up" as the artist's only clue.
-        if (state.sampleUploadFailed) {
+        // drain can simply be told to go again — and because until this existed an
+        // upload that failed three times said nothing at all, leaving "it never
+        // showed up" as the artist's only clue. The message comes from the state so
+        // it can name which kind stalled (see `failedUploadMessage`).
+        state.uploadFailedMessage?.let { message ->
             EpkBanner(
-                message = "A sample didn't finish uploading — check your connection and try again.",
+                message = message,
                 actionLabel = "Retry upload",
-                onAction = onRetrySampleUpload,
-                onDismiss = onDismissSampleUploadError,
+                onAction = onRetryUpload,
+                onDismiss = onDismissUploadError,
             )
         }
         Row(

@@ -137,6 +137,13 @@ class UploadQueue @Inject constructor(
         pump()
     }
 
+    /**
+     * Send everything the runner gave up on back round with a fresh attempt budget.
+     *
+     * Called from the EPK's stalled-upload banner (`EpkViewModel.retryFailedUploads`),
+     * which is the only surface that reports `failed` — a burned task is otherwise
+     * invisible, and a retry nobody can ask for is the same thing as no retry.
+     */
     fun retryFailed() {
         val failed = _state.value.failed
         if (failed.isEmpty()) return
@@ -163,9 +170,35 @@ class UploadQueue @Inject constructor(
         }
     }
 
+    /**
+     * Forget every task, pending and failed — the sign-out / delete-account wipe,
+     * called from `SessionManager.signOut` (iOS `UploadQueue.cancelAll`).
+     *
+     * Every task carries the artist id it was staged for, so leaving the snapshot
+     * behind hands it to whoever signs in next: [resumeAfterLaunch] drains it, the
+     * upload burns its three attempts against an RLS policy that correctly refuses
+     * to let this account write another artist's media, and it lands in `failed` —
+     * where the EPK offers the new artist a Retry for a cover they never picked. The
+     * staged bytes go with it, because once the queue has forgotten a task nothing
+     * references its file.
+     *
+     * An upload already in flight is not interrupted — its socket is not ours to
+     * kill — but it cannot resurrect what this dropped: [uploadSucceeded] and
+     * [uploadFailed] both refuse to write back once the head of the queue is no
+     * longer their task.
+     */
     fun clearAll() {
+        val dropped = _state.value.let { it.pending + it.failed }
         _state.value = State()
         persist()
+        if (dropped.isEmpty()) return
+        // Deletes are file IO and sign-out runs on the main dispatcher.
+        scope.launch {
+            dropped.forEach { task ->
+                runCatching { task.stagedFile().delete() }
+                    .onFailure { Timber.w(it, "Staged upload file delete failed: %s", task.id) }
+            }
+        }
     }
 
     private fun pump() {
@@ -186,23 +219,11 @@ class UploadQueue @Inject constructor(
                         persist()
                         try {
                             execute(marked)
-                            _state.update {
-                                it.copy(
-                                    pending = it.pending.drop(1),
-                                    batchCompleted = it.batchCompleted + 1,
-                                )
-                            }
+                            _state.update { uploadSucceeded(it, marked.id) }
                             persist()
                         } catch (t: Throwable) {
                             Timber.w(t, "Upload task failed: %s", marked.id)
-                            _state.update { st ->
-                                val rest = st.pending.drop(1)
-                                if (marked.attempts < MAX_ATTEMPTS) {
-                                    st.copy(pending = rest + marked)
-                                } else {
-                                    st.copy(pending = rest, failed = st.failed + marked)
-                                }
-                            }
+                            _state.update { uploadFailed(it, marked, MAX_ATTEMPTS) }
                             persist()
                         }
                     }
@@ -221,13 +242,16 @@ class UploadQueue @Inject constructor(
         }
     }
 
+    /** The staged copy a task uploads — the one place the two kinds' paths converge. */
+    private fun Task.stagedFile(): File = File(
+        when (this) {
+            is Task.CoverPhoto -> filePath
+            is Task.AudioSample -> filePath
+        },
+    )
+
     private suspend fun execute(task: Task) {
-        val file = File(
-            when (task) {
-                is Task.CoverPhoto -> task.filePath
-                is Task.AudioSample -> task.filePath
-            },
-        )
+        val file = task.stagedFile()
         if (!file.exists()) error("fileEvicted")
         when (task) {
             is Task.CoverPhoto -> media.uploadPhoto(file, task.artistId, position = 0)
@@ -278,8 +302,50 @@ class UploadQueue @Inject constructor(
     }
 
     companion object {
-        private const val MAX_ATTEMPTS = 3
+        /** Internal so [uploadFailed]'s tests can pin the real budget, not a guess. */
+        internal const val MAX_ATTEMPTS = 3
         private const val UNIQUE_WORK = "artistant.upload.drain"
+    }
+}
+
+/**
+ * The queue state after the head task's upload landed.
+ *
+ * Head identity is checked rather than assumed. [UploadQueue.clearAll] can empty the
+ * queue while a task is mid-flight (sign-out, delete-account), and a blind `drop(1)`
+ * would then discard whatever the next owner of the queue had put at the head and
+ * count a completion for it. When the head is no longer this task, the outcome belongs
+ * to a queue that no longer exists, so it is dropped.
+ */
+internal fun uploadSucceeded(state: UploadQueue.State, taskId: String): UploadQueue.State {
+    if (state.pending.firstOrNull()?.id != taskId) return state
+    return state.copy(
+        pending = state.pending.drop(1),
+        batchCompleted = state.batchCompleted + 1,
+    )
+}
+
+/**
+ * The queue state after the head task's upload threw.
+ *
+ * A task with attempts left goes to the BACK of the queue, so one asset that keeps
+ * failing can't starve the rest of a batch; a task that has burned [maxAttempts] moves
+ * to `failed`, where the EPK's stalled-upload banner can hand it to
+ * [UploadQueue.retryFailed]. Same head-identity guard as [uploadSucceeded]: a queue
+ * that was wiped mid-flight must not be repopulated by the failure of the upload it
+ * abandoned, or the next account inherits a stranded task it never created.
+ */
+internal fun uploadFailed(
+    state: UploadQueue.State,
+    task: UploadQueue.Task,
+    maxAttempts: Int,
+): UploadQueue.State {
+    if (state.pending.firstOrNull()?.id != task.id) return state
+    val rest = state.pending.drop(1)
+    return if (task.attempts < maxAttempts) {
+        state.copy(pending = rest + task)
+    } else {
+        state.copy(pending = rest, failed = state.failed + task)
     }
 }
 

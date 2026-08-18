@@ -6,14 +6,14 @@ import android.content.Context
 import androidx.core.content.getSystemService
 
 /**
- * Registers the notification channels P2b's `NotificationCompat.Builder` will post to. Called once
- * from [in.artistant.app.ArtistantApplication.onCreate]; creating an existing channel is a no-op,
+ * Registers the notification channels [ArtistantMessagingService] posts to. Called once from
+ * [in.artistant.app.ArtistantApplication.onCreate]; creating an existing channel is a no-op,
  * so re-running on every launch is safe. Channels are split by category (mirroring the push
  * `artistant_event` families) so the user can mute one class of push without losing the others.
+ * [pushChannelFor] is the mapping from an arriving payload to one of these ids.
  *
- * SEAM STATUS (issue #38, phase P2a): no notification is POSTED yet — this only declares the
- * channels so the P2b receiver has somewhere to target. No Firebase dependency involved (channels
- * are a plain platform API; minSdk 26 means [NotificationChannel] is always available).
+ * No Firebase dependency involved (channels are a plain platform API; minSdk 26 means
+ * [NotificationChannel] is always available).
  */
 object NotificationChannels {
 

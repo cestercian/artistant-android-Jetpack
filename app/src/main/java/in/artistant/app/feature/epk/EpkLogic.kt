@@ -513,15 +513,33 @@ fun sampleTitleFrom(displayName: String?): String {
 }
 
 /**
- * How many uploads the queue has given up on that this screen is answerable for.
+ * What the upload queue has given up on, in the artist's words — or null when it
+ * has given up on nothing.
  *
- * The queue is shared with the wizard, which puts a COVER PHOTO through it. A
- * count that ignored the task type would raise "that sample didn't upload" over
- * a failed photo — a banner offering a retry for something the artist never
- * added here.
+ * The queue is shared with the wizard, which puts the COVER PHOTO through it, so
+ * this names the kind instead of counting rows: a message that said "a sample
+ * didn't upload" over a failed photo would send the artist to the wrong section
+ * looking for something that isn't missing there. Both kinds are answerable HERE
+ * regardless, because the EPK is where a published profile's media lives once the
+ * wizard is gone — a cover that died on publish has nowhere else to be reported,
+ * and reporting nothing is how it used to ship a profile with no cover and no
+ * explanation.
  */
-fun failedSampleCount(failed: List<UploadQueue.Task>): Int =
-    failed.count { it is UploadQueue.Task.AudioSample }
+fun failedUploadMessage(failed: List<UploadQueue.Task>): String? {
+    val photos = failed.count { it is UploadQueue.Task.CoverPhoto }
+    val samples = failed.count { it is UploadQueue.Task.AudioSample }
+    return when {
+        photos > 0 && samples > 0 ->
+            "Some of your uploads didn't finish — check your connection and try again."
+        photos > 0 ->
+            "Your cover photo didn't finish uploading — check your connection and try again."
+        samples == 1 ->
+            "A sample didn't finish uploading — check your connection and try again."
+        samples > 1 ->
+            "$samples samples didn't finish uploading — check your connection and try again."
+        else -> null
+    }
+}
 
 // ── Saving ───────────────────────────────────────────────────────────────────
 

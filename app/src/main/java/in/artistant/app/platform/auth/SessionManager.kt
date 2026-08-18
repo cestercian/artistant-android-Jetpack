@@ -19,6 +19,7 @@ import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import `in`.artistant.app.BuildConfig
+import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.push.PushService
@@ -55,6 +56,7 @@ class SessionManager @Inject constructor(
     private val prefs: AppPreferences,
     private val pushService: PushService,
     private val savedStore: SavedStore,
+    private val uploadQueue: UploadQueue,
 ) {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
@@ -247,6 +249,13 @@ class SessionManager @Inject constructor(
         crash.setUser(null)
         prefs.wipeAll()
         savedStore.reset()
+        // The staged-media queue is account-scoped too: every task carries the artist id
+        // it was enqueued for, so a snapshot left behind is resumed by whoever signs in
+        // next, fails against an RLS policy that (rightly) won't let them write another
+        // artist's media, and strands itself in `failed` — where the EPK offers the new
+        // artist a Retry for a cover photo they never picked. Ports iOS
+        // `ArtistOnboardingStore.reset()` → `UploadQueue.cancelAll()`.
+        uploadQueue.clearAll()
     }
 
     // MARK: - Deep link

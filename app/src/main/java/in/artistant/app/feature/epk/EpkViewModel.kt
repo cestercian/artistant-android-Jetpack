@@ -159,14 +159,16 @@ data class EpkUiState(
     /** A WRITE failed. Dismissible, and never conflated with [loadError]. */
     val saveError: String? = null,
     /**
-     * A clip exhausted the upload queue's attempt budget.
+     * A staged upload — a clip, or the wizard's cover photo — exhausted the queue's
+     * attempt budget. Carries the message rather than a flag, because which kind
+     * stalled decides which section the artist should look at.
      *
      * Its own field rather than a [saveError], because it is the one failure on
      * this screen with somewhere to go: the file is still staged and the queue
      * can be told to drain it again, so the banner carries a Retry that
      * [saveError]'s dismiss-only banner has no room for.
      */
-    val sampleUploadFailed: Boolean = false,
+    val uploadFailedMessage: String? = null,
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
@@ -249,27 +251,34 @@ class EpkViewModel @Inject constructor(
      * artist's only signal was a sample that never appeared, and
      * `retryFailed()` had no caller anywhere in the app.
      *
-     * The failed count is acted on at its TRANSITIONS rather than read on every
+     * It watches the whole `failed` list, not just the samples. The queue is shared
+     * with the wizard, which puts the cover photo through it on publish: a cover
+     * that burned its attempts on a flaky connection used to ship a live profile
+     * with no cover, no error, and a staged file kept on disk for a retry nobody
+     * could ask for. [failedUploadMessage] is what keeps the banner honest about
+     * which of the two stalled.
+     *
+     * The message is acted on at its TRANSITIONS rather than read on every
      * emission: a dismissed banner then stays dismissed while the queue churns on
      * with `isRunning` flips, and a retry that succeeds clears it without anyone
-     * having to remember to. It is seeded at zero rather than at the current
-     * count because a task that burned its budget in a PREVIOUS session is
-     * restored straight into `failed` — that clip is precisely the one nobody has
+     * having to remember to. It is seeded at null rather than at the current
+     * message because a task that burned its budget in a PREVIOUS session is
+     * restored straight into `failed` — that upload is precisely the one nobody has
      * ever been told about.
      */
     private fun observeUploadQueue() {
         viewModelScope.launch {
             var lastCompleted = uploadQueue.state.value.batchCompleted
-            var lastFailed = 0
+            var lastFailed: String? = null
             uploadQueue.state.collect { queue ->
                 if (queue.batchCompleted != lastCompleted) {
                     lastCompleted = queue.batchCompleted
                     loadSamples()
                 }
-                val failed = failedSampleCount(queue.failed)
+                val failed = failedUploadMessage(queue.failed)
                 if (failed != lastFailed) {
                     lastFailed = failed
-                    _state.update { it.copy(sampleUploadFailed = failed > 0) }
+                    _state.update { it.copy(uploadFailedMessage = failed) }
                 }
             }
         }
@@ -411,21 +420,23 @@ class EpkViewModel @Inject constructor(
     fun consumeStatusNote() = _state.update { it.copy(statusNote = null) }
 
     /**
-     * Send the clips the queue gave up on back round.
+     * Send everything the queue gave up on back round.
      *
      * The queue parks a burned task with its attempt budget spent and waits to be
-     * asked; until this existed, nothing in the app ever asked, so a sample that
+     * asked; until this existed, nothing in the app ever asked, so an upload that
      * failed three times was stranded for good with the staged file still on
-     * disk. The banner is cleared here rather than waiting for the queue to
-     * report `failed` empty, so the tap has a visible effect even while the drain
-     * is still starting.
+     * disk. It retries the whole `failed` list — a clip and the wizard's cover
+     * photo stall for the same reason, and the artist tapping Retry means "send
+     * what didn't send", not "send the audio only". The banner is cleared here
+     * rather than waiting for the queue to report `failed` empty, so the tap has a
+     * visible effect even while the drain is still starting.
      */
-    fun retryFailedSampleUploads() {
-        _state.update { it.copy(sampleUploadFailed = false, statusNote = "Sample uploading…") }
+    fun retryFailedUploads() {
+        _state.update { it.copy(uploadFailedMessage = null, statusNote = "Retrying upload…") }
         uploadQueue.retryFailed()
     }
 
-    fun dismissSampleUploadError() = _state.update { it.copy(sampleUploadFailed = false) }
+    fun dismissUploadError() = _state.update { it.copy(uploadFailedMessage = null) }
 
     // ── Cover palette ────────────────────────────────────────────────────────
 
@@ -1194,7 +1205,7 @@ class EpkViewModel @Inject constructor(
                 }
             }
                 .onSuccess {
-                    // Deliberately does NOT clear [EpkUiState.sampleUploadFailed]:
+                    // Deliberately does NOT clear [EpkUiState.uploadFailedMessage]:
                     // adding a second clip is not a retry of the first, and an
                     // earlier one still stranded in the queue is still stranded.
                     _state.update { it.copy(saveError = null, statusNote = "Sample uploading…") }
