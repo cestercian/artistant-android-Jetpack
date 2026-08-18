@@ -22,6 +22,7 @@ import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -29,11 +30,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 
@@ -159,6 +158,15 @@ data class EpkUiState(
     val loadError: String? = null,
     /** A WRITE failed. Dismissible, and never conflated with [loadError]. */
     val saveError: String? = null,
+    /**
+     * A clip exhausted the upload queue's attempt budget.
+     *
+     * Its own field rather than a [saveError], because it is the one failure on
+     * this screen with somewhere to go: the file is still staged and the queue
+     * can be told to drain it again, so the banner carries a Retry that
+     * [saveError]'s dismiss-only banner has no room for.
+     */
+    val sampleUploadFailed: Boolean = false,
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
@@ -227,20 +235,43 @@ class EpkViewModel @Inject constructor(
 
     /**
      * Audio samples still go through [UploadQueue] (see [onSamplePicked]), which
-     * drains in the background. Watching its completion counter is what makes a
-     * finished upload appear without the artist pulling to refresh.
+     * drains in the background. This watches it for BOTH of the things it can do.
      *
-     * `drop(1)` skips the value that is already there at collection time —
-     * otherwise every construction would fire a redundant reload on top of the
-     * one `init` already started.
+     * **Completion** is what makes a finished upload appear without the artist
+     * pulling to refresh. The counter is compared against the value already there
+     * at collection time, so construction does not fire a redundant reload on top
+     * of the one `init` already started.
+     *
+     * **Failure** is the half this used to miss entirely. A task that burns its
+     * three attempts is moved to `failed` and deliberately does NOT bump
+     * `batchCompleted`, so watching the counter alone meant a clip that died
+     * against a dead connection produced no reload, no banner and no retry — the
+     * artist's only signal was a sample that never appeared, and
+     * `retryFailed()` had no caller anywhere in the app.
+     *
+     * The failed count is acted on at its TRANSITIONS rather than read on every
+     * emission: a dismissed banner then stays dismissed while the queue churns on
+     * with `isRunning` flips, and a retry that succeeds clears it without anyone
+     * having to remember to. It is seeded at zero rather than at the current
+     * count because a task that burned its budget in a PREVIOUS session is
+     * restored straight into `failed` — that clip is precisely the one nobody has
+     * ever been told about.
      */
     private fun observeUploadQueue() {
         viewModelScope.launch {
-            uploadQueue.state
-                .map { it.batchCompleted }
-                .distinctUntilChanged()
-                .drop(1)
-                .collect { loadSamples() }
+            var lastCompleted = uploadQueue.state.value.batchCompleted
+            var lastFailed = 0
+            uploadQueue.state.collect { queue ->
+                if (queue.batchCompleted != lastCompleted) {
+                    lastCompleted = queue.batchCompleted
+                    loadSamples()
+                }
+                val failed = failedSampleCount(queue.failed)
+                if (failed != lastFailed) {
+                    lastFailed = failed
+                    _state.update { it.copy(sampleUploadFailed = failed > 0) }
+                }
+            }
         }
     }
 
@@ -378,6 +409,23 @@ class EpkViewModel @Inject constructor(
     fun dismissSaveError() = _state.update { it.copy(saveError = null) }
 
     fun consumeStatusNote() = _state.update { it.copy(statusNote = null) }
+
+    /**
+     * Send the clips the queue gave up on back round.
+     *
+     * The queue parks a burned task with its attempt budget spent and waits to be
+     * asked; until this existed, nothing in the app ever asked, so a sample that
+     * failed three times was stranded for good with the staged file still on
+     * disk. The banner is cleared here rather than waiting for the queue to
+     * report `failed` empty, so the tap has a visible effect even while the drain
+     * is still starting.
+     */
+    fun retryFailedSampleUploads() {
+        _state.update { it.copy(sampleUploadFailed = false, statusNote = "Sample uploading…") }
+        uploadQueue.retryFailed()
+    }
+
+    fun dismissSampleUploadError() = _state.update { it.copy(sampleUploadFailed = false) }
 
     // ── Cover palette ────────────────────────────────────────────────────────
 
@@ -551,9 +599,16 @@ class EpkViewModel @Inject constructor(
 
     private suspend fun persistPrompts() {
         val draft = _state.value.promptDrafts
-        if (!ArtistPrompts.needsSave(draft, _state.value.artist?.prompts.orEmpty())) return
+        if (!ArtistPrompts.needsSave(draft, _state.value.artist?.prompts.orEmpty())) {
+            // Also where "the edit that cancelled an in-flight save turned out to
+            // be a no-op" lands. That save rethrew its cancellation without
+            // touching the flag (it belongs to whoever cancelled it), so this is
+            // what puts "Saving…" away when nobody takes it over.
+            _state.update { it.copy(savingPrompts = false) }
+            return
+        }
         _state.update { it.copy(savingPrompts = true) }
-        runCatching { artists.updatePrompts(draft) }
+        saveCatching { artists.updatePrompts(draft) }
             .onSuccess {
                 _state.update {
                     it.copy(
@@ -672,10 +727,15 @@ class EpkViewModel @Inject constructor(
     private suspend fun persistBio() {
         val draft = _state.value.bioDraft
         // Nothing to say to the server: the debounce fires on any keystroke,
-        // including the ones that type a character and delete it again.
-        if (!bioNeedsSave(draft, _state.value.artist?.bio.orEmpty())) return
+        // including the ones that type a character and delete it again. Clearing
+        // the flag here is what stops "Saving…" sticking when the keystroke that
+        // cancelled an in-flight save was one of those — see [persistPrompts].
+        if (!bioNeedsSave(draft, _state.value.artist?.bio.orEmpty())) {
+            _state.update { it.copy(savingBio = false) }
+            return
+        }
         _state.update { it.copy(savingBio = true) }
-        runCatching { artists.updateBio(draft) }
+        saveCatching { artists.updateBio(draft) }
             .onSuccess {
                 _state.update {
                     it.copy(
@@ -748,9 +808,13 @@ class EpkViewModel @Inject constructor(
 
     private suspend fun persistSocials() {
         val draft = _state.value.socialDraft
-        if (!socialsNeedSave(draft, savedSocials(_state.value.artist))) return
+        if (!socialsNeedSave(draft, savedSocials(_state.value.artist))) {
+            // Clears a flag a cancelled save left behind — see [persistPrompts].
+            _state.update { it.copy(savingSocials = false) }
+            return
+        }
         _state.update { it.copy(savingSocials = true) }
-        runCatching {
+        saveCatching {
             // Named, not positional. The parameter order here is
             // (instagram, spotify, youtube) while the draft and the count helper
             // read (spotify, instagram, youtube) — positionally this compiles
@@ -851,7 +915,7 @@ class EpkViewModel @Inject constructor(
         val userId = session.currentUserId ?: return
         val drafts = packageDrafts(_state.value.packageRows)
         _state.update { it.copy(savingPackages = true) }
-        runCatching { packages.replaceAll(userId, drafts) }
+        saveCatching { packages.replaceAll(userId, drafts) }
             .onSuccess {
                 _state.update {
                     it.copy(savingPackages = false, saveError = null, statusNote = "Pricing saved.")
@@ -902,7 +966,7 @@ class EpkViewModel @Inject constructor(
         val userId = session.currentUserId ?: return
         val items = _state.value.techItems
         _state.update { it.copy(savingTech = true) }
-        runCatching { techRider.replaceAll(userId, items) }
+        saveCatching { techRider.replaceAll(userId, items) }
             .onSuccess {
                 _state.update { it.copy(savingTech = false, saveError = null, statusNote = "Tech rider saved.") }
             }
@@ -1004,22 +1068,34 @@ class EpkViewModel @Inject constructor(
      * The trade is that a killed process loses an in-flight photo, where a queued
      * task would resume. Acceptable for a single image the artist can see did not
      * arrive, and the alternative is a gallery that cannot hold a second photo.
+     *
+     * **Off the main thread, explicitly.** Giving up the queue also gave up its
+     * IO scope, and everything this path does before its first suspension point
+     * is blocking work on whatever dispatcher it was launched from — which for
+     * `viewModelScope` is `Main.immediate`. `adoptPhoto` streams a multi-megabyte
+     * file through `copyTo`, and `uploadPhoto` decodes, scales to 2048px and
+     * re-compresses the JPEG. On a 12MP pick that is hundreds of milliseconds of
+     * frozen UI, so the whole body moves to IO rather than trusting a repository
+     * two layers down to switch for us.
      */
     fun onPhotoPicked(uri: Uri) {
         val userId = session.currentUserId ?: return
         if (!canAddPhoto(_state.value.photos.size, _state.value.uploadingPhoto)) return
         viewModelScope.launch {
             _state.update { it.copy(uploadingPhoto = true, saveError = null) }
-            val result = runCatching {
-                val pending = mediaCache.adoptPhoto(uri)
-                val file = pending.file(mediaCache)
-                try {
-                    media.uploadPhoto(file, userId, position = null)
-                } finally {
-                    // The cache copy exists to survive the wizard's
-                    // pick-now-publish-later gap. Here the upload IS the commit,
-                    // so the copy is dead weight the moment it returns.
-                    file.delete()
+            val result = saveCatching {
+                withContext(Dispatchers.IO) {
+                    val pending = mediaCache.adoptPhoto(uri)
+                    val file = pending.file(mediaCache)
+                    try {
+                        media.uploadPhoto(file, userId, position = null)
+                    } finally {
+                        // The cache copy exists to survive the wizard's
+                        // pick-now-publish-later gap. Here the upload IS the
+                        // commit, so the copy is dead weight the moment it
+                        // returns.
+                        file.delete()
+                    }
                 }
             }
             result
@@ -1086,9 +1162,17 @@ class EpkViewModel @Inject constructor(
      * Samples DO stay on [UploadQueue]: its audio task appends correctly, and an
      * audio file is large enough that crash-resume is worth the indirection the
      * photo path just gave up. The completion watcher in [observeUploadQueue]
-     * refreshes the list when the drain lands.
+     * refreshes the list when the drain lands, and surfaces a drain that gave up.
+     *
+     * The title is resolved HERE from the picked document rather than handed in
+     * by the screen. A picker callback only has the `Uri`, and its last path
+     * segment is a provider-defined document id — the EPK used to publish
+     * `audio:1000000042` as a clip title on the artist's public page, with no
+     * rename anywhere on this screen to fix it. Reading `DISPLAY_NAME` is a
+     * content-provider query, which together with `adoptAudio`'s whole-file copy
+     * is why the body runs on IO rather than on `Main.immediate`.
      */
-    fun onSamplePicked(uri: Uri, displayName: String?) {
+    fun onSamplePicked(uri: Uri) {
         val userId = session.currentUserId ?: return
         if (!canAddSample(_state.value.samples.size, uploadInFlight = false)) {
             _state.update {
@@ -1097,17 +1181,22 @@ class EpkViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            runCatching {
-                val title = displayName?.substringBeforeLast('.')?.trim()?.ifBlank { null } ?: "Sample"
-                val pending = mediaCache.adoptAudio(uri, title)
-                uploadQueue.enqueueAudioSample(
-                    artistId = userId,
-                    file = pending.file(mediaCache),
-                    title = pending.title,
-                    durationSeconds = pending.durationSeconds,
-                )
+            saveCatching {
+                withContext(Dispatchers.IO) {
+                    val title = sampleTitleFrom(mediaCache.displayName(uri))
+                    val pending = mediaCache.adoptAudio(uri, title)
+                    uploadQueue.enqueueAudioSample(
+                        artistId = userId,
+                        file = pending.file(mediaCache),
+                        title = pending.title,
+                        durationSeconds = pending.durationSeconds,
+                    )
+                }
             }
                 .onSuccess {
+                    // Deliberately does NOT clear [EpkUiState.sampleUploadFailed]:
+                    // adding a second clip is not a retry of the first, and an
+                    // earlier one still stranded in the queue is still stranded.
                     _state.update { it.copy(saveError = null, statusNote = "Sample uploading…") }
                 }
                 .onFailure {
@@ -1121,7 +1210,13 @@ class EpkViewModel @Inject constructor(
             // Targeted single-row delete, never a whole-set replace: a replace
             // rebuilt from a possibly-stale local list prunes rows this device
             // has not seen, taking another device's newer clip with it.
-            runCatching { samples.delete(sample.id, null) }
+            //
+            // The clip's public URL goes with it. The repository only deletes the
+            // bucket object when it is given something to derive a path from, so
+            // passing null (as this did) removed the row and left the audio
+            // sitting in a PUBLIC bucket, still playable by anyone holding the
+            // link the artist thinks they just took down.
+            runCatching { samples.delete(sample.id, sample.audioUrl) }
                 .onSuccess {
                     _state.update { it.copy(saveError = null, statusNote = "Sample removed.") }
                     loadSamples()

@@ -2,9 +2,15 @@ package `in`.artistant.app.feature.epk
 
 import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.data.repository.SupabaseSamplesRepository
 import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.feature.wizard.WIZARD_BIO_MAX
+import `in`.artistant.app.platform.media.UploadQueue
+import `in`.artistant.app.testsupport.ARTIST_ID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -736,5 +742,140 @@ class EpkLogicTest {
     @Test
     fun coverPick_allowsPickingBackToThePublishedPaletteAfterAnUnconfirmedPick() {
         assertEquals(0, coverGradientPickToWrite(hydrated = true, pending = 3, published = 0, requested = 0))
+    }
+
+    // ── Sample titles ────────────────────────────────────────────────────────
+
+    /**
+     * The bug this rule exists for. `OpenDocument()` hands back a document URI
+     * whose last path segment is a provider id, and the editor used to publish it
+     * verbatim as the clip's title — on the artist's PUBLIC profile, with no
+     * rename anywhere on the screen to correct it. Only `DISPLAY_NAME` is a name,
+     * and when the provider won't give one the fallback has to be neutral rather
+     * than plausible-looking garbage.
+     */
+    @Test
+    fun sampleTitle_fallsBackWhenTheProviderHasNoNameToGive() {
+        assertEquals("Sample", sampleTitleFrom(null))
+        assertEquals("Sample", sampleTitleFrom(""))
+        assertEquals("Sample", sampleTitleFrom("   "))
+        // A name that is nothing but an extension leaves nothing behind either.
+        assertEquals("Sample", sampleTitleFrom(".mp3"))
+    }
+
+    @Test
+    fun sampleTitle_dropsTheExtensionAndTrims() {
+        assertEquals("Rooftop set", sampleTitleFrom("  Rooftop set.mp3  "))
+        assertEquals("mix.final", sampleTitleFrom("mix.final.wav"))
+    }
+
+    /**
+     * `substringBeforeLast` returns the WHOLE string when there is no '.', which
+     * is exactly how a document id used to survive the old derivation intact. A
+     * name with no extension is still a name, so it passes through — the fix is
+     * upstream, in asking the provider for a name at all.
+     */
+    @Test
+    fun sampleTitle_keepsANameThatHasNoExtension() {
+        assertEquals("Rooftop set", sampleTitleFrom("Rooftop set"))
+    }
+
+    // ── Upload queue failures ────────────────────────────────────────────────
+
+    private fun audioTask(id: String = "a-1") = UploadQueue.Task.AudioSample(
+        id = id,
+        artistId = ARTIST_ID,
+        filePath = "/tmp/$id.m4a",
+        title = "Rooftop set",
+        durationSeconds = 90.0,
+    )
+
+    private fun photoTask(id: String = "p-1") = UploadQueue.Task.CoverPhoto(
+        id = id,
+        artistId = ARTIST_ID,
+        filePath = "/tmp/$id.jpg",
+    )
+
+    /**
+     * The queue is shared with the wizard, which puts a cover photo through it.
+     * Counting every failed task would offer "a sample didn't upload — retry" for
+     * a photo the artist never added on this screen.
+     */
+    @Test
+    fun failedSamples_ignoreTheWizardsCoverPhoto() {
+        assertEquals(0, failedSampleCount(listOf(photoTask())))
+        assertEquals(1, failedSampleCount(listOf(photoTask(), audioTask())))
+        assertEquals(2, failedSampleCount(listOf(audioTask("a-1"), audioTask("a-2"))))
+    }
+
+    @Test
+    fun failedSamples_areZeroWhenNothingHasGivenUp() {
+        assertEquals(0, failedSampleCount(emptyList()))
+    }
+
+    // ── Save guard ───────────────────────────────────────────────────────────
+
+    /**
+     * The false-banner bug. Every debounced save is launched into a Job the NEXT
+     * edit cancels, and `runCatching` catches Throwable — so tapping a second
+     * preset chip routed the first save's cancellation into the failure path and
+     * told the artist their tech rider hadn't saved, over a write that was about
+     * to succeed and had already been replaced.
+     */
+    @Test
+    fun saveCatching_rethrowsACancellationRatherThanReportingIt() = runTest {
+        var reported = false
+
+        val thrown = runCatching {
+            saveCatching { throw CancellationException("replaced by a newer edit") }
+                .onFailure { reported = true }
+        }.exceptionOrNull()
+
+        assertTrue(thrown is CancellationException)
+        assertFalse("a cancelled save must not reach the failure path", reported)
+    }
+
+    @Test
+    fun saveCatching_stillReportsARealFailure() = runTest {
+        val result = saveCatching { throw IllegalStateException("offline") }
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is IllegalStateException)
+    }
+
+    @Test
+    fun saveCatching_passesTheValueThroughOnSuccess() = runTest {
+        assertEquals("saved", saveCatching { "saved" }.getOrNull())
+    }
+
+    // ── Removing a sample ────────────────────────────────────────────────────
+
+    /**
+     * `deleteSample` used to pass null here, and the repository's storage delete
+     * is guarded by `storagePathFromUrl(...) ?: return` — so every removed clip
+     * kept its object in the PUBLIC `artist-samples` bucket, still playable by
+     * anyone holding the link. These pin the two halves of that fix: null really
+     * was a guaranteed no-op, and the `audioUrl` now passed instead really does
+     * resolve to the bucket path.
+     */
+    @Test
+    fun deletingASample_withNoUrlCouldNeverHaveRemovedTheObject() {
+        assertNull(SupabaseSamplesRepository.storagePathFromUrl(null))
+        assertNull(SupabaseSamplesRepository.storagePathFromUrl(""))
+    }
+
+    @Test
+    fun deletingASample_resolvesTheStoredAudioUrlBackToItsBucketPath() {
+        val sample = Sample(
+            id = "s-1",
+            title = "Rooftop set",
+            duration = "1:30",
+            audioUrl = "https://xyz.supabase.co/storage/v1/object/public/artist-samples/$ARTIST_ID/s-1.m4a",
+        )
+
+        assertEquals(
+            "$ARTIST_ID/s-1.m4a",
+            SupabaseSamplesRepository.storagePathFromUrl(sample.audioUrl),
+        )
     }
 }
