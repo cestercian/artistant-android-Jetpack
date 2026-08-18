@@ -49,10 +49,28 @@ interface ArtistsRepository {
     /** Non-throwing convenience — swallows transport errors as null. */
     suspend fun ensureFull(id: String): Artist?
 
-    /** Wizard Done — upsert the signed-in artist row and flip `setup_complete`. */
+    /**
+     * Wizard Done — upsert the signed-in artist's profile row.
+     *
+     * Deliberately does NOT write `setup_complete`; that flag rides [setPublished],
+     * two round-trips later. See [setPublished] for why.
+     */
     suspend fun publishWizardProfile(draft: WizardProfileDraft)
 
-    /** Flip `published` so Discover can see the artist (sync go-live; media is async). */
+    /**
+     * Go-live: flip `published` so Discover can see the artist, and mark the wizard
+     * finished in the SAME write (sync go-live; media is async).
+     *
+     * `setup_complete` lives here rather than in [publishWizardProfile]'s upsert
+     * because publish is three non-atomic calls and the middle one can fail — a
+     * dropped connection between round trips is the ordinary failure on mobile
+     * data. Marking onboarding done in the first call would leave the server at
+     * `setup_complete = true, published = false`: past the wizard re-entry gate
+     * (RootViewModel routes on `artistSetupComplete`), invisible in Discover, and
+     * with no control anywhere in the app that can flip `published`. Written
+     * together, "finished" can never outrun "live". Ported from iOS
+     * `ArtistsRepository.publish(_:)`.
+     */
     suspend fun setPublished(artistId: String, published: Boolean = true)
 
     /** Own availability columns — ManageAvailability + wizard seed. */
@@ -65,11 +83,12 @@ interface ArtistsRepository {
     // Each of these PATCHes exactly the columns it names, filtered to the
     // signed-in artist. That narrowness is the whole point: the only writer these
     // columns had was [publishWizardProfile], which upserts the WHOLE row and
-    // therefore blanks every profile column it does not carry. Editing a bio
-    // through that path would have silently cleared the artist's social links and
-    // cover choice on the way past, so the editor rendered those sections
-    // read-only instead. A PATCH per concern is what makes them editable without
-    // that collateral, and it is the same shape [updateAvailability] already uses.
+    // therefore overwrites every profile column it carries — with nulls where the
+    // wizard collected nothing. Editing a bio through that path would have
+    // silently cleared the artist's social links and cover choice on the way past,
+    // so the editor rendered those sections read-only instead. A PATCH per concern
+    // is what makes them editable without that collateral, and it is the same
+    // shape [updateAvailability] already uses.
 
     /** `artists.bio`. Blank persists as NULL — an empty bio is absent, not "". */
     suspend fun updateBio(bio: String)
@@ -200,7 +219,6 @@ class SupabaseArtistsRepository @Inject constructor(
             instagramHandle = draft.instagramHandle?.ifBlank { null },
             spotifyArtistUrl = draft.spotifyArtistUrl?.ifBlank { null },
             youtubeChannelUrl = draft.youtubeChannelUrl?.ifBlank { null },
-            setupComplete = true,
         )
         try {
             client.from("artists").upsert(row) { onConflict = "id" }
@@ -215,7 +233,9 @@ class SupabaseArtistsRepository @Inject constructor(
             ?: throw AppError.NotFoundOrUnauthorized
         require(userId == artistId.lowercase()) { "Can only publish self." }
         try {
-            client.from("artists").update(PublishedPatch(published)) {
+            // `setup_complete = true` unconditionally: it records that the wizard
+            // was finished, and finishing it is not undone by later going dark.
+            client.from("artists").update(PublishedPatch(published, setupComplete = true)) {
                 filter { eq("id", userId) }
             }
         } catch (t: Throwable) {
@@ -541,8 +561,12 @@ internal data class DbSample(
     fun toSample() = Sample(id = id, title = title, duration = durationLabel, audioUrl = audioUrl)
 }
 
+/** The go-live write. Both flags in one PATCH — see [ArtistsRepository.setPublished]. */
 @Serializable
-private data class PublishedPatch(val published: Boolean)
+internal data class PublishedPatch(
+    val published: Boolean,
+    @SerialName("setup_complete") val setupComplete: Boolean,
+)
 
 // One DTO per narrow edit. `encodeDefaults` is off by default in kotlinx, but
 // these carry no defaults anyway — every field here is one the caller meant to
@@ -609,22 +633,37 @@ private data class AvailabilityRow(
     @SerialName("default_time_slots") val defaultTimeSlots: List<String>? = null,
 )
 
+/**
+ * The wizard's whole-row write. **Not one default on it, deliberately.**
+ *
+ * kotlinx encodes with `encodeDefaults = false` and the Supabase client installs
+ * no serializer that changes that, so a field whose value happens to equal its
+ * declared default is dropped from the body entirely. PostgREST's upsert is
+ * `INSERT … ON CONFLICT (id) DO UPDATE SET <keys present>`, so a dropped key
+ * keeps whatever the row already held. With defaults on, clearing a social link
+ * or picking palette 0 on a re-publish sent nothing for those columns, and the
+ * live profile went on linking the deleted Instagram account and rendering the
+ * old palette — the artist's edit silently did not happen. Every field required
+ * means every column is always sent, which is the whole-row overwrite
+ * [ArtistsRepository.publishWizardProfile] is documented to perform.
+ *
+ * `setup_complete` is absent on purpose — it rides [ArtistsRepository.setPublished].
+ */
 @Serializable
-private data class WizardPublishRow(
+internal data class WizardPublishRow(
     val id: String,
     val handle: String,
     @SerialName("stage_name") val stageName: String,
     val category: String,
     @SerialName("base_city") val baseCity: String,
-    val genre: String? = null,
-    val bio: String? = null,
-    @SerialName("cover_gradient_index") val coverGradientIndex: Int = 0,
-    @SerialName("days_available") val daysAvailable: List<String> = emptyList(),
-    @SerialName("default_time_slots") val defaultTimeSlots: List<String> = emptyList(),
-    @SerialName("instagram_handle") val instagramHandle: String? = null,
-    @SerialName("spotify_artist_url") val spotifyArtistUrl: String? = null,
-    @SerialName("youtube_channel_url") val youtubeChannelUrl: String? = null,
-    @SerialName("setup_complete") val setupComplete: Boolean,
+    val genre: String?,
+    val bio: String?,
+    @SerialName("cover_gradient_index") val coverGradientIndex: Int,
+    @SerialName("days_available") val daysAvailable: List<String>,
+    @SerialName("default_time_slots") val defaultTimeSlots: List<String>,
+    @SerialName("instagram_handle") val instagramHandle: String?,
+    @SerialName("spotify_artist_url") val spotifyArtistUrl: String?,
+    @SerialName("youtube_channel_url") val youtubeChannelUrl: String?,
 )
 
 @Serializable
