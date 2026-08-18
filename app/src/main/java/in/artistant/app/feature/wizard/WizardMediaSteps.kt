@@ -52,6 +52,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.epk.EpkRowAction
 import `in`.artistant.app.feature.epk.EpkSectionHeader
 import `in`.artistant.app.feature.signup.SignupInputRow
+import `in`.artistant.app.platform.media.WizardMediaCache
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -532,7 +533,11 @@ private fun AddSampleButton(state: WizardUiState, vm: WizardViewModel) {
             .border(dimens.size.hairline, if (atCap) colors.line else colors.brand.copy(alpha = 0.4f), shape)
             .pressScale(interaction)
             .clickable(enabled = !atCap, interactionSource = interaction, indication = null) {
-                pickAudio.launch(arrayOf("audio/*"))
+                // Only what the samples bucket accepts. `audio/*` offered WAV and
+                // OGG, which stage and publish fine and then 400 in the upload
+                // queue — a failure the artist never sees. The adoption path
+                // re-checks, because a picker filter is a hint, not a gate.
+                pickAudio.launch(WizardMediaCache.ACCEPTED_AUDIO_MIME_TYPES.toTypedArray())
             }
             .padding(dimens.space.lg)
             .semantics { testTag = "wizard.samples.add" },

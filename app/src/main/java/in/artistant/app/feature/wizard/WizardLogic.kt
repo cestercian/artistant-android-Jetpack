@@ -156,6 +156,24 @@ fun orphanWizardMediaFiles(
     referenced: Set<String>,
 ): List<String> = onDisk.filterNot { it in referenced }
 
+/**
+ * May Save & exit write the form to the draft store?
+ *
+ * Not while the draft is still being restored. Until the restore lands the form
+ * holds a default [WizardUiState] — Identity step, blank stage name and handle,
+ * no tiers, no media references — and that window is not short: the restore
+ * awaits a profile read with no timeout, and Save & exit sits in the top bar
+ * throughout it. Saving then would replace a real draft with a blank one, sign
+ * the artist out, and on the next sign-in the blank draft would restore, find no
+ * media references, and let the orphan sweep delete the staged cover and every
+ * sample off disk. Skipping the write keeps the stored draft, which is exactly
+ * what the confirm dialog promises.
+ *
+ * The debounced writer already refuses the pre-restore state; this is the same
+ * rule applied to the one control that is live during that window.
+ */
+fun wizardExitMaySaveDraft(state: WizardUiState): Boolean = !state.isRestoring
+
 // ── Catalogs ─────────────────────────────────────────────────────────────────
 
 /** The seven categories the server's `category` enum accepts. */
