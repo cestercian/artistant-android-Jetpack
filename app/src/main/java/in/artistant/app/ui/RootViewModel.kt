@@ -72,6 +72,14 @@ class RootViewModel @Inject constructor(
                         is SessionStatus.Initializing -> _gate.value = RootGate.Loading
                         else -> {
                             lastRoutedKey = null
+                            // The hydration payload leaves with the session. `profile`
+                            // feeds the signup flow's prefill and the error feeds its
+                            // Retry banner, so keeping either past a sign-out means the
+                            // NEXT person to reach onboarding on this device can be
+                            // shown the previous account's name, city and @handle
+                            // (see SignupViewModel.reset).
+                            _profile.value = null
+                            _profileHydrationError.value = null
                             _gate.value = RootGate.NotSignedIn
                         }
                     }

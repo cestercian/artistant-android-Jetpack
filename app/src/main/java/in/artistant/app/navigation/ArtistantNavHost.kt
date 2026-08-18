@@ -40,6 +40,18 @@ fun ArtistantNavHost() {
         routedProfile?.let { signupVm.hydrate(it.role, it.fullName, it.city, it.handle) }
     }
 
+    // A session that ended — sign-out or delete-account — must not leave the
+    // departing account's draft in this activity-scoped VM (see SignupViewModel.reset).
+    // The gate arriving at NotSignedIn is the one signal that covers every route
+    // out, including a returning user who went straight to Tabs and never composed
+    // the flow at all, which is why this is keyed on the gate rather than on the
+    // flow's own signed-in bit. It fires once per transition, so it cannot clobber
+    // an in-flight signup: the whole pre-auth walk happens with the gate already
+    // sitting on NotSignedIn. A session that EXPIRES mid-flow lands here too and
+    // costs the user the fields they typed — the right side of that trade, since
+    // the alternative is handing them to whoever signs in next.
+    LaunchedEffect(gate) { if (gate == RootGate.NotSignedIn) signupVm.reset() }
+
     val hydrationError by viewModel.profileHydrationError.collectAsStateWithLifecycle()
     // Read directly rather than through `AppTheme.reduceMotion`: this sits ABOVE
     // every `ArtistantTheme` call below, so the CompositionLocal the theme

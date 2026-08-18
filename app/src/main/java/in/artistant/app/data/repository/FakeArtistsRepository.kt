@@ -15,9 +15,19 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class FakeArtistsRepository(
     seed: List<Artist> = emptyList(),
+    /**
+     * Artists the SERVER can answer for but the cache has NOT seen — what [find]
+     * must miss and [fetchArtist]/[ensureFull] must hydrate.
+     *
+     * The real [find] is a pure map read with no fetch behind it, so a fake whose
+     * every artist is already cached cannot tell a screen that hydrates its misses
+     * from one that renders the "Artist" placeholder forever.
+     */
+    remote: List<Artist> = emptyList(),
 ) : ArtistsRepository {
 
     private val byId = seed.associateBy { it.id.lowercase() }.toMutableMap()
+    private val remoteById = remote.associateBy { it.id.lowercase() }
     private val hydratedIds = seed.map { it.id.lowercase() }.toMutableSet()
     private val _cacheGeneration = MutableStateFlow(0)
     override val cacheGeneration: StateFlow<Int> = _cacheGeneration.asStateFlow()
@@ -56,8 +66,12 @@ class FakeArtistsRepository(
     override suspend fun fetchArtist(id: String): Artist? {
         if (failFetch) throw IllegalStateException("fake fetch failure")
         val key = id.lowercase()
-        val artist = byId[key] ?: return null
+        // A fetch that lands CACHES, like the real one — that's what makes the
+        // next `find` hit for an artist this fake only held remotely.
+        val artist = byId[key] ?: remoteById[key] ?: return null
+        byId[key] = artist
         hydratedIds.add(key)
+        _cacheGeneration.value = _cacheGeneration.value + 1
         return artist
     }
 

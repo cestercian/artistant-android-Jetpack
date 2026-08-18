@@ -9,6 +9,9 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.designsystem.component.monthLabelFromDateLabel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,6 +50,7 @@ class BookingsViewModel @Inject constructor(
             try {
                 val bookings = bookingsRepository.listForClient()
                     .filter { it.status != BookingStatus.Cancelled }
+                hydrateArtists(bookings)
                 val items = bookings.map { b ->
                     val artist = artistsRepository.find(b.artistId)
                     BookingsListItem(
@@ -61,6 +65,33 @@ class BookingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
+        }
+    }
+
+    /**
+     * Pull the artists these bookings reference into the by-id cache.
+     *
+     * [ArtistsRepository.find] is a pure map read — it never fetches — and nothing
+     * on this screen's path fills that map: `listForClient()` returns bookings
+     * only. So on any entry that hasn't been through Discover first (a push deep
+     * link straight to the Bookings tab, a process-death restore onto it) every
+     * row's headline would render the "Artist" placeholder, and even after
+     * Discover an artist outside its rails still would — one row saying "Artist"
+     * beside neighbours with real names reads as a data bug.
+     *
+     * Only misses are fetched, and concurrently: a client's list is a handful of
+     * distinct artists at most. `ensureFull` swallows transport errors, so a dead
+     * network costs a placeholder name, not the list. Same treatment the inbox
+     * already got — see `MessagesViewModel.hydrateArtists`.
+     */
+    private suspend fun hydrateArtists(bookings: List<Booking>) {
+        val missing = bookings
+            .map { it.artistId }
+            .distinct()
+            .filter { artistsRepository.find(it) == null }
+        if (missing.isEmpty()) return
+        coroutineScope {
+            missing.map { id -> async { artistsRepository.ensureFull(id) } }.awaitAll()
         }
     }
 

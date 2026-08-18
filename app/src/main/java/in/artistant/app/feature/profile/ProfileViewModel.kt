@@ -247,9 +247,17 @@ class ProfileViewModel @Inject constructor(
         _state.update { it.copy(isDeleting = true, actionError = null) }
         runCatching { account.deleteAccount() }
             .onSuccess {
-                calendarSync.wipeForAccountDelete()
+                // Sheet and spinner go down BEFORE the cleanup: the row is already
+                // erased server-side, nothing below can change that outcome, and
+                // holding the dialog open through a 30s logout timeout would read
+                // as a delete that never happened.
                 _state.update { it.copy(isDeleting = false, showDeleteConfirm = false) }
-                session.signOut()
+                val cleanupError = cleanUpAfterAccountDelete(
+                    wipeCalendar = { calendarSync.wipeForAccountDelete() },
+                    signOut = { session.signOut() },
+                    wipeLocalState = { prefs.wipeAll(); savedStore.reset() },
+                )
+                if (cleanupError != null) _state.update { it.copy(actionError = cleanupError) }
             }
             .onFailure { e ->
                 _state.update {
@@ -306,6 +314,43 @@ class ProfileViewModel @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * The local cleanup that follows a SUCCESSFUL server-side account delete.
+ *
+ * Non-throwing by construction, because the call site sits inside
+ * `runCatching { … }.onSuccess { }` — an inline lambda that catches nothing. A
+ * throw there escapes `viewModelScope`, which installs no
+ * CoroutineExceptionHandler, so it reaches the thread's uncaught handler and
+ * kills the app moments AFTER the account was erased, with the local wipe
+ * half-done. Neither step is hypothetical: [wipeCalendar] deletes through the
+ * calendar provider with no permission check of its own, so a calendar
+ * permission revoked since the toggle was enabled throws SecurityException, and
+ * [signOut] posts a logout carrying a JWT whose user has just been deleted, over
+ * a link that may already be gone.
+ *
+ * [wipeLocalState] is the DPDP §11 backstop. `SessionManager.signOut()` does the
+ * network logout FIRST and clears prefs / saved ids after it returns, so a failed
+ * logout skips the local wipe entirely and the deleted account's role, saved ids
+ * and thread flags survive on the device. That half is done here when sign-out
+ * fails, and the user is told to restart — the one part of this they can act on.
+ *
+ * @return the message to surface, or null when the cleanup finished cleanly.
+ */
+internal suspend fun cleanUpAfterAccountDelete(
+    wipeCalendar: suspend () -> Unit,
+    signOut: suspend () -> Unit,
+    wipeLocalState: suspend () -> Unit,
+): String? {
+    // The mirrored gigs are the device owner's own calendar events. Failing to
+    // remove them cannot un-delete the account, and on the ordinary path the
+    // sign-out below replaces this screen before any message could be read, so
+    // this failure is swallowed rather than reported.
+    runCatching { wipeCalendar() }
+    if (runCatching { signOut() }.isSuccess) return null
+    runCatching { wipeLocalState() }
+    return "Account deleted. Restart the app to finish signing out."
 }
 
 /**

@@ -3,7 +3,9 @@ package `in`.artistant.app.feature.bookings
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
+import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
+import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
 import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.test.runTest
@@ -15,7 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-/** Client-side bookings list — month folding, cancelled hiding, degrade path. */
+/** Client-side bookings list — artist-name hydration, month folding, cancelled hiding, degrade path. */
 class BookingsListViewModelTest {
 
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
@@ -56,6 +58,45 @@ class BookingsListViewModelTest {
         val byId = model.state.value.items.associateBy { it.booking.id }
         assertEquals("Nova Beats", byId.getValue("b-known").artistName)
         assertEquals("Artist", byId.getValue("b-unknown").artistName)
+    }
+
+    @Test
+    fun aColdStartFetchesTheArtistsTheCacheHasNeverSeen() = runTest {
+        // The Bookings tab can be the first screen composed — a push deep link
+        // opens it directly, and a process-death restore can land on it — so
+        // Discover has never run and the by-id cache is empty. `find` is a pure
+        // map read and `listForClient()` returns bookings only, so without a
+        // hydration step every row's headline printed the "Artist" placeholder.
+        val model = vm(
+            FakeBookingsRepository(
+                listOf(
+                    booking(id = "b-nova", artistId = ARTIST_ID),
+                    booking(id = "b-kabir", artistId = OTHER_ARTIST_ID),
+                ),
+            ),
+            FakeArtistsRepository(
+                remote = listOf(
+                    artist(id = ARTIST_ID, name = "Nova Beats"),
+                    artist(id = OTHER_ARTIST_ID, name = "Kabir Rao"),
+                ),
+            ),
+        )
+
+        val byId = model.state.value.items.associateBy { it.booking.id }
+        assertEquals("Nova Beats", byId.getValue("b-nova").artistName)
+        assertEquals("Kabir Rao", byId.getValue("b-kabir").artistName)
+    }
+
+    @Test
+    fun aFailedArtistFetchCostsTheNameNotTheList() = runTest {
+        val artists = FakeArtistsRepository(remote = listOf(artist(name = "Nova Beats")))
+            .apply { failFetch = true }
+
+        val model = vm(FakeBookingsRepository(listOf(booking(id = "b-1"))), artists)
+
+        val s = model.state.value
+        assertNull(s.error)
+        assertEquals("Artist", s.items.single().artistName)
     }
 
     @Test

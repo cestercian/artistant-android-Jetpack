@@ -9,7 +9,7 @@ import `in`.artistant.app.data.model.HandleRules
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.platform.observability.Analytics
-import `in`.artistant.app.platform.storage.CommunityPledgeStore
+import `in`.artistant.app.platform.storage.SignupConsentStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
@@ -92,7 +92,7 @@ sealed interface SignupEvent {
 class SignupViewModel @Inject constructor(
     private val users: UsersRepository,
     private val analytics: Analytics,
-    private val prefs: CommunityPledgeStore,
+    private val prefs: SignupConsentStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SignupUiState())
@@ -105,6 +105,16 @@ class SignupViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.communityAgreed.collect { agreed ->
                 _state.update { it.copy(communityAgreed = agreed) }
+            }
+        }
+        // Terms acceptance is persisted for one reason: the gate can present this
+        // flow directly at `.Profile` (ArtistantNavHost's Onboarding tier), which
+        // skips the welcome screen the checkbox lives on. After a process kill
+        // mid-signup, an in-memory-only flag meant `saveProfile` asserted no
+        // consent at all for a user who had given it.
+        viewModelScope.launch {
+            prefs.termsAccepted.collect { accepted ->
+                _state.update { it.copy(termsAccepted = accepted) }
             }
         }
         // Live handle availability: debounce the handle field, drop anything that isn't a valid
@@ -147,7 +157,12 @@ class SignupViewModel @Inject constructor(
 
     fun setName(value: String) = _state.update { it.copy(name = value) }
     fun setCity(value: String) = _state.update { it.copy(city = value) }
-    fun setTerms(accepted: Boolean) = _state.update { it.copy(termsAccepted = accepted) }
+
+    /** State first so the checkbox answers the tap, then persist — see the `init` collector. */
+    fun setTerms(accepted: Boolean) {
+        _state.update { it.copy(termsAccepted = accepted) }
+        viewModelScope.launch { prefs.setTermsAccepted(accepted) }
+    }
 
     /** Format-only status the moment the field changes; the debounced check upgrades
      *  Checking → Available/Taken/Error asynchronously. */
@@ -213,6 +228,37 @@ class SignupViewModel @Inject constructor(
         _state.update {
             if (it.step == step && it.mode == mode) it else it.copy(step = step, mode = mode)
         }
+    }
+
+    /**
+     * Back to a pristine flow — the sign-out / delete-account wipe (iOS
+     * `OnboardingStore.reset()`, called from both paths in `AccountView`).
+     *
+     * This ViewModel is hoisted above the gate in `ArtistantNavHost`, so its store
+     * owner is the Activity and ONE instance serves every signup this process
+     * renders. Without a wipe the departing account's draft — full name, city,
+     * @handle, role, accepted terms — is still here when the next person signs up
+     * on the same device: [hydrate] fills those fields from the gate's login
+     * hydration even for a returning user who never walked the flow, so B would
+     * meet a profile form pre-filled with A's PII and a pre-ticked terms box.
+     *
+     * The accepted-terms bit is cleared even though it is persisted: it is an
+     * affirmative act by whoever is holding the phone, and after this wipe we can
+     * no longer say that was the same person. The store's copy exists to survive a
+     * process death INSIDE the signed-in profile step (the gate's Onboarding tier),
+     * which this reset never touches; a fresh signup starts on the welcome screen
+     * and collects its own tick.
+     *
+     * [SignupUiState.communityAgreed] is the one field kept, because it is not an
+     * act, it is a MIRROR of the DataStore pledge flag this VM subscribes to — and
+     * sign-out wipes that store, so the subscription reports false a moment later
+     * on its own. Clearing the mirror while the store still said agreed would
+     * re-present the pledge screen whose Agree button writes the value the store
+     * already holds; DataStore emits nothing for an unchanged write, so nothing
+     * would move that screen on.
+     */
+    fun reset() {
+        _state.value = SignupUiState(communityAgreed = _state.value.communityAgreed)
     }
 
     /** Prefill draft fields from a returning user's server profile (login hydration parity —
