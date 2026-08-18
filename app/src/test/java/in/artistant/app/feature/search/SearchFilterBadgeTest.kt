@@ -90,8 +90,12 @@ class SearchFilterBadgeTest {
         assertEquals(1, SearchUiState(eventType = "Wedding").activeFilterCount)
         assertEquals(1, SearchUiState(services = setOf("dj")).activeFilterCount)
         assertEquals(1, SearchUiState(minScore = 70).activeFilterCount)
-        // Categories are the Discover rails, NOT sheet filters — never counted.
-        assertEquals(0, SearchUiState(categories = setOf("DJ")).activeFilterCount)
+        // Categories are picked from the browse rail rather than the sheet, but
+        // they narrow the roster and `clearFilters()` clears them, so they count
+        // — iOS `SearchStore.activeFilterCount` counts them too. Excluding them
+        // is what made a railed category inescapable; see
+        // SearchCategoryEscapeTest.
+        assertEquals(1, SearchUiState(categories = setOf("DJ")).activeFilterCount)
     }
 
     @Test

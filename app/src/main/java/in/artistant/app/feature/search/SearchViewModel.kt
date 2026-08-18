@@ -64,7 +64,7 @@ data class SearchUiState(
     val loadError: String? = null,
 ) {
     val hasActiveQuery: Boolean
-        get() = query.isNotBlank() || activeFilterCount > 0 || categories.isNotEmpty()
+        get() = query.isNotBlank() || activeFilterCount > 0
 
     /**
      * The `p_min_price` / `p_max_price` actually worth posting, or null when the
@@ -79,7 +79,19 @@ data class SearchUiState(
     /** The user has moved an end of the price range off the loaded data span. */
     val isPriceNarrowed: Boolean get() = activePriceFloor != null || activePriceCeiling != null
 
-    /** Badge count for the filter button — excludes category rails (iOS sheet count). */
+    /**
+     * How many filters are narrowing the roster — the filter button's badge, and
+     * the gate on the results header's "Clear filters" escape.
+     *
+     * Categories count, matching iOS `SearchStore.activeFilterCount`. They are
+     * picked from the browse rail rather than the sheet, and excluding them left
+     * a category with no way out: picking one makes [hasActiveQuery] true, which
+     * swaps the rail (the only category toggle in the app) for the results list,
+     * and every remaining exit was shut — the header's "Clear filters" was gated
+     * on a count that ignored categories, and the sheet has no category section.
+     * Because the Search destination's ViewModelStore survives tab switches, the
+     * stuck category outlived every navigation for the whole session.
+     */
     val activeFilterCount: Int
         get() {
             var n = 0
@@ -89,6 +101,7 @@ data class SearchUiState(
             if (services.isNotEmpty()) n++
             if (isPriceNarrowed) n++
             if (minScore > 0) n++
+            if (categories.isNotEmpty()) n++
             return n
         }
 }
@@ -206,13 +219,28 @@ class SearchViewModel @Inject constructor(
         _state.update { it.copy(flexDays = days) }
     }
 
-    /** Apply sheet edits and re-search (sheet mutates live; Apply just closes + refreshes). */
+    /**
+     * Adopt the sheet's edits. The sheet mutates this state live but the setters
+     * above don't search, so this is what makes the grid agree with the badge —
+     * and the screen calls it on ANY close, swipe-down included, never only on
+     * the Apply button.
+     */
     fun applyFilters() = runSearch(reset = true)
 
+    /**
+     * Back to the unfiltered roster — the sheet's "Clear" and the results
+     * header's "Clear filters", both. Clears exactly the set
+     * [SearchUiState.activeFilterCount] counts, `categories` included: leaving
+     * them behind made a category picked from the browse rail permanent, because
+     * that rail is the only thing in the app that can un-pick one and it is
+     * off-screen the moment one is picked. iOS clears it here too
+     * (`SearchStore.clearFilters`).
+     */
     fun clearFilters() {
         _state.update {
             it.copy(
                 city = null,
+                categories = emptySet(),
                 minPrice = it.priceDataMin,
                 maxPrice = it.priceDataMax,
                 minScore = 0,
@@ -226,8 +254,20 @@ class SearchViewModel @Inject constructor(
         runSearch(reset = true)
     }
 
+    /**
+     * Next page, if there is one to fetch AND we still know what "next" means.
+     *
+     * The `isLoading` guard is the important one. A reset search leaves the
+     * previous query's results painted while it flies, so a near-end scroll fires
+     * this in the middle of one. Without the guard it passed (`canLoadMore` still
+     * described the OLD page), cancelled the reset job, read the cursor the reset
+     * had already rewound to `Start`, and re-fetched page 1 of the NEW filters —
+     * then merged it onto page 1 of the old ones, because `reset` was false. One
+     * list, two filter sets, and a duplicate row key if any artist matched both.
+     */
     fun loadMore() {
-        if (_state.value.isLoadingMore || !_state.value.canLoadMore) return
+        val snap = _state.value
+        if (snap.isLoading || snap.isLoadingMore || !snap.canLoadMore) return
         runSearch(reset = false)
     }
 
@@ -350,22 +390,27 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun runSearch(reset: Boolean) {
-        val snapshot = _state.value
-        if (!snapshot.hasActiveQuery && snapshot.query.isBlank()) {
-            if (snapshot.activeFilterCount == 0 && snapshot.categories.isEmpty()) {
-                _state.update {
-                    it.copy(results = emptyList(), canLoadMore = false, loadError = null, isLoading = false)
-                }
-                nextCursor = null
-                return
+        // Nothing to search: no text and no filter (categories included, via
+        // `activeFilterCount`). The screen shows the browse rails instead.
+        if (!_state.value.hasActiveQuery) {
+            _state.update {
+                it.copy(results = emptyList(), canLoadMore = false, loadError = null, isLoading = false)
             }
+            nextCursor = null
+            return
         }
 
         searchJob?.cancel()
         val gen = ++generation
         searchJob = viewModelScope.launch {
             if (reset) {
-                _state.update { it.copy(isLoading = true, loadError = null) }
+                // `canLoadMore` goes down with the cursor. It described the page
+                // we just threw away, and `viewModelScope` is Main.immediate — so
+                // this whole prologue lands before control returns to the caller,
+                // leaving a window in which the old results are still on screen.
+                // A near-end scroll in that window used to pass `loadMore`'s guard
+                // on the strength of a stale `canLoadMore`.
+                _state.update { it.copy(isLoading = true, loadError = null, canLoadMore = false) }
                 nextCursor = SearchCursor.Start
             } else {
                 _state.update { it.copy(isLoadingMore = true) }
@@ -399,7 +444,17 @@ class SearchViewModel @Inject constructor(
                 nextCursor = page.nextCursor
                 _state.update {
                     it.copy(
-                        results = if (reset) page.artists else it.results + page.artists,
+                        // Deduped on merge. The keyset cursor pages a roster that
+                        // `compute-score` keeps rewriting, so an artist whose score
+                        // moved between two requests can land on both pages — and
+                        // the grid keys its rows by the ids in them, so a repeated
+                        // adjacent pair is a `LazyColumn` duplicate-key crash, not
+                        // just a duplicate tile.
+                        results = if (reset) {
+                            page.artists
+                        } else {
+                            (it.results + page.artists).distinctBy { a -> a.id }
+                        },
                         isLoading = false,
                         isLoadingMore = false,
                         canLoadMore = page.nextCursor !is SearchCursor.End,

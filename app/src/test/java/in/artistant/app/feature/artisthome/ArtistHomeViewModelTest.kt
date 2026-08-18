@@ -10,8 +10,10 @@ import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.data.repository.FakeRequestsRepository
 import `in`.artistant.app.data.repository.FakeScoreRepository
 import `in`.artistant.app.data.repository.FakeUsersRepository
+import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.feature.paywall.EntitlementStore
 import `in`.artistant.app.testsupport.ARTIST_ID
@@ -80,12 +82,13 @@ class ArtistHomeViewModelTest {
         bookings: BookingsRepository,
         artists: ArtistsRepository = FakeArtistsRepository(listOf(artist(id = ARTIST_ID))),
         users: UsersRepository = FakeUsersRepository(selfProfile = completeProfile),
+        score: FakeScoreRepository = FakeScoreRepository(),
     ) = ArtistHomeViewModel(
         bookingsRepository = bookings,
         requestsRepository = FakeRequestsRepository(),
         usersRepository = users,
         artistsRepository = artists,
-        scoreRepository = FakeScoreRepository(),
+        scoreRepository = score,
         entitlements = EntitlementStore(),
         viewer = ViewerIdentity { ARTIST_ID },
     )
@@ -249,4 +252,73 @@ class ArtistHomeViewModelTest {
         assertNull("no users row means nothing is knowable about gaps", model.state.value.profileGaps)
         assertNotNull("the failure banner must say the profile half didn't load", model.state.value.error)
     }
+
+    // ── A failed score read is not a new artist ─────────────────────────────
+    //
+    // The same trap one field over. `breakdownForSelf()` THROWS on a network/RLS
+    // failure and returns a zeros row for a genuine newcomer; flattening both to
+    // null and substituting `ScoreBreakdown.NewArtist` told a ranked artist their
+    // standing had reset. Bookability is the hero metric on this screen — an
+    // Elite 92 repainted as "—" / "NEW" with all four metric rows em-dashed is
+    // the single most alarming thing the dashboard can say, and it said it on
+    // nothing more than a dropped connection.
+
+    @Test
+    fun blippedScoreRead_doesNotDemoteARankedArtistToNew() = runTest {
+        val score = FakeScoreRepository(self = eliteBreakdown)
+        val model = vm(bookings = FakeBookingsRepository(), score = score)
+        advanceUntilIdle()
+        assertEquals(ScoreTier.Elite, model.state.value.breakdown.tier)
+
+        // Second refresh, score read blips.
+        score.failSelf = true
+        model.refresh()
+        advanceUntilIdle()
+
+        assertEquals(
+            "a blipped score read must not reset the standing card",
+            92,
+            model.state.value.breakdown.numericScore,
+        )
+        assertEquals(ScoreTier.Elite, model.state.value.breakdown.tier)
+        // …and the metric rows stay real rather than collapsing to em-dashes,
+        // which is what `totalGigs = 0` would have done to all four.
+        assertEquals(40, model.state.value.breakdown.totalGigs)
+    }
+
+    @Test
+    fun failedScoreRead_surfacesTheBanner_ratherThanSayingNothing() = runTest {
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            score = FakeScoreRepository(self = eliteBreakdown, failSelf = true),
+        )
+        advanceUntilIdle()
+
+        assertNotNull("the failure banner must say the score half didn't load", model.state.value.error)
+    }
+
+    /** The other side of the fix: a real newcomer must still read as New. */
+    @Test
+    fun aGenuineNewcomerStillReadsAsNew_withNoFailureBanner() = runTest {
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            score = FakeScoreRepository(self = ScoreBreakdown.NewArtist),
+        )
+        advanceUntilIdle()
+
+        assertEquals(ScoreTier.New, model.state.value.breakdown.tier)
+        assertNull(model.state.value.breakdown.numericScore)
+        assertNull("a successful read of zeros is not a failure", model.state.value.error)
+    }
+
+    /** Ranked and well clear of the `<5 gigs` New short-circuit. */
+    private val eliteBreakdown = ScoreBreakdown(
+        score = 92,
+        showUpRate = 98,
+        reviewScore = 94,
+        replySpeed = 90,
+        cancellationRate = 2,
+        socialProof = 80,
+        totalGigs = 40,
+    )
 }
