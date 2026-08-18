@@ -1,14 +1,9 @@
 package `in`.artistant.app.platform.push
 
 import android.content.Context
-import android.os.Build
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.postgrest.postgrest
-import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.navigation.PushPayloadRouter
 import `in`.artistant.app.navigation.TabRouter
 import `in`.artistant.app.platform.permissions.isNotificationPermissionGranted
@@ -18,9 +13,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,21 +20,29 @@ import javax.inject.Singleton
 /**
  * FCM registration + push-tap routing — Android port of iOS `PushService`.
  *
- * Token persistence goes through SECURITY DEFINER `claim_device_token` (mig 0075)
- * with `p_fcm` set and `p_apns` null (0069 XOR). Soft-fails when Firebase isn't
- * initialised (no `google-services.json` on this machine).
+ * Owns this device's `device_tokens` lifecycle through [DeviceTokenRepository]: claim on every
+ * completed sign-in (and cold launch), release on sign-out. Both halves are load-bearing — a
+ * token that is never released keeps delivering the signed-out account's message previews and
+ * booking pushes to whoever holds the phone next. Soft-fails when Firebase isn't initialised
+ * (no `google-services.json` on this machine).
  */
 @Singleton
 class PushService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val client: SupabaseClient,
+    private val deviceTokens: DeviceTokenRepository,
     private val tabRouter: TabRouter,
     private val prefs: AppPreferences,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Cold launch: if permission already granted, refresh/register the FCM token. */
-    fun registerOnLaunchIfPermitted() {
+    /**
+     * Cold launch or a completed sign-in: if permission is already granted, refresh the FCM
+     * token and (re-)claim this device's row for whoever is signed in now. Cheap and idempotent,
+     * so it's safe on every sign-in — which is the point: a returning user's sign-in doesn't
+     * pass through `ArtistantApplication.onCreate`, and without a re-claim the device stays
+     * addressed by the previous account (or by nobody, after a sign-out released the row).
+     */
+    fun registerIfPermitted() {
         if (!isNotificationPermissionGranted(context)) return
         fetchAndPersistToken()
     }
@@ -79,8 +79,22 @@ class PushService @Inject constructor(
         }
     }
 
-    /** Sign-out: wipe TabRouter pending channels (prefs wipe is SessionManager's job). */
-    fun onSignedOut() {
+    /**
+     * Sign-out teardown, called BEFORE `auth.signOut()`: release this device's `device_tokens`
+     * row so the leaving account stops addressing this phone, then wipe the TabRouter pending
+     * channels. (The prefs wipe stays SessionManager's job.)
+     *
+     * The ordering is the whole fix, and it's the iOS `AuthService.signOut()` ordering: the
+     * delete is RLS-scoped to the caller's own row so it needs the session that `signOut()` is
+     * about to tear down, and it has to beat `prefs.wipeAll()`, which clears
+     * [LAST_FCM_TOKEN_KEY] and would leave nothing to unregister WITH. Best-effort — an offline
+     * sign-out must still succeed, and a surviving stale row is the pre-existing behaviour.
+     */
+    suspend fun onSigningOut() {
+        runCatching {
+            val token = prefs.getString(LAST_FCM_TOKEN_KEY).first()
+            if (!token.isNullOrBlank()) deviceTokens.unregister(token)
+        }.onFailure { Timber.w(it, "device_tokens release failed (ignored)") }
         tabRouter.clearTransients()
     }
 
@@ -103,20 +117,8 @@ class PushService @Inject constructor(
     }
 
     private suspend fun persistToken(token: String) {
-        if (client.auth.currentSessionOrNull()?.user == null) {
-            Timber.d("claim_device_token skipped — not signed in")
-            return
-        }
-        // Exactly one of p_apns / p_fcm — Android always sends FCM.
-        val params = buildJsonObject {
-            put("p_apns", JsonNull)
-            put("p_fcm", token)
-            put("p_device_model", Build.MODEL)
-            put("p_os_version", Build.VERSION.RELEASE)
-        }
-        runCatching {
-            client.postgrest.rpc("claim_device_token", params)
-        }.onFailure { Timber.w(it, "claim_device_token failed") }
+        runCatching { deviceTokens.register(token) }
+            .onFailure { Timber.w(it, "claim_device_token failed") }
     }
 
     companion object {

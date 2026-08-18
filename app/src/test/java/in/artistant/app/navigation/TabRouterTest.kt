@@ -7,7 +7,7 @@ import org.junit.Test
 /**
  * TabRouter is the only process-wide place a *previous* session's push can
  * survive: the pending* channels outlive the screens that consume them.
- * `PushService.onSignedOut()` calls [TabRouter.clearTransients] for exactly
+ * `PushService.onSigningOut()` calls [TabRouter.clearTransients] for exactly
  * that reason, so these tests pin the leakage contract:
  *
  *  - sign-out wipes every pending channel,
