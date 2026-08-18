@@ -43,6 +43,10 @@ import `in`.artistant.app.designsystem.theme.motionTween
  * @param profileHydrationError a login-hydrate failure the gate surfaces here as a Retry banner.
  * @param onRetryHydration re-runs the failed profile fetch (gate-owned, since it drives routing).
  * @param onFinished fires when the user taps "Start exploring" — the gate re-routes into tabs.
+ * @param signedIn whether a live session exists — true on the gate's signed-in-but-incomplete
+ *   tier, false on the not-signed-in one. The flow can't read the session itself (the repository
+ *   seam), and the gate value alone can't tell it either: `RootGate.Onboarding` is a `data
+ *   object`, so a re-route to the same tier is conflated and re-fires nothing.
  * @param reduceMotion freezes the auth lineup for a11y.
  */
 @Composable
@@ -53,6 +57,7 @@ fun SignupFlow(
     modifier: Modifier = Modifier,
     profileHydrationError: String? = null,
     onRetryHydration: () -> Unit = {},
+    signedIn: Boolean = false,
     reduceMotion: Boolean = false,
     testMode: Boolean = false,
     viewModel: SignupViewModel = hiltViewModel(),
@@ -63,6 +68,13 @@ fun SignupFlow(
     // Seed the flow at the gate's entry step once. resumeAt is idempotent, so a recomposition or
     // a gate re-render (NotSignedIn → Onboarding) won't clobber the user's in-flow progress.
     LaunchedEffect(startStep, startMode) { viewModel.resumeAt(startStep, startMode) }
+
+    // Report the gate's session bit into the flow (iOS RootView.handleAuthChange →
+    // didCompleteAuth). Keyed on the STEP as well as the bit, so a landing on `.Auth` while a
+    // session is live — the profile-save session guard, a back press that raced this — is
+    // corrected the moment it happens. Runs after resumeAt above (declaration order), so the
+    // gate's entry step is already seeded and this only ever fixes a genuinely stranded step.
+    LaunchedEffect(signedIn, state.step) { viewModel.setSignedIn(signedIn) }
 
     // Route one-shot events: haptics + the finish hand-off. Collected once for the flow's life.
     LaunchedEffect(Unit) {
@@ -77,8 +89,12 @@ fun SignupFlow(
 
     // System back per step: Role and Profile have an in-flow back target; on other steps we don't
     // intercept (Welcome/Done have nowhere to go; Auth/Notif back would land on a screen the user
-    // can't meaningfully return to mid-auth), so the OS/gate handles it.
-    BackHandler(enabled = state.step == SignupStep.Role || state.step == SignupStep.Profile) {
+    // can't meaningfully return to mid-auth), so the OS/gate handles it. `canGoBack` covers the
+    // signed-in case where every earlier step is retired — swallowing the gesture to do nothing
+    // is worse than letting the OS have it.
+    BackHandler(
+        enabled = (state.step == SignupStep.Role || state.step == SignupStep.Profile) && state.canGoBack,
+    ) {
         viewModel.back()
     }
 

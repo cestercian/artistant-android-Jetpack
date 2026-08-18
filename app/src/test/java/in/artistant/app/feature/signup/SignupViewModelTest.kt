@@ -26,9 +26,11 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The stateful half of the signup port: synchronous handle-status mapping, the terms gate, and
- * the three profile-save outcomes (success advances, raced handle bounces to the field, lost
- * session bounces to auth). The debounced RPC check itself is exercised via advanceUntilIdle.
+ * The stateful half of the signup port: synchronous handle-status mapping, the terms gate, the
+ * profile-save outcomes (success advances, raced handle bounces to the field, lost session
+ * bounces to auth, RLS denial stays put), and the signed-in step rules — with a live session
+ * `.Auth` and `.Welcome` are retired so nothing can strand the user on a screen with no forward
+ * control. The debounced RPC check itself is exercised via advanceUntilIdle.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SignupViewModelTest {
@@ -188,11 +190,69 @@ class SignupViewModelTest {
     }
 
     @Test
+    fun `saveProfile with a live session keeps an RLS denial on the profile step`() = runTest(dispatcher) {
+        // Same typed error, opposite cause: PGRST116 is "row missing OR blocked by RLS". With a
+        // session the auth step is retired, so bouncing there would show a banner for one frame
+        // and swallow the failure — surface it inline instead.
+        val vm = vm(UpsertStub { throw AppError.NotFoundOrUnauthorized })
+        vm.resumeAt(SignupStep.Profile)
+        vm.setSignedIn(true)
+        vm.setName("Yash"); vm.setCity("Bangalore"); vm.setHandle("some_handle")
+        advanceUntilIdle()
+        vm.saveProfile()
+        advanceUntilIdle()
+        assertEquals(SignupStep.Profile, vm.state.value.step)
+        assertNull(vm.state.value.authNotice)
+        assertTrue(vm.state.value.saveError!!.contains("Couldn't save"))
+    }
+
+    @Test
     fun `onAuthCompleted advances past auth and clears the notice`() {
         val vm = vm()
         vm.startLogin() // lands on Auth
         vm.onAuthCompleted()
         assertEquals(SignupStep.Notif, vm.state.value.step) // login: auth → notif
         assertNull(vm.state.value.authNotice)
+    }
+
+    @Test
+    fun `setSignedIn lifts a user stranded on auth back into the flow`() {
+        // The production call site onAuthCompleted never had: nothing else moved the flow off
+        // `.Auth`, and the gate can't — re-routing to the same `RootGate.Onboarding` is
+        // conflated by MutableStateFlow, so its LaunchedEffect keys never change.
+        val vm = vm()
+        vm.startLogin() // parks on Auth
+        vm.setSignedIn(true)
+        assertEquals(SignupStep.Notif, vm.state.value.step)
+        assertTrue(vm.state.value.signedIn)
+    }
+
+    @Test
+    fun `back from profile skips the auth step once signed in`() {
+        val vm = vm()
+        vm.resumeAt(SignupStep.Profile) // the gate's signed-in-but-incomplete entry
+        vm.setSignedIn(true)
+        vm.back()
+        assertEquals(SignupStep.Role, vm.state.value.step) // NOT Auth — that was the dead end
+    }
+
+    @Test
+    fun `back clamps at role for a signed-in user and reports it cannot move`() {
+        val vm = vm()
+        vm.resumeAt(SignupStep.Profile)
+        vm.setSignedIn(true)
+        vm.back() // Profile → Role
+        assertFalse(vm.state.value.canGoBack) // Welcome is retired: nothing behind Role
+        vm.back()
+        assertEquals(SignupStep.Role, vm.state.value.step)
+    }
+
+    @Test
+    fun `role continue jumps straight to profile once signed in`() {
+        val vm = vm()
+        vm.startSignup()
+        vm.setSignedIn(true)
+        vm.advance()
+        assertEquals(SignupStep.Profile, vm.state.value.step)
     }
 }
