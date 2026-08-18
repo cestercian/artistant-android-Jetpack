@@ -30,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -147,7 +146,7 @@ fun ScoreExplainerScreen(
                         ScoreRing(
                             value = b.numericScore,
                             size = size.ringXl,
-                            stroke = 8.dp,
+                            stroke = size.ringXlStroke,
                             showLabel = true,
                         )
                     }

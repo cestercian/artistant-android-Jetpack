@@ -204,7 +204,6 @@ data class AppType(
     // a derived style can never fall out of sync with the step it derives from.
     // ─────────────────────────────────────────────────────────────────────
 
-    /** Artist hero name — the editorial serif, tightened. */
     /** Artist-PROFILE hero name. Distinct from [heroName], the larger 40sp Discover
      *  hero: the profile name sits on a 48%-height hero, Discover on a 74% one, so
      *  they are different steps of the ramp rather than a duplicate. */

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.artistant.app.designsystem.theme.AppRole
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -53,7 +54,11 @@ interface SignupConsentStore {
  */
 @Singleton
 class AppPreferences @Inject constructor(
-    private val context: Context,
+    // Qualified: SingletonComponent binds `@ApplicationContext Context`, never a bare
+    // one. Unqualified, this constructor could not be satisfied at all — the class was
+    // only constructible because a hand-written `@Provides` in AppModule shadowed it,
+    // so the first direct injection would have failed with a missing-binding error.
+    @ApplicationContext private val context: Context,
 ) : SignupConsentStore {
     private val roleKey = stringPreferencesKey("role")
     private val communityAgreedKey = booleanPreferencesKey("community.agreed")

@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.core.result.AppError
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.HandleAvailability
 import `in`.artistant.app.data.model.HandleRules
@@ -13,6 +12,7 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.feature.epk.PackageRow
 import `in`.artistant.app.feature.epk.packageDrafts
 import `in`.artistant.app.feature.epk.previewPackages
@@ -187,8 +187,14 @@ class WizardViewModel @Inject constructor(
      *
      * Failed tasks count as referenced too — they are retryable, and a retry
      * needs its file.
+     *
+     * Waits for the queue's snapshot read before reading it. That read is off the main
+     * thread now, so `state.value` answers "nothing is queued" while it is still in
+     * flight — indistinguishable here from a genuinely drained queue, and this is the
+     * one caller for which the two have opposite consequences.
      */
-    private fun sweepOrphanMedia(media: RestoredWizardMedia) {
+    private suspend fun sweepOrphanMedia(media: RestoredWizardMedia) {
+        uploadQueue.awaitRestore()
         val queued = uploadQueue.state.value.let { it.pending + it.failed }
             .mapNotNull { task ->
                 when (task) {

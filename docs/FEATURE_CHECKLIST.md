@@ -135,7 +135,9 @@ socials/bio) can be built before F8 lands.*
 
 - [x] **Photo Picker** (gallery `GetContent`) + camera `TakePicture` via FileProvider. **M.**
 - [x] **SAF audio picker** (`OpenDocument`). **S.**
-- [x] **VideoTrimmer** (Media3 Transformer, ≤10s; copy fallback). **L.**
+- [ ] **VideoTrimmer** (Media3 Transformer, ≤10s; copy fallback). **L.** *Ported then
+  deleted Aug 2026 — v1 ships no video pick, so it had no call site. Lands again with
+  the cover-video step (re-add `media3-transformer` then).*
 - [x] **WizardMediaCache** (cacheDir staging, JPEG normalize on upload). **M.**
 - [x] **UploadQueue** — serial drain + retry + JSON snapshot + WorkManager kick. **M.**
 - [x] **ArtistMedia/Samples repos** — storage upload + insert + rollback + reorder RPC. **M.**

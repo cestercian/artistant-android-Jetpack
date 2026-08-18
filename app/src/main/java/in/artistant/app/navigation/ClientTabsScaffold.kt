@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import `in`.artistant.app.designsystem.component.AmbientRoleWash
 import `in`.artistant.app.designsystem.component.FloatingTabAction
 import `in`.artistant.app.designsystem.component.FloatingTabBar
 import `in`.artistant.app.designsystem.component.FloatingTabItem

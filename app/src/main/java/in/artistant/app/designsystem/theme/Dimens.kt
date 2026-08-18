@@ -24,7 +24,6 @@ data class Radii(
 
 /** Icon/control/avatar/ring/hero sizes (SCREEN_INVENTORY §1). */
 data class Size(
-    val iconXs: Dp = 10.dp,
     val iconSm: Dp = 12.dp,
     val iconMd: Dp = 16.dp,
     val iconLg: Dp = 20.dp,
@@ -35,12 +34,10 @@ data class Size(
     val avatarMd: Dp = 48.dp,
     val avatarLg: Dp = 64.dp,
     val avatarXl: Dp = 96.dp,
-    val ringSm: Dp = 44.dp,
     val ringMd: Dp = 64.dp,
     val ringLg: Dp = 76.dp,
     val ringXl: Dp = 120.dp,
     val heroTall: Dp = 460.dp,
-    val heroMed: Dp = 360.dp,
     val heroShort: Dp = 280.dp,
     /**
      * The cover PREVIEW card in the press-kit editor — a picture of the hero, not
@@ -104,6 +101,14 @@ data class Size(
     /** The mini score ring that rides in the hero identity row, and its stroke. */
     val ringXs: Dp = 34.dp,
     val ringXsStroke: Dp = 3.dp,
+    /**
+     * Stroke for the [ringXl] ring — the score explainer's hero, the one place the
+     * ring IS the content rather than an ornament beside something else, so it takes
+     * the heaviest weight in the ladder (iOS `ScoreExplainerView` draws 120pt at
+     * 7pt). Named rather than typed at the call site so the weight sits next to
+     * [ringXsStroke] and can be compared, not rediscovered.
+     */
+    val ringXlStroke: Dp = 8.dp,
     /**
      * Date card. Portrait on purpose (56×76): the weekday, the day numeral and
      * the availability dot stack, which is what makes a run of them scan as a
@@ -309,13 +314,17 @@ data class Dashboard(
     val bannerDot: Dp = 8.dp,
 )
 
-/** width : height ratios for media containers. */
+/**
+ * width : height ratios for media containers.
+ *
+ * Two, because two are what the app crops to: [editorial] for the wizard's cover
+ * frames and [square] for the press-kit gallery. A ratio nobody reads is an
+ * invitation to reach for the wrong crop, so the rest are added back when a
+ * surface actually needs one.
+ */
 data class AspectRatios(
-    val portrait: Float = 4f / 5f,
     val editorial: Float = 3f / 4f,
-    val landscape: Float = 16f / 9f,
     val square: Float = 1f,
-    val stripWide: Float = 21f / 9f,
 )
 
 /** Bundle handed to the theme so composables read `AppTheme.dimens.space.lg`. */

@@ -81,9 +81,6 @@ data class Motion(
     /** Skeleton → real content, and other "the data arrived" swaps. */
     val contentReveal: Int get() = medium2
 
-    /** One full sweep of the skeleton shimmer. */
-    val shimmer: Int = 1_100
-
     // ── Travel distances / scales ───────────────────────────────────────────
 
     /**
@@ -171,17 +168,6 @@ object MotionSpecs {
         if (pressed && !reduceMotion) pressedScale else 1f
 
     /**
-     * Whether the shimmer loop should run at all.
-     *
-     * Gated explicitly rather than left to the duration scale. An infinite
-     * animation given a zero duration does not stop — it completes and restarts
-     * every frame, which is a busy loop that also strobes. Loading placeholders
-     * are exactly the surface where a user sensitive to motion is stuck looking
-     * at the screen, so this one gets to be a hard off switch.
-     */
-    fun shouldShimmer(reduceMotion: Boolean): Boolean = !reduceMotion
-
-    /**
      * Horizontal offset, in pixels, for a screen sliding in or out.
      *
      * @param width the screen's full width in px
@@ -221,9 +207,16 @@ fun rememberReduceMotion(): Boolean {
 /**
  * A `tween` that collapses to instant under reduce-motion.
  *
- * The single helper every animated surface in the app should build its spec
- * with — it is the one place the reduce-motion branch lives, so no call site can
- * forget it.
+ * The spelling to reach for whenever a spec is one duration and one easing: the
+ * reduce-motion branch comes with it, so the call site cannot forget it.
+ *
+ * It is not the only entry point, though — this comment used to claim it was, and
+ * a claim like that is how the next surface concludes the branch cannot be
+ * forgotten. The decision itself lives in [MotionSpecs.durationMillis], and a
+ * surface needing the resolved duration for something other than a single tween
+ * takes it from there instead: `RevealOnAppear` feeds one duration to two easings,
+ * `DateScroller` swaps a spring for `snap()`. Both spellings honour the setting.
+ * What must not appear is a third one that reads the system scales on its own.
  */
 @Composable
 fun <T> motionTween(

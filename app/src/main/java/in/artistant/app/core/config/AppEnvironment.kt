@@ -41,7 +41,22 @@ object AppEnvironment {
     val posthogApiKey: String get() = BuildConfig.POSTHOG_API_KEY
     val sentryDsn: String get() = BuildConfig.SENTRY_DSN
 
-    /** Play product ids — fixed across environments (mirrors iOS StoreKit ids). */
+    /**
+     * Play product ids — fixed across environments. Verified against the iOS StoreKit
+     * ids (`Sources/Artistant/Services/AppEnvironment.swift`), which these mirror
+     * character for character. The role split is product truth, not decoration: artist
+     * and client each buy their own monthly, and iOS asks
+     * `EntitlementStore.isEntitled(_:)` with the id of the role it is gating.
+     *
+     * SEAM STATUS — reconcile this BEFORE flipping [subscriptionsEnabled]. Nothing in
+     * production reads these yet: `PlayBillingService` carries a single hardcoded SKU of
+     * its own (`in.artistant.app.subscription.monthly`) and uses it for the price query,
+     * the purchase flow AND the entitlement probe, so with the flag on the paywall asks
+     * Play for a product that matches neither id here — the price falls back to the
+     * hardcoded "₹99" and `launchSubscribe` fails with "Product not found". Wiring Play
+     * Billing means making that path take the role and resolve the id through
+     * [subscriptionProductId], and creating the Play Console SKUs under these ids.
+     */
     const val artistMonthlyProductId: String = "in.artistant.subscription.artist.monthly"
     const val clientMonthlyProductId: String = "in.artistant.subscription.client.monthly"
 

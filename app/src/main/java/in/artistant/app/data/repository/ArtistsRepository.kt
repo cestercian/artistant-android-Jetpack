@@ -9,10 +9,10 @@ import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.data.model.Artist
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ArtistPrompts
 import `in`.artistant.app.domain.artist.ServiceTags
 import kotlinx.coroutines.flow.MutableStateFlow

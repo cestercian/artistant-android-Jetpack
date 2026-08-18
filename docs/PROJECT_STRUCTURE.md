@@ -93,7 +93,8 @@ in/artistant/app/
 │   │   ├── Color.kt                   # AppColors: bg/bgCard/ink*/brand/status + role accents
 │   │   ├── Type.kt                    # AppType ramp + FontFamily (Instrument Serif/Geist[Mono])
 │   │   ├── Dimens.kt                  # Space / Size / Radii / AspectRatios
-│   │   └── Role.kt                    # AppRole; role→accent mapping (lime/violet)
+│   │   ├── Role.kt                    # AppRole; role→accent mapping (lime/violet)
+│   │   └── ArtistGradient.kt          # the six cover-gradient palettes (raw-hex iOS port)
 │   └── component/                     # the 27-component port (reusable composables)
 │       ├── button/PrimaryButton.kt, Pill.kt
 │       ├── layout/CardView.kt, AppSection.kt, HeaderBar.kt, CtaScrim.kt, KVRow.kt, HRule.kt, FlowRow.kt
@@ -112,7 +113,7 @@ in/artistant/app/
 │
 ├── data/                              # the data boundary (repositories + wire models)
 │   ├── model/                         # domain + wire models (kotlinx.serialization)
-│   │   ├── Artist.kt                  # Artist, ArtistPackage, Sample, Review, ArtistGradient
+│   │   ├── Artist.kt                  # Artist, ArtistPackage, ArtistPrompt, Sample, Review
 │   │   ├── Booking.kt                 # Booking, BookingStatus, EscrowStatus, PaymentMethod, compute()
 │   │   ├── Messaging.kt               # Thread, Message, MessageSender, MessageDelivery
 │   │   ├── GigRequest.kt              # GigRequest, StoredRequest, GigRequestStatus

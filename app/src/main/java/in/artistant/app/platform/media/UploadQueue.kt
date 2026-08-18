@@ -1,9 +1,13 @@
 package `in`.artistant.app.platform.media
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.hilt.work.HiltWorker
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -11,9 +15,12 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import `in`.artistant.app.data.repository.ArtistMediaRepository
 import `in`.artistant.app.data.repository.SamplesRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +45,11 @@ import javax.inject.Singleton
  * doesn't strand wizard media. [resumeAfterLaunch] restarts the runner once auth
  * is ready (uploads need JWT). WorkManager kicks a one-shot worker after enqueue
  * so the OS can finish drains even if the process is backgrounded.
+ *
+ * Both halves of that snapshot are off the caller's thread — the read behind
+ * [restored], the writes behind [persist] — so nothing here does file IO on the main
+ * dispatcher. That makes the queue briefly "empty because not loaded yet", which is a
+ * different thing from empty; [awaitRestore] is how a caller tells them apart.
  */
 @Singleton
 class UploadQueue @Inject constructor(
@@ -47,6 +59,13 @@ class UploadQueue @Inject constructor(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
+
+    /**
+     * Serialises snapshot writes. Deliberately NOT [mutex]: that one is held for a
+     * whole drain, so sharing it would defer every write until the drain ended —
+     * which is exactly when a crash has to find an up-to-date attempt counter.
+     */
+    private val diskMutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val snapshotFile: File
         get() = File(context.filesDir, "upload-queue.json")
@@ -106,8 +125,36 @@ class UploadQueue @Inject constructor(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /**
+     * Opens once the on-disk snapshot has been read back into [state].
+     *
+     * The read used to run straight in `init`, which put a file read on whichever
+     * thread first injected this `@Singleton` — the main thread, during the first
+     * frame. Moving it to [scope] means callers can now observe an empty queue that is
+     * merely not loaded yet, and "nothing is queued" is a DESTRUCTIVE answer for the
+     * wizard's orphan sweep, which deletes every staged file the queue doesn't claim.
+     * So the read is awaitable ([awaitRestore]) and everything whose answer depends on
+     * it waits: the drain ([pump]), the resume ([resumeAfterLaunch]), the snapshot
+     * writer ([persistNow]) and the sweep. [clearAll] is the one that deliberately does
+     * NOT wait — waiting would let the merge land after the wipe.
+     */
+    private val restored = CompletableDeferred<Unit>()
+
     init {
-        restoreSnapshot()
+        scope.launch {
+            try {
+                restoreSnapshot()
+            } finally {
+                // In a `finally`: a restore that threw must not leave every upload
+                // path parked on a gate that never opens.
+                restored.complete(Unit)
+            }
+        }
+    }
+
+    /** Suspends until the snapshot read has landed. See [restored]. */
+    suspend fun awaitRestore() {
+        restored.await()
     }
 
     fun enqueueCoverPhoto(artistId: String, file: File) {
@@ -162,12 +209,37 @@ class UploadQueue @Inject constructor(
     /**
      * Call once auth session is ready (RootViewModel). Restored poison tasks
      * with burned attempt budgets stay in failed; others re-enter the runner.
+     *
+     * Waits for [restored] first: this is the ONE caller whose whole job is to act on
+     * what the snapshot held, so reading `pending` before the read lands would see an
+     * empty queue and resume nothing at all.
      */
     fun resumeAfterLaunch() {
-        if (_state.value.pending.isNotEmpty()) {
+        scope.launch {
+            awaitRestore()
+            if (_state.value.pending.isEmpty()) return@launch
             scheduleWork()
             pump()
         }
+    }
+
+    /**
+     * Drain to completion and report whether the queue emptied — [UploadDrainWorker]'s
+     * entry point, and the reason the worker is worth having.
+     *
+     * The worker used to kick [resumeAfterLaunch] and return `success` on the next
+     * line, so WorkManager marked the work done before the first byte moved and
+     * withdrew exactly the process-lifetime guarantee the worker exists to buy.
+     * Joining the drain's own job (rather than running it in the worker's coroutine)
+     * keeps every drain on this singleton's scope: a worker that the OS stops
+     * mid-upload stops waiting, it does not cancel the upload.
+     *
+     * [pump] waits for [restored], so a worker that runs before the snapshot read has
+     * landed no longer reports a drain of a queue it never saw.
+     */
+    internal suspend fun drain(): Boolean {
+        pump().join()
+        return _state.value.pending.isEmpty()
     }
 
     /**
@@ -186,14 +258,26 @@ class UploadQueue @Inject constructor(
      * kill — but it cannot resurrect what this dropped: [uploadSucceeded] and
      * [uploadFailed] both refuse to write back once the head of the queue is no
      * longer their task.
+     *
+     * The wipe lands twice on purpose. Once here, on the caller's thread, because
+     * `signOut` must not return while the departing account's tasks are still readable —
+     * [resumeAfterLaunch] would drain them for whoever signs in next. Then again inside
+     * [diskMutex], because [restoreSnapshot] is no longer synchronous with construction
+     * and its merge would otherwise put them back: sharing the lock makes the FILE the
+     * arbiter, so read-first means this overwrites what it merged and wipe-first means
+     * it reads the empty snapshot left here and merges nothing. (A task the read merged
+     * in that window loses its `state` row but not its staged bytes; the wizard's orphan
+     * sweep is the backstop for staged files nothing claims.) Deletes are file IO and
+     * sign-out runs on the main dispatcher, so they go to [scope] too.
      */
     fun clearAll() {
         val dropped = _state.value.let { it.pending + it.failed }
         _state.value = State()
-        persist()
-        if (dropped.isEmpty()) return
-        // Deletes are file IO and sign-out runs on the main dispatcher.
         scope.launch {
+            diskMutex.withLock {
+                _state.value = State()
+                writeSnapshot()
+            }
             dropped.forEach { task ->
                 runCatching { task.stagedFile().delete() }
                     .onFailure { Timber.w(it, "Staged upload file delete failed: %s", task.id) }
@@ -201,43 +285,58 @@ class UploadQueue @Inject constructor(
         }
     }
 
-    private fun pump() {
-        scope.launch {
-            mutex.withLock {
-                if (_state.value.isRunning) return@withLock
-                _state.update { it.copy(isRunning = true) }
-                persist()
-                try {
-                    while (true) {
-                        val next = _state.value.pending.firstOrNull() ?: break
-                        // Crash-loop protection: bump attempts BEFORE execute so a
-                        // hard crash doesn't infinite-retry the same poison asset.
-                        val marked = next.withAttempt(next.attempts + 1)
-                        _state.update {
-                            it.copy(pending = listOf(marked) + it.pending.drop(1))
-                        }
-                        persist()
-                        try {
-                            execute(marked)
-                            _state.update { uploadSucceeded(it, marked.id) }
-                            persist()
-                        } catch (t: Throwable) {
-                            Timber.w(t, "Upload task failed: %s", marked.id)
-                            _state.update { uploadFailed(it, marked, MAX_ATTEMPTS) }
-                            persist()
-                        }
-                    }
-                } finally {
-                    val drained = _state.value.pending.isEmpty()
+    /** Every drain waits for [restored] — see [resumeAfterLaunch] for why. */
+    private fun pump(): Job = scope.launch {
+        awaitRestore()
+        runDrain()
+    }
+
+    private suspend fun runDrain() {
+        mutex.withLock {
+            if (_state.value.isRunning) return@withLock
+            _state.update { it.copy(isRunning = true) }
+            persistNow()
+            try {
+                while (true) {
+                    val next = _state.value.pending.firstOrNull() ?: break
+                    // Offline, `execute` can only throw, and every throw costs the head
+                    // task one of its three attempts. Stop rather than spend them:
+                    // [scheduleWork]'s worker carries a CONNECTED constraint, so the OS
+                    // restarts this drain when there is a network to upload over. Without
+                    // this the in-process pump `enqueue` fires is ungated and burns the
+                    // budget before the worker's constraint has said a word.
+                    if (!isOnline()) break
+                    // Crash-loop protection: bump attempts BEFORE execute so a
+                    // hard crash doesn't infinite-retry the same poison asset.
+                    val marked = next.withAttempt(next.attempts + 1)
                     _state.update {
-                        it.copy(
-                            isRunning = false,
-                            batchTotal = if (drained) 0 else it.batchTotal,
-                            batchCompleted = if (drained) 0 else it.batchCompleted,
-                        )
+                        it.copy(pending = listOf(marked) + it.pending.drop(1))
                     }
-                    persist()
+                    persistNow()
+                    try {
+                        execute(marked)
+                        _state.update { uploadSucceeded(it, marked.id) }
+                        persistNow()
+                    } catch (t: Throwable) {
+                        Timber.w(t, "Upload task failed: %s", marked.id)
+                        _state.update { uploadFailed(it, marked, MAX_ATTEMPTS) }
+                        persistNow()
+                        // The gap before the next attempt of anything. See
+                        // [retryDelayMillis] for why it can't be conditioned on the
+                        // requeued task being back at the HEAD.
+                        delay(retryDelayMillis(_state.value, marked))
+                    }
                 }
+            } finally {
+                val drained = _state.value.pending.isEmpty()
+                _state.update {
+                    it.copy(
+                        isRunning = false,
+                        batchTotal = if (drained) 0 else it.batchTotal,
+                        batchCompleted = if (drained) 0 else it.batchCompleted,
+                    )
+                }
+                persistNow()
             }
         }
     }
@@ -249,6 +348,22 @@ class UploadQueue @Inject constructor(
             is Task.AudioSample -> filePath
         },
     )
+
+    /**
+     * Whether an upload has any chance of landing.
+     *
+     * Fail-OPEN — no manager, or a read that throws, and we try anyway: the worst case
+     * there is the behaviour we already had, whereas a false "offline" would stall the
+     * queue for the life of the install. A null `activeNetwork` IS the platform
+     * answering, so that one is believed.
+     */
+    private fun isOnline(): Boolean = runCatching {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+            ?: return@runCatching true
+        val network = cm.activeNetwork ?: return@runCatching false
+        cm.getNetworkCapabilities(network)
+            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }.getOrDefault(true)
 
     private suspend fun execute(task: Task) {
         val file = task.stagedFile()
@@ -264,25 +379,56 @@ class UploadQueue @Inject constructor(
         }
     }
 
-    private fun restoreSnapshot() {
-        val snap = runCatching {
-            if (!snapshotFile.exists()) return
-            json.decodeFromString<PersistedSnapshot>(snapshotFile.readText())
-        }.getOrNull() ?: return
-        val pending = snap.pending.mapNotNull { it.toTask() }
-            .filter { it.attempts < MAX_ATTEMPTS }
-        val burned = snap.pending.mapNotNull { it.toTask() }
-            .filter { it.attempts >= MAX_ATTEMPTS }
-        val failed = snap.failed.mapNotNull { it.toTask() } + burned
-        _state.value = State(
-            pending = pending,
-            failed = failed,
-            batchTotal = pending.size,
-            batchCompleted = 0,
-        )
+    /** Read and apply as one [diskMutex] section — see [clearAll] for what that settles. */
+    private suspend fun restoreSnapshot() {
+        diskMutex.withLock {
+            val snap = readSnapshot() ?: return@withLock
+            _state.update { restoredInto(it, snap, MAX_ATTEMPTS) }
+        }
     }
 
+    /**
+     * The bytes back. Caller holds [diskMutex]. Null when nothing is staged or the file
+     * won't parse — a corrupt snapshot must leave a usable queue, not a dead app.
+     */
+    private fun readSnapshot(): PersistedSnapshot? = runCatching {
+        if (snapshotFile.exists()) {
+            json.decodeFromString<PersistedSnapshot>(snapshotFile.readText())
+        } else {
+            null
+        }
+    }.getOrNull()
+
+    /**
+     * Queue a snapshot write on the IO scope — never on the caller's thread.
+     *
+     * [enqueue] and [retryFailed] are both reached from `viewModelScope`, i.e. the main
+     * dispatcher, and each write is a full serialize plus a file write: the wizard's
+     * publish step enqueues a cover and three samples in one loop, so this used to be
+     * four blocking writes back to back during the "Going live" animation.
+     */
     private fun persist() {
+        scope.launch { persistNow() }
+    }
+
+    /**
+     * The write itself. Each one re-reads the live state under [diskMutex], so two
+     * writes can never interleave and a late one can never restore a state the queue
+     * has already left — whichever runs last writes the truth, which is what makes
+     * the fire-and-forget [persist] safe.
+     */
+    private suspend fun persistNow() {
+        // Never write before the read. A snapshot written pre-restore holds only what
+        // this process has enqueued since launch, so [restoreSnapshot] would read it
+        // back and merge those same tasks in a second time — and if the write landed
+        // first it would have already dropped the uploads a process kill stranded,
+        // which is the one job the snapshot has.
+        awaitRestore()
+        diskMutex.withLock { writeSnapshot() }
+    }
+
+    /** The bytes. Caller holds [diskMutex]. */
+    private fun writeSnapshot() {
         val snap = PersistedSnapshot(
             pending = _state.value.pending.map { it.toPersisted() },
             failed = _state.value.failed.map { it.toPersisted() },
@@ -293,7 +439,16 @@ class UploadQueue @Inject constructor(
     }
 
     private fun scheduleWork() {
-        val req = OneTimeWorkRequestBuilder<UploadDrainWorker>().build()
+        val req = OneTimeWorkRequestBuilder<UploadDrainWorker>()
+            // Offline the drain can only fail, and every failure costs the head task
+            // one of its three attempts — so the worker waits for a network instead
+            // of burning the budget. WorkManager's default retry backoff
+            // (exponential, 30s) covers the `Result.retry()` the worker returns when
+            // tasks are still pending.
+            .setConstraints(
+                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
+            )
+            .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             UNIQUE_WORK,
             ExistingWorkPolicy.KEEP,
@@ -349,6 +504,72 @@ internal fun uploadFailed(
     }
 }
 
+/**
+ * How long the drain waits after [task]'s attempt failed, given the state that failure
+ * produced.
+ *
+ * The gap is owed to the FAILED task, not to the head of the queue. Conditioning it on
+ * "the requeued task came back to the head" only ever fires for a queue of one, and the
+ * queue the artist actually has is the wizard's Publish: a cover plus every pending
+ * sample, enqueued in one loop (`WizardViewModel.publish`). With two or more tasks the
+ * head after any failure is always a DIFFERENT task, so a head-keyed gap never fires
+ * and the drain rotates the whole batch through all [UploadQueue.MAX_ATTEMPTS] attempts
+ * back to back — the original no-backoff defect verbatim, just with more tasks. Any
+ * requeue therefore pauses the drain, whichever task it picks up next: the dominant
+ * failure is "no network", which is a property of the phone rather than of one asset.
+ *
+ * Zero when the task was NOT requeued — it burned its budget and moved to `failed`, or
+ * a sign-out wiped the queue under it. Nothing is owed a gap that isn't coming back.
+ */
+internal fun retryDelayMillis(state: UploadQueue.State, task: UploadQueue.Task): Long =
+    if (state.pending.any { it.id == task.id }) backoffMillisFor(task.attempts) else 0L
+
+/**
+ * The ladder itself: 2s, then 8s.
+ *
+ * With no gap all [UploadQueue.MAX_ATTEMPTS] attempts are spent within milliseconds of
+ * the first failure. The dominant failure here is "no network", which comes back in
+ * seconds: an artist who hit Publish during a cell→wifi handover would otherwise watch
+ * three instant failures burn the budget and permanently fail the cover, with the EPK's
+ * Retry banner the only way back.
+ */
+internal fun backoffMillisFor(attempts: Int): Long = when (attempts) {
+    1 -> 2_000L
+    2 -> 8_000L
+    else -> 30_000L
+}
+
+/**
+ * The queue state after the on-disk snapshot is read back into it.
+ *
+ * MERGES rather than replaces, because the read is no longer synchronous with the
+ * singleton's construction: a caller that enqueues in the same breath — the wizard's
+ * Publish, one frame after the EPK first injects the queue — can already have put a
+ * task in `pending`, and replacing would drop the cover it just staged. Restored tasks
+ * were queued first, so they keep the head of the line.
+ *
+ * A restored task whose attempt counter is already spent goes straight to `failed`
+ * rather than back into the runner: the counter is bumped BEFORE `execute`, so a
+ * snapshot holding `attempts == maxAttempts` is the fingerprint of an asset that hard-
+ * crashed the process three times, and the crash-loop guard is worth nothing if a
+ * restart hands it a fresh budget.
+ */
+internal fun restoredInto(
+    live: UploadQueue.State,
+    snapshot: PersistedSnapshot,
+    maxAttempts: Int,
+): UploadQueue.State {
+    val queued = snapshot.pending.mapNotNull { it.toTask() }
+    val pending = queued.filter { it.attempts < maxAttempts }
+    val failed = snapshot.failed.mapNotNull { it.toTask() } +
+        queued.filter { it.attempts >= maxAttempts }
+    return live.copy(
+        pending = pending + live.pending,
+        failed = failed + live.failed,
+        batchTotal = live.batchTotal + pending.size,
+    )
+}
+
 @Serializable
 data class PersistedSnapshot(
     val pending: List<PersistedTask> = emptyList(),
@@ -390,9 +611,14 @@ class UploadDrainWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val uploadQueue: UploadQueue,
 ) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        uploadQueue.resumeAfterLaunch()
-        // Give the in-process pump a moment; WorkManager's job is the kick, not the drain.
-        return Result.success()
-    }
+    /**
+     * Awaits the drain, which is the whole point: WorkManager keeps the process alive
+     * for as long as `doWork` is still running and not one millisecond longer, so the
+     * old body — kick the pump, return `success` on the next line — bought the drain
+     * nothing at all. `retry` when tasks are still pending hands the leftovers back to
+     * the OS with its network constraint and backoff, instead of reporting a drain
+     * that did not happen.
+     */
+    override suspend fun doWork(): Result =
+        if (uploadQueue.drain()) Result.success() else Result.retry()
 }

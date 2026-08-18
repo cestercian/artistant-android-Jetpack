@@ -393,7 +393,7 @@ small `PermissionsController` mirroring the iOS `PermissionsService`.
 | Serialization | `org.jetbrains.kotlinx:kotlinx-serialization-json` | 1.7+ | supabase-kt's native (de)serializer; replaces `Codable`. |
 | Coroutines | `kotlinx-coroutines-android` | 1.9+ | Async foundation. |
 | Images | `io.coil-kt.coil3:coil-compose` | 3.x | Compose-native `AsyncImage`; replaces SwiftUI `AsyncImage`; supports video-frame + GIF. |
-| Video/audio | `androidx.media3:{media3-exoplayer,media3-ui,media3-transformer}` | 1.4+ | Playback (AVPlayer/AVAudioPlayer) + trim/transcode (AVAssetExportSession). |
+| Video/audio | `androidx.media3:{media3-exoplayer,media3-common}` | 1.4+ | Playback (AVPlayer/AVAudioPlayer). `media3-transformer` (trim/transcode, AVAssetExportSession) is NOT linked — it comes back with the cover-video pick that needs it. |
 | Camera | `androidx.camera:camera-*` (CameraX) | 1.4+ | Modern camera; replaces `UIImagePickerController`. Or capture intents for the simple path. |
 | Media pick | `androidx.activity` Photo Picker (`PickVisualMedia`) | (activity 1.9+) | No-permission image/video pick; replaces PhotosUI. |
 | Background | `androidx.work:work-runtime-ktx` | 2.9+ | Upload queue; persistence + retry built in. |

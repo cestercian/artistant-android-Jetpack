@@ -185,13 +185,17 @@ private fun MonthMenu(monthName: String, onSelectMonth: (Int) -> Unit) {
     val dimens = AppTheme.dimens
     val space = dimens.space
     var open by remember { mutableStateOf(false) }
-    // `getDisplayNames` rather than a hardcoded list — the grid's own labels are
-    // already locale-formatted, and a menu of English months under a localised
-    // header is the kind of seam nobody notices until it ships.
-    val months = remember {
-        val symbols = java.text.DateFormatSymbols.getInstance(Locale.getDefault())
-        symbols.months.filter { it.isNotBlank() }
-    }
+    // [monthNames] — the same twelve strings the group headers below this grid are
+    // built from — and NOT `DateFormatSymbols.getInstance(Locale.getDefault())`.
+    // Nothing else on this surface is localised: [monthLabelFromEpoch] and
+    // [selectedDayLabel] both format with `Locale.US` and the weekday row is
+    // "M T W T F S S". So a default-locale menu was the one translated control on
+    // an English screen, and worse, the tick below marks the live month by
+    // comparing against the header's own name — on a hi-IN/bn-IN/ta-IN device
+    // (all shipping locales in this market) the header read "August" and the menu
+    // "अगस्त", nothing ever matched, and the open menu could no longer answer
+    // "where am I".
+    val months = monthNames
     Box {
         Row(
             modifier = Modifier
@@ -345,12 +349,23 @@ fun MonthDayGrid(
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val today = Calendar.getInstance()
-    val todayDay = if (today.get(Calendar.YEAR) == year && today.get(Calendar.MONTH) == month) {
-        today.get(Calendar.DAY_OF_MONTH)
-    } else {
-        null
+    // Both derivations below are pure functions of the displayed month, and this
+    // grid recomposes on every day tap ([selectedDay] is a parameter) — so
+    // unremembered, tapping a date re-read the wall clock and rebuilt all 42
+    // cells (three `Calendar`s and a 42-element list) just to move one ring.
+    // The clock read is keyed on the month too, which means a grid left on screen
+    // across midnight keeps its ring on yesterday until the month is stepped —
+    // cheaper and steadier than subscribing to a clock for one ring, and the
+    // dates themselves are unaffected either way.
+    val todayDay = remember(year, month) {
+        val today = Calendar.getInstance()
+        if (today.get(Calendar.YEAR) == year && today.get(Calendar.MONTH) == month) {
+            today.get(Calendar.DAY_OF_MONTH)
+        } else {
+            null
+        }
     }
+    val weeks = remember(year, month) { monthGridDays(year, month).chunked(7) }
     Column(
         modifier.padding(horizontal = space.lg),
         verticalArrangement = Arrangement.spacedBy(space.sm),
@@ -368,7 +383,7 @@ fun MonthDayGrid(
                 )
             }
         }
-        monthGridDays(year, month).chunked(7).forEach { week ->
+        weeks.forEach { week ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                 week.forEach { cell ->
                     DayTile(
@@ -467,7 +482,16 @@ private fun DayTile(
     }
 }
 
-private val monthNames = listOf(
+/**
+ * The twelve month names this whole calendar surface speaks: [MonthMenu]'s
+ * entries, the keys behind [monthsByToken], and — by position — what the menu's
+ * `onSelectMonth(index)` means.
+ *
+ * English on purpose, to agree with [monthLabelFromEpoch]'s `Locale.US` header;
+ * `internal` so a unit test can pin that agreement without a Compose runtime,
+ * the same trade [monthGridCells] makes for the fill arithmetic.
+ */
+internal val monthNames = listOf(
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
 )
@@ -563,33 +587,4 @@ fun dayOfMonthInMonth(dateLabel: String, year: Int, month: Int): Int? {
     val c = BookingDateFormat.parseLabel(dateLabel) ?: return null
     if (c.get(Calendar.YEAR) != year || c.get(Calendar.MONTH) != month) return null
     return c.get(Calendar.DAY_OF_MONTH)
-}
-
-@Composable
-fun BookingDayRow(
-    dateLabel: String,
-    timeLabel: String,
-    title: String,
-    subtitle: String,
-    statusLabel: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit = {},
-) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(colors.bg)
-            .padding(horizontal = space.lg, vertical = space.md)
-            .then(Modifier),
-    ) {
-        Text(dateLabel, style = AppTheme.type.caption, color = colors.ink3)
-        Spacer(Modifier.height(space.xs))
-        Text(title, style = AppTheme.type.headline, color = colors.ink)
-        Text("$timeLabel · $subtitle", style = AppTheme.type.footnote, color = colors.ink2)
-        Spacer(Modifier.height(space.xs))
-        Text(statusLabel, style = AppTheme.type.caption, color = colors.brand)
-    }
-    HRule(modifier = Modifier.padding(horizontal = space.lg))
 }

@@ -126,4 +126,83 @@ class UploadQueuePersistenceTest {
         assertTrue(restored.pending.isEmpty())
         assertTrue(restored.failed.isEmpty())
     }
+
+    /**
+     * The read MERGES into whatever the queue already holds. It used to run
+     * synchronously in the constructor — main-thread file IO during the first frame —
+     * and moving it to the IO scope means a caller can have enqueued by the time it
+     * lands: the wizard's Publish is a frame or two after the EPK first injects the
+     * queue. Replacing the state, as a constructor-time read could afford to, would
+     * drop the cover that caller just staged.
+     */
+    @Test
+    fun aRestoreThatLandsAfterAnEnqueueKeepsBoth() {
+        val live = UploadQueue.State(
+            pending = listOf(
+                UploadQueue.Task.CoverPhoto(id = "live", artistId = "a1", filePath = "/tmp/live.jpg"),
+            ),
+            batchTotal = 1,
+        )
+        val snapshot = PersistedSnapshot(
+            pending = listOf(
+                PersistedTask(id = "disk", kind = "cover_photo", artistId = "a1", filePath = "/tmp/disk.jpg"),
+            ),
+        )
+
+        val merged = restoredInto(live, snapshot, UploadQueue.MAX_ATTEMPTS)
+
+        // Restored ahead of live: it was queued in an earlier session.
+        assertEquals(listOf("disk", "live"), merged.pending.map { it.id })
+        // And the progress denominator counts both, or the batch reads as over early.
+        assertEquals(2, merged.batchTotal)
+    }
+
+    @Test
+    fun aRestoredTaskWithASpentBudgetLandsInFailedRatherThanTheRunner() {
+        val snapshot = PersistedSnapshot(
+            pending = listOf(
+                PersistedTask(
+                    id = "poison",
+                    kind = "cover_photo",
+                    artistId = "a1",
+                    filePath = "/tmp/poison.jpg",
+                    attempts = 3,
+                ),
+                PersistedTask(
+                    id = "live",
+                    kind = "cover_photo",
+                    artistId = "a1",
+                    filePath = "/tmp/live.jpg",
+                    attempts = 1,
+                ),
+            ),
+            failed = listOf(
+                PersistedTask(
+                    id = "old",
+                    kind = "cover_photo",
+                    artistId = "a1",
+                    filePath = "/tmp/old.jpg",
+                    attempts = 3,
+                ),
+            ),
+        )
+
+        val restored = restoredInto(UploadQueue.State(), snapshot, UploadQueue.MAX_ATTEMPTS)
+
+        assertEquals(listOf("live"), restored.pending.map { it.id })
+        assertEquals(listOf("old", "poison"), restored.failed.map { it.id })
+        assertEquals(1, restored.batchTotal)
+    }
+
+    @Test
+    fun anEmptySnapshotLeavesALiveQueueUntouched() {
+        val live = UploadQueue.State(
+            pending = listOf(
+                UploadQueue.Task.CoverPhoto(id = "live", artistId = "a1", filePath = "/tmp/live.jpg"),
+            ),
+            batchTotal = 1,
+        )
+
+        assertEquals(live, restoredInto(live, PersistedSnapshot(), UploadQueue.MAX_ATTEMPTS))
+    }
 }

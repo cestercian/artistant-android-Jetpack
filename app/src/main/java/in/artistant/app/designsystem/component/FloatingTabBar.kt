@@ -2,7 +2,6 @@ package `in`.artistant.app.designsystem.component
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -46,9 +46,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.max
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.designsystem.theme.MotionSpecs
 import `in`.artistant.app.designsystem.theme.motion
-import `in`.artistant.app.designsystem.theme.reduceMotion
+import `in`.artistant.app.designsystem.theme.motionTween
 import kotlin.math.roundToInt
 
 /**
@@ -189,16 +188,17 @@ private fun BoxScope.SelectionCapsule(
 ) {
     val colors = AppTheme.colors
     val motion = AppTheme.motion
-    val reduceMotion = AppTheme.reduceMotion
-    val spec = tween<Float>(
-        durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
-        easing = motion.emphasized,
-    )
+    val spec = motionTween<Float>(motion.indicator, motion.emphasized)
 
     // Hold the last in-pill position so leaving for Search fades the capsule out
     // where it stood; without this it would animate to index 0 on the way out
     // and back from index 0 on the way in — motion describing a journey the user
     // never took.
+    //
+    // The write below is the conditional form of `rememberUpdatedState`, and it
+    // has to stay ABOVE its only reader. Put a read of `lastIndex` before it and
+    // these two lines become a backwards write — a composition that invalidates
+    // itself every pass.
     var lastIndex by remember { mutableIntStateOf(selectedIndex.coerceAtLeast(0)) }
     if (selectedIndex >= 0) lastIndex = selectedIndex
 
@@ -241,14 +241,10 @@ private fun TabCell(
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
     val motion = AppTheme.motion
-    val reduceMotion = AppTheme.reduceMotion
     val interaction = remember { MutableInteractionSource() }
     val tint by animateColorAsState(
         targetValue = if (selected) colors.brand else colors.ink,
-        animationSpec = tween(
-            durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
-            easing = motion.standard,
-        ),
+        animationSpec = motionTween<Color>(motion.indicator, motion.standard),
         label = "tabTint",
     )
     Box(
@@ -295,17 +291,13 @@ private fun TrailingCircle(action: FloatingTabAction) {
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
     val motion = AppTheme.motion
-    val reduceMotion = AppTheme.reduceMotion
     val interaction = remember { MutableInteractionSource() }
     // No travelling capsule out here — the circle stands alone, so selection is
     // carried by the glyph tint. Cross-faded on the same curve and duration the
     // pill uses, so the two halves of the bar stay in step.
     val tint by animateColorAsState(
         targetValue = if (action.selected) colors.brand else colors.ink,
-        animationSpec = tween(
-            durationMillis = MotionSpecs.durationMillis(motion.indicator, reduceMotion),
-            easing = motion.standard,
-        ),
+        animationSpec = motionTween<Color>(motion.indicator, motion.standard),
         label = "searchTint",
     )
     Box(

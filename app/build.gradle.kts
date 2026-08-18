@@ -160,8 +160,8 @@ dependencies {
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
 
-    // Cover video trim (Media3 Transformer) + audio-sample playback (ExoPlayer)
-    implementation(libs.media3.transformer)
+    // Audio-sample playback (ExoPlayer). No media3-transformer: v1 has no video
+    // pick anywhere, so the trimmer it was here for was code nothing could call.
     implementation(libs.media3.common)
     implementation(libs.media3.exoplayer)
 

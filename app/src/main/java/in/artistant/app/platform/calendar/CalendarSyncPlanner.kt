@@ -1,7 +1,10 @@
 package `in`.artistant.app.platform.calendar
 
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.resolvedEndEpochMs
+import `in`.artistant.app.data.model.resolvedStartEpochMs
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -11,6 +14,9 @@ import java.util.TimeZone
  * `fingerprint`. No Android CalendarContract here so unit tests stay offline.
  */
 object CalendarSyncPlanner {
+
+    /** Placeholder gig length for a row with no `end_datetime` — same 2h `create()` writes. */
+    private const val DEFAULT_GIG_MS = 2L * 60 * 60 * 1000
 
     data class SyncedEvent(val eventId: String, val fingerprint: String)
 
@@ -75,11 +81,25 @@ object CalendarSyncPlanner {
             b.status.dbValue,
         ).joinToString("|")
 
-    fun resolvedStartEpochMs(b: Booking): Long? =
-        parseIso(b.startDatetimeIso) ?: parseDateTime(b.date, b.time)
+    /**
+     * The gig's start clock — the model's [Booking.resolvedStartEpochMs], never a
+     * second opinion about it.
+     *
+     * This used to be its own parser, and it was strictly weaker than the model's in
+     * three ways: one date pattern (`"EEE, MMM d, yyyy"`) against
+     * [BookingDateFormat]'s three, lenient parsing where the model is strict, and no
+     * start-of-day fallback for a row that carries a date label but no usable time.
+     * So a confirmed gig whose `date_label` reads "Jul 11, 2026" — a label every
+     * list and detail screen in the app renders fine — resolved to null here and was
+     * silently dropped from the calendar mirror, from [busyDays] and from every
+     * [clashesOnDay] warning. Leniency cut the other way too: "Mon, Feb 30, 2026"
+     * rolled over to Mar 2 and would have written a real event on the wrong day.
+     */
+    fun resolvedStartEpochMs(b: Booking): Long? = b.resolvedStartEpochMs()
 
+    /** End clock — `end_datetime` when the row has one, else [DEFAULT_GIG_MS] after the start. */
     fun resolvedEndEpochMs(b: Booking): Long? =
-        parseIso(b.endDatetimeIso) ?: resolvedStartEpochMs(b)?.plus(2 * 60 * 60 * 1000L)
+        b.resolvedEndEpochMs() ?: resolvedStartEpochMs(b)?.plus(DEFAULT_GIG_MS)
 
     fun eventTitle(b: Booking): String {
         val who = b.clientFullName?.takeIf { it.isNotBlank() } ?: b.venue.ifBlank { "Gig" }
@@ -106,7 +126,7 @@ object CalendarSyncPlanner {
             when (b.status) {
                 BookingStatus.Confirmed, BookingStatus.Completed, BookingStatus.Disputed -> {
                     val start = resolvedStartEpochMs(b) ?: return@mapNotNull null
-                    val end = resolvedEndEpochMs(b) ?: (start + 2 * 60 * 60 * 1000L)
+                    val end = resolvedEndEpochMs(b) ?: (start + DEFAULT_GIG_MS)
                     if (start < dayEndMs && end > dayStartMs) {
                         Clash(b.id.lowercase(), eventTitle(b), start, end)
                     } else null
@@ -128,32 +148,6 @@ object CalendarSyncPlanner {
                 else -> null
             }
         }.toSet()
-    }
-
-    private fun parseIso(raw: String?): Long? {
-        if (raw.isNullOrBlank()) return null
-        val formats = listOf(
-            "yyyy-MM-dd'T'HH:mm:ssXXX",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss",
-        )
-        for (pattern in formats) {
-            runCatching {
-                val f = SimpleDateFormat(pattern, Locale.US)
-                f.timeZone = TimeZone.getTimeZone("UTC")
-                return f.parse(raw)?.time
-            }
-        }
-        return null
-    }
-
-    private fun parseDateTime(date: String, time: String): Long? {
-        if (date.isBlank() || time.isBlank()) return null
-        // Booking.dateFormat = "EEE, MMM d, yyyy" + wall-clock time like "7:30 PM"
-        val combined = "$date $time"
-        val f = SimpleDateFormat("EEE, MMM d, yyyy h:mm a", Locale.US)
-        f.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-        return runCatching { f.parse(combined)?.time }.getOrNull()
     }
 
     private fun isoUtc(epochMs: Long): String {

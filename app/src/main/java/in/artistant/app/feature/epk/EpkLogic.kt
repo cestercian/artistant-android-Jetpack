@@ -1,8 +1,8 @@
 package `in`.artistant.app.feature.epk
 
-import `in`.artistant.app.data.model.ArtistGradient
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.repository.PackageDraft
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.media.UploadQueue
 import kotlinx.coroutines.CancellationException

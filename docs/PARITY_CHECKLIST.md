@@ -175,7 +175,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Services/CalendarSyncService.swift` | `platform/calendar/CalendarSyncService.kt` | done | CalendarContract mirror + planner |
 | `Services/PermissionsService.swift` | `NotificationPermission` etc. | partial | Notif permission UI M1; calendar runtime grant |
 | `Services/UploadQueue.swift` | `platform/media/UploadQueue.kt` | done | JSON snapshot + WorkManager drain + resumeAfterLaunch |
-| `Services/VideoTrimmer.swift` | `platform/media/VideoTrimmer.kt` | done | Media3 Transformer ≤10s + copy fallback |
+| `Services/VideoTrimmer.swift` | — | deferred | Was ported, deleted Aug 2026: no screen picks video in v1, so it had no caller (and no test). Re-add with the cover-video step, together with `media3-transformer` |
 | `Services/Payments/*` | `platform/billing/PlayBillingService.kt` | done | Wired; inert until subscriptionsEnabled |
 | `Services/Observability/*` | `Analytics` / `Crash` | partial | Dark-until-key stubs M0 |
 

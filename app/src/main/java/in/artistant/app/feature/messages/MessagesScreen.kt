@@ -696,7 +696,6 @@ internal fun toneColor(tone: PillTone): Color {
         // Both brand tones resolve to the same dot: the solid/washed split is
         // about the capsule's fill, and a bare dot has no fill to differ in.
         PillTone.Brand, PillTone.BrandSolid -> colors.brand
-        PillTone.Accent -> colors.accent
         PillTone.Good -> colors.good
         PillTone.Warm -> colors.warm
         PillTone.Hot -> colors.hot
