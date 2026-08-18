@@ -13,6 +13,7 @@ import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.designsystem.theme.AppColors
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.AppPreferences
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,8 +37,10 @@ import javax.inject.Singleton
 
 /**
  * CalendarContract mirror of confirmed gigs — Android port of iOS CalendarSyncService.
- * Persist toggle + bookingId→event map in DataStore; write map only after a successful
- * ContentResolver batch. Owner-user gate prevents cross-account PII leaks.
+ * Persist toggle + bookingId→event map in the CALENDAR DataStore (the one sign-out
+ * keeps — the map is the only handle on events living outside the app); write the map
+ * only after a successful ContentResolver batch. Owner-user gate on the mirror prevents
+ * cross-account PII leaks. Read surfaces answer from [CalendarSyncCache], not from here.
  */
 @Singleton
 class CalendarSyncService @Inject constructor(
@@ -73,30 +76,35 @@ class CalendarSyncService @Inject constructor(
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
+    /**
+     * Toggle + calendarId + bookingId→eventId map. Written from the reconcile's
+     * IO batch and read from Main, so it is `@Volatile`; every mutation happens
+     * under [mutex] so a toggle landing inside a running reconcile can't have
+     * its wipe overwritten by the batch that was already in flight.
+     */
+    @Volatile
     private var persisted = PersistedState()
-    private val lastSeen = mutableMapOf<String, Booking>()
+    private val cache = CalendarSyncCache()
     private var reconcileJob: Job? = null
+
+    /**
+     * Completes once [load] has put the on-disk state into [persisted]. Every
+     * mutator awaits it: until the DataStore read lands `persisted` is the
+     * default (empty map), and saving THAT over the stored blob would strand
+     * every mirrored event — the map is the only handle we have on them.
+     */
+    private val loaded = CompletableDeferred<Unit>()
 
     init {
         scope.launch { load() }
     }
 
     /** Busy day keys (yyyy-MM-dd IST) from ingested confirmed bookings. */
-    fun busyDays(): Set<String> = CalendarSyncPlanner.busyDays(lastSeen.values)
+    fun busyDays(): Set<String> = cache.busyDays()
 
     /** Clashes on the local calendar day containing [epochMs]. */
-    fun clashes(onDayOfEpochMs: Long): List<CalendarSyncPlanner.Clash> {
-        val cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata")).apply {
-            timeInMillis = onDayOfEpochMs
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }
-        val start = cal.timeInMillis
-        cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
-        return CalendarSyncPlanner.clashesOnDay(lastSeen.values, start, cal.timeInMillis)
-    }
+    fun clashes(onDayOfEpochMs: Long): List<CalendarSyncPlanner.Clash> =
+        cache.clashes(onDayOfEpochMs)
 
     suspend fun listWritableCalendars(): List<CalendarOption> = withContext(Dispatchers.IO) {
         if (!hasWritePermission()) return@withContext emptyList()
@@ -122,17 +130,42 @@ class CalendarSyncService @Inject constructor(
 
     suspend fun selectCalendar(id: Long): Boolean {
         if (!hasWritePermission()) return false
-        persisted = persisted.copy(calendarId = id, enabled = true, ownerUserId = session.currentUserId)
-        save()
+        loaded.await()
+        mutex.withLock {
+            persisted = persisted.copy(
+                calendarId = id,
+                enabled = true,
+                ownerUserId = session.currentUserId,
+            )
+            save()
+        }
         refreshUi()
         reconcileNow()
         return true
     }
 
     suspend fun load() {
-        val raw = prefs.getString(PREF_KEY).first()
+        // The blob lives in the calendar store, which sign-out deliberately
+        // KEEPS (AppPreferences.calendarStore): the mirrored gigs are the device
+        // owner's own calendar events and this map is the only handle to retract
+        // them later, so wiping it with the rest of the account state strands
+        // them forever. Only delete-account clears it (wipeForAccountDelete).
+        var raw = runCatching { prefs.calendarState.first() }.getOrNull()
+        // One-time lift: earlier builds wrote the blob into the main store,
+        // where the next sign-out's wipeAll() would take it with everything else.
+        var migrated = false
+        if (raw == null) {
+            raw = runCatching { prefs.getString(LEGACY_PREF_KEY).first() }.getOrNull()
+            migrated = raw != null
+        }
         persisted = raw?.let { runCatching { json.decodeFromString<PersistedState>(it) }.getOrNull() }
             ?: PersistedState()
+        // runCatching, like every read above it: a throw on the way to
+        // [loaded] would leave it pending and hang every mutator forever.
+        if (migrated) runCatching { save() }
+        // Only now may a toggle run: before this, `persisted` is the default and
+        // saving it would overwrite the stored map with an empty one.
+        loaded.complete(Unit)
         refreshUi()
     }
 
@@ -144,16 +177,28 @@ class CalendarSyncService @Inject constructor(
 
     /** Called after every bookings list/create/accept/cancel. */
     fun ingest(bookings: List<Booking>) {
-        val owner = persisted.ownerUserId
         val me = session.currentUserId
-        if (owner != me) return
-        for (b in bookings) lastSeen[b.id.lowercase()] = b
+        // Cache FIRST, gate second. The clash + busy-day reads answer from the
+        // cache and have nothing to do with writing to CalendarContract, so
+        // gating it on the sync owner — which stays null until someone turns the
+        // mirror on, i.e. for every user by default — meant the double-booking
+        // warning on a gig request was always empty. Only the MIRROR carries the
+        // owner check (iOS plan-016: a second account's gigs must never reach the
+        // first account's calendar).
+        cache.ingest(me, bookings)
+        if (persisted.ownerUserId != me) return
         if (!persisted.enabled || !hasWritePermission()) return
         scheduleReconcile()
     }
 
+    /**
+     * Sign-out / account switch. Drops the in-memory bookings and the pending
+     * debounce; deliberately does NOT touch [persisted] — the mirrored events
+     * outlive the session and that map is the only way to retract them (the
+     * owner gate in [ingest] is what keeps the next account out of them).
+     */
     fun clearSessionState() {
-        lastSeen.clear()
+        cache.clear()
         reconcileJob?.cancel()
         reconcileJob = null
     }
@@ -163,16 +208,26 @@ class CalendarSyncService @Inject constructor(
      * request it / point at Settings. Disabling removes mirrored events then clears map.
      */
     suspend fun setEnabled(on: Boolean): Boolean {
+        loaded.await()
         if (!on) {
-            withContext(Dispatchers.IO) { removeAllSyncedEvents() }
-            persisted = persisted.copy(enabled = false)
-            save()
+            // Under the same lock as the reconcile: a toggle-off landing inside a
+            // running batch used to delete the events and empty the map, then have
+            // the resuming batch write its staged map — full of ids that no longer
+            // exist — back over it. Re-enabling then planned nothing at all for
+            // those gigs, because plan() only Creates when the map has no entry.
+            mutex.withLock {
+                withContext(Dispatchers.IO) { removeAllSyncedEvents() }
+                persisted = persisted.copy(enabled = false)
+                save()
+            }
             refreshUi()
             return true
         }
         if (!hasWritePermission()) return false
-        persisted = persisted.copy(enabled = true, ownerUserId = session.currentUserId)
-        save()
+        mutex.withLock {
+            persisted = persisted.copy(enabled = true, ownerUserId = session.currentUserId)
+            save()
+        }
         refreshUi()
         reconcileNow()
         return true
@@ -180,10 +235,15 @@ class CalendarSyncService @Inject constructor(
 
     /** Wipe mirrored events + persisted map — call before delete-account wipeAll. */
     suspend fun wipeForAccountDelete() {
-        withContext(Dispatchers.IO) { removeAllSyncedEvents() }
-        persisted = PersistedState()
-        save()
-        lastSeen.clear()
+        loaded.await()
+        mutex.withLock {
+            withContext(Dispatchers.IO) { removeAllSyncedEvents() }
+            persisted = PersistedState()
+            // The calendar store survives sign-out on purpose, so delete-account
+            // is the one path that has to clear it explicitly.
+            prefs.wipeCalendar()
+        }
+        cache.clear()
         refreshUi()
     }
 
@@ -195,48 +255,59 @@ class CalendarSyncService @Inject constructor(
         }
     }
 
-    suspend fun reconcileNow() = mutex.withLock {
-        if (!persisted.enabled || !hasWritePermission()) return
-        val calendarId = resolveOrCreateCalendarId() ?: return
+    suspend fun reconcileNow() {
+        loaded.await()
+        mutex.withLock { reconcileLocked() }
+    }
+
+    /**
+     * The whole body runs on IO: `resolveOrCreateCalendarId` alone is up to four
+     * ContentResolver round trips plus a calendar INSERT, and every caller
+     * (the debounce on [scope], the Profile toggle on viewModelScope) is Main.
+     */
+    private suspend fun reconcileLocked(): Unit = withContext(Dispatchers.IO) {
+        if (!persisted.enabled || !hasWritePermission()) return@withContext
+        val calendarId = resolveOrCreateCalendarId() ?: return@withContext
         if (persisted.calendarId != calendarId) {
             persisted = persisted.copy(calendarId = calendarId)
         }
+        // One stable read of the desired state: Main keeps ingesting while this
+        // batch runs, and an entry that vanished mid-loop would silently skip.
+        val desired = cache.snapshot()
         val map = persisted.map.mapValues {
             CalendarSyncPlanner.SyncedEvent(it.value.eventId, it.value.fingerprint)
         }
-        val actions = CalendarSyncPlanner.plan(lastSeen.values.toList(), map)
+        val actions = CalendarSyncPlanner.plan(desired.values.toList(), map)
         if (actions.isEmpty()) {
             save()
             refreshUi()
-            return
+            return@withContext
         }
         val staged = persisted.map.toMutableMap()
         try {
-            withContext(Dispatchers.IO) {
-                for (action in actions) {
-                    when (action) {
-                        is CalendarSyncPlanner.Action.Create -> {
-                            val booking = lastSeen[action.bookingId] ?: continue
-                            val eventId = insertEvent(calendarId, booking) ?: continue
-                            staged[action.bookingId] = SyncedEntry(
-                                eventId = eventId.toString(),
-                                fingerprint = CalendarSyncPlanner.fingerprint(booking),
-                            )
-                        }
-                        is CalendarSyncPlanner.Action.Update -> {
-                            val booking = lastSeen[action.bookingId] ?: continue
-                            val eventId = action.eventId.toLongOrNull() ?: continue
-                            updateEvent(eventId, calendarId, booking)
-                            staged[action.bookingId] = SyncedEntry(
-                                eventId = action.eventId,
-                                fingerprint = CalendarSyncPlanner.fingerprint(booking),
-                            )
-                        }
-                        is CalendarSyncPlanner.Action.Delete -> {
-                            val eventId = action.eventId.toLongOrNull() ?: continue
-                            deleteEvent(eventId)
-                            staged.remove(action.bookingId)
-                        }
+            for (action in actions) {
+                when (action) {
+                    is CalendarSyncPlanner.Action.Create -> {
+                        val booking = desired[action.bookingId] ?: continue
+                        val eventId = insertEvent(calendarId, booking) ?: continue
+                        staged[action.bookingId] = SyncedEntry(
+                            eventId = eventId.toString(),
+                            fingerprint = CalendarSyncPlanner.fingerprint(booking),
+                        )
+                    }
+                    is CalendarSyncPlanner.Action.Update -> {
+                        val booking = desired[action.bookingId] ?: continue
+                        val eventId = action.eventId.toLongOrNull() ?: continue
+                        updateEvent(eventId, calendarId, booking)
+                        staged[action.bookingId] = SyncedEntry(
+                            eventId = action.eventId,
+                            fingerprint = CalendarSyncPlanner.fingerprint(booking),
+                        )
+                    }
+                    is CalendarSyncPlanner.Action.Delete -> {
+                        val eventId = action.eventId.toLongOrNull() ?: continue
+                        deleteEvent(eventId)
+                        staged.remove(action.bookingId)
                     }
                 }
             }
@@ -249,7 +320,7 @@ class CalendarSyncService @Inject constructor(
     }
 
     private suspend fun save() {
-        prefs.setString(PREF_KEY, json.encodeToString(persisted))
+        prefs.setCalendarState(json.encodeToString(persisted))
     }
 
     private fun refreshUi() {
@@ -430,7 +501,12 @@ class CalendarSyncService @Inject constructor(
     }
 
     companion object {
-        const val PREF_KEY = "calendarSync"
+        /**
+         * Where the blob used to live: a key in the MAIN store, which sign-out
+         * wipes. Read once by [load] to lift a pre-existing map into the calendar
+         * store; nothing writes it any more.
+         */
+        const val LEGACY_PREF_KEY = "calendarSync"
         private const val CALENDAR_NAME = "Artistant"
         private const val ACCOUNT_NAME = "artistant@local"
         private val TZ: String = TimeZone.getTimeZone("Asia/Kolkata").id

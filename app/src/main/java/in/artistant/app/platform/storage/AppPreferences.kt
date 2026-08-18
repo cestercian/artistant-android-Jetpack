@@ -26,7 +26,8 @@ private val Context.calendarStore by preferencesDataStore(name = "artistant.cale
 /**
  * Thin DataStore (Preferences) wrapper — replaces iOS UserDefaults/Persistence.
  * Holds the role plus a generic string get/set for small snapshots. `wipeAll()`
- * clears everything on sign-out / delete-account.
+ * clears the main store on sign-out / delete-account; the calendar store is
+ * separate and only `wipeCalendar()` clears it.
  */
 interface CommunityPledgeStore {
     /** ACCT-05 — one-time community pledge before role pick. */
