@@ -14,13 +14,20 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -219,6 +226,7 @@ fun EpkScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EpkEditor(
     state: EpkUiState,
@@ -231,7 +239,16 @@ private fun EpkEditor(
     val space = dimens.space
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier
+            .fillMaxSize()
+            // The window is edge-to-edge, so nothing resizes for the keyboard on
+            // its own. This screen has more text fields than any other, and the
+            // rider and link ones sit six sections down — without the inset they
+            // take focus underneath the keyboard and the artist types blind.
+            //
+            // `exclude(navigationBars)` for the reason the chat composer does it:
+            // the tab scaffold has already paid that inset once.
+            .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
         contentPadding = PaddingValues(bottom = dimens.hero.scrollTailroom),
         verticalArrangement = Arrangement.spacedBy(space.xl),
     ) {
@@ -754,6 +771,9 @@ private fun PhotoCell(
             .clickable(onClick = onClick)
             .semantics {
                 contentDescription = if (isCover) "Cover photo" else "Gallery photo"
+                // The brand rim is the only thing saying which photo the action
+                // row underneath belongs to, and a rim does not read aloud.
+                this.selected = selected
             },
     ) {
         AsyncImage(
@@ -1713,10 +1733,14 @@ private fun ShareLinkSection(handle: String, modifier: Modifier = Modifier) {
                         style = AppTheme.type.monoMicro,
                         color = colors.brand,
                         modifier = Modifier
+                            // A 9sp word is a 30dp target; the label keeps its size
+                            // and the tap node grows to the floor around it.
+                            .heightIn(min = AppTheme.dimens.size.rowMin)
                             .clickable {
                                 clipboard.setText(AnnotatedString(url))
                                 copied = true
                             }
+                            .wrapContentHeight()
                             .padding(space.sm),
                     )
                 }

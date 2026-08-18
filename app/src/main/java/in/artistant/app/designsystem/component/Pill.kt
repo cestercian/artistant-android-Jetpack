@@ -7,7 +7,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.data.model.BookingStatus
@@ -35,9 +34,12 @@ fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.
         PillTone.BrandSolid -> colors.brand to colors.brandInk
         // Fixed violet accent — distinct from the role-reactive brand (iOS `.accent`).
         PillTone.Accent -> colors.accentSoft to colors.accentInk
-        PillTone.Good -> Color(0x1A5BE074) to colors.good
-        PillTone.Warm -> Color(0x1AFFB454) to colors.warm
-        PillTone.Hot -> Color(0x1AFF5A5F) to colors.hot
+        // The status trio has no `*Soft` token of its own, so the wash is derived
+        // from the status colour rather than hand-mixed — retune `good`/`warm`/
+        // `hot` and the fills follow.
+        PillTone.Good -> colors.good.copy(alpha = 0.10f) to colors.good
+        PillTone.Warm -> colors.warm.copy(alpha = 0.10f) to colors.warm
+        PillTone.Hot -> colors.hot.copy(alpha = 0.10f) to colors.hot
     }
     Text(
         text = text,

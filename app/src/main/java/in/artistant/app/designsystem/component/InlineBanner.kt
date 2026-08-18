@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,8 +139,19 @@ fun InlineBanner(
                 style = AppTheme.type.caption,
                 color = colors.brand,
                 modifier = Modifier
+                    // A caption line box plus `xs` padding is ~22dp — half the
+                    // floor, on the control that exists for "the refresh failed,
+                    // tap to retry". The label stays a caption and the tap node
+                    // around it grows to `controlMin`, the same trade the title
+                    // bar's avatar makes. `wrapContentSize` re-centres the label
+                    // inside the grown box so the word doesn't sit in a corner.
+                    .sizeIn(
+                        minWidth = AppTheme.dimens.size.controlMin,
+                        minHeight = AppTheme.dimens.size.controlMin,
+                    )
                     .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                    .clickable(onClick = onAction)
+                    .clickable(role = Role.Button, onClick = onAction)
+                    .wrapContentSize()
                     .padding(horizontal = space.sm, vertical = space.xs),
             )
             onClick != null -> Icon(

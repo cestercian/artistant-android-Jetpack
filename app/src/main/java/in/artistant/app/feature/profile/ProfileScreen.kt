@@ -7,6 +7,7 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,13 +35,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -171,7 +172,9 @@ fun ProfileScreen(
                                 AppRole.Artist -> "ARTIST"
                             }
                             val cityLabel = state.profile?.city?.trim()?.uppercase().orEmpty()
-                            val year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                            // The account's own vintage, not today's year — see
+                            // ProfileUiState.vintageYear.
+                            val year = state.vintageYear
                             Text(
                                 if (cityLabel.isBlank()) "$roleLabel · $year" else "$roleLabel · $cityLabel · $year",
                                 style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
@@ -379,7 +382,11 @@ fun ProfileScreen(
                     enabled = !state.isDeleting,
                 ) {
                     if (state.isDeleting) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier.size(size.iconMd),
+                            strokeWidth = size.stroke,
+                            color = colors.brand,
+                        )
                     } else {
                         Text("Delete forever", color = colors.hot)
                     }
@@ -398,11 +405,18 @@ fun ProfileScreen(
             Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter,
         ) {
+            // No indication: this is a scrim, not a button, and Material's default
+            // ripple on a full-screen tap surface expands across the whole window.
+            val scrimInteraction = remember { MutableInteractionSource() }
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(colors.bg.copy(alpha = 0.72f))
-                    .clickable(onClick = viewModel::dismissHelp),
+                    .clickable(
+                        interactionSource = scrimInteraction,
+                        indication = null,
+                        onClick = viewModel::dismissHelp,
+                    ),
             )
             HelpFeedbackSheet(
                 sending = state.feedbackSending,

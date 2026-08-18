@@ -72,21 +72,29 @@ fun SignupProgressDots(bar: ProgressBar?, modifier: Modifier = Modifier) {
 @Composable
 fun SignupBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     Box(
+        // The 36dp disc sits inside a `controlMin` tap target rather than being grown to it —
+        // the touch floor is a hit area, not a size. Sizing the disc itself to 48dp would make
+        // the back affordance the heaviest thing on a signup step.
         modifier = modifier
-            .size(36.dp)
+            .size(dimens.size.controlMin)
             .clip(CircleShape)
-            .background(colors.bgCard)
             .clickable(onClick = onClick)
             .semantics { contentDescription = "Back" },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-            contentDescription = null,
-            tint = colors.ink,
-            modifier = Modifier.size(AppTheme.dimens.size.iconLg),
-        )
+        Box(
+            Modifier.size(36.dp).clip(CircleShape).background(colors.bgCard),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = null,
+                tint = colors.ink,
+                modifier = Modifier.size(dimens.size.iconLg),
+            )
+        }
     }
 }
 
@@ -176,7 +184,13 @@ fun TermsCheckbox(checked: Boolean, modifier: Modifier = Modifier) {
         modifier = modifier
             .size(AppTheme.dimens.size.iconLg)
             .clip(shape)
-            .then(if (checked) Modifier.background(colors.brand) else Modifier.border(1.5.dp, colors.line, shape)),
+            .then(
+                if (checked) {
+                    Modifier.background(colors.brand)
+                } else {
+                    Modifier.border(AppTheme.dimens.size.strokeEmphasis, colors.line, shape)
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         if (checked) {

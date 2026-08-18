@@ -31,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
@@ -257,7 +256,7 @@ private fun CounterDialog(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(radii.md))
-                        .border(1.dp, colors.line, RoundedCornerShape(radii.md))
+                        .border(AppTheme.dimens.size.hairline, colors.line, RoundedCornerShape(radii.md))
                         .padding(space.md),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,

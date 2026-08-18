@@ -61,7 +61,7 @@ fun StatusTimeline(steps: List<TimelineStep>, currentIndex: Int, modifier: Modif
                     if (!isLast) {
                         Box(
                             Modifier
-                                .width(2.dp)
+                                .width(AppTheme.dimens.size.stroke)
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .background(
@@ -91,6 +91,7 @@ fun StatusTimeline(steps: List<TimelineStep>, currentIndex: Int, modifier: Modif
 @Composable
 private fun Dot(state: TimelineState) {
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     val fill = if (state == TimelineState.Done) colors.brand else colors.bgCard
     val stroke = when (state) {
         TimelineState.Done, TimelineState.Current -> colors.brand
@@ -101,7 +102,7 @@ private fun Dot(state: TimelineState) {
             .size(22.dp)
             .clip(CircleShape)
             .background(fill)
-            .border(2.dp, stroke, CircleShape),
+            .border(dimens.size.stroke, stroke, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         when (state) {
@@ -109,7 +110,7 @@ private fun Dot(state: TimelineState) {
                 Icons.Filled.Check,
                 contentDescription = null,
                 tint = colors.brandInk,
-                modifier = Modifier.size(12.dp),
+                modifier = Modifier.size(dimens.size.iconSm),
             )
             TimelineState.Current -> Box(Modifier.size(8.dp).clip(CircleShape).background(colors.brand))
             TimelineState.Pending -> {}

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -295,7 +297,16 @@ fun PackageOptionRow(
             .clip(shape)
             .background(fill)
             .border(dimens.size.hairline, rim, shape)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            // `selectable`, not `clickable`: the pick is carried by a rim and a
+            // wash, neither of which a screen reader can see. Role.RadioButton is
+            // what makes the tier list read back as one choice out of several.
+            .selectable(
+                selected = selected,
+                interactionSource = interaction,
+                indication = null,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
             // `optionCardPad`, not `space.lg` — see the token's own note. A
             // matched-content measurement against the reference (same tier
             // names, same one-line includes string) put our row 4 units taller

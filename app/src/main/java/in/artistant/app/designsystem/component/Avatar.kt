@@ -13,9 +13,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.sp
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -51,9 +51,16 @@ fun Avatar(
         ) {
             Text(
                 initials,
-                color = Color.White.copy(alpha = 0.95f),
-                fontSize = (size.value * 0.38f).sp,
-                fontWeight = FontWeight.Bold,
+                color = colors.ink,
+                // Dp → Sp through the density, NOT `size.value.sp`. That form
+                // hands a dp magnitude to the sp scale, so the glyph tracked the
+                // user's font-scale setting while the disc around it stayed a
+                // fixed Dp — at 2× a 48dp avatar asked for a ~36sp monogram and
+                // the initials ran outside their own circle.
+                style = AppTheme.type.callout.copy(
+                    fontSize = with(LocalDensity.current) { (size * 0.38f).toSp() },
+                    fontWeight = FontWeight.Bold,
+                ),
             )
         }
         badge?.let { dot ->

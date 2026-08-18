@@ -45,6 +45,8 @@ import kotlinx.coroutines.delay
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.accent
+import `in`.artistant.app.designsystem.theme.motion
+import `in`.artistant.app.designsystem.theme.motionTween
 
 /**
  * Role picker (iOS `SignupRoleView`): two full-bleed "worlds" — booking (lime) and being an
@@ -152,10 +154,17 @@ private fun RolePanel(
     val dimmed = committing != null && committing != role
     val shape = RoundedCornerShape(28.dp)
 
-    // Animate the select/dim transition (iOS `.easeOut(0.24)`).
-    val panelAlpha by animateFloatAsState(if (dimmed) 0.45f else 1f, label = "roleAlpha")
-    val panelScale by animateFloatAsState(if (dimmed) 0.97f else 1f, label = "roleScale")
-    val borderColor by animateColorAsState(if (selected) accent else colors.line, label = "roleBorder")
+    // Animate the select/dim transition (iOS `.easeOut(0.24)`) through `motionTween`: the
+    // framework default spring animates even when the user has asked the system to stop, and
+    // the helper is the one place that branch lives.
+    val fade = motionTween<Float>(AppTheme.motion.tabSwitch)
+    val panelAlpha by animateFloatAsState(if (dimmed) 0.45f else 1f, animationSpec = fade, label = "roleAlpha")
+    val panelScale by animateFloatAsState(if (dimmed) 0.97f else 1f, animationSpec = fade, label = "roleScale")
+    val borderColor by animateColorAsState(
+        if (selected) accent else colors.line,
+        animationSpec = motionTween<Color>(AppTheme.motion.tabSwitch),
+        label = "roleBorder",
+    )
 
     Box(
         modifier = modifier
@@ -168,13 +177,17 @@ private fun RolePanel(
                     listOf(accent.copy(alpha = 0.24f), colors.bg.copy(alpha = 0.15f), colors.bg.copy(alpha = 0.05f)),
                 ),
             )
-            .border(if (selected) 2.dp else 1.dp, borderColor, shape)
+            .border(
+                if (selected) AppTheme.dimens.size.stroke else AppTheme.dimens.size.hairline,
+                borderColor,
+                shape,
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
             )
-            .semantics {
+            .semantics(mergeDescendants = true) {
                 this.testTag = testTag
                 contentDescription = "$title. Selects this role and continues"
             },
@@ -186,7 +199,7 @@ private fun RolePanel(
             tint = accent.copy(alpha = 0.13f),
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 8.dp)
+                .padding(top = AppTheme.dimens.space.sm)
                 .size(150.dp),
         )
         // Bottom-left label block.

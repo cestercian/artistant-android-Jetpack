@@ -6,9 +6,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.CalendarContract
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.designsystem.theme.AppColors
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -339,7 +341,7 @@ class CalendarSyncService @Inject constructor(
             put(CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.ACCOUNT_TYPE_LOCAL)
             put(CalendarContract.Calendars.NAME, CALENDAR_NAME)
             put(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CALENDAR_NAME)
-            put(CalendarContract.Calendars.CALENDAR_COLOR, 0xC8FF00.toInt())
+            put(CalendarContract.Calendars.CALENDAR_COLOR, CALENDAR_COLOR_ARGB)
             put(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.CAL_ACCESS_OWNER)
             put(CalendarContract.Calendars.OWNER_ACCOUNT, ACCOUNT_NAME)
             put(CalendarContract.Calendars.VISIBLE, 1)
@@ -432,5 +434,15 @@ class CalendarSyncService @Inject constructor(
         private const val CALENDAR_NAME = "Artistant"
         private const val ACCOUNT_NAME = "artistant@local"
         private val TZ: String = TimeZone.getTimeZone("Asia/Kolkata").id
+
+        /**
+         * The swatch the calendar app paints beside every mirrored gig — the fixed
+         * violet accent, taken from the token rather than typed out here.
+         *
+         * ARGB, and the alpha byte is the point: `CALENDAR_COLOR` is read as ARGB,
+         * so a bare RGB literal carries alpha 0 and the provider stores a fully
+         * transparent colour — the swatch then reads as nothing at all.
+         */
+        private val CALENDAR_COLOR_ARGB: Int = AppColors().accent.toArgb()
     }
 }

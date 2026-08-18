@@ -133,7 +133,10 @@ fun RequestQuoteScreen(
                 value = state.message,
                 onValueChange = viewModel::setMessage,
                 textStyle = AppTheme.type.body.copy(color = colors.ink),
-                modifier = fieldModifier().height(AppTheme.dimens.size.heroShort / 4),
+                // Three lines of the field's own type, not a fraction of a hero
+                // height: the box has to hold text, so it is measured in text.
+                minLines = 3,
+                modifier = fieldModifier(),
             )
             state.errorMessage?.let {
                 Spacer(Modifier.height(space.md))

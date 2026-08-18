@@ -132,12 +132,25 @@ class SearchViewModel @Inject constructor(
 
     fun applyRecent(term: String) {
         onQueryChange(term)
+        recordRecent(term)
     }
 
     fun onQueryChange(text: String) {
         queryFlow.value = text
         _state.update { it.copy(query = text) }
     }
+
+    /**
+     * The query the user actually meant — the keyboard's Search key, or a tap on
+     * an existing recent.
+     *
+     * Recents are recorded here and nowhere else. The search itself runs off a
+     * 280ms debounce, so persisting from it recorded the prefixes typed on the
+     * way to a word ("j", "ja", "jaz", "jazz" are four separate entries in an
+     * 8-slot list deduped only on exact equality) and the rail became a replay of
+     * the user's typing rather than of their searches. iOS records on submit.
+     */
+    fun submitQuery() = recordRecent(_state.value.query)
 
     fun clearQuery() {
         queryFlow.value = ""
@@ -219,6 +232,23 @@ class SearchViewModel @Inject constructor(
     }
 
     fun retry() = runSearch(reset = true)
+
+    /**
+     * Move [term] to the head of the recents list and persist it.
+     *
+     * Runs on its own job, isolated from the search, so a prefs write failure
+     * never masquerades as a failed search.
+     */
+    private fun recordRecent(term: String) {
+        val q = term.trim()
+        if (q.isEmpty()) return
+        viewModelScope.launch {
+            val next = (listOf(q) + _state.value.recents.filter { !it.equals(q, ignoreCase = true) })
+                .take(8)
+            runCatching { searchRecents.save(next) }
+                .onSuccess { _state.update { it.copy(recents = next) } }
+        }
+    }
 
     /**
      * Load the price facet for [city] (null = all cities).
@@ -375,16 +405,6 @@ class SearchViewModel @Inject constructor(
                         canLoadMore = page.nextCursor !is SearchCursor.End,
                         loadError = null,
                     )
-                }
-                // Persist successful text queries as recents (iOS SearchStore).
-                // Isolated from the search catch so a prefs write failure never
-                // masquerades as a failed search.
-                val q = live.query.trim()
-                if (reset && q.isNotEmpty()) {
-                    val next = (listOf(q) + live.recents.filter { !it.equals(q, ignoreCase = true) })
-                        .take(8)
-                    runCatching { searchRecents.save(next) }
-                        .onSuccess { _state.update { it.copy(recents = next) } }
                 }
             } catch (t: Throwable) {
                 if (gen != generation) return@launch
