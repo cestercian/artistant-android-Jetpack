@@ -252,20 +252,42 @@ class SupabaseBookingsRepository @Inject constructor(
         /** Pinned cancel-booking body keys — never include escrow_status (0034). */
         val cancelPayloadKeys: Set<String> = setOf("booking_id", "cancelled_by", "reason")
 
+        /** Gig wall-clock is IST — see [startEndIso]. */
+        private val IST: TimeZone get() = TimeZone.getTimeZone("Asia/Kolkata")
+
         /**
          * Combines draft day + time into ISO start/end. End = start + 2h
          * (same placeholder as iOS until package-duration parsing lands).
+         *
+         * The clock is read in **IST**, not the device's zone. `time_label`
+         * ("8:00 PM") is a wall-clock time in India, and every other place that
+         * turns a gig's labels into an instant says so — `BookingDateFormat
+         * .parseDateAndTime`, `CalendarSyncPlanner`, `CalendarSyncService`. When
+         * this wrote the instant in the device's zone instead, a client booking
+         * from, say, Dubai (UTC+4) stored an 8:00 PM gig as 16:00Z — 9:30 PM to
+         * the artist in IST: the mirrored calendar event and its −24h/−2h alarms
+         * fired at the wrong time, and the server's `bookings_no_overlap`
+         * GiST — which compares these instants, not the labels — let two clients
+         * in different zones take the same slot.
+         *
+         * The calendar DAY still comes from the device's zone, because that is the
+         * zone `BookingSlots.upcomingDateChips` formatted `date_label` in: day
+         * from the chip the client tapped, clock in IST.
          */
         fun startEndIso(draft: BookingDraft): Pair<String, String> {
-            val cal = Calendar.getInstance()
-            cal.timeInMillis = draft.dateRawEpochMs
-            cal.set(Calendar.SECOND, 0)
-            cal.set(Calendar.MILLISECOND, 0)
-
             val timeParts = parseTimeOfDay(draft.time)
                 ?: throw BookingRepositoryError.MalformedTime(draft.time)
-            cal.set(Calendar.HOUR_OF_DAY, timeParts.first)
-            cal.set(Calendar.MINUTE, timeParts.second)
+            val chosenDay = Calendar.getInstance().apply { timeInMillis = draft.dateRawEpochMs }
+            val cal = Calendar.getInstance(IST).apply {
+                clear()
+                set(
+                    chosenDay.get(Calendar.YEAR),
+                    chosenDay.get(Calendar.MONTH),
+                    chosenDay.get(Calendar.DAY_OF_MONTH),
+                    timeParts.first,
+                    timeParts.second,
+                )
+            }
             val start = cal.time
             cal.add(Calendar.HOUR_OF_DAY, 2)
             val end = cal.time

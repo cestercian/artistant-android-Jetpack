@@ -93,6 +93,27 @@ class ArtistHomeLogicTest {
         assertEquals("Priya S.", artistClientDisplayName(unnamed.copy(clientFullName = "Priya S.")))
     }
 
+    /**
+     * A quote request has no name to fall back TO, and must say so.
+     *
+     * `bookings` can print "Client" because it usually has a real name behind it
+     * — the 0080 `client_name` column. `gig_requests` has no such column, and
+     * `users` is self-only under RLS, so the `client:users!client_id(full_name)`
+     * embed is null on EVERY row the artist reads. The decoder used to stamp the
+     * literal "Client" there, which put one identical name and one identical "C"
+     * monogram on every inbound quote in the rail. Null is the honest answer and
+     * is what lets the row draw its neutral placeholder instead.
+     */
+    @Test
+    fun requesterName_isNullWhenNothingCanNameTheRequester() {
+        val named = quote(GigRequestStatus.Open)
+        assertEquals("Meera", named.requesterName)
+        assertNull(named.copy(raw = named.raw.copy(client = null)).requesterName)
+        // Blank is the same non-answer as null — a legacy/fixture row must not
+        // reach the UI as a name made of spaces.
+        assertNull(named.copy(raw = named.raw.copy(client = "   ")).requesterName)
+    }
+
     @Test
     fun upcomingConfirmed_excludesPastShows() {
         val all = listOf(

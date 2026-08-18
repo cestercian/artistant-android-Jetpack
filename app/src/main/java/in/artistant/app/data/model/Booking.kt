@@ -213,23 +213,7 @@ object BookingDateFormat {
  * else start-of-day from the date label. Mirrors iOS `Booking.resolvedStart`.
  */
 fun Booking.resolvedStartEpochMs(): Long? {
-    startDatetimeIso?.let { raw ->
-        `in`.artistant.app.common.util.SupabaseISO8601.parse(raw)?.toEpochMilli()?.let { return it }
-        val formats = listOf(
-            "yyyy-MM-dd'T'HH:mm:ssXXX",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss",
-        )
-        for (pattern in formats) {
-            val f = SimpleDateFormat(pattern, Locale.US).apply {
-                isLenient = false
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            val pos = java.text.ParsePosition(0)
-            val d = f.parse(raw, pos)
-            if (d != null && pos.index == raw.length) return d.time
-        }
-    }
+    parseTimestampEpochMs(startDatetimeIso)?.let { return it }
     BookingDateFormat.parseDateAndTime(date, time)?.let { return it }
     return BookingDateFormat.parseLabel(date)?.apply {
         set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -237,4 +221,39 @@ fun Booking.resolvedStartEpochMs(): Long? {
         set(java.util.Calendar.SECOND, 0)
         set(java.util.Calendar.MILLISECOND, 0)
     }?.timeInMillis
+}
+
+/**
+ * Gig end clock — `end_datetime`, read exactly as forgivingly as
+ * [resolvedStartEpochMs] reads the start. Null when the row carries none; the
+ * caller picks the placeholder length (`create()` writes start + 2h).
+ */
+fun Booking.resolvedEndEpochMs(): Long? = parseTimestampEpochMs(endDatetimeIso)
+
+/**
+ * A `timestamptz` off PostgREST.
+ *
+ * `Instant.parse` (ISO_INSTANT) alone is not enough: it takes the `Z` form but
+ * rejects the numeric-offset one (`…T20:30:00+00:00`) that PostgREST is free to
+ * emit, and Android's java.time on minSdk 26 has no desugaring to soften that.
+ * The explicit patterns are the fallback for exactly that shape.
+ */
+private fun parseTimestampEpochMs(raw: String?): Long? {
+    if (raw.isNullOrBlank()) return null
+    `in`.artistant.app.common.util.SupabaseISO8601.parse(raw)?.toEpochMilli()?.let { return it }
+    val formats = listOf(
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss",
+    )
+    for (pattern in formats) {
+        val f = SimpleDateFormat(pattern, Locale.US).apply {
+            isLenient = false
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val pos = java.text.ParsePosition(0)
+        val d = f.parse(raw, pos)
+        if (d != null && pos.index == raw.length) return d.time
+    }
+    return null
 }

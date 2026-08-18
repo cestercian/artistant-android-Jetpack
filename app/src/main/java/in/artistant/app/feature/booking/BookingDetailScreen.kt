@@ -58,6 +58,8 @@ import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.resolvedEndEpochMs
+import `in`.artistant.app.data.model.resolvedStartEpochMs
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.BookingStatusTimeline
 import `in`.artistant.app.designsystem.component.ButtonVariant
@@ -72,7 +74,6 @@ import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import kotlinx.coroutines.delay
-import java.time.Instant
 
 /**
  * Booking detail — the whole gig on one page: where it stands, what was agreed,
@@ -832,9 +833,16 @@ private fun ReasonRow(label: String, selected: Boolean, onClick: () -> Unit) {
  * Calendar app owns the compose UI (we never read the store).
  */
 private fun launchAddToCalendar(context: Context, booking: Booking): String? {
-    val startMs = parseIsoEpochMs(booking.startDatetimeIso)
+    // The canonical resolver, not a local ISO parse: `Instant.parse` is
+    // ISO_INSTANT, which rejects the numeric-offset form PostgREST emits for a
+    // `timestamptz`, and it has nothing to fall back on when the column is
+    // missing from a projection. `resolvedStartEpochMs` tries the offset
+    // patterns and then the date+time labels this very screen is displaying two
+    // sections up — so "Add to calendar" stops refusing a gig whose show time is
+    // plainly on screen.
+    val startMs = booking.resolvedStartEpochMs()
         ?: return "Couldn't add to calendar — missing show time."
-    val endMs = parseIsoEpochMs(booking.endDatetimeIso) ?: (startMs + DEFAULT_GIG_MS)
+    val endMs = booking.resolvedEndEpochMs() ?: (startMs + DEFAULT_GIG_MS)
     val intent = Intent(Intent.ACTION_INSERT)
         .setData(CalendarContract.Events.CONTENT_URI)
         .putExtra(CalendarContract.Events.TITLE, "Artistant · ${booking.venue}")
@@ -870,6 +878,3 @@ private fun shareGig(context: Context, text: String): String? {
     return runCatching { context.startActivity(Intent.createChooser(intent, null)); null }
         .getOrElse { "Couldn't open the share sheet." }
 }
-
-private fun parseIsoEpochMs(iso: String?): Long? =
-    iso?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }

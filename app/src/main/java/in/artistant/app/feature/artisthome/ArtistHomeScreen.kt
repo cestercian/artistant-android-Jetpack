@@ -1058,7 +1058,11 @@ private fun QuoteRequestRow(request: StoredRequest, onClick: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val interaction = remember { MutableInteractionSource() }
-    val client = request.raw.client.ifBlank { "Client" }
+    // Null when the server can't name the requester — `users` is self-only under
+    // RLS, so the artist never reads the client's row. Printing "Client" here put
+    // the same name and the same "C" monogram on every inbound quote; the row is
+    // told apart by its date, offer and message below, which are its own.
+    val client = request.requesterName
 
     Column(
         Modifier
@@ -1073,12 +1077,14 @@ private fun QuoteRequestRow(request: StoredRequest, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(space.md),
         ) {
-            Avatar(name = client, size = AppTheme.dimens.size.avatarSm)
+            // Avatar draws its neutral placeholder on an empty name — the right
+            // look for someone we can't identify.
+            Avatar(name = client.orEmpty(), size = AppTheme.dimens.size.avatarSm)
             Column(Modifier.weight(1f)) {
                 Text(
-                    client,
+                    client ?: "Gig request",
                     style = AppTheme.type.callout,
-                    color = colors.ink,
+                    color = if (client != null) colors.ink else colors.ink2,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

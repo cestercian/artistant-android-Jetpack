@@ -173,6 +173,10 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
 
+    // EXIF orientation — BitmapFactory ignores the tag and Bitmap.compress drops
+    // it, so an upload has to bake the rotation into the pixels itself.
+    implementation(libs.androidx.exifinterface)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }
