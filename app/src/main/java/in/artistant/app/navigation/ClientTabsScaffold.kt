@@ -85,11 +85,21 @@ fun ClientTabsScaffold() {
     val tabRouter = rememberTabRouter()
     val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
     val pendingBooking by tabRouter.pendingBookingDetail.collectAsStateWithLifecycle()
-    val clientTab by tabRouter.clientTab.collectAsStateWithLifecycle()
+    val pendingTab by tabRouter.pendingClientTab.collectAsStateWithLifecycle()
 
     // Push deep links: flip tab then push the detail/chat route.
-    LaunchedEffect(clientTab) {
-        val tabRoute = when (clientTab) {
+    //
+    // Consumed one-shot, like the ids below it, because `LaunchedEffect` runs on
+    // FIRST composition and not only on a change — and every configuration change
+    // (font scale, day/night, fold resize) plus every process-death restore is a
+    // fresh composition. Re-applying a retained tab there ran `navigateToTab`,
+    // whose `popUpTo(start)` popped the back stack `rememberNavController` had
+    // just restored: a client reading an artist profile at sunset was thrown back
+    // to Discover by the day/night flip. A consumed event is null by then, so the
+    // effect fires and does nothing.
+    LaunchedEffect(pendingTab) {
+        val tab = tabRouter.consumePendingClientTab() ?: return@LaunchedEffect
+        val tabRoute = when (tab) {
             ClientDeepTab.Discover -> ClientTab.Discover.route
             ClientDeepTab.Bookings -> ClientTab.Bookings.route
             ClientDeepTab.Messages -> ClientTab.Messages.route

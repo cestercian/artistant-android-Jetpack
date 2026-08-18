@@ -64,10 +64,17 @@ fun ArtistTabsScaffold() {
     val tabRouter = rememberTabRouter()
     val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
     val pendingGig by tabRouter.pendingGigRequestId.collectAsStateWithLifecycle()
-    val artistTab by tabRouter.artistTab.collectAsStateWithLifecycle()
+    val pendingTab by tabRouter.pendingArtistTab.collectAsStateWithLifecycle()
 
-    LaunchedEffect(artistTab) {
-        val tabRoute = when (artistTab) {
+    // One-shot, for both reasons spelled out on [ClientTabsScaffold] and
+    // [TabRouter]: a recreation must not re-apply a stale tab and pop the restored
+    // stack (an artist reading a gig request loses it to a font-scale change), and
+    // re-arming the tab a push already holds must still emit — `ArtistHome` and
+    // `ArtistGigs` carry no id, so this effect is the only thing that navigates
+    // for them.
+    LaunchedEffect(pendingTab) {
+        val tab = tabRouter.consumePendingArtistTab() ?: return@LaunchedEffect
+        val tabRoute = when (tab) {
             ArtistDeepTab.Home -> ArtistTab.Home.route
             ArtistDeepTab.Gigs -> ArtistTab.Gigs.route
             ArtistDeepTab.Messages -> ArtistTab.Messages.route

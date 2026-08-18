@@ -26,10 +26,44 @@ data class ArtistProfileUiState(
     val scoreBreakdown: ScoreBreakdown? = null,
     val showScoreSheet: Boolean = false,
     val isLoading: Boolean = true,
+    /**
+     * Non-null means **what is on screen is not a loaded profile** — either
+     * nothing at all, or the Discover/Search tile projection that arrived in the
+     * cache. Never null just because [artist] is non-null: see
+     * [artistProfileLoadError].
+     */
     val loadError: String? = null,
     val selectedPackageIndex: Int = 0,
     val isSaved: Boolean = false,
 )
+
+/** The read failed in transport / RLS — we do not know what this artist offers. */
+internal const val PROFILE_LOAD_FAILED = "Couldn't load this profile."
+
+/** The server answered, and there is no such artist to show. */
+internal const val ARTIST_NOT_FOUND = "Artist not found."
+
+/**
+ * What the profile says when a hydration attempt did **not** produce a full artist.
+ *
+ * Called only on that path, so it never returns null: a page drawn from anything
+ * less than a hydrated row has something to admit. That is the fix. `ensureFull`
+ * folds every transport failure into the same null the server returns for "no
+ * such row", and the screen used to read that null as "nothing to report" as soon
+ * as a cached artist existed — which it does for every client arriving from
+ * Discover or Search, because both `cache()` the tile projection first. A dropped
+ * packet therefore rendered the whole profile from a tile that by construction
+ * carries no packages, bio, samples or reviews, and every section stated its own
+ * emptiness as fact: "Pricing on request", a blank About, "No reviews yet." On a
+ * booking marketplace that is misquoting an artist after a network blip.
+ *
+ * [hasCachedArtist] takes [PROFILE_LOAD_FAILED] whatever the cause, because
+ * "Artist not found." next to a rendered artist name reads as a contradiction
+ * rather than as a warning — and from this client's seat a row it cannot read is
+ * a row it cannot show, whether the network dropped it or RLS did.
+ */
+internal fun artistProfileLoadError(fetchFailed: Boolean, hasCachedArtist: Boolean): String =
+    if (fetchFailed || hasCachedArtist) PROFILE_LOAD_FAILED else ARTIST_NOT_FOUND
 
 @HiltViewModel
 class ArtistProfileViewModel @Inject constructor(
@@ -62,12 +96,20 @@ class ArtistProfileViewModel @Inject constructor(
             if (cached != null) {
                 _state.update { it.copy(artist = cached) }
             }
-            val full = artistsRepository.ensureFull(artistId)
+            // `fetchArtist`, not `ensureFull`: the convenience wrapper swallows the
+            // throw, and "the read failed" has to stay distinguishable from "there
+            // is no such artist" — the two say opposite things about the tile this
+            // page may already be drawn from. See [artistProfileLoadError].
+            val fetched = runCatching { artistsRepository.fetchArtist(artistId) }
+            val full = fetched.getOrNull()
             if (full == null) {
                 _state.update {
                     it.copy(
                         isLoading = false,
-                        loadError = if (it.artist == null) "Artist not found." else null,
+                        loadError = artistProfileLoadError(
+                            fetchFailed = fetched.isFailure,
+                            hasCachedArtist = it.artist != null,
+                        ),
                     )
                 }
                 return@launch
