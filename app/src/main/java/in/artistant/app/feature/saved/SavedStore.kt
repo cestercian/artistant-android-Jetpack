@@ -150,8 +150,18 @@ class SavedStore @Inject constructor(
         // toggle cancels this job and installs its own, and this handler must not
         // then remove the newer entry.
         job.invokeOnCompletion { jobs.remove(id, job) }
-        _ids.update { if (id in it) it - id else it + id }
-        persistLocal()
+        // The publish is epoch-guarded too, and the check sits INSIDE the lambda
+        // for the same reason it does in [refreshFromServer]: `update` is a CAS
+        // retry loop. A `reset()` landing between arming this toggle and
+        // publishing it would otherwise repopulate the set sign-out had just
+        // emptied — putting the departing account's artist back — and
+        // `persistLocal` would then commit it under the NEW account's epoch,
+        // writing A's saved artist into B's store. Returning `local` abandons it.
+        _ids.update { local ->
+            if (epoch.get() != startedAt) local
+            else if (id in local) local - id else local + id
+        }
+        persistLocal(startedAt)
         superseded?.cancel()
         job.start()
     }
