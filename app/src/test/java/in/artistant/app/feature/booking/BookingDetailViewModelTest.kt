@@ -4,24 +4,27 @@ import androidx.lifecycle.SavedStateHandle
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.EscrowStatus
+import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
-import `in`.artistant.app.data.repository.FakeReviewsRepository
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
 import `in`.artistant.app.testsupport.pkg
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.io.IOException
 
 /**
  * The request→accept spine, from the screen's point of view.
@@ -36,14 +39,27 @@ class BookingDetailViewModelTest {
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
 
     private fun vm(
-        bookings: FakeBookingsRepository,
+        bookings: BookingsRepository,
         bookingId: String = "b-1",
     ) = BookingDetailViewModel(
         savedStateHandle = SavedStateHandle(mapOf("bookingId" to bookingId)),
         bookingsRepository = bookings,
         artistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
-        reviewsRepository = FakeReviewsRepository(),
     )
+
+    /**
+     * The action sets the SCREEN reads.
+     *
+     * BookingDetailScreen calls [BookingActions] directly off the loaded
+     * status — there is no ViewModel accessor in between, so neither is there
+     * one here. The matrix itself is owned by BookingDetailLogicTest; these
+     * assert that the status the ViewModel loaded is the one being asked about.
+     */
+    private fun BookingDetailViewModel.primaryFor(viewer: BookingViewer): List<BookingAction> =
+        state.value.booking?.status?.let { BookingActions.primary(viewer, it) }.orEmpty()
+
+    private fun BookingDetailViewModel.manageFor(viewer: BookingViewer): List<BookingAction> =
+        state.value.booking?.status?.let { BookingActions.manage(viewer, it) }.orEmpty()
 
     // --- load ---------------------------------------------------------------
 
@@ -55,17 +71,42 @@ class BookingDetailViewModelTest {
         assertEquals("b-1", s.booking?.id)
         assertEquals("Nova Beats", s.artistName)
         assertFalse(s.isLoading)
-        assertNull(s.loadError)
+        assertNull(s.loadFailure)
     }
 
     @Test
-    fun load_missingBooking_surfacesLoadError_ratherThanAnEmptyShell() = runTest {
+    fun load_missingBooking_saysTheRowIsGone_ratherThanAnEmptyShell() = runTest {
         val model = vm(FakeBookingsRepository(emptyList()))
 
         val s = model.state.value
         assertNull(s.booking)
-        assertEquals("Booking not found.", s.loadError)
+        assertEquals(BookingLoadFailure.NotFound, s.loadFailure)
         assertFalse(s.isLoading)
+    }
+
+    @Test
+    fun load_whenTheReadFails_saysSo_ratherThanClaimingTheBookingIsGone() = runTest {
+        // The failure this pins: a client opening a booking from a push on a
+        // flaky connection read "Booking not found / Booking not found." and
+        // reasonably concluded the artist had deleted their gig.
+        val model = vm(UnreachableBookings())
+
+        val s = model.state.value
+        assertNull(s.booking)
+        assertEquals(BookingLoadFailure.Unreachable, s.loadFailure)
+        assertFalse(s.isLoading)
+        // Title and body are what the empty state prints — neither may be the
+        // other, and a transport failure may not borrow the not-found copy.
+        assertNotEquals(s.loadFailure?.title, s.loadFailure?.body)
+        assertNotEquals(BookingLoadFailure.NotFound.title, s.loadFailure?.title)
+    }
+
+    /** Every read throws — the transport is down, the row's existence is unknown. */
+    private class UnreachableBookings(
+        private val delegate: FakeBookingsRepository = FakeBookingsRepository(listOf(booking())),
+    ) : BookingsRepository by delegate {
+        override suspend fun fetchOne(id: String): Booking? =
+            throw BookingRepositoryError.Underlying(IOException("Unable to resolve host"))
     }
 
     // --- role gating (mirrors the 0083 artist-only guard) --------------------
@@ -74,25 +115,26 @@ class BookingDetailViewModelTest {
     fun pendingConfirm_showsAcceptDeclineToTheArtistOnly() = runTest {
         val model = vm(FakeBookingsRepository(listOf(booking(status = BookingStatus.PendingConfirm))))
 
-        assertTrue(model.showAcceptDecline(isArtistViewer = true))
-        assertFalse(model.showAcceptDecline(isArtistViewer = false))
+        assertTrue(BookingAction.Accept in model.primaryFor(BookingViewer.Artist))
+        assertFalse(BookingAction.Accept in model.primaryFor(BookingViewer.Client))
     }
 
     @Test
     fun pendingConfirm_showsCancelToTheClientOnly() = runTest {
         val model = vm(FakeBookingsRepository(listOf(booking(status = BookingStatus.PendingConfirm))))
 
-        assertTrue(model.showClientCancel(isArtistViewer = false))
-        assertFalse(model.showClientCancel(isArtistViewer = true))
+        assertTrue(BookingAction.Cancel in model.manageFor(BookingViewer.Client))
+        assertFalse(BookingAction.Cancel in model.manageFor(BookingViewer.Artist))
     }
 
     @Test
     fun confirmedBooking_hidesAcceptDeclineFromBothSides() = runTest {
         val model = vm(FakeBookingsRepository(listOf(booking(status = BookingStatus.Confirmed))))
 
-        assertFalse(model.showAcceptDecline(isArtistViewer = true))
-        assertFalse(model.showAcceptDecline(isArtistViewer = false))
-        assertFalse(model.showClientCancel(isArtistViewer = false))
+        for (viewer in BookingViewer.entries) {
+            assertFalse(BookingAction.Accept in model.primaryFor(viewer))
+            assertFalse(BookingAction.Decline in model.primaryFor(viewer))
+        }
     }
 
     @Test
@@ -132,7 +174,9 @@ class BookingDetailViewModelTest {
         val bookings = FakeBookingsRepository(listOf(booking()))
         val model = vm(bookings)
 
-        model.declineRequest()
+        // The shipped decline: the screen's Decline button opens the cancel
+        // sheet and confirms through the artist side of cancelBooking.
+        model.cancelBooking(BookingViewer.Artist)
 
         assertEquals(BookingStatus.Cancelled, model.state.value.booking?.status)
         assertEquals(EscrowStatus.Refunded, model.state.value.booking?.escrowStatus)
@@ -237,7 +281,6 @@ class BookingDetailViewModelTest {
         savedStateHandle = SavedStateHandle(mapOf("bookingId" to "b-1")),
         bookingsRepository = spy,
         artistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
-        reviewsRepository = FakeReviewsRepository(),
     )
 
     @Test
@@ -264,10 +307,10 @@ class BookingDetailViewModelTest {
 
     @Test
     fun declineCarriesItsReasonToTheEdgeFunction() = runTest {
-        val spy = spy(booking())
+        val spy = spy(booking(status = BookingStatus.PendingConfirm))
         val model = spyVm(spy)
 
-        model.declineRequest("Not the right fit for this event")
+        model.cancelBooking(BookingViewer.Artist, reason = "Not the right fit for this event")
 
         assertEquals(listOf("declineByArtist"), spy.calls)
         assertEquals("Not the right fit for this event", spy.lastReason)
@@ -293,7 +336,6 @@ class BookingDetailViewModelTest {
             artistsRepository = FakeArtistsRepository(
                 listOf(artist(packages = listOf(pkg("p-1", name = "Evening set", price = 20_000)))),
             ),
-            reviewsRepository = FakeReviewsRepository(),
         )
 
         assertEquals("Evening set", model.packageName())
@@ -312,7 +354,6 @@ class BookingDetailViewModelTest {
             artistsRepository = FakeArtistsRepository(
                 listOf(artist(packages = listOf(pkg("p-1", name = "Evening set", price = 20_000)))),
             ),
-            reviewsRepository = FakeReviewsRepository(),
         )
 
         assertNull(model.packageName())
@@ -347,7 +388,6 @@ class BookingDetailViewModelTest {
                     ),
                 ),
             ),
-            reviewsRepository = FakeReviewsRepository(),
         )
 
         assertEquals("Evening set", model.packageName())
@@ -366,7 +406,6 @@ class BookingDetailViewModelTest {
             artistsRepository = FakeArtistsRepository(
                 listOf(artist(packages = listOf(pkg("p-1", name = "Acoustic hour", price = 12_000)))),
             ),
-            reviewsRepository = FakeReviewsRepository(),
         )
 
         assertEquals("Evening set", model.packageName())
@@ -384,7 +423,6 @@ class BookingDetailViewModelTest {
             artistsRepository = FakeArtistsRepository(
                 listOf(artist(packages = listOf(pkg("p-1", name = "Evening set", price = 20_000)))),
             ),
-            reviewsRepository = FakeReviewsRepository(),
         )
 
         assertEquals("Evening set", model.packageName())
@@ -397,9 +435,9 @@ class BookingDetailViewModelTest {
     fun actions_areEmptyUntilABookingLoads_soNoCtaRendersOverNothing() = runTest {
         val model = vm(FakeBookingsRepository(emptyList()))
 
-        assertTrue(model.actions(BookingViewer.Client).isEmpty())
-        assertTrue(model.primaryActions(BookingViewer.Artist).isEmpty())
-        assertTrue(model.manageActions(BookingViewer.Artist).isEmpty())
+        assertTrue(model.primaryFor(BookingViewer.Artist).isEmpty())
+        assertTrue(model.manageFor(BookingViewer.Artist).isEmpty())
+        assertTrue(model.primaryFor(BookingViewer.Client).isEmpty())
     }
 
     @Test
@@ -408,16 +446,15 @@ class BookingDetailViewModelTest {
         val model = vm(bookings)
         assertEquals(
             listOf(BookingAction.Accept, BookingAction.Decline),
-            model.primaryActions(BookingViewer.Artist),
+            model.primaryFor(BookingViewer.Artist),
         )
 
         model.acceptRequest()
 
         // Once accepted the artist can message and manage, and can no longer
         // accept a request that is already confirmed.
-        assertEquals(listOf(BookingAction.Message), model.primaryActions(BookingViewer.Artist))
-        assertTrue(BookingAction.Cancel in model.manageActions(BookingViewer.Artist))
-        assertFalse(model.showAcceptDecline(isArtistViewer = true))
+        assertEquals(listOf(BookingAction.Message), model.primaryFor(BookingViewer.Artist))
+        assertTrue(BookingAction.Cancel in model.manageFor(BookingViewer.Artist))
     }
 
     @Test
@@ -429,5 +466,123 @@ class BookingDetailViewModelTest {
 
         assertNull(model.state.value.actionError)
         assertEquals(BookingStatus.PendingConfirm, model.state.value.booking?.status)
+    }
+
+    // --- which action is in flight -------------------------------------------
+    //
+    // The dock puts Accept and Decline side by side for an artist on a pending
+    // request. They read one flag, so tapping either had the page announcing
+    // "Accepting…" AND "Declining…" at once — over two acts with opposite
+    // consequences for the client's booking. The label belongs to the button
+    // that was tapped.
+
+    /** Parks every mutation until the test releases it, so mid-flight is observable. */
+    private class GatedBookings(
+        private val delegate: FakeBookingsRepository,
+    ) : BookingsRepository by delegate {
+        val gate = CompletableDeferred<Unit>()
+
+        override suspend fun accept(id: String): Booking {
+            gate.await()
+            return delegate.accept(id)
+        }
+
+        override suspend fun declineByArtist(id: String, reason: String?): Booking {
+            gate.await()
+            return delegate.declineByArtist(id, reason)
+        }
+
+        override suspend fun cancel(id: String, reason: String?): Booking {
+            gate.await()
+            return delegate.cancel(id, reason)
+        }
+    }
+
+    private fun gated(status: BookingStatus = BookingStatus.PendingConfirm) =
+        GatedBookings(FakeBookingsRepository(listOf(booking(status = status))))
+
+    @Test
+    fun anInFlightAccept_isAttributedToAccept_notToTheDeclineBesideIt() = runTest {
+        val bookings = gated()
+        val model = vm(bookings)
+
+        model.acceptRequest()
+
+        assertEquals(BookingAction.Accept, model.state.value.actingAction)
+        assertTrue(model.state.value.isActing)
+
+        bookings.gate.complete(Unit)
+
+        assertNull(model.state.value.actingAction)
+        assertFalse(model.state.value.isActing)
+        assertEquals(BookingStatus.Confirmed, model.state.value.booking?.status)
+    }
+
+    @Test
+    fun anInFlightDecline_isAttributedToDecline_notToTheAcceptAboveIt() = runTest {
+        val bookings = gated()
+        val model = vm(bookings)
+
+        // The sheet's confirm — the artist's exit on a PENDING request.
+        model.cancelBooking(BookingViewer.Artist, reason = "Double-booked that date")
+
+        assertEquals(BookingAction.Decline, model.state.value.actingAction)
+
+        bookings.gate.complete(Unit)
+
+        assertNull(model.state.value.actingAction)
+        assertEquals(BookingStatus.Cancelled, model.state.value.booking?.status)
+    }
+
+    @Test
+    fun anArtistLeavingAConfirmedGig_isACancel_becauseNoDeclineIsOnScreen() = runTest {
+        val bookings = gated(BookingStatus.Confirmed)
+        val model = vm(bookings)
+
+        model.cancelBooking(BookingViewer.Artist, reason = "Can't travel to the venue")
+
+        assertEquals(BookingAction.Cancel, model.state.value.actingAction)
+        bookings.gate.complete(Unit)
+        assertNull(model.state.value.actingAction)
+    }
+
+    @Test
+    fun anInFlightClientCancel_isACancel() = runTest {
+        val bookings = gated()
+        val model = vm(bookings)
+
+        model.cancelBooking(BookingViewer.Client, reason = "Event cancelled")
+
+        assertEquals(BookingAction.Cancel, model.state.value.actingAction)
+        bookings.gate.complete(Unit)
+        assertNull(model.state.value.actingAction)
+    }
+
+    @Test
+    fun aSecondTapWhileOneActionRuns_isIgnored_ratherThanReattributingTheLabel() = runTest {
+        val bookings = gated()
+        val model = vm(bookings)
+        model.acceptRequest()
+
+        model.cancelBooking(BookingViewer.Artist, reason = "Double-booked that date")
+
+        // Still the accept — the decline never started, so the dock must not
+        // start claiming it did.
+        assertEquals(BookingAction.Accept, model.state.value.actingAction)
+        bookings.gate.complete(Unit)
+        assertEquals(BookingStatus.Confirmed, model.state.value.booking?.status)
+    }
+
+    @Test
+    fun aFailedActionReleasesTheLabel_soTheDockStopsClaimingProgress() = runTest {
+        val bookings = FakeBookingsRepository(listOf(booking()))
+        val model = vm(bookings)
+        bookings.signedIn = false
+
+        model.acceptRequest()
+
+        assertNull(model.state.value.actingAction)
+        assertFalse(model.state.value.isActing)
+        assertNotNull(model.state.value.actionError)
     }
 }

@@ -5,6 +5,11 @@ import `in`.artistant.app.data.repository.WizardProfileDraft
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.epk.PackageRow
 import `in`.artistant.app.feature.epk.packageRowIsSavable
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 
 /**
  * Every decision the onboarding wizard makes, extracted from the Composables and
@@ -174,6 +179,58 @@ fun orphanWizardMediaFiles(
  */
 fun wizardExitMaySaveDraft(state: WizardUiState): Boolean = !state.isRestoring
 
+// ── Draft writer ─────────────────────────────────────────────────────────────
+
+/**
+ * How long a burst of typing collapses before it reaches the draft store.
+ *
+ * Long enough that a text field's per-character emissions become one file write,
+ * short enough that a task-kill mid-form loses at most a word.
+ */
+const val WIZARD_DRAFT_DEBOUNCE_MS: Long = 600
+
+/**
+ * May this snapshot be written to the draft store?
+ *
+ * Three refusals, each of them load-bearing:
+ *  * **restoring** — the form still holds the blank default, so writing it would
+ *    replace a real draft with an empty one (see [wizardExitMaySaveDraft]).
+ *  * **publishing** — publish snapshots the form, then clears the draft; a write
+ *    from inside that window re-creates what publish is about to delete.
+ *  * **Done** — the celebration step. A restored draft naming it would open the
+ *    wizard on "You're live" for an artist who is not. [wizardResumeStep] is the
+ *    second guard, on the read side.
+ */
+fun wizardMaySaveDraft(state: WizardUiState): Boolean =
+    !state.isRestoring && !state.isPublishing && state.step != WizardStep.Done
+
+/**
+ * The debounced stream of snapshots worth persisting.
+ *
+ * The operator order is the whole point, and it is not visible from a reading of
+ * the ViewModel. A `filter` placed *upstream* of `debounce` means a refused
+ * emission never reaches the timer, so it can neither restart nor supersede it.
+ * That is how a publish used to resurrect its own draft: the last accepted
+ * snapshot was the Preview/going-live one, its 600ms timer kept running through
+ * `setPublished`, the enqueues and `draftStore.clear()` — a tail that usually
+ * finishes well inside the window — and then fired, writing a full draft back
+ * into the slot publish had just emptied. Refusing *after* the debounce lets the
+ * Done emission win the race and then be dropped, which is what "the draft stays
+ * deleted" actually requires.
+ *
+ * `drop(1)` discards the first post-restore snapshot: that is the state
+ * `restore()` just built out of the stored draft, so writing it back is churn.
+ */
+@OptIn(FlowPreview::class)
+fun wizardDraftWrites(
+    states: Flow<WizardUiState>,
+    debounceMillis: Long = WIZARD_DRAFT_DEBOUNCE_MS,
+): Flow<WizardUiState> = states
+    .filter { !it.isRestoring }
+    .drop(1)
+    .debounce(debounceMillis)
+    .filter { wizardMaySaveDraft(it) }
+
 // ── Catalogs ─────────────────────────────────────────────────────────────────
 
 /** The seven categories the server's `category` enum accepts. */
@@ -337,6 +394,19 @@ fun wizardCanAdvance(state: WizardUiState): Boolean = when (state.step) {
     // Done advances through its own CTA, not the step machine.
     WizardStep.Done -> false
 }
+
+/**
+ * May the artist move between steps at all right now?
+ *
+ * Not while a publish is in flight. `publish()` snapshots the form before its
+ * three round trips, so anything edited during that window reaches neither the
+ * server nor the draft — the successful publish clears the draft — and the
+ * publish ends by forcing the step to Done, yanking the artist off whatever they
+ * had opened. [wizardCanAdvance] already refused the CTA during a publish; the
+ * preview's per-section EDIT jumps and system Back did not, and they are the two
+ * ways out of the Preview step.
+ */
+fun wizardMayChangeStep(state: WizardUiState): Boolean = !state.isPublishing
 
 /**
  * Has this step been given anything?

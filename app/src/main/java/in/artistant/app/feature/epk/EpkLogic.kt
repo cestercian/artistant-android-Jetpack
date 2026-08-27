@@ -6,6 +6,7 @@ import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.media.UploadQueue
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 
 /**
  * Every decision the EPK editor makes, extracted from the Composables and the
@@ -146,7 +147,11 @@ fun sanitizePriceInput(raw: String): String {
     val digits = raw.filter { it.isDigit() }
     if (digits.isEmpty()) return ""
     val trimmed = digits.trimStart('0').ifEmpty { "0" }
-    val value = trimmed.toLongOrNull() ?: return ""
+    // A run of digits too long to be a Long is by definition past the ceiling, so
+    // it clamps like every shorter over-cap paste. Returning "" here instead —
+    // which is what an unhandled overflow did — wipes the price the artist was
+    // editing, which is the one outcome this filter exists to prevent.
+    val value = trimmed.toLongOrNull() ?: Long.MAX_VALUE
     return if (value > MAX_PRICE_INR) MAX_PRICE_INR.toString() else trimmed
 }
 
@@ -361,12 +366,17 @@ fun weekendPremiumLabel(pct: Int): String =
  * pending value is null until the artist touches a chip, so a failed write falls
  * back to the truth by clearing one field rather than by reconstructing it.
  *
- * Normalized on the way out so the chips can never show a set the column would
- * not accept — the artist should not see seven services selected and then be told
- * six saved.
+ * Cleaned but deliberately NOT clamped — [ServiceTags.normalizeForDisplay], not
+ * [ServiceTags.normalize]. The cap belongs on the way to the column. A row
+ * written elsewhere (another client, an admin backfill) can carry more than
+ * `MAX_TAGS`, and truncating it here would hide a claim the profile is still
+ * making to clients while the toggle wrote the visible six back over the whole
+ * column — deleting the hidden ones the first time the artist touched any chip.
+ * `ServiceTags.toggle` already refuses to ADD past the cap and never refuses a
+ * removal, which is the right pair of rules for a set this client did not write.
  */
 fun shownServiceTags(pending: List<String>?, published: List<String>): List<String> =
-    ServiceTags.normalize(pending ?: published)
+    ServiceTags.normalizeForDisplay(pending ?: published)
 
 // ── Whole-set write guard ────────────────────────────────────────────────────
 
@@ -480,8 +490,22 @@ fun shareLinkUrl(handle: String?): String? {
 
 // ── Samples / photos capacity ────────────────────────────────────────────────
 
-fun canAddSample(currentCount: Int, uploadInFlight: Boolean): Boolean =
-    !uploadInFlight && currentCount < MAX_SAMPLES
+/**
+ * Whether another clip can be picked.
+ *
+ * [uploading] is the clips already staged — sitting in [UploadQueue] with no
+ * `samples` row yet — and they count toward [MAX_SAMPLES] because they are about
+ * to become rows. The stored list only grows when the queue drains, seconds
+ * later, so asking about [stored] alone let two picks inside one upload both see
+ * room and put the artist over the ceiling the wizard and the editor are both
+ * supposed to honour.
+ *
+ * Counted rather than refused outright (which is what a Boolean "an upload is in
+ * flight" would do, and what the photo twin below does): the queue exists so
+ * clips can be staged with no network and drained later, and blocking the second
+ * pick until the first upload lands would give that away for nothing.
+ */
+fun canAddSample(stored: Int, uploading: Int): Boolean = stored + uploading < MAX_SAMPLES
 
 fun canAddPhoto(currentCount: Int, uploadInFlight: Boolean): Boolean =
     !uploadInFlight && currentCount < MAX_PHOTOS
@@ -571,6 +595,42 @@ suspend fun <T> saveCatching(block: suspend () -> T): Result<T> =
     } catch (e: Exception) {
         Result.failure(e)
     }
+
+/**
+ * The five debounced writes the editor can owe the server.
+ *
+ * Out here rather than private to the ViewModel because the rule that decides
+ * when one is still owed — [runOwedSave] — is the part that has to be covered,
+ * and the ViewModel is unreachable from this classpath (see the file KDoc).
+ */
+enum class EpkSave { Packages, Tech, Bio, Socials, Prompts }
+
+/**
+ * Run one debounced write, keeping it marked OWED until [persist] has returned.
+ *
+ * [owed] is what the editor consults when it is about to lose the coroutine that
+ * was going to do the writing — the artist backgrounds the app, or leaves the
+ * screen — so it has to stay accurate across both ways this can die before the
+ * server has heard anything:
+ *
+ *  - **during the wait**, which is the entire exposure a debounce buys, and
+ *  - **during the request**, because [saveCatching] rethrows a cancellation
+ *    rather than reporting it, so a write killed mid-flight leaves the mark
+ *    standing instead of clearing it on the way past.
+ *
+ * Only a persist that returned normally clears the mark — which is why the
+ * removal is the last statement and deliberately NOT a `finally`.
+ */
+suspend fun runOwedSave(
+    save: EpkSave,
+    owed: MutableSet<EpkSave>,
+    debounceMs: Long,
+    persist: suspend () -> Unit,
+) {
+    if (debounceMs > 0) delay(debounceMs)
+    persist()
+    owed -= save
+}
 
 // ── Completeness ─────────────────────────────────────────────────────────────
 

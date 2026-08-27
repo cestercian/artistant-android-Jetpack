@@ -97,7 +97,6 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
 
     ResumeEffect(onResumed = viewModel::onResumed)
 
@@ -173,6 +172,11 @@ fun ChatScreen(
             blocked = state.blocked,
             canBlock = state.counterpartId != null,
             reportSubmitted = state.reportSubmitted,
+            // A mute/block that didn't land is reported HERE, on the sheet the
+            // tap came from, rather than in the transcript's own error slot —
+            // that one speaks for the conversation failing to load and offers to
+            // reload it, which is neither true nor useful for a failed toggle.
+            actionError = state.actionError,
             onBookingClick = onBookingClick,
             onArtistClick = onArtistClick,
             onToggleStar = viewModel::toggleStarred,

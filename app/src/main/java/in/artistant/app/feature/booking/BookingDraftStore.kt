@@ -9,7 +9,13 @@ import javax.inject.Singleton
 
 /**
  * In-memory draft holder — port of iOS `BookingStore.draft`.
- * Survives Booking → Checkout within a session; cleared after confirm.
+ *
+ * Survives Booking → Checkout within a session; cleared after confirm — and on
+ * sign-out / account delete (`ProfileViewModel`), because a `@Singleton` in a
+ * process that outlives the session otherwise hands the next account the
+ * previous one's half-composed booking: their venue, guest count and free-text
+ * directions, plus the package tier that decides which ticket the booking
+ * screen opens on.
  */
 @Singleton
 class BookingDraftStore @Inject constructor() {
@@ -53,7 +59,7 @@ class BookingDraftStore @Inject constructor() {
     fun pendingPackageIndex(artistId: String): Int? =
         _pendingPackage.value?.takeIf { it.artistId == artistId }?.index
 
-    /** Clears the whole handoff — the post-confirm reset, as on iOS. */
+    /** Clears the whole handoff — the post-confirm reset (as on iOS) and sign-out. */
     fun clear() {
         _draft.value = null
         _pendingPackage.value = null

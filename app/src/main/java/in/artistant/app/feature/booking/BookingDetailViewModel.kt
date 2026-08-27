@@ -10,13 +10,33 @@ import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
-import `in`.artistant.app.data.repository.ReviewsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/**
+ * Why the page has no booking to show.
+ *
+ * Title and body travel together because the screen prints BOTH, and the two
+ * cases are opposite facts: a row that isn't there (cancelled, removed, or not
+ * this account's to read) versus a read that never completed. The single
+ * `loadError = "Booking not found."` they replace said the same sentence twice
+ * — once as the heading, once as its explanation — and told a client on a flaky
+ * connection that the artist had deleted their gig.
+ */
+enum class BookingLoadFailure(val title: String, val body: String) {
+    NotFound(
+        title = "Booking not found",
+        body = "It may have been cancelled, or it isn't on this account.",
+    ),
+    Unreachable(
+        title = "Couldn't load this booking",
+        body = "Check your connection and try again.",
+    ),
+}
 
 data class BookingDetailUiState(
     val booking: Booking? = null,
@@ -32,18 +52,29 @@ data class BookingDetailUiState(
      */
     val artist: Artist? = null,
     val isLoading: Boolean = true,
-    val loadError: String? = null,
-    val isActing: Boolean = false,
+    val loadFailure: BookingLoadFailure? = null,
+    /**
+     * WHICH mutation is in flight, or null when none is.
+     *
+     * A bare `isActing` boolean was ambiguous on the one screen where it
+     * matters: for an artist on a pending request the dock renders Accept AND
+     * Decline together, both read the same flag, and tapping either made the
+     * page announce "Accepting…" and "Declining…" at once — over two actions
+     * with opposite consequences for the client's booking. The label belongs to
+     * the button that was tapped; the others are merely disabled.
+     */
+    val actingAction: BookingAction? = null,
     val actionError: String? = null,
-)
+) {
+    /** Any mutation in flight — every dock control is disabled while one is. */
+    val isActing: Boolean get() = actingAction != null
+}
 
 @HiltViewModel
 class BookingDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val bookingsRepository: BookingsRepository,
     private val artistsRepository: ArtistsRepository,
-    /** Handed to [ReviewSheet] so the detail screen doesn't need a second VM. */
-    val reviewsRepository: ReviewsRepository,
 ) : ViewModel() {
 
     private val bookingId: String = checkNotNull(savedStateHandle["bookingId"])
@@ -57,10 +88,18 @@ class BookingDetailViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, loadError = null) }
-            val booking = runCatching { bookingsRepository.fetchOne(bookingId) }.getOrNull()
+            _state.update { it.copy(isLoading = true, loadFailure = null) }
+            // A read that FAILED and a row that ISN'T THERE are opposite facts,
+            // and collapsing them into one sentence reported every dropped
+            // connection as a booking the artist had deleted. Retry is offered
+            // either way, so the only thing at stake is what the page claims
+            // happened — see [BookingLoadFailure].
+            val result = runCatching { bookingsRepository.fetchOne(bookingId) }
+            val booking = result.getOrNull()
             if (booking == null) {
-                _state.update { it.copy(isLoading = false, loadError = "Booking not found.") }
+                val failure =
+                    if (result.isFailure) BookingLoadFailure.Unreachable else BookingLoadFailure.NotFound
+                _state.update { it.copy(isLoading = false, loadFailure = failure) }
                 return@launch
             }
             // Publish the booking BEFORE the artist round-trip. The page's whole
@@ -83,10 +122,9 @@ class BookingDetailViewModel @Inject constructor(
         }
     }
 
-    fun acceptRequest() = mutateRequest { bookingsRepository.accept(bookingId) }
-
-    fun declineRequest(reason: String? = null) =
-        mutateRequest { bookingsRepository.declineByArtist(bookingId, reason) }
+    fun acceptRequest() = mutateRequest(BookingAction.Accept) {
+        bookingsRepository.accept(bookingId)
+    }
 
     /**
      * Withdraw the booking, stamped with the viewer's own side.
@@ -96,15 +134,34 @@ class BookingDetailViewModel @Inject constructor(
      * drives whose cancellation-rate metric moves, and mig 0083 rejects a client
      * trying to claim the artist's. Defaulted so the pre-existing call sites
      * (and their tests) keep compiling as the client path they always were.
+     *
+     * This is also the artist's Decline: the screen routes both through here
+     * because the two are the same Edge Function call with the same stamp, and
+     * only the sheet's copy differs.
      */
     fun cancelBooking(viewer: BookingViewer = BookingViewer.Client, reason: String? = null) =
         when (cancelActor(viewer)) {
-            CancelActor.Artist -> mutateRequest {
+            CancelActor.Artist -> mutateRequest(artistExitAction()) {
                 bookingsRepository.declineByArtist(bookingId, reason)
             }
-            CancelActor.Client -> mutateRequest {
+            CancelActor.Client -> mutateRequest(BookingAction.Cancel) {
                 bookingsRepository.cancel(bookingId, reason)
             }
+        }
+
+    /**
+     * Which button the artist's exit belongs to — Decline while the request is
+     * still pending, Cancel once the gig is confirmed.
+     *
+     * The same fork the sheet's copy makes (`isDecline` in the screen). It
+     * exists so the in-flight label lands on the control that was tapped rather
+     * than on every control at once.
+     */
+    private fun artistExitAction(): BookingAction =
+        if (_state.value.booking?.status == BookingStatus.PendingConfirm) {
+            BookingAction.Decline
+        } else {
+            BookingAction.Cancel
         }
 
     fun reportActionError(message: String) =
@@ -112,18 +169,18 @@ class BookingDetailViewModel @Inject constructor(
 
     fun dismissActionError() = _state.update { it.copy(actionError = null) }
 
-    private fun mutateRequest(block: suspend () -> Booking) {
+    private fun mutateRequest(action: BookingAction, block: suspend () -> Booking) {
         if (_state.value.isActing) return
         viewModelScope.launch {
-            _state.update { it.copy(isActing = true, actionError = null) }
+            _state.update { it.copy(actingAction = action, actionError = null) }
             try {
                 val updated = block()
-                _state.update { it.copy(booking = updated, isActing = false) }
+                _state.update { it.copy(booking = updated, actingAction = null) }
             } catch (e: BookingRepositoryError) {
-                _state.update { it.copy(isActing = false, actionError = e.message) }
+                _state.update { it.copy(actingAction = null, actionError = e.message) }
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(isActing = false, actionError = e.message ?: "Action failed.")
+                    it.copy(actingAction = null, actionError = e.message ?: "Action failed.")
                 }
             }
         }
@@ -164,29 +221,6 @@ class BookingDetailViewModel @Inject constructor(
         val booking = s.booking ?: return null
         booking.packageName?.takeIf { it.isNotBlank() }?.let { return it }
         return s.artist?.packages?.getOrNull(booking.packageIndex)?.name?.takeIf { it.isNotBlank() }
-    }
-
-    fun showAcceptDecline(isArtistViewer: Boolean): Boolean =
-        BookingAction.Accept in actions(viewerOf(isArtistViewer))
-
-    fun showClientCancel(isArtistViewer: Boolean): Boolean =
-        !isArtistViewer &&
-            _state.value.booking?.status == BookingStatus.PendingConfirm
-
-    /** The whole action set for this viewer at the booking's current status. */
-    fun actions(viewer: BookingViewer): Set<BookingAction> {
-        val status = _state.value.booking?.status ?: return emptySet()
-        return BookingActions.forViewer(viewer, status)
-    }
-
-    fun primaryActions(viewer: BookingViewer): List<BookingAction> {
-        val status = _state.value.booking?.status ?: return emptyList()
-        return BookingActions.primary(viewer, status)
-    }
-
-    fun manageActions(viewer: BookingViewer): List<BookingAction> {
-        val status = _state.value.booking?.status ?: return emptyList()
-        return BookingActions.manage(viewer, status)
     }
 }
 

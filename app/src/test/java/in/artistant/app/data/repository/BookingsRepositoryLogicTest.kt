@@ -95,6 +95,77 @@ class BookingsRepositoryLogicTest {
     }
 
     @Test
+    fun accept_onAnIdTheSeatCantSee_isTypedNotOpaque() = runTest {
+        // The real seam UPDATEs by id and reads back the rows it matched: zero
+        // rows is the expected outcome of a stale push id, a booking the client
+        // cancelled a second earlier, or 0083's artist-only policy refusing the
+        // write. It has to arrive as a signal the screen can word, not as a
+        // decode failure the artist reads verbatim.
+        val repo = FakeBookingsRepository()
+        val err = runCatching { repo.accept("11111111-1111-1111-1111-111111111111") }.exceptionOrNull()
+        assertTrue(
+            "expected NotFoundOrUnauthorized, got $err",
+            err is BookingRepositoryError.NotFoundOrUnauthorized,
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // classifyCreateError — the server's booking guards, said in English
+    //
+    // Nothing on the client pre-checks the no-overlap or self-booking guards, so
+    // a rejected insert is the FIRST time either is heard about — and unclassified
+    // it went to the checkout banner as raw PostgREST text ("conflicting key value
+    // violates exclusion constraint \"bookings_no_overlap\"") with no hint that
+    // picking another date would fix it. Ported from iOS's classifier, ordering
+    // included.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun classify(message: String) =
+        SupabaseBookingsRepository.classifyCreateError(IllegalStateException(message))
+
+    @Test
+    fun classifyCreateError_slotTaken_readsAsADateToChangeNotAConstraint() {
+        for (raw in listOf(
+            "conflicting key value violates exclusion constraint \"bookings_no_overlap\"",
+            "PostgrestException: code 23P01, message: conflicting key value",
+            "violates exclusion constraint",
+        )) {
+            val mapped = classify(raw)
+            assertTrue(
+                "expected DateUnavailable for \"$raw\", got $mapped",
+                mapped is BookingRepositoryError.DateUnavailable,
+            )
+            assertEquals("That date was just taken. Pick another date and try again.", mapped.message)
+        }
+    }
+
+    @Test
+    fun classifyCreateError_selfBooking_beatsTheRateCapItSharesAnSqlstateWith() {
+        // Both `bookings_no_self` and the 0074 squat caps raise 23514
+        // (check_violation). Keying the cap first would tell an artist who tapped
+        // their own profile that they had hit a booking limit — the wrong reason,
+        // and one they cannot act on.
+        val mapped = classify(
+            "new row for relation \"bookings\" violates check constraint \"bookings_no_self\" (SQLSTATE 23514)",
+        )
+        assertTrue("expected SelfBooking, got $mapped", mapped is BookingRepositoryError.SelfBooking)
+    }
+
+    @Test
+    fun classifyCreateError_squatCap_isARateLimit() {
+        val mapped = classify("check_violation: booking limit reached for this artist")
+        assertTrue("expected RateLimited, got $mapped", mapped is BookingRepositoryError.RateLimited)
+    }
+
+    @Test
+    fun classifyCreateError_anythingElseKeepsItsCause() {
+        val cause = IllegalStateException("socket closed")
+        val mapped = SupabaseBookingsRepository.classifyCreateError(cause)
+        assertTrue("expected Underlying, got $mapped", mapped is BookingRepositoryError.Underlying)
+        assertEquals(cause, mapped.cause)
+    }
+
+    @Test
     fun cancelPayloadKeys_excludeEscrow() {
         assertEquals(setOf("booking_id", "cancelled_by", "reason"), SupabaseBookingsRepository.cancelPayloadKeys)
         assertTrue("escrow_status" !in SupabaseBookingsRepository.cancelPayloadKeys)

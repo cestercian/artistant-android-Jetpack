@@ -170,20 +170,28 @@ class SupportChatViewModel @Inject constructor(
     private val _state = MutableStateFlow(SupportUiState())
     val state: StateFlow<SupportUiState> = _state.asStateFlow()
 
+    /**
+     * Line ids, minted outside every `update` block.
+     *
+     * `MutableStateFlow.update` re-runs its lambda when the compare-and-set
+     * loses, so the lambda has to be side-effect free — and `nextId++` is a
+     * read-modify-write. Building the lines first keeps every lambda a plain
+     * `copy()`.
+     */
     private var nextId = 0L
 
     init {
-        _state.update { it.copy(lines = listOf(botLine(SupportScript.GREETING))) }
+        val greeting = botLine(SupportScript.GREETING)
+        _state.update { it.copy(lines = listOf(greeting)) }
     }
 
     fun choose(intent: SupportIntent, bookingsLabel: String) {
         val (answer, offersBookings) = SupportScript.answer(intent, bookingsLabel)
+        val echoed = SupportScript.userLine(intent)?.let { listOf(userLine(it)) } ?: emptyList()
+        val reply = botLine(answer, offersBookings)
+        val step = SupportScript.next(intent)
         _state.update { current ->
-            val echoed = SupportScript.userLine(intent)?.let { listOf(userLine(it)) } ?: emptyList()
-            current.copy(
-                lines = current.lines + echoed + botLine(answer, offersBookings),
-                step = SupportScript.next(intent),
-            )
+            current.copy(lines = current.lines + echoed + reply, step = step)
         }
     }
 
@@ -195,13 +203,15 @@ class SupportChatViewModel @Inject constructor(
     fun sendNote(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || _state.value.sending) return
-        _state.update { it.copy(lines = it.lines + userLine(trimmed), sending = true) }
+        val echo = userLine(trimmed)
+        _state.update { it.copy(lines = it.lines + echo, sending = true) }
         viewModelScope.launch {
             val delivered = runCatching { bookings.submitFeedback(trimmed, isBug = false) }
                 .getOrDefault(false)
+            val receipt = botLine(SupportScript.noteReceipt(delivered))
             _state.update {
                 it.copy(
-                    lines = it.lines + botLine(SupportScript.noteReceipt(delivered)),
+                    lines = it.lines + receipt,
                     // A failed send stays in the composer step so the retry is one
                     // tap away; a delivered one closes the composer.
                     step = if (delivered) SupportStep.NoteSent else SupportStep.Composing,

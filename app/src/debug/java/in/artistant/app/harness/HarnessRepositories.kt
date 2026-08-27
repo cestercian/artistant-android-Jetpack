@@ -299,7 +299,8 @@ private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository 
         return thread.id
     }
 
-    override suspend fun markThreadRead(threadId: String) {
+    /** One viewer, one counter — nothing here for the real seam's seat to select (cf. [setMuted]). */
+    override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) {
         val index = threads.indexOfFirst { it.id == threadId }
         if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
     }

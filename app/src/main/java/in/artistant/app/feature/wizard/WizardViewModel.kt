@@ -14,12 +14,16 @@ import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.feature.epk.PackageRow
+import `in`.artistant.app.feature.epk.addTechItem
 import `in`.artistant.app.feature.epk.packageDrafts
 import `in`.artistant.app.feature.epk.previewPackages
+import `in`.artistant.app.feature.epk.sampleTitleFrom
 import `in`.artistant.app.feature.epk.sanitizePriceInput
+import `in`.artistant.app.feature.epk.toggleTechItem
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -30,7 +34,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -55,7 +58,14 @@ data class WizardUiState(
      * coercing it to 0 mid-keystroke publishes a free gig.
      */
     val packageRows: List<PackageRow> = emptyList(),
-    val techItems: Set<String> = emptySet(),
+    /**
+     * The rider, in the order the artist built it — a List rather than a Set for
+     * the same reason the EPK editor holds one: `tech_rider` stores a `position`
+     * and a sound engineer reads the sheet top to bottom. Membership is
+     * case-insensitive, which a Set cannot express, so add/toggle go through the
+     * EPK's rules rather than through plain set arithmetic.
+     */
+    val techItems: List<String> = emptyList(),
     val techDraft: String = "",
     val daysAvailable: Set<String> = setOf("Fri", "Sat"),
     val timeSlots: Set<String> = setOf("7:30 PM", "9:00 PM"),
@@ -77,6 +87,16 @@ data class WizardUiState(
     val isPublishing: Boolean = false,
     val publishPhase: WizardPublishPhase = WizardPublishPhase.Idle,
     val publishError: String? = null,
+    /**
+     * A media step's own error line: an import that failed, or a camera the OS
+     * refused to open.
+     *
+     * Separate from [publishError] because only the Preview step renders that
+     * one, and every step change clears it — so a failed pick on the Cover or
+     * Samples step wrote a message nothing would ever show, and the artist got
+     * an empty preview with no explanation at all.
+     */
+    val mediaError: String? = null,
     /** Set while the draft is being restored, so the form doesn't flash empty. */
     val isRestoring: Boolean = true,
 ) {
@@ -231,7 +251,7 @@ class WizardViewModel @Inject constructor(
         packageRows = draft.packages.map {
             PackageRow(it.key, it.name, it.duration, it.price, it.popular)
         },
-        techItems = draft.techItems.toSet(),
+        techItems = draft.techItems,
         daysAvailable = draft.daysAvailable.toSet().ifEmpty { daysAvailable },
         timeSlots = draft.timeSlots.toSet().ifEmpty { timeSlots },
         coverGradientIndex = ArtistGradient.clampIndex(draft.coverGradientIndex),
@@ -257,29 +277,19 @@ class WizardViewModel @Inject constructor(
      *
      * Debounced rather than written per keystroke because a DataStore edit is a
      * file write plus a JSON encode, and a text field emits one state per typed
-     * character. 600ms is long enough that a burst of typing collapses to one
-     * write and short enough that a task-kill mid-form loses at most a word.
-     * `drop(1)` skips the initial empty state so an immediate kill can't
-     * overwrite a good draft with a blank one before [restore] has landed.
+     * character.
      *
-     * Done is excluded, and that exclusion is load-bearing rather than tidy.
-     * Publish clears the draft and then moves the step, so a writer that still
-     * fired on Done would land 600ms later and rewrite the draft it had just
-     * deleted — with `step = Done` in it. The next launch would restore that and
-     * open the wizard on the celebration screen for a profile the artist had not
-     * published. Caught on device; the ordering is invisible from the code alone.
+     * The pipeline itself lives in [wizardDraftWrites] — which snapshots are
+     * worth writing, and in which order the filters sit relative to the debounce,
+     * are decisions that were only ever visible on a device. They are covered by
+     * a unit test now.
      */
-    @OptIn(FlowPreview::class)
     private fun observeDraftWrites() {
         viewModelScope.launch {
-            _state
-                .filter { !it.isRestoring && it.step != WizardStep.Done }
-                .drop(1)
-                .debounce(600)
-                .collect { snapshot ->
-                    val ownerId = session.currentUserId?.lowercase() ?: return@collect
-                    runCatching { draftStore.save(snapshot.toDraft(ownerId)) }
-                }
+            wizardDraftWrites(_state).collect { snapshot ->
+                val ownerId = session.currentUserId?.lowercase() ?: return@collect
+                runCatching { draftStore.save(snapshot.toDraft(ownerId)) }
+            }
         }
     }
 
@@ -292,7 +302,7 @@ class WizardViewModel @Inject constructor(
         genre = genre,
         baseCity = baseCity,
         packages = packageRows.map { DraftPackage(it.key, it.name, it.duration, it.price, it.popular) },
-        techItems = techItems.toList(),
+        techItems = techItems,
         daysAvailable = daysAvailable.toList(),
         timeSlots = timeSlots.toList(),
         coverGradientIndex = coverGradientIndex,
@@ -408,15 +418,25 @@ class WizardViewModel @Inject constructor(
 
     // ── Tech rider ───────────────────────────────────────────────────────────
 
+    /**
+     * Both halves defer to the EPK's rider rules, which are case-insensitive.
+     *
+     * The wizard used to do exact-match set arithmetic, so an artist who typed
+     * "4 Vocal Mics" with the "4 vocal mics" preset chip already selected
+     * published the same line twice — on a document a venue has to act on. The
+     * rule belongs in one place; the wizard and the EPK edit the same rider.
+     */
     fun toggleTechItem(item: String) =
-        _state.update { it.copy(techItems = toggleInSet(item, it.techItems)) }
+        _state.update { it.copy(techItems = toggleTechItem(it.techItems, item)) }
 
     fun onTechDraftChanged(value: String) = _state.update { it.copy(techDraft = value) }
 
     fun addTechItem() {
-        val item = _state.value.techDraft.trim()
-        if (item.isBlank()) return
-        _state.update { it.copy(techItems = it.techItems + item, techDraft = "") }
+        val draft = _state.value.techDraft
+        // The field clears either way: a refused duplicate means the line the
+        // artist typed is already on the rider, so leaving it in the box to be
+        // "fixed" would be asking for a change that has nothing to change.
+        _state.update { it.copy(techItems = addTechItem(it.techItems, draft), techDraft = "") }
     }
 
     // ── Availability ─────────────────────────────────────────────────────────
@@ -440,30 +460,54 @@ class WizardViewModel @Inject constructor(
                     it.copy(
                         pendingCover = pending,
                         pendingCoverPath = pending.file(mediaCache).absolutePath,
-                        publishError = null,
+                        mediaError = null,
                     )
                 }
             }.onFailure { e ->
-                _state.update { it.copy(publishError = e.message ?: "Couldn't import that photo.") }
+                _state.update { it.copy(mediaError = e.message ?: "Couldn't import that photo.") }
             }
         }
+    }
+
+    /**
+     * The camera can't be opened — the permission was refused, and on Android 11+
+     * a second refusal stops the system prompting at all.
+     *
+     * Said out loud because the alternative is what shipped: "Take photo" looking
+     * identical to the working "Choose photo" beside it and doing nothing, for
+     * good. The gallery is the recovery worth naming; Settings is the other one.
+     */
+    fun onCameraUnavailable() = _state.update {
+        it.copy(mediaError = "Camera access is off — turn it on in Settings, or choose a photo instead.")
     }
 
     fun clearCoverPick() = _state.update { it.copy(pendingCover = null, pendingCoverPath = null) }
 
     // ── Samples ──────────────────────────────────────────────────────────────
 
-    fun onSamplePicked(uri: Uri, displayName: String?) {
+    /**
+     * The title comes from the provider's `DISPLAY_NAME`, never from
+     * `Uri.lastPathSegment`.
+     *
+     * A SAF pick hands back a document URI whose last segment is a
+     * provider-defined id — `audio:1000000042`, `primary:Music/demo.mp3` — and
+     * that string was going straight into `samples.title` on the artist's public
+     * profile. Reading the real name is a content-provider query, which is why
+     * this runs on IO (`adoptAudio` makes the same hop for its file copy).
+     */
+    fun onSamplePicked(uri: Uri) {
         viewModelScope.launch {
             runCatching {
-                val title = displayName?.substringBeforeLast('.')?.ifBlank { null } ?: "Sample"
-                val pending = mediaCache.adoptAudio(uri, title)
+                withContext(Dispatchers.IO) {
+                    mediaCache.adoptAudio(uri, sampleTitleFrom(mediaCache.displayName(uri)))
+                }
+            }.onSuccess { pending ->
                 _state.update {
                     if (it.pendingSamples.size >= WIZARD_MAX_SAMPLES) it
-                    else it.copy(pendingSamples = it.pendingSamples + pending, publishError = null)
+                    else it.copy(pendingSamples = it.pendingSamples + pending, mediaError = null)
                 }
             }.onFailure { e ->
-                _state.update { it.copy(publishError = e.message ?: "Couldn't import that audio.") }
+                _state.update { it.copy(mediaError = e.message ?: "Couldn't import that audio.") }
             }
         }
     }
@@ -493,21 +537,33 @@ class WizardViewModel @Inject constructor(
         if (!current.canAdvance) return
         when (current.step) {
             WizardStep.Preview -> publish()
-            WizardStep.Done -> finishFromDone()
+            // No Done arm: `wizardCanAdvance` refuses Done, so the guard above has
+            // already returned. Done leaves through its own CTA, which calls
+            // `finishFromDone` directly.
             else -> advanceWizardStep(current.step)?.let { nextStep ->
-                _state.update { it.copy(step = nextStep, publishError = null) }
+                _state.update { it.copy(step = nextStep, publishError = null, mediaError = null) }
             }
         }
     }
 
     fun back() {
-        backWizardStep(_state.value.step)?.let { prev ->
-            _state.update { it.copy(step = prev, publishError = null) }
+        val current = _state.value
+        if (!wizardMayChangeStep(current)) return
+        backWizardStep(current.step)?.let { prev ->
+            _state.update { it.copy(step = prev, publishError = null, mediaError = null) }
         }
     }
 
-    /** Preview's per-section edit jump. Advancing re-walks the flow back here. */
-    fun jumpTo(step: WizardStep) = _state.update { it.copy(step = step, publishError = null) }
+    /**
+     * Preview's per-section edit jump. Advancing re-walks the flow back here.
+     *
+     * Refused while a publish is in flight — see [wizardMayChangeStep]. The
+     * EDIT chips sit on the same screen as the "Publishing…" CTA and stayed
+     * tappable through three round trips.
+     */
+    fun jumpTo(step: WizardStep) = _state.update {
+        if (!wizardMayChangeStep(it)) it else it.copy(step = step, publishError = null, mediaError = null)
+    }
 
     fun finishFromDone() {
         viewModelScope.launch { _events.send(WizardEvent.Finished) }
@@ -580,7 +636,7 @@ class WizardViewModel @Inject constructor(
                 _state.update { it.copy(publishPhase = WizardPublishPhase.SavingDetails) }
                 coroutineScope {
                     val pkgs = async { packages.replaceAll(userId, packageDrafts(snap.packageRows)) }
-                    val tech = async { techRider.replaceAll(userId, snap.techItems.toList()) }
+                    val tech = async { techRider.replaceAll(userId, snap.techItems) }
                     pkgs.await()
                     tech.await()
                 }
@@ -610,11 +666,18 @@ class WizardViewModel @Inject constructor(
                         publishPhase = WizardPublishPhase.Idle,
                         step = WizardStep.Done,
                         publishError = null,
+                        mediaError = null,
                         pendingCover = null,
                         pendingCoverPath = null,
                         pendingSamples = emptyList(),
                     )
                 }
+            } catch (e: CancellationException) {
+                // Structured concurrency: never swallow. A CancellationException
+                // is an Exception, so without this arm clearing the wizard
+                // mid-publish would land in the catch-all below and report the
+                // cancellation to the artist as a publish failure.
+                throw e
             } catch (e: AppError.UniqueViolation) {
                 failPublish("That handle is already taken.")
             } catch (e: AppError) {

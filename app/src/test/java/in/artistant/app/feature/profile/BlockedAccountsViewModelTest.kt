@@ -50,7 +50,7 @@ class BlockedAccountsViewModelTest {
         override suspend fun send(threadId: String, body: String): Message = error("unused")
         override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String =
             error("unused")
-        override suspend fun markThreadRead(threadId: String) = Unit
+        override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) = Unit
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
         override suspend fun counterpartLastRead(threadId: String): Long? = null
         override suspend fun setMuted(threadId: String, muted: Boolean) = Unit

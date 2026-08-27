@@ -212,16 +212,27 @@ class CheckoutViewModelLogicTest {
         assertNull(vm.state.value.confirmedBookingId)
     }
 
+    /**
+     * The entitlement gate moved inside the launch, behind a refresh — a client
+     * who subscribed yesterday cold-starts with `isEntitled` false and nothing on
+     * their seat ever populates it, so gating on the cached value bounced them to
+     * the paywall for a subscription they already owned.
+     *
+     * With subscriptions off (`AppEnvironment.subscriptionsEnabled`), the gate has
+     * to stay entirely out of the way: the request still lands, and the paywall
+     * flag is never raised.
+     */
     @Test
-    fun dismissError_clearsTheBannerWithoutTouchingTheDraft() = runTest {
-        val vm = vm(storeWithDraft(), bookings = FakeBookingsRepository().apply { failCreate = true })
+    fun theEntitlementGateStaysInertWhileSubscriptionsAreOff() = runTest {
+        val bookings = FakeBookingsRepository()
+        val vm = vm(storeWithDraft(), bookings = bookings)
         advanceUntilIdle()
+
         vm.sendRequest()
         advanceUntilIdle()
 
-        vm.dismissError()
-
-        assertNull(vm.state.value.lastCreateErrorMessage)
-        assertNotNull(vm.state.value.draft)
+        assertFalse(vm.state.value.needsPaywall)
+        assertNotNull(vm.state.value.confirmedBookingId)
+        assertFalse(vm.state.value.isSubmitting)
     }
 }

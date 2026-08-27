@@ -1,11 +1,11 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
-import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -39,6 +39,7 @@ class SupabaseReportsRepository @Inject constructor(
 ) : ReportsRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val localLogMutex = Mutex()
 
     override suspend fun reportConversation(threadId: String, reason: String, details: String?) {
         insert(
@@ -68,20 +69,23 @@ class SupabaseReportsRepository @Inject constructor(
         try {
             client.from("reports").insert(row)
         } catch (t: Throwable) {
+            // Soft-fail, whatever the reason — missing table, RLS, offline. A
+            // report must never throw into the chat UI (see the class doc), and
+            // the local log is what keeps the failure from being silent.
             Timber.w(t, "reports insert failed — logging locally")
             appendLocal(row)
-            // Soft-fail for missing table / offline — never block chat UX.
-            val mapped = mapPostgrest(t)
-            if ("reports" !in (t.message.orEmpty()) && "PGRST" !in (t.message.orEmpty()) &&
-                "relation" !in (t.message.orEmpty()).lowercase()
-            ) {
-                // Still soft — conversation report must not throw into UI.
-                Timber.d("report soft-fail: %s", mapped.message)
-            }
         }
     }
 
-    private suspend fun appendLocal(row: ReportInsert) {
+    /**
+     * Read-modify-write of the whole local log, serialised.
+     *
+     * The read and the write are two separate DataStore operations, and this log
+     * is the ONLY record of a report the server refused — two interleaved appends
+     * would both encode the list they read and the loser's report would vanish
+     * exactly where the fallback exists to catch it.
+     */
+    private suspend fun appendLocal(row: ReportInsert) = localLogMutex.withLock {
         val prev = prefs.getString(LOCAL_KEY).first().orEmpty()
         val next = if (prev.isBlank()) json.encodeToString(listOf(row))
         else {

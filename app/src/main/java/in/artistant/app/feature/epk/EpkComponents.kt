@@ -314,31 +314,29 @@ fun EpkChip(
     }
 }
 
-/** Error tone for [EpkBanner]. Load failures offer a retry; save failures do not. */
-enum class EpkBannerTone { Error, Warning }
-
 /**
  * Inline notice with an optional action and an optional dismiss.
  *
  * Not a snackbar: a save failure has to stay on screen next to the edit that did
  * not land, and a snackbar's whole contract is that it leaves. The artist must
  * be able to see "your pricing didn't save" at the same time as the price.
+ *
+ * One tone. Every banner this screen raises — a failed load, a failed save, a
+ * stalled upload — is something that did not happen, so the "warning" half of the
+ * two-value tone enum this used to take never had a caller and never will until
+ * one of those stops being an error.
  */
 @Composable
 fun EpkBanner(
     message: String,
     modifier: Modifier = Modifier,
-    tone: EpkBannerTone = EpkBannerTone.Error,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     onDismiss: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val accent = when (tone) {
-        EpkBannerTone.Error -> colors.hot
-        EpkBannerTone.Warning -> colors.warm
-    }
+    val accent = colors.hot
     Column(
         modifier
             .fillMaxWidth()

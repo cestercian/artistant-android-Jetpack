@@ -55,10 +55,6 @@ class RequestQuoteViewModel @Inject constructor(
         _state.update { it.copy(amountInr = value.filter { c -> c.isDigit() }) }
     }
 
-    fun setDate(value: String) {
-        _state.update { it.copy(dateLabel = value) }
-    }
-
     fun setMessage(value: String) {
         _state.update { it.copy(message = value) }
     }

@@ -133,9 +133,13 @@ fun BookingDetailScreen(
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
                 }
+                // Title AND body come off the same failure, so the page can't
+                // report a dropped connection as a deleted booking — or print
+                // one sentence twice. See [BookingLoadFailure].
+                val failure = state.loadFailure ?: BookingLoadFailure.NotFound
                 EmptyState(
-                    title = "Booking not found",
-                    body = state.loadError,
+                    title = failure.title,
+                    body = failure.body,
                     actionLabel = "Retry",
                     onAction = viewModel::refresh,
                 )
@@ -209,7 +213,7 @@ fun BookingDetailScreen(
                     Dock(
                         booking = booking,
                         viewer = viewer,
-                        isActing = state.isActing,
+                        acting = state.actingAction,
                         openingChat = openingChat,
                         error = state.actionError ?: chatError,
                         onDismissError = {
@@ -229,15 +233,15 @@ fun BookingDetailScreen(
                 // Decline and Cancel share this sheet on purpose: both end the
                 // booking, both want a reason on the row, and both route by side
                 // — the artist's lands as `cancelled_by = "artist"` either way,
-                // since `cancelBooking(Artist, …)` and `declineRequest` are the
-                // same Edge Function call. Only the copy differs, which is what
-                // `isDecline` selects.
+                // since `cancelBooking(Artist, …)` is one Edge Function call
+                // whichever button opened the sheet. Only the copy differs,
+                // which is what `isDecline` selects (the ViewModel makes the
+                // same fork to decide which button wears the progress label).
                 val isDecline = viewer == BookingViewer.Artist &&
                     booking.status == BookingStatus.PendingConfirm
                 CancelFlowSheet(
                     viewer = viewer,
                     isDecline = isDecline,
-                    isActing = state.isActing,
                     onDismiss = { showCancel = false },
                     onConfirm = { reason ->
                         showCancel = false
@@ -253,9 +257,11 @@ fun BookingDetailScreen(
                     sheetState = sheetState,
                     containerColor = colors.bgElev,
                 ) {
+                    // No repository handed down: the sheet owns a ViewModel of
+                    // its own, resolved against THIS destination, so a scrim tap
+                    // mid-submit no longer cancels the write.
                     ReviewSheet(
                         bookingId = booking.id,
-                        reviewsRepository = viewModel.reviewsRepository,
                         onDismiss = { showReview = false },
                         onSubmitted = { showReview = false },
                     )
@@ -560,7 +566,13 @@ private fun ActionRow(
 private fun Dock(
     booking: Booking,
     viewer: BookingViewer,
-    isActing: Boolean,
+    /**
+     * The action currently in flight, or null. Only the button that OWNS it
+     * wears the progress label: Accept and Decline co-render for an artist on a
+     * pending request, and a shared boolean had the dock announcing both at
+     * once. Everything else is merely disabled while a mutation runs.
+     */
+    acting: BookingAction?,
     openingChat: Boolean,
     error: String?,
     onDismissError: () -> Unit,
@@ -572,6 +584,7 @@ private fun Dock(
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val isActing = acting != null
     val primary = BookingActions.primary(viewer, booking.status)
     // Only the secondary actions the in-page list did NOT take — see the
     // manageRows/dockSecondary partition.
@@ -608,13 +621,13 @@ private fun Dock(
         primary.forEach { action ->
             when (action) {
                 BookingAction.Accept -> PrimaryButton(
-                    text = if (isActing) "Accepting…" else "Accept request",
+                    text = if (acting == BookingAction.Accept) "Accepting…" else "Accept request",
                     onClick = onAccept,
                     fullWidth = true,
                     enabled = !isActing,
                 )
                 BookingAction.Decline -> PrimaryButton(
-                    text = if (isActing) "Declining…" else "Decline",
+                    text = if (acting == BookingAction.Decline) "Declining…" else "Decline",
                     onClick = onDecline,
                     variant = ButtonVariant.Ghost,
                     fullWidth = true,
@@ -640,7 +653,7 @@ private fun Dock(
         secondary.forEach { action ->
             when (action) {
                 BookingAction.Cancel -> PrimaryButton(
-                    text = if (isActing) "Cancelling…" else "Cancel request",
+                    text = if (acting == BookingAction.Cancel) "Cancelling…" else "Cancel request",
                     onClick = onCancel,
                     variant = ButtonVariant.Ghost,
                     fullWidth = true,
@@ -669,13 +682,18 @@ private fun Dock(
  * different: the reason is for us (it lands on the row and feeds matching), the
  * consequences are for them. Collapsing them into a single "Are you sure?" gets
  * a reflexive yes and no reason at all.
+ *
+ * It carries no in-flight state of its own: confirming closes the sheet and the
+ * mutation reports itself on the dock underneath. The `isActing` parameter this
+ * used to take could never be observed true — the sheet was already out of
+ * composition by the time the flag flipped — so its disabled button was a
+ * promise the screen never kept.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CancelFlowSheet(
     viewer: BookingViewer,
     isDecline: Boolean,
-    isActing: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (reason: String?) -> Unit,
 ) {
@@ -768,7 +786,6 @@ private fun CancelFlowSheet(
                         text = title,
                         onClick = { onConfirm(reason?.label) },
                         fullWidth = true,
-                        enabled = !isActing,
                     )
                     PrimaryButton(
                         text = if (isDecline) "Keep request" else "Keep booking",

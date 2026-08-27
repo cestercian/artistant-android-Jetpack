@@ -69,7 +69,6 @@ fun WizardScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
     var confirmingExit by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -83,6 +82,9 @@ fun WizardScreen(
     // System back walks the flow rather than leaving it: the wizard is a gate,
     // and there is no screen behind it. Disabled on the first and last steps,
     // where back would mean "leave" and Save & exit is the honest way to do that.
+    // Deliberately still enabled while a publish is in flight: `back()` refuses
+    // during that window, and disabling the handler instead would let the press
+    // fall through and escape the gate mid-publish.
     BackHandler(enabled = state.step != WizardStep.Identity && state.step != WizardStep.Done) {
         viewModel.back()
     }

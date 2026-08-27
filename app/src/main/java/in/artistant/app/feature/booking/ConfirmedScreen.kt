@@ -1,5 +1,8 @@
 package `in`.artistant.app.feature.booking
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +40,7 @@ import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.signup.EditorialHeadline
 import dagger.hilt.android.lifecycle.HiltViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -113,9 +117,22 @@ fun ConfirmedScreen(
     val ui by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    var ringScale by remember { mutableStateOf(0.6f) }
 
-    LaunchedEffect(Unit) { ringScale = 1f }
+    // The check disc springs in from 0.6× — the reference build's
+    // `.spring(duration: 0.6)` on `.onAppear`. This used to be a plain
+    // `mutableStateOf` flipped from a LaunchedEffect with no animation spec
+    // anywhere in the chain, so the disc rendered small for one frame and
+    // snapped: the pop that makes the send land never actually happened.
+    //
+    // Reduce-motion keeps the state plumbing and drops the travel, arriving at
+    // full size instantly (`snap()`), the same branch DateCell takes.
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
+    val ringScale by animateFloatAsState(
+        targetValue = if (appeared) 1f else RING_ENTRY_SCALE,
+        animationSpec = if (AppTheme.reduceMotion) snap() else spring(),
+        label = "confirmRing",
+    )
 
     Column(
         modifier
@@ -203,3 +220,10 @@ fun ConfirmedScreen(
         )
     }
 }
+
+/**
+ * Where the check disc starts before it springs to full size. Matches the
+ * reference build's entrance; small enough that the growth reads as a pop rather
+ * than as the icon loading late.
+ */
+private const val RING_ENTRY_SCALE = 0.6f

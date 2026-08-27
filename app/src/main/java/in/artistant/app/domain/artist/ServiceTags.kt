@@ -73,16 +73,28 @@ object ServiceTags {
         }
 
     /**
-     * Clean a set on the way to the column.
+     * Clean a set for READING: trims, drops blanks and de-duplicates (first
+     * occurrence wins, so the artist's own ordering survives). Case-sensitive by
+     * design — the slugs are lowercase by construction and case-folding an
+     * off-taxonomy admin tag would rewrite a value this client did not author.
      *
-     * Trims, drops blanks, de-duplicates (first occurrence wins, so the artist's
-     * own ordering survives) and clamps to [MAX_TAGS]. Case-sensitive by design —
-     * the slugs are lowercase by construction and case-folding an off-taxonomy
-     * admin tag would rewrite a value this client did not author.
+     * No cap, and that is the point. The column is shared, so a row carrying more
+     * than [MAX_TAGS] is an ordinary thing to read — and clamping on the way to
+     * the SCREEN hides a claim the profile is still making while leaving the
+     * artist's next edit to write the visible subset back over the whole column.
+     * Same reasoning as [label] echoing an unknown slug: show what the row
+     * actually says.
      */
-    fun normalize(raw: List<String>): List<String> =
+    fun normalizeForDisplay(raw: List<String>): List<String> =
         raw.map { it.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
-            .take(MAX_TAGS)
+
+    /**
+     * Clean a set on the way to the column: [normalizeForDisplay] plus the cap.
+     *
+     * The cap lives on the WRITE side only, where it is a rule about what this
+     * client publishes rather than a rule about what it can be shown.
+     */
+    fun normalize(raw: List<String>): List<String> = normalizeForDisplay(raw).take(MAX_TAGS)
 }

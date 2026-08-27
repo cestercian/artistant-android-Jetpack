@@ -29,12 +29,12 @@ object ChatRealtimeLogic {
                 return existing.toMutableList().also { it[optIdx] = confirmed }
             }
         }
-        return existing + confirmed
+        return insertBySentAt(existing, confirmed)
     }
 
     /**
-     * After `send()` returns: drop the optimistic id, then append the server row
-     * only if Realtime hasn't already inserted it.
+     * After `send()` returns: drop the optimistic id, then place the server row
+     * in `sent_at` order — and only if Realtime hasn't already inserted it.
      */
     fun reconcileSendSuccess(
         existing: List<Message>,
@@ -44,7 +44,7 @@ object ChatRealtimeLogic {
         val withoutOptimistic = existing.filterNot { it.id == optimisticId }
         val confirmed = server.copy(delivery = MessageDelivery.Sent, isMine = true)
         if (withoutOptimistic.any { it.id == confirmed.id }) return withoutOptimistic
-        return withoutOptimistic + confirmed
+        return insertBySentAt(withoutOptimistic, confirmed)
     }
 
     fun markDelivery(
@@ -64,5 +64,29 @@ object ChatRealtimeLogic {
         val preserved = existing.filter { it.id !in serverIds }
         if (preserved.isEmpty()) return server
         return (server + preserved).sortedBy { it.sentAtEpochMs }
+    }
+
+    /**
+     * Put a new row where its `sent_at` belongs, not at the tail.
+     *
+     * The transcript is ascending by `sentAtEpochMs` — [mergePreservingOptimistic]
+     * sorts it, and everything downstream reads it that way ([ChatTimestamps]
+     * walks it linearly to place day rules and outgoing-run captions). Appending
+     * blindly breaks that in the one window where both insert paths are live at
+     * once: the counterparty's Realtime INSERT lands while the viewer's own
+     * `send()` RETURNING is still in flight, so the confirmed row — stamped
+     * EARLIER by the server — would otherwise settle below a reply that came
+     * after it, and a pair straddling local midnight would print the same day
+     * separator twice.
+     *
+     * The common case is still an append: a message that is genuinely the newest
+     * costs one comparison.
+     */
+    private fun insertBySentAt(existing: List<Message>, message: Message): List<Message> {
+        if (existing.isEmpty() || existing.last().sentAtEpochMs <= message.sentAtEpochMs) {
+            return existing + message
+        }
+        val at = existing.indexOfFirst { it.sentAtEpochMs > message.sentAtEpochMs }
+        return existing.toMutableList().also { it.add(at, message) }
     }
 }

@@ -84,19 +84,30 @@ class CheckoutViewModel @Inject constructor(
     fun sendRequest() {
         val draft = _state.value.draft ?: return
         if (_state.value.blocked) return
-        // Mirror the reference build's quota gate — inert until subscriptions flip on.
-        if (entitlements.subscriptionsActive && !entitlements.isEntitled.value) {
-            _state.update { it.copy(needsPaywall = true) }
-            return
-        }
         viewModelScope.launch {
-            _state.update {
-                it.copy(
-                    isSubmitting = true,
-                    lastCreateErrorMessage = null,
-                    waitPhase = CheckoutWaitPhase.Sending,
-                )
+            // Take the CTA out of play before the entitlement probe: once
+            // subscriptions are live that probe is a Play Billing round trip, and
+            // a second tap during it would file the request twice. `waitPhase`
+            // stays null until the gate clears — the narrated takeover says
+            // "Sending your request", which is not what is happening yet.
+            _state.update { it.copy(isSubmitting = true, lastCreateErrorMessage = null) }
+
+            // Mirror the reference build's quota gate — inert until subscriptions
+            // flip on. The refresh is the point: `isEntitled` starts false on
+            // every process start, and nothing on the CLIENT seat ever populates
+            // it (the only other refreshers are Artist Home and the paywall
+            // itself). Gating on the cached value alone would bounce a client who
+            // subscribed yesterday to the paywall on every cold-start send, for a
+            // subscription they already own, until they happened to tap Restore.
+            // While subscriptions are off this short-circuits to false without a
+            // suspension, so today it costs nothing.
+            entitlements.refresh()
+            if (entitlements.subscriptionsActive && !entitlements.isEntitled.value) {
+                _state.update { it.copy(isSubmitting = false, needsPaywall = true) }
+                return@launch
             }
+
+            _state.update { it.copy(waitPhase = CheckoutWaitPhase.Sending) }
             try {
                 // The payments seam stays in the path even though v1 moves no
                 // money: the mock returns a receipt whose ids are persisted onto
@@ -145,7 +156,9 @@ class CheckoutViewModel @Inject constructor(
         _state.update { it.copy(needsPaywall = false) }
     }
 
-    fun dismissError() {
-        _state.update { it.copy(lastCreateErrorMessage = null) }
-    }
+    // No `dismissError()`. The create banner's only action is Retry, and
+    // `sendRequest` clears the message itself on the next attempt — which is the
+    // right shape for this one: an InlineBanner states a fact about the page and
+    // stays until that fact changes, and "your last send failed" is still true
+    // until a send succeeds. A Dismiss here would only hide it.
 }
