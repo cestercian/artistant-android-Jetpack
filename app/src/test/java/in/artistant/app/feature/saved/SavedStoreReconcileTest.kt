@@ -76,4 +76,51 @@ class SavedStoreReconcileTest {
             reconcileSaved(remote = setOf("a"), local = emptySet(), unsettled = setOf("a")),
         )
     }
+
+    /**
+     * The window `jobs` alone cannot see.
+     *
+     * A tap whose write both starts and finishes inside one `list()` round trip
+     * is absent from both in-flight snapshots — its entry is added after the
+     * first and pruned before the second — so the stale answer reversed a save
+     * that had just succeeded. `refreshFromServer` therefore also protects the
+     * before/after difference of the local set, which is what these two pin.
+     */
+    @Test
+    fun `a save that completed during the read survives the stale answer`() {
+        val before = emptySet<String>()
+        val local = setOf("a")
+        val changedDuringRead = (local - before) + (before - local)
+
+        assertEquals(
+            setOf("a"),
+            reconcileSaved(remote = emptySet(), local = local, unsettled = changedDuringRead),
+        )
+    }
+
+    @Test
+    fun `an unsave that completed during the read is not resurrected`() {
+        val before = setOf("a")
+        val local = emptySet<String>()
+        val changedDuringRead = (local - before) + (before - local)
+
+        assertEquals(
+            emptySet<String>(),
+            reconcileSaved(remote = setOf("a"), local = local, unsettled = changedDuringRead),
+        )
+    }
+
+    @Test
+    fun `a heart tapped and untapped inside one read lets the server win`() {
+        // Net zero local change, so there is no user intent for the answer to
+        // overwrite — the diff is empty and remote is adopted whole.
+        val before = setOf("a")
+        val local = setOf("a")
+        val changedDuringRead = (local - before) + (before - local)
+
+        assertEquals(
+            setOf("a", "b"),
+            reconcileSaved(remote = setOf("a", "b"), local = local, unsettled = changedDuringRead),
+        )
+    }
 }

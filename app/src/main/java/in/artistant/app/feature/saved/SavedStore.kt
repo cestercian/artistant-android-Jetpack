@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,6 +47,19 @@ class SavedStore @Inject constructor(
     // gain an entry per artist ever toggled and never lose one.
     private val mutexes = ConcurrentHashMap<String, Mutex>()
     private val jobs = ConcurrentHashMap<String, Job>()
+
+    /**
+     * Which account the in-memory state belongs to, as a counter [reset] bumps.
+     *
+     * This is a process-lifetime singleton and its writes are fire-and-forget, so
+     * nothing tied them to the session that started them: a heart tapped by A
+     * whose `add` was still queued when A signed out and B signed in ran under
+     * B's JWT against an `_ids` that [reset] had emptied — deleting B's save of
+     * that artist — and a `list()` issued for A could land after the switch and
+     * persist A's saved ids into B's DataStore. Every write and every refresh now
+     * carries the epoch it began under and abandons itself if that changed.
+     */
+    private val epoch = AtomicInteger(0)
 
     init {
         scope.launch {
@@ -78,8 +92,14 @@ class SavedStore @Inject constructor(
         //
         // LAZY because the body re-reads the desired state from `_ids`, so it
         // must not run until the publish below has happened.
+        val startedAt = epoch.get()
         val job = scope.launch(start = CoroutineStart.LAZY) {
             mutexFor(id).withLock {
+                // The account that armed this write must still be the one signed
+                // in: `_ids` is empty after a sign-out, so an unguarded run here
+                // would read wantSaved=false and issue a `remove` under the NEW
+                // user's JWT, deleting their save of this artist.
+                if (epoch.get() != startedAt) return@withLock
                 // Re-read desired state after any superseded toggles.
                 val wantSaved = id in _ids.value
                 runCatching {
@@ -116,10 +136,30 @@ class SavedStore @Inject constructor(
      * been served before it), and a fresh tap can arrive mid-read.
      */
     suspend fun refreshFromServer() {
+        val startedAt = epoch.get()
+        // What the set looked like before the read was issued. Anything that
+        // differs afterwards is a change the user made while we were reading, and
+        // the server's answer cannot have seen it.
+        val before = _ids.value
         val inFlightAtRead = jobs.keys.toSet()
         try {
             val remote = repository.list().map { it.lowercase() }.toSet()
-            _ids.update { local -> reconcileSaved(remote, local, inFlightAtRead + jobs.keys) }
+            // Issued for a different account: applying it would overwrite this
+            // user's hearts with the previous one's, and persistLocal would put
+            // them on disk.
+            if (epoch.get() != startedAt) return
+            _ids.update { local ->
+                // `jobs` names only writes STILL in flight, so a toggle that both
+                // started and finished inside this read appeared in neither
+                // snapshot — its entry was added after the first and pruned before
+                // the second — and the stale answer reversed a save that had just
+                // succeeded. A before/after diff of the local set catches it
+                // whatever became of its write, and self-cancels correctly: heart
+                // then un-heart during one read nets to no change, so the server
+                // rightly wins.
+                val changedDuringRead = (local - before) + (before - local)
+                reconcileSaved(remote, local, inFlightAtRead + jobs.keys + changedDuringRead)
+            }
             persistLocal()
         } catch (e: CancellationException) {
             // Structured concurrency: the callers are viewModelScope coroutines
@@ -134,7 +174,20 @@ class SavedStore @Inject constructor(
         }
     }
 
+    /**
+     * Drop everything this device knows about the departing account.
+     *
+     * Called from `SessionManager.signOut()` and the delete-account path. Bumping
+     * [epoch] first is what makes the abandonment checks in [toggle] and
+     * [refreshFromServer] fire; cancelling the in-flight writes stops the ones
+     * already past their check, and clearing the per-artist maps releases the
+     * bookkeeping that would otherwise outlive the session that created it.
+     */
     fun reset() {
+        epoch.incrementAndGet()
+        jobs.values.forEach { it.cancel() }
+        jobs.clear()
+        mutexes.clear()
         _ids.value = emptySet()
         persistLocal()
     }
