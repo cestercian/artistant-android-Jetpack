@@ -490,6 +490,32 @@ object HarnessFixtures {
         onTime = 90 + (score % 9),
         gigs = gigs,
         rating = 4.0 + (score % 10) / 10.0,
+        // Two tiers, not none. `FakeSearchRepository` feeds the roster into the
+        // artists cache so a tapped search result resolves at all, and
+        // `fetchArtist` then answers from that entry and marks it hydrated — so
+        // whatever this fixture omits, the profile presents as genuine fact
+        // rather than as still-loading. A package-less roster entry rendered
+        // "Pricing on request" and an empty Booking block on every non-fixture
+        // artist in the harness, with no error and nothing a refresh could
+        // recover. `price` stays the cheaper tier so the tile and the profile
+        // dock quote the same figure.
+        packages = listOf(
+            ArtistPackage(
+                id = "$id-pkg-0",
+                name = "60-min set",
+                duration = "60-min set",
+                price = price,
+                includes = listOf("Own equipment", "One soundcheck"),
+                popular = true,
+            ),
+            ArtistPackage(
+                id = "$id-pkg-1",
+                name = "Extended set",
+                duration = "120-min set",
+                price = price * 2,
+                includes = listOf("Own equipment", "One soundcheck", "Encore"),
+            ),
+        ),
     )
 
     /** Saved-artists seed, so the client's Saved list has rows instead of an empty state. */
