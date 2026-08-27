@@ -14,7 +14,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -114,26 +113,24 @@ class ReviewSheetViewModel @Inject constructor(
  *
  * State-driven and dumb: everything it can decide lives in [ReviewSheetViewModel],
  * which is resolved against the host destination rather than against this sheet.
+ *
+ * It does NOT watch `submitted` itself. The insert outlives a scrim dismiss (that
+ * is the whole point of hoisting it into the ViewModel), so an effect living here
+ * would simply not be in composition when a write landed after the sheet closed:
+ * the host would never hear about it, the booking would keep offering "Leave a
+ * review", and reopening the sheet would flash shut on the stale flag. The host
+ * owns that effect — see `BookingDetailScreen`.
  */
 @Composable
 fun ReviewSheet(
     bookingId: String,
     onDismiss: () -> Unit,
-    onSubmitted: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ReviewSheetViewModel = hiltViewModel(),
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val ui by viewModel.state.collectAsStateWithLifecycle()
-
-    LaunchedEffect(ui.submitted) {
-        if (ui.submitted) {
-            viewModel.consumeSubmitted()
-            onSubmitted()
-            onDismiss()
-        }
-    }
 
     // Rounded top only — this is a bottom sheet, so its lower edge is the screen
     // edge and has no corner to soften.

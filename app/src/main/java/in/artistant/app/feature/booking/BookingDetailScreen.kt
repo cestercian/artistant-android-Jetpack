@@ -98,8 +98,13 @@ fun BookingDetailScreen(
     modifier: Modifier = Modifier,
     viewModel: BookingDetailViewModel = hiltViewModel(),
     chatOpen: ChatOpenViewModel = hiltViewModel(),
+    // Resolved HERE, not inside the sheet, and it is the same instance the sheet
+    // gets: both are `hiltViewModel()` against this destination. The host has to
+    // own it because the write outlives the sheet.
+    reviewVm: ReviewSheetViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val review by reviewVm.state.collectAsStateWithLifecycle()
     val openingChat by chatOpen.opening.collectAsStateWithLifecycle()
     val chatError by chatOpen.error.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
@@ -111,6 +116,20 @@ fun BookingDetailScreen(
 
     var showReview by remember { mutableStateOf(false) }
     var showCancel by remember { mutableStateOf(false) }
+    // Outside `if (showReview)` on purpose. The insert runs on the ViewModel's
+    // scope so a scrim tap mid-submit no longer cancels it — which means it can
+    // also land when the sheet is already gone. An effect inside the sheet would
+    // not be in composition to hear it: the row would keep offering "Leave a
+    // review", and reopening would flash shut on the leftover flag.
+    LaunchedEffect(review.submitted) {
+        if (review.submitted) {
+            reviewVm.consumeSubmitted()
+            showReview = false
+            // The stars are on the booking row, so re-read it rather than
+            // trusting the screen to already know.
+            viewModel.refresh()
+        }
+    }
     // The clipboard row acknowledges itself by swapping its own label rather than
     // raising a toast: from Android 13 the system already shows a copy
     // confirmation, and stacking ours on top of it reads as a double-fire.
@@ -263,7 +282,7 @@ fun BookingDetailScreen(
                     ReviewSheet(
                         bookingId = booking.id,
                         onDismiss = { showReview = false },
-                        onSubmitted = { showReview = false },
+                        viewModel = reviewVm,
                     )
                 }
             }

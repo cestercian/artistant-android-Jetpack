@@ -167,9 +167,22 @@ object BookingDateFormat {
     private val posix = Locale.US
     private val datePatterns = listOf(PATTERN, "MMM d, yyyy", "yyyy-MM-dd")
 
+    /**
+     * The gig calendar. A `date` label names the day the show happens IN INDIA,
+     * so every helper here reads and writes it in that zone.
+     *
+     * This used to be split: labels were written and parsed in the DEVICE zone
+     * while [parseDateAndTime] — the reader `resolvedStartEpochMs` prefers, and
+     * the one the funnel's persisted instant agrees with — read them in IST. A
+     * client whose device date differs from India's (New York at 22:00 is
+     * already tomorrow morning in Kolkata) therefore picked a chip labelled with
+     * one day and stored a booking on another.
+     */
+    private val IST: TimeZone get() = TimeZone.getTimeZone("Asia/Kolkata")
+
     fun weekdayString(epochMs: Long): String {
         val f = SimpleDateFormat(PATTERN, posix)
-        f.timeZone = TimeZone.getDefault()
+        f.timeZone = IST
         return f.format(Date(epochMs))
     }
 
@@ -178,8 +191,8 @@ object BookingDateFormat {
         val trimmed = dateLabel.trim()
         if (trimmed.isEmpty()) return null
         for (p in datePatterns) {
-            parseStrict(trimmed, p, TimeZone.getDefault())?.let { d ->
-                return java.util.Calendar.getInstance().apply { time = d }
+            parseStrict(trimmed, p, IST)?.let { d ->
+                return java.util.Calendar.getInstance(IST).apply { time = d }
             }
         }
         return null
@@ -189,9 +202,8 @@ object BookingDateFormat {
     fun parseDateAndTime(dateLabel: String, timeLabel: String): Long? {
         val combined = "${dateLabel.trim()} ${timeLabel.trim()}"
         if (dateLabel.isBlank() || timeLabel.isBlank()) return null
-        val ist = TimeZone.getTimeZone("Asia/Kolkata")
         for (p in datePatterns) {
-            parseStrict(combined, "$p h:mm a", ist)?.time?.let { return it }
+            parseStrict(combined, "$p h:mm a", IST)?.time?.let { return it }
         }
         return null
     }
