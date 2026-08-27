@@ -1375,8 +1375,23 @@ class EpkViewModel @Inject constructor(
         super.onCleared()
         val owed = armedSaves.toList()
         if (owed.isEmpty()) return
+        // The owner these drafts were composed for. Detaching the write from
+        // `viewModelScope` also detached it from the SESSION, and
+        // `ArtistsRepository.patchSelf` resolves its target from
+        // `currentSessionOrNull()` at execution time without checking that the
+        // patch was built for that user — so an owed save still queued when the
+        // artist signs out and someone else signs in on the same device would
+        // land THIS artist's bio, pricing, rider, socials or prompts on the new
+        // account's public row. RLS permits it: the JWT is theirs and the row is
+        // theirs. The same file already guards its two other write paths this
+        // way (`require(userId == ...)` on wizard publish and setPublished).
+        val owner = session.currentUserId ?: return
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
             owed.forEach { save ->
+                // Re-read per save, immediately before issuing it: sign-out is a
+                // multi-second user action, so a session that changed mid-flush
+                // is caught here rather than after the first write has gone.
+                if (session.currentUserId != owner) return@launch
                 runCatching {
                     when (save) {
                         EpkSave.Packages -> persistPackages()
