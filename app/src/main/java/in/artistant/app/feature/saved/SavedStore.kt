@@ -77,6 +77,20 @@ class SavedStore @Inject constructor(
     /** Serialises the DataStore writes so two of them cannot commit out of order. */
     private val persistMutex = Mutex()
 
+    /**
+     * Makes a toggle atomic against a read's registration, and vice versa.
+     *
+     * Stamping the open reads and registering the write are two steps, and a read
+     * that registered BETWEEN them saw neither: not in `touched` (stamped before
+     * it existed) and not in `jobs` (registered after the snapshot), so a write
+     * that then finished before reconciliation was invisible to all three records
+     * and the stale answer reversed it. Under one monitor a toggle is either
+     * wholly visible to a given read or wholly ahead of it — and if it is ahead,
+     * that read is already installed and the stamp loop reaches it. Neither
+     * critical section suspends.
+     */
+    private val registryLock = Any()
+
     private val readsInFlight = ConcurrentHashMap<Long, MutableSet<String>>()
     private val nextReadId = AtomicLong(0)
 
@@ -112,8 +126,6 @@ class SavedStore @Inject constructor(
         // LAZY because the body re-reads the desired state from `_ids`, so it
         // must not run until the publish below has happened.
         val startedAt = epoch.get()
-        // Tell every in-flight read that this id moved, whatever it settles on.
-        readsInFlight.values.forEach { it.add(id) }
         val job = scope.launch(start = CoroutineStart.LAZY) {
             mutexFor(id).withLock {
                 // The account that armed this write must still be the one signed
@@ -128,7 +140,11 @@ class SavedStore @Inject constructor(
                 }.onFailure { if (it is CancellationException) throw it }
             }
         }
-        val superseded = jobs.put(id, job)
+        // Stamped and registered together: see [registryLock].
+        val superseded = synchronized(registryLock) {
+            readsInFlight.values.forEach { it.add(id) }
+            jobs.put(id, job)
+        }
         // Prune on completion so the map means "writes still in flight" rather
         // than "artists ever hearted". Conditional on identity: a superseding
         // toggle cancels this job and installs its own, and this handler must not
@@ -162,8 +178,10 @@ class SavedStore @Inject constructor(
         // Registered BEFORE the read is issued, so no toggle can slip between the
         // two and go unrecorded.
         val touchedDuringRead = ConcurrentHashMap.newKeySet<String>()
-        readsInFlight[readId] = touchedDuringRead
-        val inFlightAtRead = jobs.keys.toSet()
+        val inFlightAtRead = synchronized(registryLock) {
+            readsInFlight[readId] = touchedDuringRead
+            jobs.keys.toSet()
+        }
         try {
             val remote = repository.list().map { it.lowercase() }.toSet()
             // Issued for a different account: applying it would overwrite this
