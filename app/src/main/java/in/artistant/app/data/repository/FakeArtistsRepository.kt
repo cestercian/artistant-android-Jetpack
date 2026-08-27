@@ -44,6 +44,15 @@ class FakeArtistsRepository(
 
     /** Confirmed misses, memoized exactly as the real repository memoizes them. */
     private val missingIds = mutableSetOf<String>()
+
+    /**
+     * Ids whose `byId` entry is a search/browse TILE rather than a profile.
+     *
+     * The distinction the real seam gets for free — its `cache()` fills a
+     * by-id map that `find()` reads, while `fetchArtist` goes to the server — and
+     * that this fake had collapsed, letting a tile satisfy a profile fetch.
+     */
+    private val partialIds = mutableSetOf<String>()
     private val _cacheGeneration = MutableStateFlow(0)
     override val cacheGeneration: StateFlow<Int> = _cacheGeneration.asStateFlow()
 
@@ -84,6 +93,8 @@ class FakeArtistsRepository(
             if (id in hydratedIds) continue
             missingIds.remove(id)
             byId[id] = a.copy(id = id)
+            // Remembered as a TILE, not as a profile. See [fetchArtist].
+            partialIds.add(id)
             changed = true
         }
         if (changed) _cacheGeneration.value = _cacheGeneration.value + 1
@@ -101,12 +112,22 @@ class FakeArtistsRepository(
         fetchedIds += key
         // A fetch that lands CACHES, like the real one — that's what makes the
         // next `find` hit for an artist this fake only held remotely.
-        val artist = byId[key] ?: remoteById[key]
+        //
+        // A cached TILE is not an answer to this. `cache()` stores the compact
+        // projection a search or browse row carries; the real repository never
+        // returns that from a profile fetch, it stitches five tables and produces
+        // something strictly richer. Answering from the tile and then marking it
+        // hydrated made every field the projection omits — samples, rider,
+        // packages, prompts — render as genuine empty data with no load error,
+        // and the hydration short-circuit meant no refresh could ever recover it.
+        // The remote seed is the fake's "server", so it is what a fetch may read.
+        val artist = remoteById[key] ?: byId[key]?.takeIf { key !in partialIds }
         if (artist == null) {
             missingIds.add(key)
             return null
         }
         byId[key] = artist
+        partialIds.remove(key)
         hydratedIds.add(key)
         _cacheGeneration.value = _cacheGeneration.value + 1
         return artist
@@ -245,6 +266,8 @@ class FakeArtistsRepository(
             byId[id] = a.copy(id = id)
             hydratedIds.add(id)
             missingIds.remove(id)
+            // Seeded as a full profile, so it is no longer a tile.
+            partialIds.remove(id)
         }
         if (artists.isNotEmpty()) _cacheGeneration.value = _cacheGeneration.value + 1
     }

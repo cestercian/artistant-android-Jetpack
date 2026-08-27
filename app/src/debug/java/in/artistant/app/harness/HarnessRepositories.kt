@@ -105,7 +105,14 @@ object HarnessRepositories {
         // seedFull (not the constructor's plain seed) marks the row HYDRATED, so
         // `fetchArtist` returns the full profile — packages, samples, tech rider and all —
         // instead of a tile-shaped partial that would render a half-empty EPK.
-        FakeArtistsRepository().apply { seedFull(listOf(coveredArtist)) }
+        //
+        // The REST of the roster goes in as `remote`: rows the fake's "server" can answer
+        // for, which `find()` misses until a fetch hydrates them. Without it, tapping a
+        // non-fixture search result had only the cached tile to work with — and since a
+        // tile no longer satisfies `fetchArtist` (it never should have), that tap would
+        // read "Artist not found." Seeding them remotely is what makes the profile resolve
+        // the way the real five-table stitch does.
+        FakeArtistsRepository(remote = roster.drop(1)).apply { seedFull(listOf(coveredArtist)) }
     }
 
     private val bookingsImpl: FakeBookingsRepository by lazy {
