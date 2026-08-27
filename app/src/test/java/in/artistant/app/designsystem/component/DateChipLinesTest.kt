@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.util.Calendar
+import java.util.TimeZone
 
 /**
  * Chip content for the "Pick a date" scroller.
@@ -97,5 +98,31 @@ class DateChipLinesTest {
     fun `an empty label yields empty lines rather than throwing`() {
         // `DbBooking.dateLabel` defaults to "" — reachable, not theoretical.
         assertEquals(DateChipLines("", ""), dateChipLines(""))
+    }
+
+    /**
+     * The chip must show the day the gig happens IN INDIA, not the one the
+     * device is having.
+     *
+     * The funnel's chips carry an epoch, its label is written in IST and
+     * `startEndIso` stores the day in IST — so rendering the epoch through the
+     * device zone put the visible chip a day off its own label. A client in New
+     * York at 22:00 saw "27" while the tap booked the 28th.
+     */
+    @Test
+    fun `an epoch renders the gig day even when the device is on another date`() {
+        val default = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+            // 22:00 on Aug 27 in New York == 07:30 on Aug 28 in Kolkata.
+            val ist = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata")).apply {
+                clear()
+                set(2026, Calendar.AUGUST, 28, 7, 30, 0)
+            }.timeInMillis
+
+            assertEquals(DateChipLines("FRI", "28"), dateChipLines(ist))
+        } finally {
+            TimeZone.setDefault(default)
+        }
     }
 }

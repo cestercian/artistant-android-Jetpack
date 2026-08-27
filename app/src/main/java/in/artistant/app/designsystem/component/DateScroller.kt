@@ -95,12 +95,22 @@ fun dateChipLines(dateLabel: String): DateChipLines {
 }
 
 /**
- * Chip lines for an epoch — the shape the booking funnel's chips carry. Resolved
- * in the device zone, matching [BookingDateFormat]'s reader, so the same day
- * can't render as two different chips depending on which side produced it.
+ * Chip lines for an epoch — the shape the booking funnel's chips carry.
+ *
+ * Resolved in the GIG zone, matching [BookingDateFormat]'s reader, so the same
+ * day cannot render as two different chips depending on which side produced it.
+ * That reader is Asia/Kolkata: a gig's date is the day it happens in India, and
+ * the funnel's chip walk, its stored label and the instant `startEndIso` writes
+ * all say so. Resolving here in the device zone instead put the visible chip a
+ * day off its own label for a client whose calendar differs from India's — New
+ * York at 22:00 is already the next morning in Kolkata, so the strip read "27"
+ * while the tap booked the 28th.
  */
 fun dateChipLines(epochMs: Long): DateChipLines =
-    dateChipLines(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate())
+    dateChipLines(Instant.ofEpochMilli(epochMs).atZone(GIG_ZONE).toLocalDate())
+
+/** The clock every gig date is written, read and rendered in. */
+private val GIG_ZONE: ZoneId = ZoneId.of("Asia/Kolkata")
 
 /** The one place either line is actually formatted. */
 fun dateChipLines(date: LocalDate): DateChipLines = DateChipLines(
