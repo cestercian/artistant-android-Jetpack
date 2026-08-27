@@ -204,23 +204,30 @@ private data class DbGigRequestWithClient(
     @SerialName("crowd_size") val crowdSize: Int? = null,
     val status: String = "open",
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("client_name") val clientName: String? = null,
     val client: ClientEmbed? = null,
 ) {
     @Serializable
     data class ClientEmbed(@SerialName("full_name") val fullName: String? = null)
 
     fun toStoredRequest(): StoredRequest {
-        // Null, not "Client". The embed only resolves on the CLIENT's own path
-        // (`users_select_self`); on the artist's path RLS nulls it, and
-        // `gig_requests` carries no denormalized `client_name` to fall back to
-        // the way `bookings` does (0080). Stamping a literal there made every
-        // inbound quote render under the same name — a fact about nobody. The
-        // renderers show the request's own date/offer instead.
-        val clientName = client?.fullName?.trim()?.takeIf { it.isNotEmpty() }
+        // Denormalized column first, embed second, null last — never a literal.
+        //
+        // The embed only resolves on the CLIENT's own path (`users_select_self`);
+        // on the artist's path RLS nulls it, which is why every inbound quote
+        // used to render under the same hardcoded name — a fact about nobody.
+        // Migration 0100 adds `client_name`, filled by a SECURITY DEFINER
+        // trigger exactly as 0080 does for bookings, so the artist can finally
+        // tell requesters apart. The embed stays as the fallback for rows
+        // written before 0100's backfill, and null still means null: the
+        // renderers show the request's own date and offer rather than inventing
+        // an identity.
+        val resolvedName = clientName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: client?.fullName?.trim()?.takeIf { it.isNotEmpty() }
         return StoredRequest(
             raw = GigRequest(
                 id = id,
-                client = clientName,
+                client = resolvedName,
                 message = message.orEmpty(),
                 date = dateLabel,
                 amount = proposedAmountInr,
