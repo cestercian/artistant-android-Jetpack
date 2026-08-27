@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,6 +62,24 @@ class SavedStore @Inject constructor(
      */
     private val epoch = AtomicInteger(0)
 
+    /**
+     * Ids toggled while a `list()` is in flight, per in-flight read.
+     *
+     * [jobs] cannot answer this: it names only writes still running, so a toggle
+     * that starts and finishes inside one read is in neither snapshot. A
+     * before/after diff of the local set cannot answer it either — a save and an
+     * unsave inside one read net to zero, and if the server's answer observed the
+     * save in between, adopting it puts the heart back after the unsave
+     * succeeded. Only "was this id touched at all while we were reading" is
+     * right, so each read registers a set and every toggle stamps every open one.
+     * Entries live exactly as long as their read.
+     */
+    /** Serialises the DataStore writes so two of them cannot commit out of order. */
+    private val persistMutex = Mutex()
+
+    private val readsInFlight = ConcurrentHashMap<Long, MutableSet<String>>()
+    private val nextReadId = AtomicLong(0)
+
     init {
         scope.launch {
             val cached = prefs.getString(PREFS_KEY).first()
@@ -93,6 +112,8 @@ class SavedStore @Inject constructor(
         // LAZY because the body re-reads the desired state from `_ids`, so it
         // must not run until the publish below has happened.
         val startedAt = epoch.get()
+        // Tell every in-flight read that this id moved, whatever it settles on.
+        readsInFlight.values.forEach { it.add(id) }
         val job = scope.launch(start = CoroutineStart.LAZY) {
             mutexFor(id).withLock {
                 // The account that armed this write must still be the one signed
@@ -137,10 +158,11 @@ class SavedStore @Inject constructor(
      */
     suspend fun refreshFromServer() {
         val startedAt = epoch.get()
-        // What the set looked like before the read was issued. Anything that
-        // differs afterwards is a change the user made while we were reading, and
-        // the server's answer cannot have seen it.
-        val before = _ids.value
+        val readId = nextReadId.incrementAndGet()
+        // Registered BEFORE the read is issued, so no toggle can slip between the
+        // two and go unrecorded.
+        val touchedDuringRead = ConcurrentHashMap.newKeySet<String>()
+        readsInFlight[readId] = touchedDuringRead
         val inFlightAtRead = jobs.keys.toSet()
         try {
             val remote = repository.list().map { it.lowercase() }.toSet()
@@ -148,19 +170,22 @@ class SavedStore @Inject constructor(
             // user's hearts with the previous one's, and persistLocal would put
             // them on disk.
             if (epoch.get() != startedAt) return
+            // Local wins for anything touched while this answer was being
+            // fetched — the server cannot have seen the whole sequence, and a
+            // pair that nets to zero locally may still have been observed
+            // half-done.
+            //
+            // The epoch is re-read INSIDE the lambda, not just before it. `update`
+            // is a CAS retry loop, so a `reset()` landing between the read above
+            // and the swap would otherwise write the departing account's hearts
+            // back into a set that sign-out had just emptied — and the retry would
+            // recompute them from the emptied set and put them back again.
+            // Returning `local` unchanged is what abandons the answer.
             _ids.update { local ->
-                // `jobs` names only writes STILL in flight, so a toggle that both
-                // started and finished inside this read appeared in neither
-                // snapshot — its entry was added after the first and pruned before
-                // the second — and the stale answer reversed a save that had just
-                // succeeded. A before/after diff of the local set catches it
-                // whatever became of its write, and self-cancels correctly: heart
-                // then un-heart during one read nets to no change, so the server
-                // rightly wins.
-                val changedDuringRead = (local - before) + (before - local)
-                reconcileSaved(remote, local, inFlightAtRead + jobs.keys + changedDuringRead)
+                if (epoch.get() != startedAt) local
+                else reconcileSaved(remote, local, inFlightAtRead + jobs.keys + touchedDuringRead)
             }
-            persistLocal()
+            persistLocal(startedAt)
         } catch (e: CancellationException) {
             // Structured concurrency: the callers are viewModelScope coroutines
             // (ProfileViewModel, ArtistListViewModel), so a cleared ViewModel
@@ -171,6 +196,8 @@ class SavedStore @Inject constructor(
             // Keep local hearts until a session lands.
         } catch (_: Throwable) {
             // Network/RLS — leave local untouched (iOS contract).
+        } finally {
+            readsInFlight.remove(readId)
         }
     }
 
@@ -188,13 +215,27 @@ class SavedStore @Inject constructor(
         jobs.values.forEach { it.cancel() }
         jobs.clear()
         mutexes.clear()
+        readsInFlight.clear()
         _ids.value = emptySet()
         persistLocal()
     }
 
-    private fun persistLocal() {
+    /**
+     * Mirror the set to disk, unless the account it belongs to has left.
+     *
+     * Serialised, and re-checked under the lock: the write reads `_ids` and then
+     * suspends on DataStore, so two unordered persists could commit out of order
+     * and leave a departed account's hearts on disk after sign-out's empty write.
+     * [expectedEpoch] defaults to the current one, so ordinary callers are
+     * unaffected; a refresh passes the epoch it began under and is skipped if
+     * [reset] has since bumped it.
+     */
+    private fun persistLocal(expectedEpoch: Int = epoch.get()) {
         scope.launch {
-            prefs.setString(PREFS_KEY, _ids.value.joinToString(","))
+            persistMutex.withLock {
+                if (epoch.get() != expectedEpoch) return@withLock
+                prefs.setString(PREFS_KEY, _ids.value.joinToString(","))
+            }
         }
     }
 

@@ -86,7 +86,20 @@ class RootViewModel @Inject constructor(
                             val key = authAdvanceKey(uid, gen)
                             if (key != lastRoutedKey) {
                                 lastRoutedKey = key
-                                routeSignedIn()
+                                // LAUNCHED, not awaited. Awaiting it here parked this
+                                // collector inside `fetchWithRetry`, so the sign-out
+                                // emission queued behind it and could not reach the
+                                // `else` branch below to cancel the pass or bump
+                                // [routingGeneration] — the two things that are supposed
+                                // to invalidate it. The departed pass then resumed with
+                                // its generation still current and wrote `prefs.setRole`
+                                // and `uploadQueue.resumeAfterLaunch()` AFTER
+                                // `SessionManager.signOut()` had wiped prefs and cleared
+                                // the queue, handing the next account on this device the
+                                // previous one's role and re-queued uploads. `_profile`
+                                // and `_gate` were survivable — the else branch resets
+                                // them a moment later — but those two are not.
+                                launchRouting()
                             }
                         }
                         // Initializing → keep Loading (avoids an auth-screen flash before the

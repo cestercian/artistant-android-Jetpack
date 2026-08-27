@@ -110,17 +110,33 @@ class SavedStoreReconcileTest {
         )
     }
 
+    /**
+     * Save then unsave inside ONE read, where the server's answer caught the save
+     * in between.
+     *
+     * The local set is back where it started, so a before/after diff sees nothing
+     * to protect — but the answer is not stale in the harmless way that implies:
+     * it observed the intermediate state, so adopting it puts the heart back
+     * after the unsave has already succeeded. Protection has to be "was this id
+     * touched at all during the read", which is what `readsInFlight` records.
+     */
     @Test
-    fun `a heart tapped and untapped inside one read lets the server win`() {
-        // Net zero local change, so there is no user intent for the answer to
-        // overwrite — the diff is empty and remote is adopted whole.
-        val before = setOf("a")
-        val local = setOf("a")
-        val changedDuringRead = (local - before) + (before - local)
+    fun `a net-zero toggle pair still beats an answer that caught it half-done`() {
+        val touchedDuringRead = setOf("a")
 
         assertEquals(
+            emptySet<String>(),
+            reconcileSaved(remote = setOf("a"), local = emptySet(), unsettled = touchedDuringRead),
+        )
+    }
+
+    @Test
+    fun `an untouched id still adopts the server answer`() {
+        // Nothing local moved during the read, so the server is the authority and
+        // a heart saved on another device arrives.
+        assertEquals(
             setOf("a", "b"),
-            reconcileSaved(remote = setOf("a", "b"), local = local, unsettled = changedDuringRead),
+            reconcileSaved(remote = setOf("a", "b"), local = setOf("a"), unsettled = emptySet()),
         )
     }
 }
