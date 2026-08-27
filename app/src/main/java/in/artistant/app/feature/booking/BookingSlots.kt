@@ -32,7 +32,13 @@ fun upcomingDateChips(
     timeSlots: List<String> = emptyList(),
     nowMs: Long = System.currentTimeMillis(),
 ): List<DateChip> {
-    val cal = Calendar.getInstance().apply { timeInMillis = nowMs }
+    // Stepped in IST, like every other reading of a gig day. A device-zone
+    // walk labelled chip 0 with the device's date while the filter below and
+    // `startEndIso` both resolve the day in India's — so a client in New York at
+    // 22:00 (already the next morning in Kolkata) got a chip for a day that had
+    // effectively passed there, kept its evening slots, and filed a booking whose
+    // start time was hours in the past.
+    val cal = Calendar.getInstance(IST).apply { timeInMillis = nowMs }
     val filterByArtist = daysAvailable.isNotEmpty()
     return buildList {
         repeat(count) {
