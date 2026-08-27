@@ -12,43 +12,38 @@ import kotlinx.coroutines.flow.StateFlow
  * Doubles shared by the messages ViewModel tests.
  *
  * Both seams the rebuilt inbox and chat depend on are here rather than repeated
- * per file: a bookings repository that only answers the two list calls the inbox
- * makes, and a flags store that keeps its sets in memory instead of DataStore.
+ * per file: a bookings repository that only answers the by-id reads these screens
+ * make, and a flags store that keeps its sets in memory instead of DataStore.
  */
 
 /**
- * Bookings, scriptable per seat.
+ * Bookings, scriptable.
  *
- * Everything the messages surfaces never call throws, so a test that
- * accidentally reaches for a write path fails loudly instead of silently
- * passing against a no-op.
+ * The messages surfaces read bookings by id and nothing else: the inbox asks for
+ * the ids its rows carry ([fetchMany]), the chat asks for the one behind its
+ * thread ([fetchOne]). Everything they never call throws — including the two
+ * seat lists, so a surface that goes back to pulling a whole booking history
+ * fails loudly instead of passing against a no-op.
  */
 open class StubBookings(
-    private val clientBookings: List<Booking> = emptyList(),
-    private val artistBookings: List<Booking> = emptyList(),
-    private val failLists: Boolean = false,
+    private val bookings: List<Booking> = emptyList(),
+    private val failFetch: Boolean = false,
     private val one: Booking? = null,
 ) : BookingsRepository {
-    var clientCalls = 0
-        private set
-    var artistCalls = 0
-        private set
+    /** Every id set asked for, in order — one entry per load. */
+    val fetchedIds = mutableListOf<List<String>>()
+
     var feedback: List<String> = emptyList()
         private set
 
     /** Set to make [submitFeedback] report a failed write. */
     var feedbackDelivers: Boolean = true
 
-    override suspend fun listForClient(): List<Booking> {
-        clientCalls++
-        if (failLists) throw IllegalStateException("offline")
-        return clientBookings
-    }
-
-    override suspend fun listForArtist(): List<Booking> {
-        artistCalls++
-        if (failLists) throw IllegalStateException("offline")
-        return artistBookings
+    override suspend fun fetchMany(ids: List<String>): List<Booking> {
+        fetchedIds += ids
+        if (failFetch) throw IllegalStateException("offline")
+        val wanted = ids.map { it.lowercase() }.toSet()
+        return bookings.filter { it.id.lowercase() in wanted }
     }
 
     override suspend fun fetchOne(id: String): Booking? = one?.takeIf { it.id == id }
@@ -57,6 +52,12 @@ open class StubBookings(
         feedback = feedback + body
         return feedbackDelivers
     }
+
+    override suspend fun listForClient(): List<Booking> =
+        error("messages reads bookings by id, never a whole seat list")
+
+    override suspend fun listForArtist(): List<Booking> =
+        error("messages reads bookings by id, never a whole seat list")
 
     override suspend fun create(draft: BookingDraft, paymentResult: PaymentResult): Booking =
         error("messages never creates a booking")

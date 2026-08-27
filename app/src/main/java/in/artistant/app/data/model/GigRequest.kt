@@ -11,7 +11,25 @@ enum class GigRequestStatus(val dbValue: String) {
     Countered("countered"),
     Accepted("accepted"),
     Declined("declined"),
-    Expired("expired");
+    Expired("expired"),
+
+    /**
+     * A status this build doesn't recognise — the server has moved ahead of the
+     * client (some future `withdrawn` / `converted` / …), or a row was stamped
+     * by another client with a value this build predates.
+     *
+     * Decode-only, exactly like [BookingStatus.Unknown]. [dbValue] is a sentinel
+     * that is NOT in the `gig_requests.status` check constraint, and no write
+     * path serializes a variable status — `accept`/`decline`/`counter` each send
+     * their own literal — so this case can never round-trip to the server.
+     *
+     * It exists because the decoder used to fall back to [Open], which is the
+     * opposite of neutral: [Open] is the state that hangs the artist's
+     * Accept/Decline/Counter dock and puts the row in Home's "New requests"
+     * bucket. An unrecognised status therefore rendered as a live request, and
+     * Accept fired a status PATCH against a row this build cannot reason about.
+     */
+    Unknown("unknown");
 
     val label: String
         get() = when (this) {
@@ -20,11 +38,19 @@ enum class GigRequestStatus(val dbValue: String) {
             Accepted -> "Accepted"
             Declined -> "Declined"
             Expired -> "Expired"
+            // Deliberately NOT "Unknown": [BookingStatus.Unknown] shows
+            // "Unavailable" for the same case on both clients, and two words for
+            // one fact is a support call.
+            Unknown -> "Unavailable"
         }
 
     companion object {
+        /**
+         * Null / unrecognised → [Unknown]. Never [Open]: a request the client
+         * can't interpret must not be handed an Accept button.
+         */
         fun fromDb(raw: String?): GigRequestStatus =
-            entries.firstOrNull { it.dbValue == raw } ?: Open
+            entries.firstOrNull { it.dbValue == raw } ?: Unknown
     }
 }
 

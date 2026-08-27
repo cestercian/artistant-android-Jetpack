@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 /**
  * The blocked-user set (migration 0087).
@@ -27,8 +28,21 @@ class BlockedUsersStoreTest {
         var writes = 0
             private set
 
-        override suspend fun read(): String? = value
+        /**
+         * A damaged preferences file. DataStore THROWS on one — it does not hand
+         * back an empty value — and both of these calls sit on the path of every
+         * refresh, so "what happens then" is a property of the store worth pinning.
+         */
+        var failReads: Boolean = false
+        var failWrites: Boolean = false
+
+        override suspend fun read(): String? {
+            if (failReads) throw IOException("preferences file is damaged")
+            return value
+        }
+
         override suspend fun write(value: String) {
+            if (failWrites) throw IOException("preferences file is damaged")
             this.value = value
             writes++
         }
@@ -138,6 +152,37 @@ class BlockedUsersStoreTest {
 
         val offline = store(repository = FakeBlockRepository().apply { signedIn = false })
         assertFalse(offline.refresh())
+    }
+
+    @Test
+    fun aMirrorThatWontReadCostsTheHeadStart_notTheCaller() = runTest {
+        // The disk read is the FIRST thing refresh does, and it was the one call
+        // here nothing guarded. ChatViewModel refreshes from a bare launch, so an
+        // escaping IOException is an unhandled coroutine exception — the whole
+        // inbox and chat path taken down by a damaged preferences file.
+        val mirror = FakeMirror("${CLIENT_ID.lowercase()}\n${ARTIST_ID.lowercase()}")
+            .apply { failReads = true }
+        val store = store(repository = FakeBlockRepository(setOf(OTHER_ARTIST_ID)), mirror = mirror)
+
+        assertTrue(store.refresh())
+
+        // Only the offline copy was lost; the server's answer still lands.
+        assertEquals(setOf(OTHER_ARTIST_ID.lowercase()), store.blocked.value)
+    }
+
+    @Test
+    fun aMirrorThatWontWriteStillReportsTheBlockTheServerTook() = runTest {
+        // The mirror write runs BEFORE the server call in a toggle, so an
+        // unguarded failure here refused a block the server would have accepted —
+        // and reported it as one that didn't persist.
+        val repository = FakeBlockRepository()
+        val store = store(repository = repository, mirror = FakeMirror().apply { failWrites = true })
+
+        val ok = store.toggle(ARTIST_ID)
+
+        assertTrue(ok)
+        assertEquals(setOf(ARTIST_ID.lowercase()), store.blocked.value)
+        assertEquals(listOf(ARTIST_ID.lowercase()), repository.blockCalls)
     }
 
     @Test

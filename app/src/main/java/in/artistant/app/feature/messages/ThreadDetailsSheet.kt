@@ -92,6 +92,12 @@ fun ThreadDetailsSheet(
      */
     canBlock: Boolean,
     reportSubmitted: Boolean,
+    /**
+     * The last mute/block toggle didn't land. Rendered above the rows, because
+     * this sheet is where the tap happened and the row it belongs to has already
+     * flipped back to the state it was in.
+     */
+    actionError: String?,
     onBookingClick: (String) -> Unit,
     onToggleStar: () -> Unit,
     onToggleArchive: () -> Unit,
@@ -153,6 +159,17 @@ fun ThreadDetailsSheet(
             ParticipantRow(name = "You", role = ThreadCounterpart.viewerRole(viewerIsArtist))
 
             SectionHeader("Conversation")
+            actionError?.let {
+                Text(
+                    it,
+                    style = AppTheme.type.footnote,
+                    color = colors.hot,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = space.sm)
+                        .semantics { testTag = "threadDetails.actionError" },
+                )
+            }
             when {
                 reportSubmitted -> ReportReceipt()
                 reporting -> ReportReasonPicker(

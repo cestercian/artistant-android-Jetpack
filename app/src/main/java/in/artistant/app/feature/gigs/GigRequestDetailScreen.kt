@@ -235,7 +235,12 @@ private fun OfferBlock(request: `in`.artistant.app.data.model.StoredRequest) {
             HRule()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Status", style = AppTheme.type.footnote, color = colors.ink2)
-                Pill(request.status.dbValue.replaceFirstChar { it.uppercase() }, tone = PillTone.Neutral)
+                // The label, not a capitalised db value: it is what the artist
+                // Home rail prints for this same row (and what iOS's statusPill
+                // uses), so a countered request stopped reading "Countered" here
+                // and "Counter offer" there — and the decode fallback now has a
+                // word of its own ("Unavailable") that the column value lacks.
+                Pill(request.status.label, tone = PillTone.Neutral)
             }
         }
     }

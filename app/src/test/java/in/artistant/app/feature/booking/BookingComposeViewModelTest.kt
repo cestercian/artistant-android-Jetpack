@@ -222,11 +222,75 @@ class BookingComposeViewModelTest {
     }
 
     @Test
+    fun setVenueNotes_isBoundedHere_notAtWhicheverFieldHappensToCallIt() = runTest {
+        // The cap used to live in the composable's onValueChange, so the server
+        // column's bound held for exactly one caller. Anything else writing
+        // notes — a restore, a paste handler, a test — put an unbounded string
+        // into the draft and on to the wire.
+        val store = BookingDraftStore()
+        val model = vm(seededArtists(), store)
+
+        model.setVenueNotes("x".repeat(VENUE_NOTES_MAX + 200))
+
+        assertEquals(VENUE_NOTES_MAX, model.state.value.venueNotes.length)
+        assertTrue(model.onContinue())
+        assertEquals(VENUE_NOTES_MAX, store.draft.value?.venueNotes?.length)
+    }
+
+    @Test
+    fun setVenueNotes_leavesAnOrdinaryNoteAlone() = runTest {
+        val model = vm(seededArtists())
+
+        model.setVenueNotes("Gate 3, load-in at the back.")
+
+        assertEquals("Gate 3, load-in at the back.", model.state.value.venueNotes)
+    }
+
+    @Test
     fun artistWithNoPublishedSlots_fallsBackToTheDefaultTimeGrid() = runTest {
         val model = vm(FakeArtistsRepository(listOf(artist(timeSlots = emptyList()))))
 
+        // Asserted on a day that cannot be today. Today's grid is now trimmed to
+        // the slots the clock hasn't passed, so a suite run after 6pm would see a
+        // short list through no fault of the fallback. Clock behaviour itself is
+        // pinned deterministically in BookingSlotsTest.
+        model.selectDate(model.state.value.dateChips[1])
+
         assertEquals(DefaultTimeSlots, model.state.value.timeSlots)
-        assertEquals("8:30 PM", model.state.value.selectedTime)
+        assertTrue(model.state.value.selectedTime in DefaultTimeSlots)
+    }
+
+    /**
+     * The past-slot regression, at the ViewModel seam.
+     *
+     * `upcomingDateChips` starts at today and `resolveTimeSlots` returned the
+     * artist's whole list regardless of the hour, so opening the funnel at 23:10
+     * preselected "8:30 PM" and Continue snapshotted a draft for a show that had
+     * already ended. Both halves are asserted without touching the clock: the day
+     * the screen opens on must be one the strip calls available, and the time it
+     * preselects must be one of the times it is actually offering.
+     */
+    @Test
+    fun refresh_opensOnABookableDayWithATimeItIsStillOffering() = runTest {
+        val model = vm(FakeArtistsRepository(listOf(artist(timeSlots = DefaultTimeSlots))))
+
+        val s = model.state.value
+
+        assertEquals(s.dateChips.first { it.available }.epochMs, s.selectedDateEpochMs)
+        assertTrue(s.timeSlots.isNotEmpty())
+        assertTrue(s.selectedTime in s.timeSlots)
+    }
+
+    @Test
+    fun selectDate_movingOffTodayRestoresTheArtistsWholeGrid() = runTest {
+        // Only today hides passed slots, so a later day has to come back with the
+        // full published list — a trimmed grid must not follow the user forward.
+        val model = vm(FakeArtistsRepository(listOf(artist(timeSlots = DefaultTimeSlots))))
+
+        model.selectDate(model.state.value.dateChips[7])
+
+        assertEquals(DefaultTimeSlots, model.state.value.timeSlots)
+        assertTrue(model.state.value.selectedTime in DefaultTimeSlots)
     }
 
     @Test
@@ -238,5 +302,20 @@ class BookingComposeViewModelTest {
         store.clear()
 
         assertNull(store.draft.value)
+    }
+
+    @Test
+    fun draftStore_clearAlsoDropsTheTappedTier_soANewAccountDoesNotOpenOnIt() {
+        // The store is a @Singleton, so it outlives the session; sign-out and
+        // account delete both call clear() (ProfileViewModel). The package
+        // handover is the half that shows: without it dropped, the next account
+        // to open this artist would find the previous one's tier preselected.
+        val store = BookingDraftStore()
+        store.seedPackageIndex(ARTIST_ID, 2)
+        assertEquals(2, store.pendingPackageIndex(ARTIST_ID))
+
+        store.clear()
+
+        assertNull(store.pendingPackageIndex(ARTIST_ID))
     }
 }

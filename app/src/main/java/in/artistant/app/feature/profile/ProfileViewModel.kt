@@ -13,6 +13,7 @@ import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.booking.BookingDraftStore
 import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
@@ -129,6 +130,7 @@ class ProfileViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
+    private val draftStore: BookingDraftStore,
     val bookingsRepository: BookingsRepository,
 ) : ViewModel() {
 
@@ -232,7 +234,14 @@ class ProfileViewModel @Inject constructor(
 
     fun signOut() = viewModelScope.launch {
         _state.update { it.copy(showSignOutConfirm = false) }
+        // Account-scoped state held in memory, which the next session must not
+        // inherit. The booking draft is a @Singleton that outlives the session:
+        // the artist, venue, guest count and the free-text directions of a
+        // half-composed booking — plus the package tier tapped on a profile,
+        // which is what the next account's booking screen would silently open
+        // on — all stayed resident without this.
         calendarSync.clearSessionState()
+        draftStore.clear()
         runCatching { session.signOut() }
             .onFailure { e ->
                 _state.update { it.copy(actionError = e.message ?: "Sign out failed") }
@@ -252,6 +261,10 @@ class ProfileViewModel @Inject constructor(
                 // holding the dialog open through a 30s logout timeout would read
                 // as a delete that never happened.
                 _state.update { it.copy(isDeleting = false, showDeleteConfirm = false) }
+                // Same in-memory, account-scoped state sign-out drops. Not
+                // folded into [wipeLocalState] below, which only runs when the
+                // logout itself fails.
+                draftStore.clear()
                 val cleanupError = cleanUpAfterAccountDelete(
                     wipeCalendar = { calendarSync.wipeForAccountDelete() },
                     signOut = { session.signOut() },

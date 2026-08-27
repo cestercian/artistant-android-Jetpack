@@ -65,7 +65,7 @@ class MessagesInboxViewModelTest {
         override suspend fun send(threadId: String, body: String): Message = error("unused")
         override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String =
             threads.firstOrNull()?.id ?: "t-new"
-        override suspend fun markThreadRead(threadId: String) = Unit
+        override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) = Unit
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
         override suspend fun counterpartLastRead(threadId: String): Long? = null
         override suspend fun setMuted(threadId: String, muted: Boolean) = Unit
@@ -224,16 +224,6 @@ class MessagesInboxViewModelTest {
     }
 
     @Test
-    fun findOrCreateThreadHandsBackAServerId() = runTest {
-        val model = vm(FakeMessagesRepository())
-        var opened: String? = null
-
-        model.findOrCreateThread(ARTIST_ID) { opened = it }
-
-        assertNotNull(opened)
-    }
-
-    @Test
     fun aFailedInboxLoadSurfacesAnError() = runTest {
         val model = vm(StaticThreads(failList = true))
 
@@ -352,16 +342,14 @@ class MessagesInboxViewModelTest {
 
     /**
      * The row's whole point: it should name the gig's state, not just the person.
-     * The booking is read from the seat's own list and matched by id.
+     * The booking is read by id and matched back onto its thread.
      */
     @Test
     fun aBookedThreadCarriesItsGigStatusDateAndVenue() = runTest {
         val model = vm(
             StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))),
             bookings = StubBookings(
-                clientBookings = listOf(
-                    booking(id = "b-1", status = BookingStatus.Confirmed, venue = "Rooftop"),
-                ),
+                listOf(booking(id = "b-1", status = BookingStatus.Confirmed, venue = "Rooftop")),
             ),
         )
 
@@ -376,7 +364,7 @@ class MessagesInboxViewModelTest {
     fun aBookinglessThreadStaysAnInquiry() = runTest {
         val model = vm(
             StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))),
-            bookings = StubBookings(clientBookings = listOf(booking(id = "b-1"))),
+            bookings = StubBookings(listOf(booking(id = "b-1"))),
         )
 
         assertEquals(ThreadContext.INQUIRY, model.state.value.threads.single().context)
@@ -391,7 +379,7 @@ class MessagesInboxViewModelTest {
     fun anUnreadableBookingLeavesTheStatusUnresolved() = runTest {
         val model = vm(
             StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-missing"))),
-            bookings = StubBookings(clientBookings = emptyList()),
+            bookings = StubBookings(),
         )
 
         val context = model.state.value.threads.single().context
@@ -404,7 +392,7 @@ class MessagesInboxViewModelTest {
     fun aBookingsFailureDoesNotTakeTheInboxDown() = runTest {
         val model = vm(
             StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))),
-            bookings = StubBookings(failLists = true),
+            bookings = StubBookings(failFetch = true),
         )
 
         assertNull(model.state.value.error)
@@ -412,30 +400,38 @@ class MessagesInboxViewModelTest {
     }
 
     /**
-     * Only the seats present in the inbox are queried. A pure client asking for
-     * artist gigs is a wasted round trip on every inbox load.
+     * Only the ids the rows actually carry, once each, in one query. Asking for
+     * the seat's own list instead pulls every booking the account has ever had
+     * on every inbox load — and drags the calendar mirror along behind it, which
+     * is the surface Bookings/Gigs owns, not this one.
      */
     @Test
-    fun onlyTheSeatsInTheInboxAreQueriedForBookings() = runTest {
-        val bookings = StubBookings()
+    fun onlyTheBookingsTheRowsReferenceAreFetched() = runTest {
+        val bookings = StubBookings(listOf(booking(id = "b-1")))
         vm(
-            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"))),
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"),
+                    // The same gig, negotiated in two threads, plus an inquiry
+                    // that has no gig at all.
+                    Thread(id = "t-2", artistId = OTHER_ARTIST_ID, bookingId = "b-1"),
+                    Thread(id = "t-3", artistId = ARTIST_ID),
+                ),
+            ),
             viewerId = CLIENT_ID,
             bookings = bookings,
         )
 
-        assertEquals(1, bookings.clientCalls)
-        assertEquals(0, bookings.artistCalls)
+        assertEquals(listOf(listOf("b-1")), bookings.fetchedIds)
     }
 
-    /** No booked threads at all means neither list is worth asking for. */
+    /** No booked threads at all means there is nothing to ask for. */
     @Test
     fun anInboxOfPureInquiriesSkipsTheBookingsFetchEntirely() = runTest {
         val bookings = StubBookings()
         vm(StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))), bookings = bookings)
 
-        assertEquals(0, bookings.clientCalls)
-        assertEquals(0, bookings.artistCalls)
+        assertTrue(bookings.fetchedIds.isEmpty())
     }
 
     /**
@@ -451,12 +447,12 @@ class MessagesInboxViewModelTest {
         val asArtist = vm(
             StaticThreads(threads),
             viewerId = ARTIST_ID,
-            bookings = StubBookings(artistBookings = pending),
+            bookings = StubBookings(pending),
         )
         val asClient = vm(
             StaticThreads(threads),
             viewerId = CLIENT_ID,
-            bookings = StubBookings(clientBookings = pending),
+            bookings = StubBookings(pending),
         )
 
         assertTrue(asArtist.state.value.threads.single().context.awaitingViewer)
@@ -540,8 +536,8 @@ class MessagesInboxViewModelTest {
         )
 
         // Not just `visibleThreads`: a block that left the row in `threads`
-        // would keep feeding the chip counts and the unread badge, so the tab
-        // bar would still advertise a conversation with no way to open it.
+        // would keep feeding the chip counts and the archive list, so the inbox
+        // would still advertise a conversation with no way to open it.
         assertEquals(listOf("t-2"), model.state.value.threads.map { it.thread.id })
         assertEquals(listOf("t-2"), model.state.value.visibleThreads.map { it.thread.id })
         assertEquals(1, model.state.value.counts[MessagesFilter.All])

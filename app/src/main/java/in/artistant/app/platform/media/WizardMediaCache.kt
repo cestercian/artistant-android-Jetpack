@@ -1,6 +1,7 @@
 package `in`.artistant.app.platform.media
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -101,8 +102,15 @@ class WizardMediaCache @Inject constructor(
      * Rejecting at the pick turns a silent late failure into an immediate,
      * explainable one — the call iOS made too (`acceptedAudio` / `maxAudioBytes`
      * in WizardMediaCache.swift).
+     *
+     * The duration is measured here, off the staged copy. It used to be a
+     * caller-supplied parameter defaulting to 0.0 that nothing on this platform
+     * ever filled in, so every clip the app published wrote `0:00` into
+     * `samples.duration_label` and rendered as "AUDIO CLIP" in the editor —
+     * while the draft's own KDoc claimed it was "read from the media at pick
+     * time". iOS measures at adoption (AVAudioPlayer); now so do we.
      */
-    suspend fun adoptAudio(uri: Uri, title: String, durationSeconds: Double = 0.0): PendingAudio =
+    suspend fun adoptAudio(uri: Uri, title: String): PendingAudio =
         withContext(Dispatchers.IO) {
             val ext = stagedAudioExtension(context.contentResolver.getType(uri), uri.lastPathSegment)
                 ?: error(UNSUPPORTED_AUDIO_MESSAGE)
@@ -119,8 +127,28 @@ class WizardMediaCache @Inject constructor(
                 dest.delete()
                 error(OVERSIZE_AUDIO_MESSAGE)
             }
-            PendingAudio(name, title.ifBlank { "Sample" }, durationSeconds)
+            PendingAudio(name, title.ifBlank { "Sample" }, measuredDurationSeconds(dest))
         }
+
+    /**
+     * The staged clip's length in seconds, or 0.0 when the container won't say.
+     *
+     * Read off the local copy rather than the source URI: the bytes are already
+     * here, so there is no second cloud fetch and no permission to re-check.
+     * Zero stays the honest "not measured" value the editor's duration label and
+     * `SamplePlayback` both already know how to read.
+     */
+    private fun measuredDurationSeconds(file: File): Double {
+        val retriever = MediaMetadataRetriever()
+        val millis = runCatching {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        }.getOrNull()
+        // release(), not use{}: MediaMetadataRetriever only became AutoCloseable
+        // at API 29 and this module ships to 26.
+        runCatching { retriever.release() }
+        return millis?.takeIf { it > 0L }?.div(1000.0) ?: 0.0
+    }
 
     /**
      * Stream [uri] into [dest], leaving nothing behind if it fails.

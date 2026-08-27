@@ -15,6 +15,8 @@ import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ArtistPrompts
 import `in`.artistant.app.domain.artist.ServiceTags
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -163,6 +165,22 @@ class SupabaseArtistsRepository @Inject constructor(
 
     private val byId = mutableMapOf<String, Artist>()
     private val hydratedIds = mutableSetOf<String>()
+
+    /**
+     * Ids the server has already answered "no row" for.
+     *
+     * A confirmed miss is a fact worth keeping. [fetchArtist] short-circuits a
+     * HIT on [hydratedIds], but without this a lookup that legitimately resolves
+     * to nothing re-runs [fetchMany]'s whole five-table fan-out on every call —
+     * and the Blocked-accounts screen does exactly that on purpose: a blocked
+     * CLIENT id is never in `artists`, and its name hydration asks for every such
+     * id again on every refresh.
+     *
+     * Cleared in precisely the two places a positive entry would be: [invalidate]
+     * (the artist just wrote their own row) and [cache] (a tile projection
+     * carrying the id disproves the miss).
+     */
+    private val missingIds = mutableSetOf<String>()
     private val _cacheGeneration = MutableStateFlow(0)
     override val cacheGeneration: StateFlow<Int> = _cacheGeneration.asStateFlow()
 
@@ -176,6 +194,10 @@ class SupabaseArtistsRepository @Inject constructor(
         for (a in partials) {
             val id = a.id.lowercase()
             if (id in hydratedIds) continue
+            // Seeing the row at all disproves an earlier miss — a search or
+            // Discover page can carry an artist this repository once asked for
+            // before they were published.
+            missingIds.remove(id)
             byId[id] = a.copy(id = id)
             changed = true
         }
@@ -185,7 +207,12 @@ class SupabaseArtistsRepository @Inject constructor(
     override suspend fun fetchArtist(id: String): Artist? {
         val key = id.lowercase()
         if (key in hydratedIds) return byId[key]
-        val artist = fetchMany(listOf(key)).firstOrNull() ?: return null
+        if (key in missingIds) return null
+        val artist = fetchMany(listOf(key)).firstOrNull()
+        if (artist == null) {
+            missingIds.add(key)
+            return null
+        }
         byId[key] = artist
         hydratedIds.add(key)
         _cacheGeneration.value = _cacheGeneration.value + 1
@@ -336,48 +363,76 @@ class SupabaseArtistsRepository @Inject constructor(
     private fun invalidate(userId: String) {
         byId.remove(userId)
         hydratedIds.remove(userId)
+        // The wizard's first publish INSERTS the row, so this id may well be one
+        // an earlier lookup recorded as absent. Dropping the miss alongside the
+        // hydrated entry is what lets the artist's own profile load right after
+        // going live.
+        missingIds.remove(userId)
         _cacheGeneration.value = _cacheGeneration.value + 1
     }
 
-    private suspend fun fetchMany(ids: List<String>): List<Artist> {
-        if (ids.isEmpty()) return emptyList()
-        val artists = client.from("artists")
-            .select {
-                filter { isIn("id", ids) }
-            }
-            .decodeList<DbArtist>()
-        val packages = client.from("packages")
-            .select {
-                filter { isIn("artist_id", ids) }
-                order("artist_id", Order.ASCENDING)
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DbPackage>()
-        val tech = client.from("tech_rider")
-            .select {
-                filter { isIn("artist_id", ids) }
-                order("artist_id", Order.ASCENDING)
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DbTechItem>()
-        val samples = client.from("samples")
-            .select {
-                filter { isIn("artist_id", ids) }
-                order("artist_id", Order.ASCENDING)
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DbSample>()
-        val covers = client.from("artist_media")
-            .select(Columns.list("artist_id", "storage_path", "position")) {
-                filter {
-                    isIn("artist_id", ids)
-                    eq("kind", "photo")
+    /**
+     * The five-table profile fan-out, issued in PARALLEL.
+     *
+     * None of these reads depends on another's result — [stitch] is their only
+     * consumer and it needs all five — so awaiting them one after another cost a
+     * profile open five serial round trips (~1.5s on a 300ms mobile RTT) for work
+     * that takes one. iOS fans the same five out with `async let`; in this repo
+     * the idiom is `DiscoverViewModel.loadRails`.
+     *
+     * `coroutineScope` keeps the failure semantics identical to the sequential
+     * version: the first read to throw cancels its siblings and propagates, so a
+     * caller still sees one error rather than a half-stitched artist.
+     */
+    private suspend fun fetchMany(ids: List<String>): List<Artist> = coroutineScope {
+        if (ids.isEmpty()) return@coroutineScope emptyList()
+        val artists = async {
+            client.from("artists")
+                .select {
+                    filter { isIn("id", ids) }
                 }
-                order("artist_id", Order.ASCENDING)
-                order("position", Order.ASCENDING)
-            }
-            .decodeList<DbArtistCover>()
-        return stitch(artists, packages, tech, samples, covers)
+                .decodeList<DbArtist>()
+        }
+        val packages = async {
+            client.from("packages")
+                .select {
+                    filter { isIn("artist_id", ids) }
+                    order("artist_id", Order.ASCENDING)
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<DbPackage>()
+        }
+        val tech = async {
+            client.from("tech_rider")
+                .select {
+                    filter { isIn("artist_id", ids) }
+                    order("artist_id", Order.ASCENDING)
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<DbTechItem>()
+        }
+        val samples = async {
+            client.from("samples")
+                .select {
+                    filter { isIn("artist_id", ids) }
+                    order("artist_id", Order.ASCENDING)
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<DbSample>()
+        }
+        val covers = async {
+            client.from("artist_media")
+                .select(Columns.list("artist_id", "storage_path", "position")) {
+                    filter {
+                        isIn("artist_id", ids)
+                        eq("kind", "photo")
+                    }
+                    order("artist_id", Order.ASCENDING)
+                    order("position", Order.ASCENDING)
+                }
+                .decodeList<DbArtistCover>()
+        }
+        stitch(artists.await(), packages.await(), tech.await(), samples.await(), covers.await())
     }
 
     companion object {

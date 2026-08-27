@@ -127,7 +127,14 @@ private fun Dot(state: TimelineState) {
 fun BookingStatusTimeline(status: BookingStatus, modifier: Modifier = Modifier) {
     val steps = listOf(
         TimelineStep("Booked", "Your booking request is in."),
-        TimelineStep("Awaiting confirm", "Artist will confirm within 24h."),
+        // Word for word `CheckoutLogic.CHECKOUT_EXPECTATION`, and it has to stay
+        // that way. This step used to read "Artist will confirm within 24h.",
+        // which is an SLA nothing enforces — no response window exists on the
+        // booking path (the schema's `expires_at` belongs to the artist-side
+        // gig-request flow), and checkout one screen earlier deliberately
+        // refuses to promise one. The client was told two different things about
+        // the same request inside a single navigation.
+        TimelineStep("Awaiting confirm", "We'll notify you as soon as they respond."),
         TimelineStep("Show day", "Soundcheck, performance, applause."),
         TimelineStep("Completed", "Wrap-up after the show."),
     )

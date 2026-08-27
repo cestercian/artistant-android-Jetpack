@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -24,7 +25,21 @@ data class ChatUiState(
     val title: String = "Chat",
     val messages: List<Message> = emptyList(),
     val isLoading: Boolean = true,
+    /**
+     * The transcript couldn't be loaded, or a send didn't land. Owns the two
+     * surfaces that offer to reload the conversation — the empty-state Retry and
+     * the strip above the composer — so nothing else may write it.
+     */
     val error: String? = null,
+    /**
+     * A mute or block toggle that didn't take. Kept apart from [error] because
+     * the two mean opposite things to the reader: routing a failed mute into
+     * `error` told them "couldn't refresh this conversation" over a transcript
+     * that was fine, and on a thread with no messages yet it replaced the whole
+     * transcript with a load-failure screen. This renders in the details sheet,
+     * where the tap happened, and clears on the next toggle or on dismiss.
+     */
+    val actionError: String? = null,
     val counterpartLastReadAt: Long? = null,
     val showDetails: Boolean = false,
     /**
@@ -194,7 +209,7 @@ class ChatViewModel @Inject constructor(
                     isLoading = false,
                 )
             }
-            hydrateArtist(thread)
+            hydrateArtist(thread, viewerIsArtist)
             loadGigContext(thread, viewerIsArtist)
             markReadBestEffort()
         }.onFailure { e -> _state.update { it.copy(isLoading = false, error = e.message) } }
@@ -279,7 +294,10 @@ class ChatViewModel @Inject constructor(
     fun send(body: String) {
         val text = body.take(MAX_MESSAGE_CHARS).trim()
         if (text.isEmpty()) return
-        val optimisticId = "optimistic-${System.currentTimeMillis()}"
+        // Random, not the clock: the transcript is keyed by id in a LazyColumn,
+        // which throws on a duplicate key rather than degrading. The prefix is
+        // the part everything else matches on ([retryFailedMessage], the tests).
+        val optimisticId = "optimistic-${UUID.randomUUID()}"
         val optimistic = Message(
             id = optimisticId,
             threadId = threadId,
@@ -311,6 +329,13 @@ class ChatViewModel @Inject constructor(
                             optimisticId = optimisticId,
                             server = server,
                         ),
+                        // A retry that lands has to retire the message the failed
+                        // attempt left behind: `send` clears it on its way in,
+                        // `retryFailedMessage` reuses the existing bubble and so
+                        // never passes through there, and once the failed bubble
+                        // is gone the strip above the composer stops suppressing
+                        // itself and would report a refresh that never failed.
+                        error = null,
                     )
                 }
                 markReadBestEffort()
@@ -385,8 +410,15 @@ class ChatViewModel @Inject constructor(
      * Pull the thread's artist into the by-id cache when it is cold, then
      * re-project the header. Reaching the chat from a push deep link skips the
      * inbox entirely, so this is often the first time the artist is fetched.
+     *
+     * Only on the client seat. On the artist seat `thread.artistId` IS the
+     * viewer, and nothing renders it: the title keeps the client's name, and
+     * `artistId` is nulled in [refresh] so the details sheet never offers the
+     * profile row these two fields feed. Fetching it would be a round trip for
+     * three assignments no surface reads.
      */
-    private fun hydrateArtist(thread: Thread?) = viewModelScope.launch {
+    private fun hydrateArtist(thread: Thread?, viewerIsArtist: Boolean) = viewModelScope.launch {
+        if (viewerIsArtist) return@launch
         val artistId = thread?.artistId ?: return@launch
         if (artistsRepository.find(artistId) != null) return@launch
         val artist = artistsRepository.ensureFull(artistId) ?: return@launch
@@ -402,17 +434,35 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun markReadBestEffort() = viewModelScope.launch {
-        runCatching { messagesRepository.markThreadRead(threadId) }
+        // `threads` keeps one unread counter per side, so the write has to name
+        // the viewer's seat — and the loaded row is what decides it. No row means
+        // no seat AND nothing to clear: either the viewer isn't a participant, or
+        // [refresh] is still in flight and marks read again the moment it lands.
+        val loaded = _state.value
+        if (loaded.thread != null) {
+            runCatching { messagesRepository.markThreadRead(threadId, loaded.viewerIsArtist) }
+        }
         runCatching { messagesRepository.markThreadReadReceipt(threadId) }
         // Opening the thread also retires an explicit "mark as unread" — the
         // reader has now, demonstrably, read it.
         runCatching { flagsStore.clearMarkedUnread(threadId) }
+        // Only ever overwritten with a VALUE. Null means three different things
+        // here — no receipts row, nothing read yet, and a read that failed (the
+        // seam swallows its own throw) — and this runs on every inbound message,
+        // so assigning null unconditionally made one dropped request wipe a
+        // receipt the counterparty had genuinely left: the "Read · 9:14 am"
+        // caption blinked out mid-conversation. Receipts only ever move forward,
+        // so the last known one is never wrong for longer than the next call.
         val readAt = runCatching { messagesRepository.counterpartLastRead(threadId) }.getOrNull()
-        _state.update { it.copy(counterpartLastReadAt = readAt) }
+        if (readAt != null) _state.update { it.copy(counterpartLastReadAt = readAt) }
     }
 
     fun openDetails() = _state.update { it.copy(showDetails = true) }
-    fun dismissDetails() = _state.update { it.copy(showDetails = false, reportSubmitted = false) }
+
+    /** Closing takes the sheet's own failure line with it — see [ChatUiState.actionError]. */
+    fun dismissDetails() = _state.update {
+        it.copy(showDetails = false, reportSubmitted = false, actionError = null)
+    }
 
     fun dismissSafetyBanner() = viewModelScope.launch { flagsStore.dismissSafetyBanner(threadId) }
 
@@ -434,15 +484,20 @@ class ChatViewModel @Inject constructor(
      */
     fun toggleMuted() {
         val next = !_state.value.muted
-        _state.update { it.copy(muted = next, thread = it.thread?.copy(muted = next)) }
+        _state.update {
+            it.copy(muted = next, thread = it.thread?.copy(muted = next), actionError = null)
+        }
         viewModelScope.launch {
             runCatching { messagesRepository.setMuted(threadId, next) }
-                .onFailure { e ->
+                .onFailure { _ ->
+                    // Deliberately not `e.message`: this row is one tap inside a
+                    // sheet, and a Postgres/transport string there says nothing
+                    // the reader can act on.
                     _state.update {
                         it.copy(
                             muted = !next,
                             thread = it.thread?.copy(muted = !next),
-                            error = e.message ?: MUTE_FAILED,
+                            actionError = MUTE_FAILED,
                         )
                     }
                 }
@@ -466,11 +521,12 @@ class ChatViewModel @Inject constructor(
      */
     fun toggleBlocked() {
         val target = _state.value.counterpartId ?: return
+        _state.update { it.copy(actionError = null) }
         viewModelScope.launch {
             // The store owns the optimistic flip and its revert; all that is
             // left here is saying so when the write didn't land.
             if (!blockedUsers.toggle(target)) {
-                _state.update { it.copy(error = BLOCK_FAILED) }
+                _state.update { it.copy(actionError = BLOCK_FAILED) }
             }
         }
     }

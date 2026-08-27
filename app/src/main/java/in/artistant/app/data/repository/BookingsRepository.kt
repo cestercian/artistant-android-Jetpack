@@ -39,6 +39,31 @@ import javax.inject.Singleton
 sealed class BookingRepositoryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     data object NotSignedIn : BookingRepositoryError("You're not signed in. Sign in and try booking again.")
     class MalformedTime(raw: String) : BookingRepositoryError("Couldn't parse the show time \"$raw\".")
+
+    /**
+     * The `bookings_no_overlap` GiST exclusion (0051) rejected the insert — the
+     * artist took that slot between the date pick and Send.
+     */
+    class DateUnavailable(cause: Throwable) :
+        BookingRepositoryError("That date was just taken. Pick another date and try again.", cause)
+
+    /** The `bookings_no_self` CHECK (0033/0081) — you can't book yourself. */
+    class SelfBooking(cause: Throwable) :
+        BookingRepositoryError("You can't book your own artist profile.", cause)
+
+    /** A server write-rate / squat cap (0074) rejected the insert. */
+    class RateLimited(cause: Throwable) :
+        BookingRepositoryError("You've reached a booking limit for now. Try again a little later.", cause)
+
+    /**
+     * A status write matched ZERO rows — the id is gone, or RLS (0083's
+     * artist-only accept) filtered it out. [id] is kept off the copy on purpose:
+     * a UUID in a banner tells the user nothing, but logs want it.
+     */
+    class NotFoundOrUnauthorized(val id: String) : BookingRepositoryError(
+        "This request is no longer available — it may have been cancelled or already answered.",
+    )
+
     class Underlying(cause: Throwable) : BookingRepositoryError(cause.message ?: "Booking request failed", cause)
 }
 
@@ -47,6 +72,17 @@ interface BookingsRepository {
     suspend fun listForClient(): List<Booking>
     suspend fun listForArtist(): List<Booking>
     suspend fun fetchOne(id: String): Booking?
+
+    /**
+     * The rows behind a known set of ids, in one round trip.
+     *
+     * For a surface that references a handful of bookings it never listed — the
+     * inbox, where each thread carries at most one. Asking the seat's own list
+     * instead would pull every booking the account has ever had (and drag the
+     * calendar mirror along with it) to render a status word per row. RLS decides
+     * what comes back, so an id the viewer can't read is simply absent.
+     */
+    suspend fun fetchMany(ids: List<String>): List<Booking>
     suspend fun cancel(id: String, reason: String?): Booking
     suspend fun accept(id: String): Booking
     suspend fun declineByArtist(id: String, reason: String?): Booking
@@ -119,7 +155,13 @@ class SupabaseBookingsRepository @Inject constructor(
             calendarSync.ingest(listOf(booking))
             booking
         } catch (t: Throwable) {
-            throw BookingRepositoryError.Underlying(t)
+            // The house-rule guards are server-side, and the client pre-checks
+            // neither of them, so this is where they land. Unclassified, the raw
+            // PostgREST text went straight to the checkout banner — a client who
+            // picked a slot the artist already has booked read
+            // `conflicting key value violates exclusion constraint
+            // "bookings_no_overlap"` with no hint to pick another date.
+            throw classifyCreateError(t)
         }
     }
 
@@ -171,20 +213,46 @@ class SupabaseBookingsRepository @Inject constructor(
         }
     }
 
+    override suspend fun fetchMany(ids: List<String>): List<Booking> {
+        if (ids.isEmpty()) return emptyList()
+        return try {
+            // Same projection as [fetchOne] — the artist seat needs the client
+            // embed, and RLS nulls it for anyone who shouldn't see it — and, like
+            // fetchOne, no calendar ingest: mirroring belongs to the surfaces
+            // that own the calendar, not to a caller reading rows by id.
+            client.from("bookings")
+                .select(Columns.raw("*, client:users!client_id(full_name)")) {
+                    filter { isIn("id", ids.map { it.lowercase() }) }
+                }
+                .decodeList<DbBookingWithClient>()
+                .map { it.toDomain() }
+        } catch (t: Throwable) {
+            throw BookingRepositoryError.Underlying(t)
+        }
+    }
+
     override suspend fun cancel(id: String, reason: String?): Booking =
         cancelViaEdgeFunction(id, reason, cancelledBy = "client")
 
     override suspend fun accept(id: String): Booking {
         if (currentUserId() == null) throw BookingRepositoryError.NotSignedIn
         return try {
-            client.from("bookings")
+            // decodeList, not decodeSingle: zero rows is an EXPECTED outcome here
+            // — 0083's artist-only policy rejecting the write, a booking another
+            // device already answered, a stale id off a push deep link — and
+            // decodeSingle turns all three into a kotlinx decode message the
+            // artist reads verbatim in the action banner. Same shape as
+            // RequestsRepository.updateStatus.
+            val rows = client.from("bookings")
                 .update(AcceptPayload(status = BookingStatus.Confirmed.dbValue)) {
                     filter { eq("id", id.lowercase()) }
                     select()
                 }
-                .decodeSingle<DbBooking>()
-                .toDomain()
-                .also { calendarSync.ingest(listOf(it)) }
+                .decodeList<DbBooking>()
+            val row = rows.firstOrNull() ?: throw BookingRepositoryError.NotFoundOrUnauthorized(id)
+            row.toDomain().also { calendarSync.ingest(listOf(it)) }
+        } catch (e: BookingRepositoryError) {
+            throw e
         } catch (t: Throwable) {
             throw BookingRepositoryError.Underlying(t)
         }
@@ -252,6 +320,36 @@ class SupabaseBookingsRepository @Inject constructor(
         /** Pinned cancel-booking body keys — never include escrow_status (0034). */
         val cancelPayloadKeys: Set<String> = setOf("booking_id", "cancelled_by", "reason")
 
+        /**
+         * Classify a failed `create` into a typed error the checkout screen can
+         * say something useful about. Pure + in the companion so every branch is
+         * unit-testable without a live PostgREST round trip (port of iOS
+         * `BookingsRepository.classifyCreateError`).
+         *
+         * **Order matters.** `bookings_no_self` and the 0074 squat caps both
+         * raise SQLSTATE 23514 (`check_violation`), so keying the cap on a bare
+         * "23514" first would report a self-booking as "you've hit a booking
+         * limit" — the specific constraint has to win.
+         */
+        fun classifyCreateError(t: Throwable): BookingRepositoryError {
+            val desc = t.message.orEmpty().lowercase()
+            return when {
+                // Its own constraint name, matched before the caps it shares an
+                // SQLSTATE with. Covers `bookings_no_self_booking` (0033) too.
+                "bookings_no_self" in desc -> BookingRepositoryError.SelfBooking(t)
+                // The GiST exclusion (0051) on a slot taken since the date pick.
+                "23p01" in desc || "exclusion" in desc || "no_overlap" in desc ->
+                    BookingRepositoryError.DateUnavailable(t)
+                // Write-rate / squat caps (0074) — after the two above.
+                RATE_LIMIT_MARKERS.any { it in desc } -> BookingRepositoryError.RateLimited(t)
+                else -> BookingRepositoryError.Underlying(t)
+            }
+        }
+
+        /** Shared with iOS's `BackendError.isRateLimit` — same guard family. */
+        private val RATE_LIMIT_MARKERS =
+            listOf("23514", "check_violation", "rate limit", "cap reached", "booking limit")
+
         /** Gig wall-clock is IST — see [startEndIso]. */
         private val IST: TimeZone get() = TimeZone.getTimeZone("Asia/Kolkata")
 
@@ -277,7 +375,11 @@ class SupabaseBookingsRepository @Inject constructor(
         fun startEndIso(draft: BookingDraft): Pair<String, String> {
             val timeParts = parseTimeOfDay(draft.time)
                 ?: throw BookingRepositoryError.MalformedTime(draft.time)
-            val chosenDay = Calendar.getInstance().apply { timeInMillis = draft.dateRawEpochMs }
+            // The chip's day read in IST, matching how it was generated and
+            // labelled (BookingSlots.upcomingDateChips) — reading it in the
+            // device zone here made the stored day disagree with the label the
+            // client tapped whenever the two calendars differed.
+            val chosenDay = Calendar.getInstance(IST).apply { timeInMillis = draft.dateRawEpochMs }
             val cal = Calendar.getInstance(IST).apply {
                 clear()
                 set(
@@ -530,6 +632,12 @@ class FakeBookingsRepository(
     override suspend fun fetchOne(id: String): Booking? =
         rows.firstOrNull { it.id.equals(id, ignoreCase = true) }
 
+    /** Like the real seam: ids that match nothing are absent, never null entries. */
+    override suspend fun fetchMany(ids: List<String>): List<Booking> {
+        val wanted = ids.map { it.lowercase() }.toSet()
+        return rows.filter { it.id.lowercase() in wanted }
+    }
+
     override suspend fun cancel(id: String, reason: String?): Booking =
         mutate(id) { it.copy(status = BookingStatus.Cancelled, escrowStatus = EscrowStatus.Refunded) }
 
@@ -547,7 +655,8 @@ class FakeBookingsRepository(
     private fun mutate(id: String, transform: (Booking) -> Booking): Booking {
         if (!signedIn) throw BookingRepositoryError.NotSignedIn
         val idx = rows.indexOfFirst { it.id.equals(id, ignoreCase = true) }
-        if (idx < 0) throw BookingRepositoryError.Underlying(NoSuchElementException(id))
+        // Same signal the real seam raises when the status write matches no row.
+        if (idx < 0) throw BookingRepositoryError.NotFoundOrUnauthorized(id)
         val updated = transform(rows[idx])
         rows[idx] = updated
         return updated

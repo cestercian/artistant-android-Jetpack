@@ -104,9 +104,6 @@ fun BookingStatus.isActionable(): Boolean =
  */
 object BookingActions {
 
-    fun forViewer(viewer: BookingViewer, status: BookingStatus): Set<BookingAction> =
-        (primary(viewer, status) + manage(viewer, status)).toSet()
-
     /**
      * What the pinned dock carries. Accept + Decline REPLACE Message for an
      * artist looking at a pending request — a request's affordance is answering
@@ -265,6 +262,12 @@ data class BookingTerm(val label: String, val value: String, val mono: Boolean =
  * because an artist with no published packages genuinely has none to name, in
  * which case the row is dropped rather than rendered as "Custom" (which would
  * assert a tier that does not exist).
+ *
+ * A blank value drops its whole row for the same reason [heroWhereLine] drops
+ * blank parts: a "Time" label with nothing beside it reads as a rendering fault,
+ * and the two would otherwise disagree about the same booking on the same
+ * screen. Nothing here can be empty on a row read whole, so this is the guard
+ * for a projection that omitted a column, not a routine case.
  */
 fun bookingTerms(booking: Booking, packageName: String?): List<BookingTerm> = buildList {
     packageName?.trim()?.takeIf { it.isNotEmpty() }?.let { add(BookingTerm("Package", it)) }
@@ -273,7 +276,7 @@ fun bookingTerms(booking: Booking, packageName: String?): List<BookingTerm> = bu
     add(BookingTerm("Venue", booking.venue))
     add(BookingTerm("Guests", booking.guests.toString()))
     add(BookingTerm("Booking ID", truncatedBookingId(booking.id), mono = true))
-}
+}.filter { it.value.isNotBlank() }
 
 /**
  * "Rooftop · May 16 · 8:30 PM" — where and when, on one line under the name.

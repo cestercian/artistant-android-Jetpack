@@ -136,7 +136,12 @@ fun MessagesScreen(
 
         // A refresh that failed while rows are already on screen is a strip, not
         // an empty state — the stale list is still the best thing to show.
-        if (state.error != null && state.threads.isNotEmpty()) {
+        //
+        // Gated on `activeThreads`, not `threads`: archived conversations are on
+        // another screen, so an inbox whose every thread is archived has nothing
+        // on screen for the strip to sit over, and would print "couldn't refresh"
+        // directly above "you don't have any messages".
+        if (state.error != null && state.activeThreads.isNotEmpty()) {
             InlineBanner(
                 title = "Couldn't refresh messages",
                 detail = state.error,
@@ -164,7 +169,10 @@ fun MessagesScreen(
                 // when someone is most likely to want it.
                 state.filter == MessagesFilter.Support -> SupportSegment(onOpen = { showSupport = true })
 
-                state.error != null && state.threads.isEmpty() -> EmptyState(
+                // Same seam as the strip above, from the other side: with nothing
+                // visible to show, a failed load owns the whole area rather than
+                // ceding it to the "no messages yet" copy.
+                state.error != null && state.activeThreads.isEmpty() -> EmptyState(
                     title = "Couldn't load messages",
                     body = state.error,
                     actionLabel = "Retry",

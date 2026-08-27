@@ -27,8 +27,15 @@ import org.junit.Test
  */
 class BookingDetailLogicTest {
 
-    private fun actions(viewer: BookingViewer, status: BookingStatus) =
-        BookingActions.forViewer(viewer, status)
+    /**
+     * The whole cell of the matrix: everything the dock offers plus everything
+     * the manage list does. Composed here rather than on [BookingActions],
+     * because the screen never asks for the union — it renders the two halves
+     * separately, and a production accessor only tests would call is one more
+     * thing to keep true.
+     */
+    private fun actions(viewer: BookingViewer, status: BookingStatus): Set<BookingAction> =
+        (BookingActions.primary(viewer, status) + BookingActions.manage(viewer, status)).toSet()
 
     // --- the matrix, cell by cell -------------------------------------------
 
@@ -326,6 +333,18 @@ class BookingDetailLogicTest {
     @Test
     fun bookingTerms_dropABlankPackageName() {
         assertFalse(bookingTerms(booking(), "   ").any { it.label == "Package" })
+    }
+
+    @Test
+    fun bookingTerms_dropAnyBlankRow_soNoLabelSitsBesideNothing() {
+        // A projection that skipped a column arrives here as "". A "Time" label
+        // with nothing beside it reads as a rendering fault — and the hero line
+        // on the same screen already drops the same blank, so leaving it in had
+        // the two halves of one page disagreeing about one booking.
+        val terms = bookingTerms(booking(time = "", venue = "  "), packageName = "Evening set")
+
+        assertEquals(listOf("Package", "Date", "Guests", "Booking ID"), terms.map { it.label })
+        assertTrue(terms.none { it.value.isBlank() })
     }
 
     @Test

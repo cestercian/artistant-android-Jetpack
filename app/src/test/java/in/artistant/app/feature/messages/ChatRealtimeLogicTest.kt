@@ -69,6 +69,49 @@ class ChatRealtimeLogicTest {
         assertEquals(listOf("server-9"), result.map { it.id })
     }
 
+    /**
+     * The reconcile races an inbound message, so the row it commits is not always
+     * the newest one: the server stamped the send BEFORE the reply that overtook
+     * it on the wire. Appending put the viewer's own message below the answer to
+     * it — and, across local midnight, made [ChatTimestamps] emit two separators
+     * for one day, since it reads the list as ascending.
+     */
+    @Test
+    fun reconcileSend_placesTheConfirmedRowInSentAtOrder() {
+        val existing = listOf(
+            msg("optimistic-1", body = "on my way", delivery = MessageDelivery.Sending, at = 1_000),
+            // Landed on the socket while the send was still in flight.
+            msg("them-1", body = "ok", mine = false, at = 2_000),
+        )
+        val result = ChatRealtimeLogic.reconcileSendSuccess(
+            existing = existing,
+            optimisticId = "optimistic-1",
+            server = msg("server-9", body = "on my way", at = 1_500),
+        )
+        assertEquals(listOf("server-9", "them-1"), result.map { it.id })
+    }
+
+    @Test
+    fun receive_placesAnEarlierRowInSentAtOrderRatherThanAtTheTail() {
+        val existing = listOf(msg("s1", at = 1_000), msg("s3", at = 3_000))
+        val result = ChatRealtimeLogic.receiveRealtimeMessage(
+            existing,
+            msg("s2", body = "in between", mine = false, at = 2_000),
+        )
+        assertEquals(listOf("s1", "s2", "s3"), result.map { it.id })
+    }
+
+    /** The common case stays an append — a genuinely newer row goes to the tail. */
+    @Test
+    fun receive_appendsARowThatIsGenuinelyTheNewest() {
+        val existing = listOf(msg("s1", at = 1_000))
+        val result = ChatRealtimeLogic.receiveRealtimeMessage(
+            existing,
+            msg("s2", body = "later", mine = false, at = 2_000),
+        )
+        assertEquals(listOf("s1", "s2"), result.map { it.id })
+    }
+
     @Test
     fun mergePreservingOptimistic_keepsScrollbackAndInFlight() {
         val server = listOf(msg("s2", at = 2_000), msg("s3", at = 3_000))

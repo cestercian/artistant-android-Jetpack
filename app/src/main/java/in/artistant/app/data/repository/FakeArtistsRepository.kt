@@ -29,8 +29,21 @@ class FakeArtistsRepository(
     private val byId = seed.associateBy { it.id.lowercase() }.toMutableMap()
     private val remoteById = remote.associateBy { it.id.lowercase() }
     private val hydratedIds = seed.map { it.id.lowercase() }.toMutableSet()
+
+    /** Confirmed misses, memoized exactly as the real repository memoizes them. */
+    private val missingIds = mutableSetOf<String>()
     private val _cacheGeneration = MutableStateFlow(0)
     override val cacheGeneration: StateFlow<Int> = _cacheGeneration.asStateFlow()
+
+    /**
+     * Every [fetchArtist] ask the caches did NOT short-circuit, in call order —
+     * i.e. the round trips the real repository would have paid for.
+     *
+     * Exposed because a miss returns null whether or not it was remembered, so
+     * the only way to pin "a confirmed miss costs one fan-out, not one per call"
+     * is to count the asks that got through.
+     */
+    val fetchedIds = mutableListOf<String>()
 
     /** When true, [fetchArtist] throws so callers can exercise degrade paths. */
     var failFetch: Boolean = false
@@ -57,6 +70,7 @@ class FakeArtistsRepository(
         for (a in partials) {
             val id = a.id.lowercase()
             if (id in hydratedIds) continue
+            missingIds.remove(id)
             byId[id] = a.copy(id = id)
             changed = true
         }
@@ -66,9 +80,20 @@ class FakeArtistsRepository(
     override suspend fun fetchArtist(id: String): Artist? {
         if (failFetch) throw IllegalStateException("fake fetch failure")
         val key = id.lowercase()
+        // Both short-circuits the real one has, in the same order: a hydrated
+        // hit costs nothing, and so does a remembered miss — otherwise an id
+        // that is not an artist (a blocked client, say) re-runs the whole
+        // five-table fan-out on every call.
+        if (key in hydratedIds) return byId[key]
+        if (key in missingIds) return null
+        fetchedIds += key
         // A fetch that lands CACHES, like the real one — that's what makes the
         // next `find` hit for an artist this fake only held remotely.
-        val artist = byId[key] ?: remoteById[key] ?: return null
+        val artist = byId[key] ?: remoteById[key]
+        if (artist == null) {
+            missingIds.add(key)
+            return null
+        }
         byId[key] = artist
         hydratedIds.add(key)
         _cacheGeneration.value = _cacheGeneration.value + 1
@@ -107,6 +132,9 @@ class FakeArtistsRepository(
             youtubeChannelUrl = draft.youtubeChannelUrl,
         )
         hydratedIds.add(id)
+        // The real repository invalidates this id after the upsert, misses
+        // included — a first publish INSERTS a row an earlier lookup missed.
+        missingIds.remove(id)
         _cacheGeneration.value = _cacheGeneration.value + 1
     }
 
@@ -188,6 +216,7 @@ class FakeArtistsRepository(
             val id = a.id.lowercase()
             byId[id] = a.copy(id = id)
             hydratedIds.add(id)
+            missingIds.remove(id)
         }
         if (artists.isNotEmpty()) _cacheGeneration.value = _cacheGeneration.value + 1
     }

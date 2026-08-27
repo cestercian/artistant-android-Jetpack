@@ -371,14 +371,14 @@ private fun VenueSection(
                     // Live counter on a bounded field — the cap is enforced in
                     // the setter, so the count is the only warning a paste gets.
                     Text(
-                        "${notes.length}/$NOTES_MAX",
+                        "${notes.length}/$VENUE_NOTES_MAX",
                         style = AppTheme.type.monoMicroSoft,
                         color = colors.ink3,
                     )
                 }
                 SunkenTextField(
                     value = notes,
-                    onValueChange = { onNotesChange(it.take(NOTES_MAX)) },
+                    onValueChange = onNotesChange,
                     placeholder = "Gate, parking, load-in… (optional)",
                     minLines = 2,
                 )
@@ -389,9 +389,6 @@ private fun VenueSection(
 
 /** Guests move in tens: a 100-guest party is not booked one head at a time. */
 private const val GUEST_STEP = 10
-
-/** Matches the server column's bound, enforced in the setter so a paste can't exceed it. */
-private const val NOTES_MAX = 500
 
 @Composable
 private fun FieldLabel(text: String, modifier: Modifier = Modifier) {
