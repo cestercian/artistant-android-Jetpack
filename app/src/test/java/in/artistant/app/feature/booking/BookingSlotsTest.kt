@@ -92,6 +92,38 @@ class BookingSlotsTest {
         }
     }
 
+    /**
+     * The case Greptile caught: the funnel must not offer a slot whose stored
+     * instant is already in the past.
+     *
+     * New York at 22:00 on the 27th is 07:30 on the 28th in Kolkata. When the
+     * chip walk ran on the device calendar it produced a chip for "the 27th",
+     * while the filter and `startEndIso` both resolve the day in India — so an
+     * 8:30 PM slot survived and persisted as the 27th at 20:30 IST, eleven hours
+     * gone. With the whole chain on one clock, chip 0 IS the 28th and the
+     * evening is genuinely still ahead.
+     */
+    @Test
+    fun upcomingDateChips_startTodayInIndia_notOnTheDevicesCalendar() {
+        val default = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+            // 22:00 on the 27th in New York == 07:30 on the 28th in Kolkata.
+            val now = at(hour = 7, minute = 30, day = 28)
+
+            val chips = upcomingDateChips(count = 1, timeSlots = DefaultTimeSlots, nowMs = now)
+
+            assertTrue("the gig day is India's, so the evening is still ahead", chips[0].available)
+            assertEquals("Fri, Aug 28, 2026", chips[0].label)
+            assertEquals(
+                DefaultTimeSlots,
+                bookableTimeSlots(DefaultTimeSlots, dayEpochMs = now, nowMs = now),
+            )
+        } finally {
+            TimeZone.setDefault(default)
+        }
+    }
+
     @Test
     fun bookableTimeSlots_treatsASlotStartingExactlyNowAsGone() {
         val now = at(hour = 20, minute = 30)

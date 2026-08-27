@@ -375,7 +375,11 @@ class SupabaseBookingsRepository @Inject constructor(
         fun startEndIso(draft: BookingDraft): Pair<String, String> {
             val timeParts = parseTimeOfDay(draft.time)
                 ?: throw BookingRepositoryError.MalformedTime(draft.time)
-            val chosenDay = Calendar.getInstance().apply { timeInMillis = draft.dateRawEpochMs }
+            // The chip's day read in IST, matching how it was generated and
+            // labelled (BookingSlots.upcomingDateChips) — reading it in the
+            // device zone here made the stored day disagree with the label the
+            // client tapped whenever the two calendars differed.
+            val chosenDay = Calendar.getInstance(IST).apply { timeInMillis = draft.dateRawEpochMs }
             val cal = Calendar.getInstance(IST).apply {
                 clear()
                 set(
