@@ -34,6 +34,46 @@ class MessagesRepositoryLogicTest {
         assertNotEquals(first, otherBooking)
     }
 
+    /**
+     * The artist seat cannot MINT a thread — that would be `client_id ==
+     * artist_id`, which 0081's CHECK rejects — but it must still reach the one
+     * 0015 minted when the booking confirmed. So the refusal is typed, and it
+     * sits BELOW the lookup: swapping those two would lock artists out of every
+     * booking conversation they have.
+     */
+    @Test
+    fun theArtistSeatReachesAnExistingBookingThreadButCannotMintOne() = runTest {
+        val existing = Thread(id = THREAD, artistId = ARTIST, clientId = CLIENT, bookingId = "b-1")
+        val repo = FakeMessagesRepository(userId = ARTIST, seedThreads = listOf(existing))
+
+        assertEquals(THREAD, repo.findOrCreateThread(ARTIST, bookingId = "b-1"))
+
+        val err = runCatching { repo.findOrCreateThread(ARTIST, bookingId = "b-2") }.exceptionOrNull()
+        assertTrue("expected SelfThread, got $err", err is MessagesRepositoryError.SelfThread)
+        assertEquals("The conversation opens once the booking is confirmed.", err?.message)
+    }
+
+    /**
+     * `threads` keeps one unread counter per side, so a mark-read is filtered on
+     * the seat it names and a write aimed at the counterparty's column clears
+     * NOTHING — which is why the seat is a required argument rather than a
+     * defaulted guess, and why the seam no longer writes both sides and lets the
+     * server discard the miss.
+     */
+    @Test
+    fun markingReadClearsOnlyTheSeatItNames() = runTest {
+        val seed = listOf(Thread(id = THREAD, artistId = ARTIST, clientId = CLIENT, unreadCount = 3))
+        val repo = FakeMessagesRepository(userId = CLIENT, seedThreads = seed)
+
+        repo.markThreadRead(THREAD, viewerIsArtist = true)
+        assertEquals(3, repo.listThreadsForUser().single().unreadCount)
+
+        repo.markThreadRead(THREAD, viewerIsArtist = false)
+        assertEquals(0, repo.listThreadsForUser().single().unreadCount)
+
+        assertEquals(listOf(THREAD to true, THREAD to false), repo.readSeats)
+    }
+
     // ── per-seat mute (migration 0091) ───────────────────────────────────────
     //
     // 0091 puts TWO booleans on `threads` — `client_muted` and `artist_muted` —

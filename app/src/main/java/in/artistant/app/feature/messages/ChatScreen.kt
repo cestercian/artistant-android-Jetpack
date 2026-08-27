@@ -97,7 +97,11 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    // One clock for the whole screen. The transcript's day separators and the
+    // composer's "how soon" caption both describe the same day, so they read the
+    // same "now" — and one midnight timer / lifecycle observer serves both
+    // instead of a pair per screen (see rememberDayClock).
+    val now = rememberDayClock()
 
     ResumeEffect(onResumed = viewModel::onResumed)
 
@@ -144,6 +148,7 @@ fun ChatScreen(
 
                 else -> Transcript(
                     state = state,
+                    nowMs = now,
                     onBookingClick = onBookingClick,
                     onRetry = viewModel::retryFailedMessage,
                     onLoadOlder = viewModel::loadOlder,
@@ -153,6 +158,7 @@ fun ChatScreen(
 
         ComposerStack(
             state = state,
+            nowMs = now,
             onSend = viewModel::send,
             onRetryRefresh = viewModel::refresh,
             onOpenBooking = onBookingClick,
@@ -173,6 +179,11 @@ fun ChatScreen(
             blocked = state.blocked,
             canBlock = state.counterpartId != null,
             reportSubmitted = state.reportSubmitted,
+            // A mute/block that didn't land is reported HERE, on the sheet the
+            // tap came from, rather than in the transcript's own error slot —
+            // that one speaks for the conversation failing to load and offers to
+            // reload it, which is neither true nor useful for a failed toggle.
+            actionError = state.actionError,
             onBookingClick = onBookingClick,
             onArtistClick = onArtistClick,
             onToggleStar = viewModel::toggleStarred,
@@ -366,6 +377,7 @@ private fun SafetyBanner(onDismiss: () -> Unit) {
 @Composable
 private fun Transcript(
     state: ChatUiState,
+    nowMs: Long,
     onBookingClick: (String) -> Unit,
     onRetry: (String) -> Unit,
     onLoadOlder: () -> Unit,
@@ -379,10 +391,6 @@ private fun Transcript(
     val dayStarts = remember(messages) { ChatTimestamps.dayStartIds(messages) }
     val incomingStarts = remember(messages) { ChatTimestamps.incomingRunStartIds(messages) }
     val outgoingEnds = remember(messages) { ChatTimestamps.outgoingRunEndIds(messages) }
-    // One consistent "now" for the whole transcript, so two separators can't
-    // disagree about which day is Today mid-scroll — but one that re-reads the
-    // clock when the day actually turns over (see rememberDayClock).
-    val now = rememberDayClock()
     // The platform formatters honour the user's locale AND their 24-hour setting.
     // Never reintroduce a fixed "h:mm a" pattern here.
     val context = LocalContext.current
@@ -409,7 +417,7 @@ private fun Transcript(
                 if (message.id in dayStarts) {
                     DaySeparatorRow(
                         sentAtEpochMs = message.sentAtEpochMs,
-                        nowMs = now,
+                        nowMs = nowMs,
                         dateFormat = dateFormat,
                     )
                 }
@@ -715,13 +723,13 @@ private fun TrailingCaption(text: String, readable: String? = null, tag: String?
 @Composable
 private fun ComposerStack(
     state: ChatUiState,
+    nowMs: Long,
     onSend: (String) -> Unit,
     onRetryRefresh: () -> Unit,
     onOpenBooking: (String) -> Unit,
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val now = rememberDayClock()
 
     Column(Modifier.fillMaxWidth()) {
         // A failed SEND already carries its own retry on the bubble, and that is
@@ -755,7 +763,7 @@ private fun ComposerStack(
             }
         }
 
-        gigCaption(state.context, now)?.let {
+        gigCaption(state.context, nowMs)?.let {
             Text(
                 it,
                 style = AppTheme.type.monoSmall,
@@ -871,6 +879,10 @@ internal fun ResumeEffect(onResumed: () -> Unit) {
  *
  * Both write the same state, and re-reading the clock is idempotent, so the two
  * firing together is harmless.
+ *
+ * Called ONCE, by [ChatScreen], and the value handed down to everything that
+ * needs it: each call site would otherwise own a separate timer and a separate
+ * lifecycle observer for a value the whole screen shares.
  */
 @Composable
 private fun rememberDayClock(): Long {

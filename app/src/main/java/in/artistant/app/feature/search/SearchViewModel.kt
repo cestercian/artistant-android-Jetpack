@@ -390,6 +390,23 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun runSearch(reset: Boolean) {
+        // Retire whatever is in the air BEFORE deciding whether to launch anything.
+        // This used to sit below the early return, so clearing the box mid-flight
+        // (`clearQuery()` → here → "nothing to search" → return) emptied `results`
+        // and left the previous coroutine running with `gen == generation`: when it
+        // landed it wrote that dead query's page, cursor and `canLoadMore` back into
+        // state, and could persist the dead query as a recent. Tap a category chip
+        // in that window and the grid painted the old query's tiles under the new
+        // filter, because `results` was non-empty so the spinner branch was skipped.
+        //
+        // Bump BEFORE cancelling, too: `viewModelScope` is Main.immediate, so
+        // `cancel()` resumes the awaiting coroutine inline, and its `catch
+        // (t: Throwable)` sees the CancellationException. Retiring the generation
+        // first is what makes that catch fall out on `gen != generation` instead
+        // of writing "Job was cancelled" into `loadError`.
+        val gen = ++generation
+        searchJob?.cancel()
+
         // Nothing to search: no text and no filter (categories included, via
         // `activeFilterCount`). The screen shows the browse rails instead.
         if (!_state.value.hasActiveQuery) {
@@ -400,8 +417,6 @@ class SearchViewModel @Inject constructor(
             return
         }
 
-        searchJob?.cancel()
-        val gen = ++generation
         searchJob = viewModelScope.launch {
             if (reset) {
                 // `canLoadMore` goes down with the cursor. It described the page

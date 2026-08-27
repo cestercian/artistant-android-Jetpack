@@ -36,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.PriceBucket
-import `in`.artistant.app.data.model.SearchTuning
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -180,13 +179,7 @@ fun SearchFilterSheet(
             AccordionHeader(
                 "Budget",
                 open == FilterSection.Budget,
-                if (state.minPrice == SearchTuning.PRICE_FLOOR &&
-                    state.maxPrice == SearchTuning.PRICE_CEILING
-                ) {
-                    "Any"
-                } else {
-                    "${formatInr(state.minPrice)}–${formatInr(state.maxPrice)}"
-                },
+                searchBudgetSummary(state),
             ) { open = FilterSection.Budget }
             if (open == FilterSection.Budget) {
                 if (state.histogram.isNotEmpty()) {
@@ -221,22 +214,72 @@ fun SearchFilterSheet(
 
             Spacer(Modifier.height(space.xl))
             PrimaryButton(
-                text = when {
-                    state.isLoading -> "Searching…"
-                    state.results.isEmpty() && state.hasActiveQuery -> "No matches"
-                    else -> {
-                        // "Show 1 artists" shipped for as long as the sheet has
-                        // existed. The count is the whole point of the label.
-                        val n = state.results.size.coerceAtLeast(1)
-                        if (n == 1) "Show 1 artist" else "Show $n artists"
-                    }
-                },
+                text = searchApplyLabel(
+                    resultCount = state.results.size,
+                    hasActiveQuery = state.hasActiveQuery,
+                    isLoading = state.isLoading,
+                    canLoadMore = state.canLoadMore,
+                ),
                 onClick = onApply,
                 fullWidth = true,
             )
             Spacer(Modifier.height(space.xxl))
         }
     }
+}
+
+/**
+ * The Budget row's collapsed summary.
+ *
+ * Reads [SearchUiState.isPriceNarrowed] — the same predicate the filter badge and
+ * the `search_artists` price arguments read — instead of comparing the selection
+ * against the `SearchTuning` ₹10k/₹80k constants. Those constants describe no
+ * roster: once `price_histogram` lands, an untouched selection SNAPS onto the
+ * learned span, so on any roster that isn't exactly ₹10k–₹80k the old comparison
+ * failed and a cold sheet announced a price range nobody had set, sitting under a
+ * badge that correctly read 0. Third source of truth for the one thing
+ * [SearchUiState.activePriceFloor] is documented as owning.
+ *
+ * Internal so it can be tested, same as [searchApplyLabel]. Takes the whole state
+ * rather than loose numbers on purpose — the bug WAS an inconsistent triple, and
+ * a signature that can express one proves nothing.
+ */
+internal fun searchBudgetSummary(state: SearchUiState): String =
+    if (!state.isPriceNarrowed) {
+        "Any"
+    } else {
+        "${formatInr(state.minPrice)}–${formatInr(state.maxPrice)}"
+    }
+
+/**
+ * What the sheet's primary CTA claims it will show — a straight port of iOS
+ * `SearchFilterSheet.applyLabel`.
+ *
+ * Internal rather than private so it can be tested, same as the results header's
+ * [searchResultCountLabel]: the branching is small and every branch is one a
+ * user sees. It replaces a `coerceAtLeast(1)` that had been added to dodge
+ * "Show 0 artists" and instead turned a zero into a claim — a cold Search tab
+ * (nothing typed, no filter, so [hasActiveQuery] false and the "No matches"
+ * branch skipped) opened the sheet on "Show 1 artist".
+ *
+ * Nothing set at all is its own answer: closing the sheet then goes back to the
+ * browse rails, so the honest label is the unnumbered one.
+ *
+ * The trailing "+" carries the same caveat as the header's count — the list
+ * pages, so the number is a floor rather than a total.
+ */
+internal fun searchApplyLabel(
+    resultCount: Int,
+    hasActiveQuery: Boolean,
+    isLoading: Boolean,
+    canLoadMore: Boolean,
+): String = when {
+    isLoading -> "Searching…"
+    !hasActiveQuery -> "Show artists"
+    resultCount == 0 -> "No matches"
+    canLoadMore -> "Show $resultCount+ artists"
+    resultCount == 1 -> "Show 1 artist"
+    else -> "Show $resultCount artists"
 }
 
 /**

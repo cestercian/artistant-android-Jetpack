@@ -32,16 +32,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -64,6 +62,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
@@ -137,6 +138,25 @@ fun EpkScreen(
     }
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.onPhotoPicked(uri)
+    }
+
+    // Leaving the app cashes in the debounce. Every edit here autosaves after a
+    // 1.2s wait, and a wait being counted by a backgrounded process is a wait the
+    // OS can end by reclaiming it — a kill calls no `onCleared`, so the last thing
+    // typed before the home button would simply never reach the server, silently,
+    // while the completeness block at the top of the screen had already counted
+    // it. ON_STOP is the last thing we are told while the process is still ours.
+    //
+    // It also fires when this screen's own file picker takes the foreground, which
+    // is harmless in the only direction it can go: a flush makes a write the
+    // artist already asked for happen sooner, never something they didn't.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.flushPendingSaves()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Transient confirmations clear themselves. They exist for writes with no
@@ -361,6 +381,9 @@ private fun EpkEditor(
         item(key = "samples") {
             SamplesSection(
                 samples = state.samples,
+                // Clips the queue is still carrying. They have no row yet but they
+                // are about to, so the cap counts them — see [EpkUiState.samplesUploading].
+                uploading = state.samplesUploading,
                 // The State, not its value: read inside the section so a position
                 // tick five times a second recomposes one row group rather than
                 // every section in the editor.
@@ -590,9 +613,16 @@ private fun GradientPicker(
     }
 }
 
-/** Translucent caption on the cover — an opaque fill would punch a hole in the photo. */
+/**
+ * Translucent caption on the cover — an opaque fill would punch a hole in the photo.
+ *
+ * Text only. The public profile's near-identical chip takes an icon because it
+ * renders the city with a pin (`ArtistProfileScreen`); the editor's cover carries
+ * the category and nothing else, so the flag this copy used to declare had no
+ * caller and its icon branch never composed.
+ */
 @Composable
-private fun MediaChip(text: String, showPin: Boolean = false) {
+private fun MediaChip(text: String) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Row(
@@ -604,14 +634,6 @@ private fun MediaChip(text: String, showPin: Boolean = false) {
         horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (showPin) {
-            Icon(
-                Icons.Filled.LocationOn,
-                contentDescription = null,
-                tint = colors.ink2,
-                modifier = Modifier.size(dimens.size.iconSm),
-            )
-        }
         Text(text, style = AppTheme.type.caption, color = colors.ink2)
     }
 }
@@ -1398,6 +1420,7 @@ private fun PackageEditorRow(
 @Composable
 private fun SamplesSection(
     samples: List<Sample>,
+    uploading: Int,
     playback: State<SamplePlayback>,
     onPlay: (Sample) -> Unit,
     onAdd: () -> Unit,
@@ -1406,13 +1429,17 @@ private fun SamplesSection(
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    // Stored rows plus the ones still on their way up. The counter reads the same
+    // number the Add affordance is gated on, so "6/6" and a disabled + Add tell
+    // one story instead of leaving a dead button beside a count that says 5.
+    val staged = samples.size + uploading
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(space.md)) {
         EpkSectionHeader(
             title = "Music samples",
             actionLabel = "+ Add",
             onAction = onAdd,
-            actionEnabled = canAddSample(samples.size, uploadInFlight = false),
-            trailingNote = if (samples.isEmpty()) null else "${samples.size}/$MAX_SAMPLES",
+            actionEnabled = canAddSample(stored = samples.size, uploading = uploading),
+            trailingNote = if (staged == 0) null else "$staged/$MAX_SAMPLES",
         )
         if (samples.isEmpty()) {
             Text(

@@ -83,6 +83,16 @@ class ChatViewModelTest {
          */
         var sendGate: CompletableDeferred<Unit>? = null
 
+        /**
+         * What the server stamps on the row `send()` returns. Defaults to "now",
+         * the way a real insert does; a test that races the RETURNING row against
+         * an inbound message pins it so the two orders are comparable.
+         */
+        var nextServerSentAt: Long? = null
+
+        /** What the receipts read answers. Null is also what a FAILED read gives. */
+        var counterpartRead: Long? = 9_000L
+
         fun emit(message: Message) = listener?.invoke(message)
 
         override suspend fun listThreadsForUser(): List<Thread> = listOfNotNull(thread)
@@ -111,15 +121,22 @@ class ChatViewModelTest {
                 // The real seam trims before it inserts, so both the RETURNING
                 // row and the row Postgres broadcasts carry the trimmed text.
                 body = body.trim(),
-                sentAtEpochMs = 5_000L,
+                sentAtEpochMs = nextServerSentAt ?: System.currentTimeMillis(),
                 isMine = true,
             )
         }
 
         override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String = threadId
-        override suspend fun markThreadRead(threadId: String) { markedRead++ }
+
+        /** Which seat every mark-read named, in order — one entry per request. */
+        val readSeats = mutableListOf<Boolean>()
+
+        override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) {
+            markedRead++
+            readSeats += viewerIsArtist
+        }
         override suspend fun markThreadReadReceipt(threadId: String) = Unit
-        override suspend fun counterpartLastRead(threadId: String): Long? = 9_000L
+        override suspend fun counterpartLastRead(threadId: String): Long? = counterpartRead
 
         /** Every mute value the ViewModel asked the server to write, in order. */
         val muteWrites = mutableListOf<Boolean>()
@@ -146,10 +163,11 @@ class ChatViewModelTest {
         bookings: StubBookings = StubBookings(),
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
+        artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
-        artistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
+        artistsRepository = artists,
         bookingsRepository = bookings,
         reports = FakeReportsRepository(),
         flagsStore = flags,
@@ -178,7 +196,46 @@ class ChatViewModelTest {
         assertEquals(listOf("s1"), model.state.value.messages.map { it.id })
         assertEquals("Nova Beats", model.state.value.title)
         assertTrue(repo.markedRead > 0)
+        assertEquals(listOf(false), repo.readSeats)
         assertEquals(9_000L, model.state.value.counterpartLastReadAt)
+    }
+
+    /**
+     * `threads` keeps ONE unread counter per side, and a PATCH aimed at the
+     * counterparty's column matches zero rows — so the seat travels with the call
+     * and exactly one request goes out. The seam used to fire both seat-filtered
+     * PATCHes on every thread open AND every inbound Realtime row, one of them
+     * guaranteed to be a no-op; probing client-first only moved that cost onto the
+     * artist seat. A single entry per open, carrying the viewer's own side, is the
+     * whole assertion: a regression to "write both" shows up as two entries, and a
+     * regression to "always the client" shows up as `false` on the artist seat.
+     */
+    @Test
+    fun markingReadNamesTheViewersOwnSeatAndAsksForOneWrite() = runTest {
+        val seat = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID)
+
+        val asClient = ScriptedMessages(thread = seat)
+        vm(asClient, viewerId = CLIENT_ID)
+        assertEquals(listOf(false), asClient.readSeats)
+
+        val asArtist = ScriptedMessages(thread = seat)
+        vm(asArtist, viewerId = ARTIST_ID)
+        assertEquals(listOf(true), asArtist.readSeats)
+    }
+
+    /**
+     * No thread row means no seat, and naming one would be a guess: half the time
+     * it writes a column the viewer doesn't own, which the server silently drops.
+     * There is nothing to clear either — the viewer is either not a participant or
+     * still mid-load, and [ChatViewModel.refresh] marks read again when it lands.
+     */
+    @Test
+    fun aThreadThatNeverLoadedAsksForNoUnreadWriteAtAll() = runTest {
+        val repo = ScriptedMessages(thread = null)
+
+        vm(repo)
+
+        assertEquals(0, repo.markedRead)
     }
 
     // --- title: the counterpart, from the viewer's seat ----------------------
@@ -221,6 +278,42 @@ class ChatViewModelTest {
         val model = vm(repo, viewerId = ARTIST_ID)
 
         assertEquals("Client", model.state.value.title)
+    }
+
+    /**
+     * On the artist seat the thread's `artistId` IS the viewer, and no surface
+     * here reads that profile: the header keeps the client's name and `artistId`
+     * is nulled so the details sheet shows a plain participant row. Hydrating it
+     * is a round trip bought for assignments nothing renders.
+     */
+    @Test
+    fun theArtistSeatNeverFetchesTheViewersOwnProfile() = runTest {
+        val artists = FakeArtistsRepository(remote = listOf(artist(name = "Nova Beats")))
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientName = "Asha Rao"),
+        )
+
+        val model = vm(repo, viewerId = ARTIST_ID, artists = artists)
+        advanceUntilIdle()
+
+        assertTrue(artists.fetchedIds.isEmpty())
+        assertEquals("Asha Rao", model.state.value.title)
+    }
+
+    /**
+     * The client seat still hydrates a cold cache — a chat opened from a push
+     * never passed through the inbox, so this is what names the header at all.
+     */
+    @Test
+    fun theClientSeatHydratesTheArtistWhenTheCacheIsCold() = runTest {
+        val artists = FakeArtistsRepository(remote = listOf(artist(name = "Nova Beats")))
+        val repo = ScriptedMessages(thread = Thread(id = threadId, artistId = ARTIST_ID))
+
+        val model = vm(repo, viewerId = CLIENT_ID, artists = artists)
+        advanceUntilIdle()
+
+        assertEquals(listOf(ARTIST_ID.lowercase()), artists.fetchedIds)
+        assertEquals("Nova Beats", model.state.value.title)
     }
 
     // --- optimistic send ----------------------------------------------------
@@ -337,6 +430,52 @@ class ChatViewModelTest {
         assertEquals(listOf("server-old", "server-1"), model.state.value.messages.map { it.id })
     }
 
+    /**
+     * The other half of that same window: the counterparty's reply lands on the
+     * socket while the viewer's own write is still waiting for its RETURNING row.
+     * The server stamped the send FIRST, so the confirmed bubble belongs ABOVE
+     * the reply — appending it at the tail put the viewer's message underneath a
+     * message that answered it, and a pair straddling midnight printed the day
+     * separator twice.
+     */
+    @Test
+    fun aConfirmedSendSettlesInSentAtOrderEvenWhenAReplyBeatsItBack() = runTest {
+        val now = System.currentTimeMillis()
+        val repo = ScriptedMessages().apply {
+            sendGate = CompletableDeferred()
+            nextServerSentAt = now + 500
+        }
+        val model = vm(repo)
+
+        model.send("On my way")
+        repo.emit(serverMessage("them-1", "ok", at = now + 1_000, mine = false))
+        repo.sendGate!!.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(listOf("server-1", "them-1"), model.state.value.messages.map { it.id })
+    }
+
+    /**
+     * The transcript is keyed by id in a LazyColumn, which throws on a duplicate
+     * key rather than degrading — so two bubbles minted in the same millisecond
+     * would take the chat screen down.
+     */
+    @Test
+    fun twoBubblesInFlightAtOnceCarryDistinctOptimisticIds() = runTest {
+        val repo = ScriptedMessages().apply { sendGate = CompletableDeferred() }
+        val model = vm(repo)
+
+        model.send("first")
+        model.send("second")
+
+        val ids = model.state.value.messages.map { it.id }
+        assertEquals(2, ids.size)
+        assertEquals("optimistic ids must be unique", 2, ids.toSet().size)
+
+        repo.sendGate!!.complete(Unit)
+        advanceUntilIdle()
+    }
+
     @Test
     fun anIncomingMessageFromTheCounterpartAppends() = runTest {
         val repo = ScriptedMessages()
@@ -400,6 +539,26 @@ class ChatViewModelTest {
         assertEquals("server-1", messages.single().id)
         assertEquals(MessageDelivery.Sent, messages.single().delivery)
         assertEquals(2, repo.sendCount)
+    }
+
+    /**
+     * The failed bubble carried its own retry, so the strip above the composer
+     * stays out of the way while it is on screen. Once the retry lands the bubble
+     * is gone — and the strip, which speaks for the CONVERSATION failing to load,
+     * would take over and report a refresh that never failed.
+     */
+    @Test
+    fun aRetryThatLandsRetiresTheFailureItLeftBehind() = runTest {
+        val repo = ScriptedMessages().apply { failSend = true }
+        val model = vm(repo)
+        model.send("Meet at 8?")
+        val failedId = model.state.value.messages.single().id
+        assertNotNull(model.state.value.error)
+
+        repo.failSend = false
+        model.retryFailedMessage(failedId)
+
+        assertNull(model.state.value.error)
     }
 
     @Test
@@ -595,7 +754,7 @@ class ChatViewModelTest {
                 emptyList()
             override suspend fun send(threadId: String, body: String): Message = error("offline")
             override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String = error("offline")
-            override suspend fun markThreadRead(threadId: String) = Unit
+            override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) = Unit
             override suspend fun markThreadReadReceipt(threadId: String) = Unit
             override suspend fun counterpartLastRead(threadId: String): Long? = null
             override suspend fun setMuted(threadId: String, muted: Boolean) = error("offline")
@@ -669,6 +828,30 @@ class ChatViewModelTest {
         )
         val model = vm(repo)
 
+        assertEquals("s1", model.state.value.lastReadOwnMessageId)
+    }
+
+    /**
+     * A receipts read answers null for three different reasons — no row, nothing
+     * read yet, and a read that failed (the seam swallows its own throw). This
+     * runs again on every inbound message, so writing null through made one
+     * dropped request erase a receipt the counterparty had genuinely left: the
+     * "Read" caption blinked out mid-conversation and came back on the next call.
+     * Receipts only move forward, so the last known one is kept.
+     */
+    @Test
+    fun aReceiptReadThatAnswersNothingKeepsTheLastKnownReceipt() = runTest {
+        val repo = ScriptedMessages(
+            seedMessages = listOf(serverMessage("s1", "Meet at 8?", at = 5_000L, mine = true)),
+        )
+        val model = vm(repo)
+        assertEquals(9_000L, model.state.value.counterpartLastReadAt)
+
+        repo.counterpartRead = null
+        repo.emit(serverMessage("them-1", "ok", at = 10_000L, mine = false))
+        advanceUntilIdle()
+
+        assertEquals(9_000L, model.state.value.counterpartLastReadAt)
         assertEquals("s1", model.state.value.lastReadOwnMessageId)
     }
 
@@ -859,7 +1042,50 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         assertFalse(model.state.value.muted)
-        assertNotNull(model.state.value.error)
+        assertNotNull(model.state.value.actionError)
+        // NOT `error`: that slot speaks for the transcript, and the two surfaces
+        // reading it say "couldn't refresh this conversation" with a Retry that
+        // reloads — over a conversation that loaded perfectly well. On a thread
+        // with no messages yet it replaces the transcript outright.
+        assertNull(model.state.value.error)
+    }
+
+    /** The next toggle that lands retires the line; nothing else was clearing it. */
+    @Test
+    fun aLaterSuccessfulToggleClearsTheFailureLine() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        ).apply { failMute = true }
+        val model = vm(repo)
+        advanceUntilIdle()
+        model.toggleMuted()
+        advanceUntilIdle()
+        assertNotNull(model.state.value.actionError)
+
+        repo.failMute = false
+        model.toggleMuted()
+        advanceUntilIdle()
+
+        assertNull(model.state.value.actionError)
+        assertTrue(model.state.value.muted)
+    }
+
+    /** The line lives on the sheet, so closing the sheet takes it with it. */
+    @Test
+    fun closingTheDetailsSheetClearsTheFailureLine() = runTest {
+        val repo = ScriptedMessages(
+            thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID),
+        ).apply { failMute = true }
+        val model = vm(repo)
+        advanceUntilIdle()
+        model.openDetails()
+        model.toggleMuted()
+        advanceUntilIdle()
+        assertNotNull(model.state.value.actionError)
+
+        model.dismissDetails()
+
+        assertNull(model.state.value.actionError)
     }
 
     // --- blocking (mig 0087) -------------------------------------------------
@@ -922,7 +1148,11 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         assertFalse(model.state.value.blocked)
-        assertNotNull(model.state.value.error)
+        assertNotNull(model.state.value.actionError)
+        // Same split as the failed mute, and it matters most here: a block is
+        // often attempted on a brand-new thread, where routing this into `error`
+        // replaced the whole transcript with a load-failure screen.
+        assertNull(model.state.value.error)
     }
 
     @Test

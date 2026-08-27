@@ -39,21 +39,43 @@ class FakeSearchRepository(
         }
         if (!filters.hasTextQuery) {
             matched = when (filters.sort) {
-                SearchSort.Bookability -> matched.sortedByDescending { it.score }
+                // `score desc, id desc` — the server's bookability order, and the
+                // tuple its keyset cursor walks (mig 0073 `search_artists`).
+                SearchSort.Bookability ->
+                    matched.sortedWith(
+                        compareByDescending<Artist> { it.score }.thenByDescending { it.id },
+                    )
                 SearchSort.Price -> matched.sortedBy { it.price }
                 SearchSort.New -> matched
             }
         }
         val limit = SearchTuning.PAGE_LIMIT
-        val offset = when (cursor) {
-            is SearchCursor.Offset -> cursor.offset
-            else -> 0
+        // Mirror the real cursor policy: the default (no-query) bookability sort
+        // pages by keyset, everything else by offset. A fake that only ever spoke
+        // Offset made a keyset regression uncatchable through the seam.
+        val keysetPaging = !filters.hasTextQuery && filters.sort == SearchSort.Bookability
+        val offset = if (keysetPaging) 0 else ((cursor as? SearchCursor.Offset)?.offset ?: 0)
+        val page = if (keysetPaging) {
+            val after = cursor as? SearchCursor.Keyset
+            val rest = if (after == null) matched else matched.filter { it.isAfter(after) }
+            rest.take(limit)
+        } else {
+            matched.drop(offset).take(limit)
         }
-        val page = matched.drop(offset).take(limit)
-        val next: SearchCursor =
-            if (page.size < limit) SearchCursor.End else SearchCursor.Offset(offset + limit)
+        // A short page means the roster ran out — same End rule as the real one.
+        val next: SearchCursor = when {
+            page.size < limit -> SearchCursor.End
+            keysetPaging -> page.last().let {
+                SearchCursor.Keyset(afterScore = it.score, afterId = it.id)
+            }
+            else -> SearchCursor.Offset(offset + limit)
+        }
         return SearchPage(artists = page, nextCursor = next)
     }
+
+    /** `(score, id) < (after_score, after_id)` — the server's keyset predicate. */
+    private fun Artist.isAfter(cursor: SearchCursor.Keyset): Boolean =
+        score < cursor.afterScore || (score == cursor.afterScore && id < cursor.afterId)
 
     override suspend fun facets(): SearchFacets {
         val list = roster()

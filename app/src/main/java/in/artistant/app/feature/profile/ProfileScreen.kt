@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.profile
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -94,14 +95,19 @@ fun ProfileScreen(
 
     LaunchedEffect(state.pendingExport) {
         val export = state.pendingExport ?: return@LaunchedEffect
-        when (export) {
-            is ExportResult.Inline -> {
-                context.startActivity(Intent.createChooser(exportShareIntent(export.json), "Share export"))
-            }
-            is ExportResult.SignedUrl -> {
-                context.startActivity(exportViewIntent(export.url))
-            }
+        val failure = when (export) {
+            is ExportResult.Inline -> handOff(
+                context,
+                Intent.createChooser(exportShareIntent(export.json), "Share export"),
+                "Couldn't open the share sheet — no app on this device can take the export.",
+            )
+            is ExportResult.SignedUrl -> handOff(
+                context,
+                exportViewIntent(export.url),
+                "Couldn't open a browser for the export link on this device.",
+            )
         }
+        failure?.let(viewModel::reportActionError)
         viewModel.clearPendingExport()
     }
 
@@ -261,15 +267,21 @@ fun ProfileScreen(
                                     HRule()
                                 }
                                 SettingsRow("Notifications") {
-                                    context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                    })
+                                    handOff(
+                                        context,
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        },
+                                        "Couldn't open notification settings on this device.",
+                                    )?.let(viewModel::reportActionError)
                                 }
                                 HRule()
                                 SettingsRow("Privacy") {
-                                    context.startActivity(
+                                    handOff(
+                                        context,
                                         Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
-                                    )
+                                        "Couldn't open a browser on this device.",
+                                    )?.let(viewModel::reportActionError)
                                 }
                                 HRule()
                                 // Sits next to Privacy because it belongs to the
@@ -309,21 +321,39 @@ fun ProfileScreen(
                             }
                         }
 
+                        // Both lines are TAP-TO-DISMISS, the same affordance
+                        // BlockedAccountsScreen gives its action error. Nothing
+                        // else clears either one: "Calendar permission denied —
+                        // enable it in system Settings." used to sit under the
+                        // settings list for the life of the ViewModel, long after
+                        // the user had granted the permission and watched the
+                        // sync work.
                         state.actionMessage?.let { msg ->
                             Text(
                                 msg,
                                 style = AppTheme.type.footnote,
                                 color = colors.ink2,
-                                modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(onClick = viewModel::clearActionFeedback)
+                                    .padding(horizontal = space.xl, vertical = space.sm),
                             )
                         }
-                        state.actionError?.let { msg ->
-                            Text(
-                                msg,
-                                style = AppTheme.type.footnote,
-                                color = colors.hot,
-                                modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
-                            )
+                        // Not while the delete sheet is up: that dialog renders
+                        // the very same string inside itself, so the failed
+                        // delete was being stated twice at once.
+                        if (!state.showDeleteConfirm) {
+                            state.actionError?.let { msg ->
+                                Text(
+                                    msg,
+                                    style = AppTheme.type.footnote,
+                                    color = colors.hot,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(onClick = viewModel::clearActionFeedback)
+                                        .padding(horizontal = space.xl, vertical = space.sm),
+                                )
+                            }
                         }
 
                         Spacer(Modifier.height(size.listTailroom))
@@ -429,11 +459,17 @@ fun ProfileScreen(
     }
 }
 
+/**
+ * The three counters under the identity hero. [bookings] and [completed] are
+ * nullable because the read that feeds them is best-effort — see
+ * [profileStatValue], which is what turns "we don't know" into an em dash rather
+ * than into a zero the account never earned.
+ */
 @Composable
 private fun ProfileStatsRow(
-    bookings: Int,
+    bookings: Int?,
     saved: Int,
-    completed: Int,
+    completed: Int?,
     onClick: (ArtistListKind) -> Unit,
 ) {
     val space = AppTheme.dimens.space
@@ -480,7 +516,7 @@ private fun StatDivider() {
 @Composable
 private fun StatCol(
     title: String,
-    value: Int,
+    value: Int?,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -490,7 +526,7 @@ private fun StatCol(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
     ) {
-        Text("$value", style = AppTheme.type.monoCount, color = colors.ink)
+        Text(profileStatValue(value), style = AppTheme.type.monoCount, color = colors.ink)
         Text(
             title.uppercase(),
             style = AppTheme.type.statLabel,
@@ -498,6 +534,22 @@ private fun StatCol(
         )
     }
 }
+
+/**
+ * Hand an intent to the system, or return the line to show when nothing on the
+ * device can take it.
+ *
+ * `startActivity` throws ActivityNotFoundException when no activity matches, on
+ * the main thread, straight out of a click handler — which is an app crash from
+ * tapping a settings row. Two of these are genuinely unresolvable in the field:
+ * `ACTION_APP_NOTIFICATION_SETTINGS` is not on every OEM/Go build, and an
+ * `ACTION_VIEW` on an https URL needs a browser, which a locked-down or
+ * work-profile device may not offer. Same call BookingDetailScreen makes for its
+ * maps/dial/share handoffs, and ArtistProfileScreen for its share sheet: a row
+ * that can't open is a message, not a crash.
+ */
+private fun handOff(context: Context, intent: Intent, failure: String): String? =
+    runCatching { context.startActivity(intent); null }.getOrElse { failure }
 
 /**
  * The calendar-sync control: a plain switch row, with the write target revealed

@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.discover
 
+import `in`.artistant.app.testsupport.pkg
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -95,5 +96,48 @@ class DiscoverHeroLogicTest {
     @Test
     fun `next page is zero for an empty carousel instead of dividing by zero`() {
         assertEquals(0, DiscoverHeroLogic.nextPage(current = 0, pageCount = 0))
+    }
+
+    // ── fromPriceLabel ───────────────────────────────────────────────────────
+    //
+    // `search_artists` maps a NULL `min_price` to 0 and the RPC deliberately
+    // keeps no-package artists in unfiltered results, so those artists reach the
+    // hero. The shipped expression quoted them at "FROM ₹0" while their own
+    // profile said "Pricing on request" for the same fact.
+
+    @Test
+    fun `a no-package artist with no server price is quoted on request, not free`() {
+        assertEquals(DiscoverHeroLogic.PRICE_ON_REQUEST, DiscoverHeroLogic.fromPriceLabel(emptyList(), 0))
+    }
+
+    @Test
+    fun `a negative server price is an absence too`() {
+        assertEquals(DiscoverHeroLogic.PRICE_ON_REQUEST, DiscoverHeroLogic.fromPriceLabel(emptyList(), -1))
+    }
+
+    @Test
+    fun `the row price carries a no-package artist that has one`() {
+        assertEquals("FROM ₹25K", DiscoverHeroLogic.fromPriceLabel(emptyList(), 25_000))
+    }
+
+    @Test
+    fun `from means the cheapest tier, not the first one listed`() {
+        // The shipped expression was `packages.firstOrNull()?.price`, so an
+        // artist whose dearest tier happens to be listed first advertised it as
+        // their floor — the exact bug PackagePricing exists to stop.
+        val packages = listOf(
+            pkg(id = "p1", name = "Full band", price = 83_000),
+            pkg(id = "p2", name = "Acoustic", price = 22_000),
+        )
+        assertEquals("FROM ₹22K", DiscoverHeroLogic.fromPriceLabel(packages, 51_000))
+    }
+
+    @Test
+    fun `packages beat a stale denormalized row price`() {
+        // `artists.min_price` is confirmed stale on dev — see PackagePricing.
+        assertEquals(
+            "FROM ₹22K",
+            DiscoverHeroLogic.fromPriceLabel(listOf(pkg(id = "p1", name = "Acoustic", price = 22_000)), 51_000),
+        )
     }
 }

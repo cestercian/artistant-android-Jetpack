@@ -7,12 +7,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -59,7 +59,6 @@ fun SignupFlow(
     onRetryHydration: () -> Unit = {},
     signedIn: Boolean = false,
     reduceMotion: Boolean = false,
-    testMode: Boolean = false,
     viewModel: SignupViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -87,18 +86,31 @@ fun SignupFlow(
         }
     }
 
-    // System back per step: Role and Profile have an in-flow back target; on other steps we don't
-    // intercept (Welcome/Done have nowhere to go; Auth/Notif back would land on a screen the user
-    // can't meaningfully return to mid-auth), so the OS/gate handles it. `canGoBack` covers the
-    // signed-in case where every earlier step is retired — swallowing the gesture to do nothing
-    // is worse than letting the OS have it.
+    // System back per step: Role, Auth and Profile have an in-flow back target; on the others we
+    // don't intercept (Welcome/Done have nowhere to go; Notif is past the point of return), so the
+    // OS/gate handles it. `canGoBack` covers the signed-in case where every earlier step is
+    // retired — swallowing the gesture to do nothing is worse than letting the OS have it.
+    //
+    // `.Auth` was left out on the theory that back there "lands on a screen the user can't
+    // meaningfully return to mid-auth". It doesn't: in signup mode it lands on `.Role`, a purely
+    // local choice with no auth state attached, and in login mode on `.Welcome`. Unhandled, the
+    // press fell through to the Activity — so the only way out of a role the user had just picked
+    // was to quit the app.
     BackHandler(
-        enabled = (state.step == SignupStep.Role || state.step == SignupStep.Profile) && state.canGoBack,
+        enabled = (
+            state.step == SignupStep.Role ||
+                state.step == SignupStep.Auth ||
+                state.step == SignupStep.Profile
+            ) && state.canGoBack,
     ) {
         viewModel.back()
     }
 
-    Box(modifier = modifier.fillMaxSize().background(AppTheme.colors.bg)) {
+    // The flow has no Scaffold, and MainActivity is edge-to-edge, so the bottom inset is this
+    // container's job: every step bottoms out at `space.xxl` (32dp), which a 48dp 3-button nav
+    // bar overlapped — including "Start exploring →", the terminal action. Applied AFTER the
+    // background so the bar still sits over `colors.bg` rather than a bare window.
+    Box(modifier = modifier.fillMaxSize().background(AppTheme.colors.bg).navigationBarsPadding()) {
         // Built here rather than inside `transitionSpec`, which is not a composable scope.
         // motionTween owns the reduce-motion branch, so the step swap is instant for a user who
         // has asked the system to stop animating — a raw `tween` animated regardless.
@@ -120,7 +132,6 @@ fun SignupFlow(
                         RoleScreen(
                             onPick = viewModel::pickRole,
                             onAdvance = viewModel::advance,
-                            testMode = testMode,
                         )
                     } else {
                         CommunityCommitmentScreen(

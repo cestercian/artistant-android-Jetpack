@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -16,8 +18,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -66,12 +70,28 @@ fun EmailAuthSheet(
             // and out of step with every other surface in this app. One shape
             // for all three fields so the stack reads as a single form.
             val fieldShape = RoundedCornerShape(AppTheme.dimens.radii.md)
+            val canSubmit = !state.isAuthenticating && email.isNotBlank() && password.isNotBlank()
+            val submit = {
+                if (signUpMode) onSignUp(email, password, fullName.ifBlank { null })
+                else onSignIn(email, password)
+            }
+            // Every field states its own keyboard, as iOS does (EmailAuthView.field: .words on
+            // the name, .emailAddress + never-capitalize on the email, secure on the password).
+            // Left at the Compose default all three are plain text fields, and the password one
+            // is the one that matters: `PasswordVisualTransformation` only masks what is DRAWN,
+            // so the IME still runs autocorrect and predictive text over the typed password and
+            // can put it in the suggestion strip. Next/Done also give the stack a keyboard walk
+            // instead of making the user dismiss and tap between fields.
             if (signUpMode) {
                 OutlinedTextField(
                     value = fullName,
                     onValueChange = { fullName = it },
                     label = { Text("Full name") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Words,
+                        imeAction = ImeAction.Next,
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                     shape = fieldShape,
                 )
@@ -81,6 +101,11 @@ fun EmailAuthSheet(
                 onValueChange = { email = it },
                 label = { Text("Email") },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    keyboardType = KeyboardType.Email,
+                    imeAction = ImeAction.Next,
+                ),
                 modifier = Modifier.fillMaxWidth(),
                 shape = fieldShape,
             )
@@ -90,6 +115,14 @@ fun EmailAuthSheet(
                 label = { Text("Password") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done,
+                ),
+                // The IME's Done key submits the same form the button does — and only when
+                // the button itself would be tappable, so it can't fire a doomed request or
+                // a second one over the one in flight.
+                keyboardActions = KeyboardActions(onDone = { if (canSubmit) submit() }),
                 modifier = Modifier.fillMaxWidth(),
                 shape = fieldShape,
             )
@@ -105,12 +138,9 @@ fun EmailAuthSheet(
 
             PrimaryButton(
                 text = if (signUpMode) "Create account" else "Sign in",
-                onClick = {
-                    if (signUpMode) onSignUp(email, password, fullName.ifBlank { null })
-                    else onSignIn(email, password)
-                },
+                onClick = submit,
                 fullWidth = true,
-                enabled = !state.isAuthenticating && email.isNotBlank() && password.isNotBlank(),
+                enabled = canSubmit,
             )
             TextButton(onClick = { signUpMode = !signUpMode }) {
                 Text(

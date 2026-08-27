@@ -356,14 +356,18 @@ fun LazyListScope.techStep(state: WizardUiState, vm: WizardViewModel) {
         WizardChipSection(
             title = "Common requirements",
             options = TECH_PRESETS,
-            isSelected = { it in state.techItems },
+            // Case-insensitive, matching the EPK's rider chips and the add/toggle
+            // rules behind them: "4 Vocal Mics" IS the "4 vocal mics" preset, and
+            // an exact-match test rendered it unselected while its twin sat in
+            // "Yours" — two lines on one rider for one requirement.
+            isSelected = { preset -> state.techItems.any { it.equals(preset, ignoreCase = true) } },
             onToggle = vm::toggleTechItem,
             tag = "wizard.tech.presets",
         )
     }
     // Anything the artist added by hand — rendered separately so a custom entry
     // is visibly theirs and removable, rather than lost among the presets.
-    val custom = state.techItems.filterNot { it in TECH_PRESETS }
+    val custom = state.techItems.filterNot { item -> TECH_PRESETS.any { it.equals(item, ignoreCase = true) } }
     if (custom.isNotEmpty()) {
         item(key = "tech.custom") {
             WizardChipSection(

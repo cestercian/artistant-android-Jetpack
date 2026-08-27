@@ -12,6 +12,9 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.feature.saved.SavedStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,11 +72,35 @@ class ArtistListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Hydrate every artist these rows will name, in ONE wait.
+     *
+     * `ensureFull` is a five-table stitch (artists, packages, tech_rider,
+     * samples, artist_media), and these screens are drill-downs over a whole
+     * list: asked one at a time, 25 saved artists is 25 sequential round trips —
+     * 125 queries — with the screen holding its spinner until the last one
+     * lands. Fanned out, the wait is the slowest single hydration instead of
+     * their sum. Ids the repository has already hydrated (or already resolved to
+     * "no row") short-circuit inside it, so re-asking for them is free.
+     *
+     * Same shape as `MessagesViewModel.hydrateArtists`, and for the same reason.
+     */
+    private suspend fun hydrateArtists(ids: List<String>) {
+        val wanted = ids.distinct()
+        if (wanted.isEmpty()) return
+        coroutineScope {
+            wanted.map { id -> async { artists.ensureFull(id) } }.awaitAll()
+        }
+    }
+
     private suspend fun loadSaved(): List<ArtistListRow> {
         savedStore.refreshFromServer()
         val ids = savedStore.ids.value.toList()
+        hydrateArtists(ids)
         return ids.map { id ->
-            val artist = artists.ensureFull(id) ?: artists.find(id)
+            // Hydrated above, so this is the cache: the full stitch when it
+            // landed, the tile projection when it didn't, null when neither.
+            val artist = artists.find(id)
             ArtistListRow(
                 id = id,
                 artistId = id,
@@ -103,9 +130,10 @@ class ArtistListViewModel @Inject constructor(
                 else -> lhs.id.compareTo(rhs.id)
             }
         }
+        hydrateArtists(sorted.map { it.artistId.lowercase() })
         return sorted.map { booking ->
             val artistId = booking.artistId.lowercase()
-            val artist = artists.ensureFull(artistId) ?: artists.find(artistId)
+            val artist = artists.find(artistId)
             ArtistListRow(
                 id = booking.id.lowercase(),
                 artistId = artistId,

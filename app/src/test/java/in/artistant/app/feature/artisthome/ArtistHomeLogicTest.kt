@@ -338,6 +338,25 @@ class ArtistHomeLogicTest {
         assertEquals("Next gig in 1 day", snapshot.copy)
     }
 
+    /**
+     * Two gigs, one day. The "spread" copy is about the SPAN, not the count, so
+     * this still reads as a single next-gig line — which is why the old
+     * `|| upcoming.size == 1` disjunct never decided anything: with one start
+     * min == max already, and with several on one day min == max too.
+     */
+    @Test
+    fun upcomingSnapshot_severalGigsOnOneDayAreNotASpread() {
+        val snapshot = upcomingSnapshot(
+            listOf(
+                booking(BookingStatus.Confirmed, id = "matinee", startIso = "2027-01-17T07:00:00Z"),
+                booking(BookingStatus.Confirmed, id = "evening", startIso = "2027-01-17T15:00:00Z"),
+            ),
+            NOW,
+        )
+        assertEquals(2, snapshot.count)
+        assertEquals("Next gig in 2 days", snapshot.copy)
+    }
+
     @Test
     fun upcomingSnapshot_spreadWhenGigsStraddleDays() {
         val snapshot = upcomingSnapshot(

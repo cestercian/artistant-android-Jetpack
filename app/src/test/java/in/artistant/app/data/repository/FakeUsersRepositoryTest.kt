@@ -15,11 +15,22 @@ import org.junit.Test
 class FakeUsersRepositoryTest {
 
     @Test
-    fun `handle availability reflects the taken set and format`() = runTest {
+    fun `handle availability reflects the taken set, not the format`() = runTest {
         val repo = FakeUsersRepository(taken = setOf("taken"))
         assertEquals(HandleAvailability.Available, repo.handleIsAvailable("free_one"))
         assertEquals(HandleAvailability.Unavailable, repo.handleIsAvailable("taken"))
-        assertEquals(HandleAvailability.Unavailable, repo.handleIsAvailable("no")) // bad format
+        // The RPC only asks whether the row exists, so a badly formatted handle
+        // nobody holds is AVAILABLE there too. Callers gate on format first.
+        assertEquals(HandleAvailability.Available, repo.handleIsAvailable("no"))
+    }
+
+    /** The real impl catches everything into [HandleAvailability.Failure]; so must the fake. */
+    @Test
+    fun `failAvailability degrades to Failure rather than Unavailable`() = runTest {
+        val repo = FakeUsersRepository(taken = setOf("taken"), failAvailability = true)
+        assertTrue(repo.handleIsAvailable("free_one") is HandleAvailability.Failure)
+        // Even a handle it knows is taken: a blip answers "unknown", not "no".
+        assertTrue(repo.handleIsAvailable("taken") is HandleAvailability.Failure)
     }
 
     @Test

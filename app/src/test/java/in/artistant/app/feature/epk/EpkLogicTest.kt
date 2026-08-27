@@ -10,6 +10,11 @@ import `in`.artistant.app.feature.wizard.WIZARD_BIO_MAX
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.testsupport.ARTIST_ID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,6 +68,18 @@ class EpkLogicTest {
     @Test
     fun sanitizePrice_clampsAPasteAtTheCeiling() {
         assertEquals(MAX_PRICE_INR.toString(), sanitizePriceInput("999999999"))
+    }
+
+    /**
+     * A paste longer than a Long is still a paste over the cap, so it clamps like
+     * every shorter one. It used to overflow `toLongOrNull` and return "", wiping
+     * the price the artist was editing — the one thing a filter that runs on the
+     * way IN exists to prevent.
+     */
+    @Test
+    fun sanitizePrice_clampsAPasteTooLongToBeANumber() {
+        assertEquals(MAX_PRICE_INR.toString(), sanitizePriceInput("9".repeat(25)))
+        assertEquals(MAX_PRICE_INR.toString(), sanitizePriceInput("₹" + "1".repeat(30)))
     }
 
     @Test
@@ -306,10 +323,26 @@ class EpkLogicTest {
     // ── Capacity ─────────────────────────────────────────────────────────────
 
     @Test
-    fun sampleAdds_stopAtTheCapAndDuringAnUpload() {
-        assertTrue(canAddSample(currentCount = MAX_SAMPLES - 1, uploadInFlight = false))
-        assertFalse(canAddSample(currentCount = MAX_SAMPLES, uploadInFlight = false))
-        assertFalse(canAddSample(currentCount = 0, uploadInFlight = true))
+    fun sampleAdds_stopAtTheCap() {
+        assertTrue(canAddSample(stored = MAX_SAMPLES - 1, uploading = 0))
+        assertFalse(canAddSample(stored = MAX_SAMPLES, uploading = 0))
+    }
+
+    /**
+     * A clip still in the upload queue counts as one the artist already has.
+     *
+     * Both production call sites used to hand this `false`, so the stored list —
+     * which only grows seconds later, when the queue drains and the samples are
+     * re-read — was the whole answer: two picks inside one upload both saw room
+     * at 5/6 and the editor became the way around the wizard's ceiling.
+     */
+    @Test
+    fun sampleAdds_countTheClipsStillUploading() {
+        assertFalse(canAddSample(stored = MAX_SAMPLES - 1, uploading = 1))
+        assertFalse(canAddSample(stored = 0, uploading = MAX_SAMPLES))
+        // But staging while one is in flight is fine — that is what the queue is
+        // for, and refusing it would break adding clips offline.
+        assertTrue(canAddSample(stored = 0, uploading = 1))
     }
 
     @Test
@@ -588,20 +621,37 @@ class EpkLogicTest {
         assertTrue(shownServiceTags(pending = emptyList(), published = listOf("dj-set")).isEmpty())
     }
 
-    /**
-     * The chips can never show a set the column would reject, so an over-cap or
-     * duplicated set read from the server is normalized before it is rendered.
-     */
+    /** Blanks and duplicates are noise, not services, so they never reach a chip. */
     @Test
-    fun serviceTags_normalizeWhatTheyShow() {
+    fun serviceTags_dropBlanksAndDuplicatesFromWhatTheyShow() {
         assertEquals(
             listOf("dj-set"),
             shownServiceTags(pending = null, published = listOf("dj-set", "dj-set", " ")),
         )
-        assertEquals(
-            ServiceTags.MAX_TAGS,
-            shownServiceTags(pending = null, published = ServiceTags.catalog.map { it.first }).size,
-        )
+    }
+
+    /**
+     * An over-cap set — written by another client or an admin backfill — renders
+     * in FULL rather than being clamped to [ServiceTags.MAX_TAGS].
+     *
+     * Clamping here is what made the editor delete tags nobody could see: the
+     * hidden ones were absent from the toggle's input, and the toggle's output
+     * replaces the whole column. The cap belongs to the write, and
+     * `ServiceTags.toggle` still refuses to add past it.
+     */
+    @Test
+    fun serviceTags_showAnOverCapSetInFull_soAToggleCannotDeleteWhatIsHidden() {
+        val over = ServiceTags.catalog.map { it.first }
+        assertTrue(over.size > ServiceTags.MAX_TAGS)
+
+        val shown = shownServiceTags(pending = null, published = over)
+
+        assertEquals(over, shown)
+        // And the artist can still withdraw one, which is the only edit an
+        // over-cap set is allowed to make.
+        assertEquals(over.drop(1), ServiceTags.toggle(shown, over.first()))
+        // Adding is refused rather than truncating the rest away.
+        assertEquals(shown, ServiceTags.toggle(shown, "something-new"))
     }
 
     // ── Connected accounts ───────────────────────────────────────────────────
@@ -872,6 +922,105 @@ class EpkLogicTest {
     @Test
     fun saveCatching_passesTheValueThroughOnSuccess() = runTest {
         assertEquals("saved", saveCatching { "saved" }.getOrNull())
+    }
+
+    // ── Owed writes ──────────────────────────────────────────────────────────
+    //
+    // The debounce is a promise to write in 1.2 seconds, made by a coroutine that
+    // can be killed inside it — the artist goes Back, or backgrounds the app and
+    // the process is reclaimed. The ViewModel answers that by keeping a record of
+    // what is still owed and re-running it (`flushPendingSaves` on ON_STOP,
+    // `onCleared` on the way out), which is only ever as good as that mark.
+    //
+    // The cheap version — clear the mark when the coroutine ends, however it ends
+    // — would be the bug rather than the fix: both of the ways a write dies before
+    // the server has heard anything end the coroutine.
+
+    /** Mirrors `EpkViewModel.SAVE_DEBOUNCE_MS`, which is private to the ViewModel. */
+    private val debounceMs = 1_200L
+
+    @Test
+    fun owedSave_staysOwedWhenTheWaitIsCancelled() = runTest {
+        val owed = mutableSetOf(EpkSave.Bio)
+        var persisted = false
+
+        val job = launch { runOwedSave(EpkSave.Bio, owed, debounceMs) { persisted = true } }
+        advanceTimeBy(600)
+        job.cancelAndJoin()
+
+        assertFalse("the write never went out", persisted)
+        assertTrue("an edit killed inside the debounce is still owed", EpkSave.Bio in owed)
+    }
+
+    /**
+     * The second death. `saveCatching` rethrows a cancellation rather than
+     * reporting it, so a write cut off mid-request never reaches the line that
+     * clears the mark — which is exactly what has to happen, since the server
+     * heard nothing.
+     */
+    @Test
+    fun owedSave_staysOwedWhenTheRequestIsCancelledMidFlight() = runTest {
+        val owed = mutableSetOf(EpkSave.Packages)
+        var started = false
+
+        val job = launch {
+            runOwedSave(EpkSave.Packages, owed, debounceMs) {
+                started = true
+                saveCatching { delay(10_000) }
+            }
+        }
+        advanceTimeBy(debounceMs + 100)
+        assertTrue("the request should have begun", started)
+        job.cancelAndJoin()
+
+        assertTrue("a write killed on the wire is still owed", EpkSave.Packages in owed)
+    }
+
+    @Test
+    fun owedSave_isDisarmedOnlyByAPersistThatReturned() = runTest {
+        val owed = mutableSetOf(EpkSave.Socials)
+
+        launch { runOwedSave(EpkSave.Socials, owed, debounceMs) {} }
+        advanceTimeBy(debounceMs + 100)
+
+        assertTrue("a completed write owes nothing", owed.isEmpty())
+    }
+
+    /**
+     * What a flush buys. Re-arming with no wait writes on the spot rather than
+     * leaving the edit sitting in a 1.2s window that a backgrounded process may
+     * not live through.
+     */
+    @Test
+    fun owedSave_withNoDebounceWritesImmediately() = runTest {
+        val owed = mutableSetOf(EpkSave.Tech)
+        var persisted = false
+
+        launch { runOwedSave(EpkSave.Tech, owed, debounceMs = 0) { persisted = true } }
+        runCurrent()
+
+        assertTrue("a flushed write must not wait out the debounce", persisted)
+        assertTrue(owed.isEmpty())
+    }
+
+    /**
+     * A write that genuinely failed is NOT owed. Every persist on this screen
+     * routes through [saveCatching], which turns a real failure into a banner the
+     * artist can act on and returns normally — re-running it from the flush would
+     * repeat a request that has already had its say.
+     */
+    @Test
+    fun owedSave_isNotOwedAfterAFailureTheArtistWasToldAbout() = runTest {
+        val owed = mutableSetOf(EpkSave.Prompts)
+
+        launch {
+            runOwedSave(EpkSave.Prompts, owed, debounceMs = 0) {
+                saveCatching { throw IllegalStateException("offline") }
+            }
+        }
+        runCurrent()
+
+        assertTrue("a reported failure is not a pending write", owed.isEmpty())
     }
 
     // ── Removing a sample ────────────────────────────────────────────────────

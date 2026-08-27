@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -27,6 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.DateCell
@@ -85,10 +88,17 @@ fun RequestQuoteScreen(
         ) {
             Text("Amount (INR)", style = AppTheme.type.caption, color = colors.ink3)
             Spacer(Modifier.height(space.xs))
+            // Number pad, matching iOS `.keyboardType(.numberPad)`. Without it the
+            // field opened the full text IME while `setAmount` strips every
+            // non-digit as you type, so "25,000" lost its separator under the
+            // client's finger with nothing to explain it, and a typed "₹" left the
+            // field empty and the submit refusing with "Enter a valid amount."
             BasicTextField(
                 value = state.amountInr,
                 onValueChange = viewModel::setAmount,
                 textStyle = AppTheme.type.monoMedium.copy(color = colors.ink),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = fieldModifier(),
             )
             Spacer(Modifier.height(space.lg))
@@ -136,6 +146,12 @@ fun RequestQuoteScreen(
                 // Three lines of the field's own type, not a fraction of a hero
                 // height: the box has to hold text, so it is measured in text.
                 minLines = 3,
+                // Prose about the event, so sentence case — the IME default is
+                // no capitalization, which left every line starting lowercase.
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    capitalization = KeyboardCapitalization.Sentences,
+                ),
                 modifier = fieldModifier(),
             )
             state.errorMessage?.let {

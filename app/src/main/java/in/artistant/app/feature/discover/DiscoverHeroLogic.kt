@@ -1,5 +1,9 @@
 package `in`.artistant.app.feature.discover
 
+import `in`.artistant.app.common.util.formatInrShort
+import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.domain.artist.PackagePricing
+
 /**
  * Pure decisions behind the Discover masthead + hero carousel.
  *
@@ -56,4 +60,27 @@ object DiscoverHeroLogic {
     /** Next slide index, wrapping. Returns 0 for an empty carousel. */
     fun nextPage(current: Int, pageCount: Int): Int =
         if (pageCount <= 0) 0 else (current + 1) % pageCount
+
+    /** What the price cell says when there is no honest figure to quote. */
+    const val PRICE_ON_REQUEST = "ON REQUEST"
+
+    /**
+     * The trailing `FROM ₹75K` cell on the hero strip and the featured frame.
+     *
+     * Two bugs it exists to stop, both on the same shipped expression
+     * (`packages.firstOrNull()?.price ?: artist.price`):
+     *
+     *  - **"FROM ₹0".** `search_artists` maps a NULL `min_price` to 0, and the
+     *    RPC deliberately keeps no-package artists in unfiltered results — so
+     *    those artists reach the hero and quote ₹0 on the busiest screen in the
+     *    app, while their own profile says "Pricing on request" for the same
+     *    fact. Anything at or below zero is an absence, not a price.
+     *  - **the first package is not the cheapest.** "from" means minimum, which
+     *    is [PackagePricing.fromPrice]'s whole contract, and every other price
+     *    surface goes through it. Discover computed its own.
+     */
+    fun fromPriceLabel(packages: List<ArtistPackage>, fallback: Int): String {
+        val from = PackagePricing.fromPrice(packages, fallback)
+        return if (from > 0) "FROM ${formatInrShort(from)}" else PRICE_ON_REQUEST
+    }
 }

@@ -172,7 +172,21 @@ class ServerBlockedUsersStore(
         val viewerId = viewer.currentUserId()?.lowercase()
         if (viewerId == owner) return
         owner = viewerId
-        _blocked.value = readLocal(viewerId)
+        // The old set goes BEFORE the read, not after it. This is a @Singleton, so
+        // a hydrate that never finishes must not leave one account's ids in memory
+        // stamped with the next account's name.
+        _blocked.value = emptySet()
+        // And a mirror that will not read is an unknown, not a crash. DataStore
+        // throws IOException on a damaged preferences file, and this call sits on
+        // the path of every [refresh] — including the one ChatViewModel makes from
+        // a bare launch, where an escaping throw is an unhandled coroutine
+        // exception rather than a message that failed to load.
+        //
+        // The unreadable case is treated as "nothing known" and NOT retried later:
+        // what corrects it is the server's copy, which [refresh] is about to ask
+        // for, and re-reading disk on a later call would either clobber that answer
+        // or need a merge nothing else in this class does.
+        _blocked.value = runCatching { readLocal(viewerId) }.getOrDefault(emptySet())
     }
 
     /**
@@ -184,7 +198,11 @@ class ServerBlockedUsersStore(
         // The LIVE session stamps the write, never the cached [owner]: a mirror
         // is only ever ours to claim for whoever is signed in right now.
         val ownerId = viewer.currentUserId()?.lowercase() ?: return
-        mirror.write((listOf(ownerId) + ids).joinToString(SEPARATOR))
+        // Guarded for the same reason the read is: losing the offline copy costs a
+        // cold start its head start, while letting the failure out of here would
+        // take down a block that the SERVER already accepted — memory and the
+        // server would agree, and only the caller would be told it failed.
+        runCatching { mirror.write((listOf(ownerId) + ids).joinToString(SEPARATOR)) }
     }
 
     private suspend fun readLocal(viewerId: String?): Set<String> {

@@ -48,7 +48,54 @@ class ScoreExplainerViewModelTest {
         assertEquals(82, s.breakdown.score)
         assertEquals(1, s.history.size)
         assertFalse(s.isLoading)
+        assertFalse(s.historyFailed)
         assertNull(s.error)
+    }
+
+    @Test
+    fun `a failed history read is flagged, not flattened into an empty series`() = runTest {
+        // `historyForSelf()` throws a mapped Postgrest error on any transport/RLS
+        // failure. Collapsing that to emptyList() hid the History section entirely
+        // — and the sheet behind it says "No history yet — score updates after
+        // gigs land", which we hadn't earned. Same distinction iOS draws with
+        // `ScoreHistorySheet.fetchError`.
+        val model = ScoreExplainerViewModel(
+            FakeScoreRepository(self = breakdown(score = 82, gigs = 12), failHistory = true),
+        )
+
+        val s = model.state.value
+        assertTrue("the UI must be able to say history didn't load", s.historyFailed)
+        assertTrue(s.history.isEmpty())
+        // The ring is the screen; a dead sparkline must not take it down with it.
+        assertNull(s.error)
+        assertEquals(82, s.breakdown.score)
+        assertFalse(s.isLoading)
+    }
+
+    @Test
+    fun `an artist with genuinely no history is not flagged as failed`() = runTest {
+        val model = ScoreExplainerViewModel(FakeScoreRepository(self = breakdown(score = 82, gigs = 12)))
+
+        val s = model.state.value
+        assertFalse("no rows yet is not a failure", s.historyFailed)
+        assertTrue(s.history.isEmpty())
+    }
+
+    @Test
+    fun `refresh clears the history failure once the read succeeds`() = runTest {
+        val repo = FakeScoreRepository(
+            self = breakdown(score = 82, gigs = 12),
+            history = listOf(ScoreHistoryPoint(score = 79, computedAtIso = "2026-05-01T00:00:00Z")),
+            failHistory = true,
+        )
+        val model = ScoreExplainerViewModel(repo)
+        assertTrue(model.state.value.historyFailed)
+
+        repo.failHistory = false
+        model.refresh()
+
+        assertFalse(model.state.value.historyFailed)
+        assertEquals(1, model.state.value.history.size)
     }
 
     @Test

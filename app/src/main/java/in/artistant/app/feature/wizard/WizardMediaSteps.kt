@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,9 @@ import kotlin.math.roundToInt
 fun LazyListScope.coverStep(state: WizardUiState, vm: WizardViewModel) {
     item(key = "cover.preview") { CoverPreview(state) }
     item(key = "cover.actions") { CoverActions(state, vm) }
+    // Emitted only when there is something to say — the scaffold spaces its items,
+    // so an always-present empty row would open a hole above the gradient picker.
+    state.mediaError?.let { message -> item(key = "cover.error") { WizardMediaError(message) } }
     item(key = "cover.gradient") {
         Column {
             EpkSectionHeader(
@@ -104,7 +108,6 @@ private fun CoverPreview(state: WizardUiState) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    val context = LocalContext.current
     Box(
         Modifier
             .fillMaxWidth()
@@ -189,20 +192,31 @@ private fun CoverActions(state: WizardUiState, vm: WizardViewModel) {
         if (uri != null) vm.onCoverPicked(uri)
     }
     // A camera capture needs a destination URI before the intent fires, so the
-    // file is minted here and remembered across the permission round-trip.
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    // file is minted here and held across the permission round-trip.
+    //
+    // `rememberSaveable`, not `remember`: the camera is a separate full-screen
+    // activity and ours can be recreated behind it (low memory, "don't keep
+    // activities", a config change while the shutter is up). The result registry
+    // restores its pending launch and still reports ok=true, so a plain
+    // `remember` came back null and the capture was dropped without a word —
+    // with the photo sitting on disk under a name nothing remembered. Stored as
+    // a String because that is savable everywhere a Bundle goes.
+    var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) cameraUri?.let(vm::onCoverPicked)
+        if (ok) cameraUri?.let { vm.onCoverPicked(Uri.parse(it)) }
     }
     val launchCamera = {
         val file = File(context.cacheDir, "artist-wizard/camera-${UUID.randomUUID()}.jpg")
             .also { it.parentFile?.mkdirs() }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        cameraUri = uri
+        cameraUri = uri.toString()
         takePicture.launch(uri)
     }
     val requestCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) launchCamera()
+        // A refusal has to say something. After the second one the OS stops
+        // showing the dialog at all, so without this the button is simply dead
+        // and looks identical to the working one beside it.
+        if (granted) launchCamera() else vm.onCameraUnavailable()
     }
 
     Row(
@@ -456,6 +470,27 @@ fun LazyListScope.samplesStep(state: WizardUiState, vm: WizardViewModel) {
         )
     }
     item(key = "samples.add") { AddSampleButton(state, vm) }
+    state.mediaError?.let { message -> item(key = "samples.error") { WizardMediaError(message) } }
+}
+
+/**
+ * The media steps' error line.
+ *
+ * Cover and Samples had no error surface at all: a rejected format, an
+ * unreadable content URI, a camera the OS refuses to open — all of it wrote into
+ * `publishError`, which only the Preview step renders and which every step
+ * change clears, so the message was dead before anything could show it.
+ */
+@Composable
+private fun WizardMediaError(message: String) {
+    Text(
+        message,
+        style = AppTheme.type.footnote,
+        color = AppTheme.colors.hot,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { testTag = "wizard.media.error" },
+    )
 }
 
 @Composable
@@ -506,9 +541,9 @@ private fun SampleRow(
 /**
  * `m:ss`, or a neutral line when the duration is unknown.
  *
- * The staging path does not probe the container, so zero means "not measured"
- * rather than "empty clip" — rendering it as `0:00` would claim a fact we do not
- * have.
+ * Staging measures the copy now, but a container can still refuse to answer, so
+ * zero keeps meaning "not measured" rather than "empty clip" — rendering it as
+ * `0:00` would claim a fact we do not have.
  */
 private fun durationLabel(seconds: Double): String {
     if (seconds <= 0.0) return "AUDIO CLIP"
@@ -524,7 +559,10 @@ private fun AddSampleButton(state: WizardUiState, vm: WizardViewModel) {
     val interaction = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(dimens.radii.md)
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) vm.onSamplePicked(uri, uri.lastPathSegment)
+        // The URI only. The title comes from the provider's DISPLAY_NAME, read on
+        // IO in the ViewModel — `lastPathSegment` here is a document id
+        // ("audio:1000000042"), which is what used to reach the public profile.
+        if (uri != null) vm.onSamplePicked(uri)
     }
     Row(
         Modifier

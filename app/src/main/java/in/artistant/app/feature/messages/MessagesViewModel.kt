@@ -39,8 +39,6 @@ data class MessagesUiState(
     val visibleThreads: List<ThreadListItem> = InboxProjection.visible(activeThreads, filter, query)
 
     val counts: Map<MessagesFilter, Int> = InboxProjection.counts(activeThreads, query)
-
-    val unreadCount: Int = activeThreads.count { it.unread }
 }
 
 /**
@@ -54,9 +52,9 @@ data class MessagesUiState(
  *    (see [ThreadCounterpart]) rather than per row, so a sign-out mid-map can't
  *    label two rows from two different seats.
  *  - **Gig resolution.** Each thread's booking is looked up so the row can carry
- *    a status, a date and a venue. Only the lists the viewer can legitimately
- *    read are fetched, chosen by which seats actually appear in their inbox — a
- *    pure client never asks for artist gigs, and vice versa.
+ *    a status, a date and a venue. Only the ids the rows actually reference are
+ *    fetched, in one query — never a seat's whole booking history, which is both
+ *    an unbounded payload and the calendar mirror's own trigger.
  *
  * Filtering and search run entirely over the loaded list ([InboxProjection]);
  * changing a chip must never refetch.
@@ -173,22 +171,15 @@ class MessagesViewModel @Inject constructor(
 
     fun toggleArchived(threadId: String) = viewModelScope.launch { flagsStore.toggleArchived(threadId) }
 
-    /** Opens a real participant-pair thread; navigation receives only server UUIDs. */
-    fun findOrCreateThread(artistId: String, onReady: (String) -> Unit) = viewModelScope.launch {
-        runCatching { messagesRepository.findOrCreateThread(artistId) }
-            .onSuccess(onReady)
-            .onFailure { e -> _state.update { it.copy(error = e.message ?: FALLBACK_ERROR) } }
-    }
-
     /** Rebuild the rows from the last payload plus the current local flags. */
     private fun project(): List<ThreadListItem> {
         val viewerId = viewer.currentUserId()
         // Blocked conversations are dropped HERE, before the rows exist, rather
         // than in one of the inbox's list projections. Everything the inbox
-        // shows — the rows, the filter-chip counts, the archive list and the
-        // unread badge — is derived from this one list, so filtering at the
-        // source is what makes a block complete: a blocked person can't leave a
-        // badge on the tab bar for a conversation there is no way to open.
+        // shows — the rows, the filter-chip counts and the archive list — is
+        // derived from this one list, so filtering at the source is what makes a
+        // block complete: a blocked person can't leave a count on a chip for a
+        // conversation there is no way to open.
         return loadedThreads.filterNot { ThreadCounterpart.isBlocked(it, blockedIds) }.map { thread ->
             val viewerIsArtist = ThreadCounterpart.viewerIsArtist(thread, viewerId)
             val artist = artistsRepository.find(thread.artistId)
@@ -231,29 +222,24 @@ class MessagesViewModel @Inject constructor(
     /**
      * The bookings behind these threads, keyed by id.
      *
-     * Which list to ask for is decided by the seats present in the inbox, not by
-     * a stored role: an account can legitimately hold both (an artist who also
-     * books other artists), and asking for the wrong list returns an empty set
-     * rather than an error, which would look identical to "no gigs" and quietly
-     * strip the status from every row.
+     * Exactly the ids the rows reference, in one round trip. The seat's own list
+     * was the wrong instrument twice over: it pulls every booking the account has
+     * ever had — an inbox load's payload growing with a working artist's whole
+     * history — and both list calls carry the calendar-mirror side effect, which
+     * belongs to Bookings/Gigs, not here. `fetchMany` also needs no seat: RLS
+     * already decides which of these ids the viewer may read, so an account that
+     * holds both seats is served by the same single query.
      *
-     * Both calls degrade to empty on failure. A booking lookup that fails costs
-     * the context line; it must never take the inbox down with it, so this
-     * result is deliberately not routed into `state.error`.
+     * Degrades to empty on failure. A booking lookup that fails costs the context
+     * line; it must never take the inbox down with it, so this result is
+     * deliberately not routed into `state.error`.
      */
     private suspend fun loadBookings(threads: List<Thread>): Map<String, Booking> {
-        if (threads.none { it.bookingId != null }) return emptyMap()
-        val viewerId = viewer.currentUserId()
-        val seats = threads.map { ThreadCounterpart.viewerIsArtist(it, viewerId) }.toSet()
-        val loaded = buildList {
-            if (seats.contains(true)) {
-                addAll(runCatching { bookingsRepository.listForArtist() }.getOrDefault(emptyList()))
-            }
-            if (seats.contains(false)) {
-                addAll(runCatching { bookingsRepository.listForClient() }.getOrDefault(emptyList()))
-            }
-        }
-        return loaded.associateBy { it.id.lowercase() }
+        val ids = threads.mapNotNull { it.bookingId }.distinct()
+        if (ids.isEmpty()) return emptyMap()
+        return runCatching { bookingsRepository.fetchMany(ids) }
+            .getOrDefault(emptyList())
+            .associateBy { it.id.lowercase() }
     }
 
     private companion object {

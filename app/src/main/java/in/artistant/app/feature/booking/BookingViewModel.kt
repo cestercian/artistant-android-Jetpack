@@ -14,6 +14,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Cap on "Directions for the artist", matching the server column's bound.
+ *
+ * Lives beside [BookingViewModel.setVenueNotes], which enforces it; the booking
+ * screen reads it only to render the live counter.
+ */
+const val VENUE_NOTES_MAX = 500
+
 data class BookingUiState(
     val artist: Artist? = null,
     val isLoading: Boolean = true,
@@ -54,9 +62,14 @@ class BookingViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false, loadError = "Artist not found.") }
                 return@launch
             }
-            val chips = upcomingDateChips(daysAvailable = full.daysAvailable)
+            val published = resolveTimeSlots(full.timeSlots)
+            // The strip starts at today, so the clock has to be part of what
+            // "available" means: a day whose last slot has already gone by is not
+            // bookable, and offering it is how a request for a show that already
+            // ended gets filed. See [bookableTimeSlots].
+            val chips = upcomingDateChips(daysAvailable = full.daysAvailable, timeSlots = published)
             val firstAvailable = chips.firstOrNull { it.available } ?: chips.first()
-            val slots = resolveTimeSlots(full.timeSlots)
+            val slots = bookableTimeSlots(published, firstAvailable.epochMs)
             val popularIdx = full.packages.indexOfFirst { it.popular }.takeIf { it >= 0 } ?: 0
             // Open on the tier the client tapped on the profile, if they came
             // that way. Without this the selection there was cosmetic: the route
@@ -88,7 +101,20 @@ class BookingViewModel @Inject constructor(
 
     fun selectDate(chip: DateChip) {
         if (!chip.available) return
-        _state.update { it.copy(selectedDateEpochMs = chip.epochMs, selectedDateLabel = chip.label) }
+        _state.update { s ->
+            // The grid is per-day, not per-screen: only today hides the slots the
+            // clock has passed, so moving off today has to restore the artist's
+            // whole list — and moving onto it has to trim it again. Keeping the
+            // current pick when it survives the move is what stops a date tap
+            // silently re-deciding the time.
+            val slots = bookableTimeSlots(resolveTimeSlots(s.artist?.timeSlots.orEmpty()), chip.epochMs)
+            s.copy(
+                selectedDateEpochMs = chip.epochMs,
+                selectedDateLabel = chip.label,
+                timeSlots = slots,
+                selectedTime = s.selectedTime.takeIf { it in slots } ?: defaultTimeFromSlots(slots),
+            )
+        }
     }
 
     fun selectTime(slot: String) {
@@ -103,8 +129,15 @@ class BookingViewModel @Inject constructor(
         _state.update { it.copy(guests = value.coerceIn(10, 5000)) }
     }
 
+    /**
+     * Bounded HERE rather than at the text field, so the invariant belongs to
+     * the draft instead of to one caller: the field's `take()` held only for the
+     * composable that happened to apply it, and anything else writing notes — a
+     * restore, a paste handler, a test — put an unbounded string into the draft
+     * and on to the server column.
+     */
     fun setVenueNotes(value: String) {
-        _state.update { it.copy(venueNotes = value) }
+        _state.update { it.copy(venueNotes = value.take(VENUE_NOTES_MAX)) }
     }
 
     /** Snapshot draft into [BookingDraftStore] for Checkout. */

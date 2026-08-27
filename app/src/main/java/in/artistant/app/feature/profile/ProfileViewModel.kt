@@ -13,6 +13,7 @@ import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.booking.BookingDraftStore
 import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
@@ -57,10 +58,24 @@ data class ProfileUiState(
      * withhold the date, and a signed-out state has none at all.
      */
     val joinedYear: Int? = null,
-    /** Profile stats — Bookings = still live (see [liveBookingsCount]), Completed = finished. */
-    val bookingsCount: Int = 0,
+    /**
+     * Profile stats — Bookings = still live (see [liveBookingsCount]), Completed
+     * = finished.
+     *
+     * Null means "not read yet", and it is NOT zero: the bookings fetch is
+     * best-effort, so an offline / RLS / not-signed-in failure used to leave the
+     * defaults in place and print "0 BOOKINGS · 0 COMPLETED" — a confident claim
+     * about the account's track record that is indistinguishable from a genuinely
+     * new user, with no error and no retry beside it. Rendered as an em dash
+     * until a read actually answers (see [profileStatValue]). A read that fails
+     * AFTER one succeeded keeps the last known counts rather than blanking them.
+     *
+     * [savedCount] has no such state: it is fed by the local [SavedStore] set,
+     * which always has an answer.
+     */
+    val bookingsCount: Int? = null,
     val savedCount: Int = 0,
-    val completedCount: Int = 0,
+    val completedCount: Int? = null,
     val feedbackSending: Boolean = false,
     val feedbackStatus: String? = null,
     val feedbackOk: Boolean = false,
@@ -129,7 +144,8 @@ class ProfileViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
-    val bookingsRepository: BookingsRepository,
+    private val draftStore: BookingDraftStore,
+    private val bookingsRepository: BookingsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ProfileUiState())
@@ -189,7 +205,17 @@ class ProfileViewModel @Inject constructor(
                     it.copy(isLoading = false, error = e.message ?: "Couldn't load profile")
                 }
             }
-        // Best-effort stats — don't blank the profile if bookings fail.
+        // Client-only tail. Both reads below feed the stat band, which
+        // ProfileScreen renders behind `role == Client && onArtistList != null`
+        // — and the artist tab graph passes no `onArtistList` at all, so an
+        // artist opening Account was paying for a `bookings` select filtered on
+        // their own uid (invariably empty, invariably discarded) plus a
+        // saved-artists read. Resolved role, not the cached pref: the profile
+        // fetch above is what settles it.
+        if (_state.value.role != AppRole.Client) return@launch
+        // Best-effort stats — don't blank the profile if bookings fail. Note the
+        // counters stay NULL rather than 0 until a read answers; see
+        // [ProfileUiState.bookingsCount].
         runCatching { bookingsRepository.listForClient() }
             .onSuccess { bookings ->
                 _state.update {
@@ -200,7 +226,10 @@ class ProfileViewModel @Inject constructor(
                     )
                 }
             }
-        runCatching { savedStore.refreshFromServer() }
+        // No runCatching: refreshFromServer swallows every network/RLS failure
+        // itself and now re-throws CancellationException, which wrapping it here
+        // would put straight back in the bin.
+        savedStore.refreshFromServer()
     }
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
@@ -232,11 +261,20 @@ class ProfileViewModel @Inject constructor(
 
     fun signOut() = viewModelScope.launch {
         _state.update { it.copy(showSignOutConfirm = false) }
+        // Account-scoped state held in memory, which the next session must not
+        // inherit. The booking draft is a @Singleton that outlives the session:
+        // the artist, venue, guest count and the free-text directions of a
+        // half-composed booking — plus the package tier tapped on a profile,
+        // which is what the next account's booking screen would silently open
+        // on — all stayed resident without this.
         calendarSync.clearSessionState()
-        runCatching { session.signOut() }
-            .onFailure { e ->
-                _state.update { it.copy(actionError = e.message ?: "Sign out failed") }
-            }
+        draftStore.clear()
+        val message = cleanUpAfterSignOut(
+            signOut = { session.signOut() },
+            stillSignedIn = { session.currentUserId != null },
+            wipeLocalState = { prefs.wipeAll(); savedStore.reset() },
+        )
+        if (message != null) _state.update { it.copy(actionError = message) }
     }
 
     fun showDeleteConfirm() = _state.update { it.copy(showDeleteConfirm = true, actionError = null) }
@@ -252,6 +290,10 @@ class ProfileViewModel @Inject constructor(
                 // holding the dialog open through a 30s logout timeout would read
                 // as a delete that never happened.
                 _state.update { it.copy(isDeleting = false, showDeleteConfirm = false) }
+                // Same in-memory, account-scoped state sign-out drops. Not
+                // folded into [wipeLocalState] below, which only runs when the
+                // logout itself fails.
+                draftStore.clear()
                 val cleanupError = cleanUpAfterAccountDelete(
                     wipeCalendar = { calendarSync.wipeForAccountDelete() },
                     signOut = { session.signOut() },
@@ -284,7 +326,16 @@ class ProfileViewModel @Inject constructor(
 
     fun clearPendingExport() = _state.update { it.copy(pendingExport = null) }
 
+    /** Tap-to-dismiss for the two transient lines under the settings list. */
     fun clearActionFeedback() = _state.update { it.copy(actionMessage = null, actionError = null) }
+
+    /**
+     * A system handoff the screen could not complete — no browser, no
+     * notification-settings activity, no share target for the export. Reported
+     * on the same line as every other action failure instead of throwing
+     * ActivityNotFoundException out of a click handler and taking the tab with it.
+     */
+    fun reportActionError(message: String) = _state.update { it.copy(actionError = message) }
 
     fun manageAvailabilityMissingNav() {
         _state.update {
@@ -354,6 +405,48 @@ internal suspend fun cleanUpAfterAccountDelete(
 }
 
 /**
+ * The local cleanup that follows a PLAIN sign-out attempt.
+ *
+ * `SessionManager.signOut()` does the network logout first and clears prefs /
+ * saved ids only after it returns, so anything that throws in between skips the
+ * local wipe entirely. Which of the two failures happened decides what may be
+ * done about it — and unlike the delete path, the answer is not always "wipe".
+ *
+ * - **The logout never landed** (offline, timeout, an unexpected status).
+ *   supabase-kt rethrows without touching its stored session — it only reaches
+ *   `clearSession()` on a logout it swallowed — so the account is still signed
+ *   in and still using its role, saved ids and thread flags. Nothing was
+ *   cleared, and nothing may be: wiping here would strip a live session's own
+ *   state out from under it over a failure the user can simply retry. Report it
+ *   and leave the device exactly as it was.
+ * - **The logout landed and a step after it threw.** [AppPreferences.wipeAll] is
+ *   a DataStore edit, which throws IOException, and the analytics/crash resets
+ *   ahead of it are no more guaranteed. The session is gone, so the device is
+ *   holding the departed account's local state with no session left to reach it
+ *   — the DPDP §11 backstop, the same one [cleanUpAfterAccountDelete] applies
+ *   when its own sign-out fails. Finish the wipe here, and say nothing: the user
+ *   got exactly what they asked for, and the auth screen is already replacing
+ *   this one as the cleared session propagates.
+ *
+ * [stillSignedIn] is the whole discriminator, and it is read AFTER the attempt.
+ *
+ * Non-throwing by construction, like its sibling: the call site is a bare
+ * `viewModelScope.launch`, which installs no CoroutineExceptionHandler.
+ *
+ * @return the message to surface, or null when there is nothing to tell.
+ */
+internal suspend fun cleanUpAfterSignOut(
+    signOut: suspend () -> Unit,
+    stillSignedIn: () -> Boolean,
+    wipeLocalState: suspend () -> Unit,
+): String? {
+    val failure = runCatching { signOut() }.exceptionOrNull() ?: return null
+    if (stillSignedIn()) return failure.message ?: "Sign out failed"
+    runCatching { wipeLocalState() }
+    return null
+}
+
+/**
  * How many of [bookings] are still LIVE — the number under the profile header's
  * "Bookings" column, read beside "Completed".
  *
@@ -388,6 +481,22 @@ internal suspend fun cleanUpAfterAccountDelete(
  * visible at all (the Bookings tab filters it out entirely).
  */
 fun liveBookingsCount(bookings: List<Booking>): Int = bookings.count { it.status.isLive() }
+
+/**
+ * What one column of the profile stat band prints.
+ *
+ * A count we HAVE is printed. A count we could not read prints an em dash,
+ * because "you have 0 bookings" and "we couldn't reach the server" are opposite
+ * claims and the band is the only thing on the screen making either — the same
+ * loaded-and-empty vs couldn't-load conflation `BlockedUsersStore.refresh()` was
+ * changed to stop making, and the same em dash the artist dashboard already
+ * prints for a score it couldn't read.
+ *
+ * The column stays TAPPABLE while unknown: the drill-down list does its own read
+ * and surfaces the failure properly, so "—" plus a tap is the honest route to the
+ * error the header used to hide behind a zero.
+ */
+fun profileStatValue(count: Int?): String = count?.toString() ?: "—"
 
 private fun BookingStatus.isLive(): Boolean = when (this) {
     BookingStatus.PendingConfirm, BookingStatus.Confirmed -> true

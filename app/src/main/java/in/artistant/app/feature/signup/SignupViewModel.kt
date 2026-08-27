@@ -101,6 +101,17 @@ class SignupViewModel @Inject constructor(
     private val _events = Channel<SignupEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
 
+    /**
+     * The handle the signed-in user ALREADY owns, hydrated from their own `users` row.
+     *
+     * `handle_is_available` (mig 0007) is a bare "does any row hold this handle" existence check —
+     * it has to be, since it is granted to anon and runs before sign-in — so it answers "taken" for
+     * the user's own handle. Without this the live check reported a red "Taken" chip on the handle
+     * hydrate had just filled in, and Continue stayed disabled until the user picked a different
+     * one. Wiped by [reset] with the rest of the departing account's draft.
+     */
+    private var ownHandle: String? = null
+
     init {
         viewModelScope.launch {
             prefs.communityAgreed.collect { agreed ->
@@ -131,6 +142,11 @@ class SignupViewModel @Inject constructor(
                     // The synchronous status set in `onHandleChanged` already showed Checking;
                     // guard against a race where the user kept typing past this emission.
                     if (_state.value.handle != handle) return@collect
+                    // Their own handle needs no round-trip — and would fail one (see [ownHandle]).
+                    if (HandleRules.normalize(handle) == ownHandle) {
+                        _state.update { it.copy(handleStatus = HandleStatus.Available) }
+                        return@collect
+                    }
                     val result = users.handleIsAvailable(HandleRules.normalize(handle))
                     if (_state.value.handle != handle) return@collect
                     _state.update {
@@ -158,10 +174,11 @@ class SignupViewModel @Inject constructor(
     fun setName(value: String) = _state.update { it.copy(name = value) }
     fun setCity(value: String) = _state.update { it.copy(city = value) }
 
-    /** State first so the checkbox answers the tap, then persist — see the `init` collector. */
+    /** State first so the checkbox answers the tap, then persist — see the `init` collector.
+     *  The write is guarded for the reason spelled out on [agreeCommunity]. */
     fun setTerms(accepted: Boolean) {
         _state.update { it.copy(termsAccepted = accepted) }
-        viewModelScope.launch { prefs.setTermsAccepted(accepted) }
+        viewModelScope.launch { runCatching { prefs.setTermsAccepted(accepted) } }
     }
 
     /** Format-only status the moment the field changes; the debounced check upgrades
@@ -192,9 +209,21 @@ class SignupViewModel @Inject constructor(
         viewModelScope.launch { _events.send(SignupEvent.SelectionHaptic) }
     }
 
-    /** ACCT-05 — persist pledge; step stays `.Role` and re-renders the role picker. */
+    /**
+     * ACCT-05 — pledge agreed; step stays `.Role` and re-renders the role picker.
+     *
+     * The mirror is set here rather than waited for, and the write is guarded, for the two
+     * halves of the same reason. `DataStore.edit` throws `IOException` on a preferences file it
+     * cannot read or write, and this ran bare inside `viewModelScope.launch` — no
+     * `CoroutineExceptionHandler` on that scope, so the throw reached the thread's default one
+     * and took the app down on the pledge screen. Guarded but still waiting on the store, the
+     * same failure reads as an Agree button that does nothing, because the screen only swaps
+     * when the collector reports the flag back. The pledge is re-askable: if the write never
+     * landed, the store answers false next launch and this screen simply asks again.
+     */
     fun agreeCommunity() = viewModelScope.launch {
-        prefs.setCommunityAgreed(true)
+        _state.update { it.copy(communityAgreed = true) }
+        runCatching { prefs.setCommunityAgreed(true) }
         _events.send(SignupEvent.SelectionHaptic)
     }
 
@@ -258,18 +287,41 @@ class SignupViewModel @Inject constructor(
      * would move that screen on.
      */
     fun reset() {
+        // Including the departing account's own handle: to the next person it is just another
+        // handle the RPC gets to answer for, and answering Available for it would hand them a
+        // Continue button the upsert's unique constraint then rejects.
+        ownHandle = null
         _state.value = SignupUiState(communityAgreed = _state.value.communityAgreed)
     }
 
-    /** Prefill draft fields from a returning user's server profile (login hydration parity —
-     *  keeps the Done screen personalized even though login skips the profile step). */
-    fun hydrate(role: AppRole?, name: String?, city: String?, handle: String?) = _state.update {
-        it.copy(
-            role = role ?: it.role,
-            name = name?.takeIf { n -> n.isNotBlank() } ?: it.name,
-            city = city?.takeIf { c -> c.isNotBlank() } ?: it.city,
-            handle = handle?.takeIf { h -> h.isNotBlank() } ?: it.handle,
-        )
+    /**
+     * Prefill draft fields from a returning user's server profile (login hydration parity — keeps
+     * the Done screen personalized even though login skips the profile step).
+     *
+     * A hydrated handle arrives WITH its status, because (`handle`, `handleStatus`) is a pair every
+     * other writer keeps consistent — `setHandle` recomputes it through [syncStatus]. Filling the
+     * field and leaving the status at `Empty` left `profileValid` false, so the profile screen's
+     * Continue sat disabled under a handle the user could plainly see, with nothing on screen
+     * saying why. It is `Available` rather than `Checking` because the row it came from is theirs:
+     * see [ownHandle] for why asking the RPC instead returns the opposite answer.
+     */
+    fun hydrate(role: AppRole?, name: String?, city: String?, handle: String?) {
+        val own = handle?.takeIf { it.isNotBlank() }?.let { HandleRules.normalize(it) }
+        if (own != null) ownHandle = own
+        _state.update {
+            it.copy(
+                role = role ?: it.role,
+                name = name?.takeIf { n -> n.isNotBlank() } ?: it.name,
+                city = city?.takeIf { c -> c.isNotBlank() } ?: it.city,
+                handle = own ?: it.handle,
+                handleStatus = when {
+                    own == null -> it.handleStatus
+                    // A stored handle that no longer passes the format rules has to be re-picked.
+                    HandleRules.isValidFormat(own) -> HandleStatus.Available
+                    else -> syncStatus(own)
+                },
+            )
+        }
     }
 
     // --- Profile save ---

@@ -110,13 +110,13 @@ fun playbackProgress(positionMs: Long, durationMs: Long): Float {
 /**
  * The duration to show for a row.
  *
- * The player's measurement wins whenever it has one, because the stored
- * `duration_label` is written from a duration that nothing on Android measures —
- * every sample uploaded from this app records zero seconds, so the server label
- * reads "0:00" for clips that are minutes long. Once a row is playing we have a
- * real number and should use it; rows that have never been played fall back to
- * the stored label, and a blank/zero label renders as nothing rather than as a
- * confident lie about the length.
+ * The player's measurement wins whenever it has one. The stored `duration_label`
+ * is only as good as whatever measured it at upload: this app now probes the
+ * staged file, but every clip it published before that recorded zero seconds, so
+ * the server label still reads "0:00" for plenty of rows that are minutes long.
+ * Once a row is playing we have a real number and should use it; rows that have
+ * never been played fall back to the stored label, and a blank/zero label renders
+ * as nothing rather than as a confident lie about the length.
  */
 fun sampleDurationLabel(sample: Sample, playback: SamplePlayback): String? {
     if (playback.isActive(sample.id) && playback.durationMs > 0L) {

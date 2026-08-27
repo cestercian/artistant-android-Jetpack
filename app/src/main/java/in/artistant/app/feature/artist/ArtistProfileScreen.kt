@@ -197,14 +197,21 @@ fun ArtistProfileScreen(
                             if (artist.samples.isNotEmpty()) {
                                 SoundBlock(samples = artist.samples)
                             }
-                            BookingBlock(artist = artist)
+                            BookingBlock(
+                                artist = artist,
+                                packagesLoaded = state.packagesLoaded,
+                            )
                             PackagesBlock(
                                 artist = artist,
                                 selectedIndex = state.selectedPackageIndex,
                                 onSelect = viewModel::selectPackage,
                                 onRequestQuote = { onRequestQuote(artist.id) },
                             )
-                            ReviewsBlock(reviews = state.reviews)
+                            ReviewsBlock(
+                                reviews = state.reviews,
+                                failed = state.reviewsFailed,
+                                onRetry = viewModel::refresh,
+                            )
                             Spacer(Modifier.height(space.md))
                         }
                     }
@@ -215,12 +222,16 @@ fun ArtistProfileScreen(
                     // stale on dev (a row reading ₹51,000 while a ₹22,000 package
                     // exists). `artist.price` survives only as the empty-set
                     // fallback. iOS does the same thing via `cheapestPackage`.
-                    // packagesLoaded: the artist is fully hydrated here, so an
-                    // empty package set is a fact, not a mid-load state.
+                    // packagesLoaded is the state's fact, not `true`: this branch
+                    // is entered as soon as `artist` is non-null, which the cached
+                    // Discover/Search tile makes true BEFORE the stitch returns —
+                    // and that tile has no packages beside a real min_price. Hard-
+                    // coding true made the dock read "On request" mid-load for an
+                    // artist with tiers, permanently so if the stitch failed.
                     val fromPrice = PackagePricing.dockPrice(
                         artist.packages,
                         fallback = artist.price,
-                        packagesLoaded = true,
+                        packagesLoaded = state.packagesLoaded,
                     )
                     ActionDock(
                         fromPrice = fromPrice,
@@ -530,6 +541,10 @@ private fun ScoreChip(score: Int, gigs: Int, tier: ScoreTier, onClick: () -> Uni
  * data is the tier — which the hero chip already states — and a lone redundant
  * cell is worse than no strip. Rating and count are computed from the same list
  * the Reviews block renders, so the two surfaces cannot disagree.
+ *
+ * That includes a FAILED read, which arrives as the same empty list: there is no
+ * average to print, so the strip stays away and the Reviews block below carries
+ * the "couldn't load" line and the retry.
  */
 @Composable
 private fun StatStrip(reviews: List<Review>, tier: ScoreTier) {
@@ -761,9 +776,14 @@ private fun PromptsBlock(prompts: List<ArtistPrompt>) {
  * worse, but this line is the page *stating* a price, and stating a known-stale
  * one as a headline is the exact bug the "from means minimum" fix was about.
  * "Pricing on request" is true, and the quote row below acts on it.
+ *
+ * That claim is gated on [packagesLoaded] for the same reason the dock's is: an
+ * empty package set only means "takes custom requests" once a full stitch has
+ * landed. Before then it means "we don't know yet", and this block says nothing
+ * rather than announcing an artist with three tiers has no prices.
  */
 @Composable
-private fun BookingBlock(artist: Artist) {
+private fun BookingBlock(artist: Artist, packagesLoaded: Boolean) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val cheapest = artist.packages.minByOrNull { it.price }
@@ -786,7 +806,7 @@ private fun BookingBlock(artist: Artist) {
                     modifier = Modifier.alignByBaseline(),
                 )
             }
-        } else {
+        } else if (packagesLoaded) {
             Text(
                 "Pricing on request",
                 style = AppTheme.type.body,
@@ -885,12 +905,36 @@ private fun RequestQuoteRow(onClick: () -> Unit) {
     }
 }
 
+/**
+ * The artist's track record, or an honest account of why it isn't here.
+ *
+ * A failed read and a genuinely unreviewed artist arrive as the same empty list
+ * and say opposite things, so [failed] is threaded in rather than inferred: "No
+ * reviews yet." for a dropped request is a false claim about the artist, made by
+ * the marketplace, on the page a client decides from. The score sheet on this
+ * same screen already draws the distinction (`ReviewRow`), and so does iOS
+ * (`reviewsError`, an explicit retryable surface).
+ *
+ * Retry is [ArtistProfileViewModel.refresh] — the reviews read has no narrower
+ * entry point, and the page's other Retry only exists in the nothing-loaded
+ * branch.
+ */
 @Composable
-private fun ReviewsBlock(reviews: List<Review>) {
+private fun ReviewsBlock(reviews: List<Review>, failed: Boolean, onRetry: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
         Text("Reviews", style = AppTheme.type.displaySmall, color = colors.ink)
+        if (failed) {
+            InlineBanner(
+                title = "Couldn't load reviews",
+                detail = "This artist may have reviews — we just couldn't load them.",
+                tone = BannerTone.Failure,
+                actionLabel = "Retry",
+                onAction = onRetry,
+            )
+            return@Column
+        }
         if (reviews.isEmpty()) {
             Text("No reviews yet.", style = AppTheme.type.body, color = colors.ink3)
             return@Column

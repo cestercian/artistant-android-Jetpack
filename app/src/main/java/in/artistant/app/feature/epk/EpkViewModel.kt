@@ -17,16 +17,18 @@ import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.SamplesRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ArtistPrompts
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.media.WizardMediaCache
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -144,6 +146,17 @@ data class EpkUiState(
     val techDraft: String = "",
     val linkEditor: LinkEditorState? = null,
 
+    /**
+     * Clips staged in [UploadQueue] that have no `samples` row yet.
+     *
+     * A count rather than a flag because it is counted toward [MAX_SAMPLES]:
+     * [samples] only grows when the queue drains, seconds after the pick, so two
+     * picks inside one upload both used to see room under the cap. See
+     * [canAddSample] for why staged clips are counted rather than the Add
+     * affordance being switched off while the queue works.
+     */
+    val samplesUploading: Int = 0,
+
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val savingPackages: Boolean = false,
@@ -230,6 +243,17 @@ class EpkViewModel @Inject constructor(
     private var socialsSaveJob: Job? = null
     private var promptsSaveJob: Job? = null
 
+    /**
+     * Which writes are armed: scheduled, and not yet run all the way through.
+     *
+     * Kept beside the jobs rather than derived from them because by the time
+     * [onCleared] is asked, the framework has already cancelled `viewModelScope`
+     * and every one of those jobs reads as inactive — a flush that trusted
+     * `job.isActive` would always find nothing to do. Main-thread only, like the
+     * jobs themselves.
+     */
+    private val armedSaves = mutableSetOf<EpkSave>()
+
     init {
         refresh()
         observeUploadQueue()
@@ -275,6 +299,13 @@ class EpkViewModel @Inject constructor(
                     lastCompleted = queue.batchCompleted
                     loadSamples()
                 }
+                // What the cap counts on top of the stored rows. A task sits at the
+                // head of `pending` while it uploads and only leaves once its row
+                // exists, and this is updated AFTER the reload above, so a clip is
+                // never missing from both numbers at once — which is the window the
+                // cap used to be picked through.
+                val staged = queue.pending.count { task -> task is UploadQueue.Task.AudioSample }
+                _state.update { it.copy(samplesUploading = staged) }
                 val failed = failedUploadMessage(queue.failed)
                 if (failed != lastFailed) {
                     lastFailed = failed
@@ -464,7 +495,26 @@ class EpkViewModel @Inject constructor(
         _state.update { it.copy(coverGradientIndex = clamped, saveError = null) }
         viewModelScope.launch {
             runCatching { artists.updateCoverGradient(clamped) }
-                .onSuccess { _state.update { it.copy(statusNote = "Cover saved.") } }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            statusNote = "Cover saved.",
+                            // Folded into the row like every other optimistic
+                            // control here. Without it the saved palette lived
+                            // ONLY in the pending index, which [loadIdentity]
+                            // clears on every successful read — so a refresh
+                            // landing before the artist cache is invalidated
+                            // snapped the ring back to the old colour and left
+                            // "Cover saved." sitting over the palette that was
+                            // not saved. The resolved colours travel with the
+                            // index because [Artist] carries both.
+                            artist = it.artist?.copy(
+                                coverGradientIndex = clamped,
+                                gradient = ArtistGradient.palette(clamped),
+                            ),
+                        )
+                    }
+                }
                 .onFailure {
                     _state.update {
                         it.copy(
@@ -599,13 +649,10 @@ class EpkViewModel @Inject constructor(
      * refresh and a guard that lives only in a Composable is not a guard the next
      * caller of this method inherits.
      */
-    private fun schedulePromptsSave() {
+    private fun schedulePromptsSave(immediate: Boolean = false) {
         if (!_state.value.identityHydrated || session.currentUserId == null) return
         promptsSaveJob?.cancel()
-        promptsSaveJob = viewModelScope.launch {
-            delay(SAVE_DEBOUNCE_MS)
-            persistPrompts()
-        }
+        promptsSaveJob = arm(EpkSave.Prompts, debounce = !immediate) { persistPrompts() }
     }
 
     private suspend fun persistPrompts() {
@@ -726,13 +773,10 @@ class EpkViewModel @Inject constructor(
      * [EpkUiState.identityHydrated] rather than [canReplaceWholeSet] — there is no
      * set to wipe, but there is still a row we must have read before writing it.
      */
-    private fun scheduleBioSave() {
+    private fun scheduleBioSave(immediate: Boolean = false) {
         if (!_state.value.identityHydrated || session.currentUserId == null) return
         bioSaveJob?.cancel()
-        bioSaveJob = viewModelScope.launch {
-            delay(SAVE_DEBOUNCE_MS)
-            persistBio()
-        }
+        bioSaveJob = arm(EpkSave.Bio, debounce = !immediate) { persistBio() }
     }
 
     private suspend fun persistBio() {
@@ -808,13 +852,10 @@ class EpkViewModel @Inject constructor(
      * flips on a background refresh, and a guard that exists only in a Composable
      * is a guard the next caller of this method will not have.
      */
-    private fun scheduleSocialsSave() {
+    private fun scheduleSocialsSave(immediate: Boolean = false) {
         if (!_state.value.identityHydrated || session.currentUserId == null) return
         socialsSaveJob?.cancel()
-        socialsSaveJob = viewModelScope.launch {
-            delay(SAVE_DEBOUNCE_MS)
-            persistSocials()
-        }
+        socialsSaveJob = arm(EpkSave.Socials, debounce = !immediate) { persistSocials() }
     }
 
     private suspend fun persistSocials() {
@@ -916,10 +957,7 @@ class EpkViewModel @Inject constructor(
     private fun schedulePackagesSave(immediate: Boolean = false) {
         if (!canReplaceWholeSet(_state.value.packagesHydrated, session.currentUserId != null)) return
         packagesSaveJob?.cancel()
-        packagesSaveJob = viewModelScope.launch {
-            if (!immediate) delay(SAVE_DEBOUNCE_MS)
-            persistPackages()
-        }
+        packagesSaveJob = arm(EpkSave.Packages, debounce = !immediate) { persistPackages() }
     }
 
     private suspend fun persistPackages() {
@@ -959,18 +997,10 @@ class EpkViewModel @Inject constructor(
         scheduleTechSave(immediate = true)
     }
 
-    fun removeTechItem(item: String) {
-        _state.update { it.copy(techItems = it.techItems.filterNot { existing -> existing == item }) }
-        scheduleTechSave(immediate = true)
-    }
-
     private fun scheduleTechSave(immediate: Boolean = false) {
         if (!canReplaceWholeSet(_state.value.techHydrated, session.currentUserId != null)) return
         techSaveJob?.cancel()
-        techSaveJob = viewModelScope.launch {
-            if (!immediate) delay(SAVE_DEBOUNCE_MS)
-            persistTech()
-        }
+        techSaveJob = arm(EpkSave.Tech, debounce = !immediate) { persistTech() }
     }
 
     private suspend fun persistTech() {
@@ -1185,7 +1215,8 @@ class EpkViewModel @Inject constructor(
      */
     fun onSamplePicked(uri: Uri) {
         val userId = session.currentUserId ?: return
-        if (!canAddSample(_state.value.samples.size, uploadInFlight = false)) {
+        val current = _state.value
+        if (!canAddSample(stored = current.samples.size, uploading = current.samplesUploading)) {
             _state.update {
                 it.copy(saveError = "You can keep up to $MAX_SAMPLES samples — remove one to add another.")
             }
@@ -1237,6 +1268,101 @@ class EpkViewModel @Inject constructor(
                         it.copy(saveError = "Couldn't remove that sample — check your connection and try again.")
                     }
                 }
+        }
+    }
+
+    // ── Saving ───────────────────────────────────────────────────────────────
+
+    /**
+     * Schedule one debounced write and remember that it owes the server something.
+     *
+     * The [save] stays armed from here until [persist] has run all the way
+     * through — deliberately including the network call, so a write that was
+     * cancelled mid-flight is still owed. A superseding edit re-arms the same
+     * entry, which is why this is a set.
+     */
+    private fun arm(save: EpkSave, debounce: Boolean, persist: suspend () -> Unit): Job {
+        armedSaves += save
+        return viewModelScope.launch {
+            runOwedSave(save, armedSaves, if (debounce) SAVE_DEBOUNCE_MS else 0L, persist)
+        }
+    }
+
+    /**
+     * Stop waiting: send everything that is owed, now.
+     *
+     * The debounce is only ever safe while the app is in front of the artist. Go
+     * to the home screen mid-window and the 1.2s wait is being counted by a
+     * process the OS may reclaim at any point, with the edit living nowhere but
+     * that process's heap — [onCleared] does not run on a kill, so the write
+     * simply never happens and nothing says so. [removePackageRow] already
+     * refuses the debounce for exactly this reason ("long enough to background
+     * the app"); this generalises it to every edit rather than to the one that
+     * thought of it first.
+     *
+     * Re-scheduling as `immediate` is deliberate over cancelling the wait in
+     * place: it reuses each section's own gate (a signed-out or never-hydrated
+     * section still refuses to write) and it re-arms through the same path an
+     * ordinary edit uses. A save already past the wait and out on the wire gets
+     * cancelled and re-issued, which is a wasted request in a narrow window and
+     * costs nothing else — every persist here either diffs first or replaces a
+     * whole set, so re-running one is a no-op or the same write again.
+     *
+     * The drafts themselves are deliberately NOT mirrored to disk to survive a
+     * kill. Packages and the tech rider persist by whole-set replace, and this
+     * file's first rule is that a replace may only be built from a list that came
+     * from a successful server read — replaying a set from a previous process
+     * would send a stale list back over whatever the artist has since changed
+     * elsewhere, which is a bigger hole than the one it closes.
+     */
+    fun flushPendingSaves() {
+        armedSaves.toList().forEach { save ->
+            when (save) {
+                EpkSave.Packages -> schedulePackagesSave(immediate = true)
+                EpkSave.Tech -> scheduleTechSave(immediate = true)
+                EpkSave.Bio -> scheduleBioSave(immediate = true)
+                EpkSave.Socials -> scheduleSocialsSave(immediate = true)
+                EpkSave.Prompts -> schedulePromptsSave(immediate = true)
+            }
+        }
+    }
+
+    /**
+     * Let an armed write finish after the editor is gone.
+     *
+     * Every save on this screen is debounced onto `viewModelScope`, which the
+     * framework cancels when the artist leaves — so typing the last digit of a
+     * price and immediately going Back destroyed the edit inside the 1.2s window,
+     * silently, while the completeness counter at the top of the screen had
+     * already counted it (it reads the drafts). The reference client's saves are
+     * unstructured tasks and survive leaving the screen; these now do too.
+     *
+     * The scope is created here rather than held as a field because it exists for
+     * one thing — owning these last writes until they land — and nothing
+     * references it afterwards. Re-running is safe: the three diffing persists
+     * (bio, accounts, prompts) ask `needsSave` first and no-op when the write
+     * already landed, and the two whole-set replaces are idempotent.
+     *
+     * This covers *leaving*. It cannot cover a process the OS reclaims, which
+     * calls nothing at all — [flushPendingSaves] is the half that handles going
+     * to the background, before there is anything to reclaim.
+     */
+    override fun onCleared() {
+        super.onCleared()
+        val owed = armedSaves.toList()
+        if (owed.isEmpty()) return
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
+            owed.forEach { save ->
+                runCatching {
+                    when (save) {
+                        EpkSave.Packages -> persistPackages()
+                        EpkSave.Tech -> persistTech()
+                        EpkSave.Bio -> persistBio()
+                        EpkSave.Socials -> persistSocials()
+                        EpkSave.Prompts -> persistPrompts()
+                    }
+                }
+            }
         }
     }
 

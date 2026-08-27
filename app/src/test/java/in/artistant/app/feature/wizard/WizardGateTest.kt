@@ -3,6 +3,10 @@ package `in`.artistant.app.feature.wizard
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.epk.PackageRow
 import `in`.artistant.app.testsupport.ARTIST_ID
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -28,7 +32,7 @@ class WizardGateTest {
         category: String = "DJ",
         baseCity: String = "Bangalore",
         packageRows: List<PackageRow> = listOf(PackageRow("k", "Evening set", "2h", "25000")),
-        techItems: Set<String> = setOf("1 DI box"),
+        techItems: List<String> = listOf("1 DI box"),
         daysAvailable: Set<String> = setOf("Fri"),
         timeSlots: Set<String> = setOf("9:00 PM"),
         bio: String = "Rooftop sets",
@@ -128,7 +132,7 @@ class WizardGateTest {
 
     @Test
     fun `tech and availability are required, not optional`() {
-        assertFalse(state(WizardStep.Tech, techItems = emptySet()).canAdvance)
+        assertFalse(state(WizardStep.Tech, techItems = emptyList()).canAdvance)
         // A day with no time, or a time with no day, is not a schedule a client
         // can book against — both halves are required.
         assertFalse(state(WizardStep.Availability, daysAvailable = emptySet()).canAdvance)
@@ -242,6 +246,91 @@ class WizardGateTest {
     @Test
     fun `save and exit writes the form once the restore has landed`() {
         assertTrue(wizardExitMaySaveDraft(state(WizardStep.Pricing).copy(isRestoring = false)))
+    }
+
+    // --- The debounced draft writer ------------------------------------------
+
+    @Test
+    fun `the writer refuses every state that would damage a draft`() {
+        val form = state(WizardStep.Pricing).copy(isRestoring = false)
+        assertTrue(wizardMaySaveDraft(form))
+        assertFalse(
+            "restoring: the form is still the blank default",
+            wizardMaySaveDraft(form.copy(isRestoring = true)),
+        )
+        assertFalse(
+            "publishing: publish is about to clear this draft",
+            wizardMaySaveDraft(form.copy(isPublishing = true)),
+        )
+        assertFalse(
+            "Done: a restore of it would open the wizard on 'You're live'",
+            wizardMaySaveDraft(state(WizardStep.Done).copy(isRestoring = false)),
+        )
+    }
+
+    @Test
+    fun `a publish that lands inside the debounce window does not resurrect its draft`() = runTest {
+        // The reason the refusals sit DOWNSTREAM of the debounce. Filtering
+        // upstream meant a refused emission never reached the timer, so it could
+        // neither restart nor supersede it: the last accepted snapshot was the
+        // going-live one, its timer kept running through setPublished, the
+        // enqueues and draftStore.clear() — a tail that usually finishes well
+        // inside the window — and then fired, writing a full draft back into the
+        // slot publish had just emptied.
+        val restored = state(WizardStep.Preview, bio = "").copy(isRestoring = false)
+        val edited = state(WizardStep.Preview, bio = "Rooftop sets").copy(isRestoring = false)
+
+        val written = wizardDraftWrites(
+            flow {
+                emit(restored)
+                emit(edited)
+                delay(WIZARD_DRAFT_DEBOUNCE_MS + 1)
+                // Publish starts, reaches go-live…
+                emit(edited.copy(isPublishing = true, publishPhase = WizardPublishPhase.GoingLive))
+                // …and the whole tail lands 50ms later, well inside the window.
+                delay(50)
+                emit(edited.copy(isPublishing = false, step = WizardStep.Done))
+                delay(WIZARD_DRAFT_DEBOUNCE_MS + 1)
+            },
+        ).toList()
+
+        // The edit is written; nothing from the publish window is.
+        assertEquals(listOf("Rooftop sets"), written.map { it.bio })
+        assertTrue(written.none { it.isPublishing || it.step == WizardStep.Done })
+    }
+
+    @Test
+    fun `the first snapshot after a restore is not written back`() = runTest {
+        // It is the state `restore()` just built out of the stored draft, so
+        // writing it is pure churn — and it is the one snapshot that could land
+        // before the artist has touched anything.
+        val restored = state(WizardStep.Pricing).copy(isRestoring = false)
+
+        val written = wizardDraftWrites(
+            flow {
+                emit(state(WizardStep.Pricing))          // still restoring
+                emit(restored)
+                delay(WIZARD_DRAFT_DEBOUNCE_MS + 1)
+            },
+        ).toList()
+
+        assertEquals(emptyList<WizardUiState>(), written)
+    }
+
+    // --- The step lock during a publish --------------------------------------
+
+    @Test
+    fun `nothing moves between steps while a publish is in flight`() {
+        // publish() snapshots the form before three round trips, so an edit made
+        // during that window reaches neither the server nor the draft — the
+        // successful publish clears it — and the publish ends by forcing the step
+        // to Done, yanking the artist off whatever they had opened. The CTA was
+        // already gated on this; the preview's EDIT jumps and system Back were
+        // not, and they are the two ways off the Preview step.
+        val preview = state(WizardStep.Preview)
+        assertTrue(wizardMayChangeStep(preview))
+        assertFalse(wizardMayChangeStep(preview.copy(isPublishing = true)))
+        assertFalse(preview.copy(isPublishing = true).canAdvance)
     }
 
     // --- Publish payload -----------------------------------------------------

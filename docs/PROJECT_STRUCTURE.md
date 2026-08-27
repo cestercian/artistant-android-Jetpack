@@ -200,7 +200,6 @@ in/artistant/app/
 └── ui/                                # shared UI plumbing not tied to one feature
     ├── ArtistantRoot.kt               # auth-gate composable (signed-in? role? setup?)
     ├── ObserveAsEvents.kt             # collect one-shot event Flows in a LaunchedEffect
-    ├── Haptics.kt                     # HapticFeedback wrappers (selection/success/error)
     └── modifier/                      # shared Modifiers (pressScale, shimmer, bottomScrim)
 ```
 

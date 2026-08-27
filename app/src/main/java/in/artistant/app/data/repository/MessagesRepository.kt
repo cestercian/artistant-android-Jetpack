@@ -15,6 +15,7 @@ import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageKind
 import `in`.artistant.app.data.model.Thread
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,6 +34,18 @@ import javax.inject.Singleton
 
 sealed class MessagesRepositoryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     data object NotSignedIn : MessagesRepositoryError("Sign in to send and sync messages.")
+
+    /**
+     * The viewer IS the artist on a thread that doesn't exist yet — only the
+     * client seat may mint one (0081's `threads_no_self` CHECK would reject
+     * `client_id == artist_id` anyway). A purely local refusal, so it is typed
+     * rather than wrapped: [MessagesRepository.findOrCreateThread] rethrows it
+     * untouched instead of paying for the race-recovery read a server failure
+     * earns.
+     */
+    data object SelfThread :
+        MessagesRepositoryError("The conversation opens once the booking is confirmed.")
+
     class Underlying(cause: Throwable) : MessagesRepositoryError(cause.message ?: "Messages request failed", cause)
 }
 
@@ -61,7 +74,21 @@ interface MessagesRepository {
 
     suspend fun send(threadId: String, body: String): Message
     suspend fun findOrCreateThread(artistId: String, bookingId: String? = null): String
-    suspend fun markThreadRead(threadId: String)
+
+    /**
+     * Zero the viewer's own unread counter on [threadId].
+     *
+     * [viewerIsArtist] names WHICH counter. `threads` keeps one per side
+     * (`client_unread_count` / `artist_unread_count`) and a session gives a uid,
+     * not a side, so the seat has to travel with the call — the alternative is
+     * writing both and letting the server discard the one that matches nothing.
+     * The caller already resolved the seat to render the thread at all
+     * (`ThreadCounterpart.viewerIsArtist`), so naming it costs nothing.
+     *
+     * No default: a defaulted seat is a guess, and a guess is wrong half the
+     * time — silently, since the wrong side simply matches zero rows.
+     */
+    suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean)
     suspend fun markThreadReadReceipt(threadId: String)
     suspend fun counterpartLastRead(threadId: String): Long?
 
@@ -204,28 +231,54 @@ class SupabaseMessagesRepository @Inject constructor(
             // No thread yet. Only the CLIENT may create — artist here means the
             // booking isn't confirmed (0015 hasn't minted the row). Creating
             // would mint client_id == artist_id (self-thread / 0081 CHECK).
-            if (userId == artist) {
-                throw IllegalStateException("The conversation opens once the booking is confirmed.")
-            }
+            //
+            // Stays BELOW the lookup: with a booking id, `existing()` filters on
+            // the booking alone, which is how the artist reaches the thread 0015
+            // minted for a confirmed one.
+            if (userId == artist) throw MessagesRepositoryError.SelfThread
             return client.from("threads")
                 .insert(ThreadInsert(userId, artist, booking)) { select(Columns.list("id")) }
                 .decodeSingle<ThreadIdRow>()
                 .id
+        } catch (e: MessagesRepositoryError) {
+            throw e
         } catch (t: Throwable) {
             // A concurrent creator can win the unique-pair race; read once more.
-            existing()?.let { return it }
+            // Guarded, because the usual reason the INSERT failed — the network
+            // dropped — is also the reason this read will: unguarded, its own
+            // raw exception escaped the typed seam and took `t` with it.
+            runCatching { existing() }.getOrNull()?.let { return it }
             throw MessagesRepositoryError.Underlying(t)
         }
     }
 
-    override suspend fun markThreadRead(threadId: String) {
+    /**
+     * Zero the viewer's own unread counter — ONE column, one round trip.
+     *
+     * A viewer occupies exactly one seat, so firing both seat-filtered PATCHes
+     * meant a guaranteed no-op request on every thread open AND on every inbound
+     * realtime message; probing (client first, artist only if that matched
+     * nothing) merely moved the cost onto the artist seat. The seat is not
+     * derivable here — the session yields a uid, and which side that uid sits on
+     * is a fact about the ROW — so [markThreadRead] takes it, and the caller
+     * hands over the value it already computed from the loaded thread.
+     *
+     * The seat column is still repeated in the filter, as [setMuted] repeats it:
+     * if the session changes mid-call the write matches zero rows instead of
+     * zeroing the counterparty's badge.
+     */
+    override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) {
         val userId = currentUserId() ?: return
+        val tid = threadId.lowercase()
         try {
-            client.from("threads").update(UnreadPatch(0)) {
-                filter { eq("id", threadId.lowercase()); eq("client_id", userId) }
-            }
-            client.from("threads").update(ArtistUnreadPatch(0)) {
-                filter { eq("id", threadId.lowercase()); eq("artist_id", userId) }
+            if (viewerIsArtist) {
+                client.from("threads").update(ArtistUnreadPatch(0)) {
+                    filter { eq("id", tid); eq("artist_id", userId) }
+                }
+            } else {
+                client.from("threads").update(UnreadPatch(0)) {
+                    filter { eq("id", tid); eq("client_id", userId) }
+                }
             }
         } catch (t: Throwable) {
             throw MessagesRepositoryError.Underlying(t)
@@ -338,21 +391,32 @@ class SupabaseMessagesRepository @Inject constructor(
             }
         }
 
-        return try {
-            channel.subscribe(blockUntilSubscribed = true)
-            MessagesSubscription {
-                live.set(false)
-                collectJob.cancel()
-                scope.launch {
-                    runCatching { channel.unsubscribe() }
-                    scope.coroutineContext[Job]?.cancel()
-                }
-            }
-        } catch (t: Throwable) {
-            Timber.w(t, "Realtime subscribe failed for thread %s — polling fallback", tid)
+        // ONE teardown for both exits. The channel is created — and registered on
+        // the single app-wide Realtime client — BEFORE the join is attempted, so
+        // a failure path that only killed the local scope left a joined
+        // `messages:<tid>` channel behind for the process lifetime, one per
+        // attempt on a flaky connection. `scope` is independent of the caller, so
+        // this still runs when the caller is what got cancelled.
+        fun leave() {
             live.set(false)
             collectJob.cancel()
-            scope.coroutineContext[Job]?.cancel()
+            scope.launch {
+                runCatching { channel.unsubscribe() }
+                scope.coroutineContext[Job]?.cancel()
+            }
+        }
+
+        return try {
+            channel.subscribe(blockUntilSubscribed = true)
+            MessagesSubscription { leave() }
+        } catch (t: Throwable) {
+            leave()
+            // Cancellation is not a subscribe failure. Backing out of a chat
+            // while the join ack is still in flight cancels ChatViewModel's
+            // scope; swallowing it here handed a dying caller a healthy-looking
+            // no-op subscription and broke structured concurrency.
+            if (t is CancellationException) throw t
+            Timber.w(t, "Realtime subscribe failed for thread %s — polling fallback", tid)
             MessagesSubscription {}
         }
     }
@@ -531,6 +595,10 @@ class FakeMessagesRepository(
 
     override suspend fun findOrCreateThread(artistId: String, bookingId: String?): String {
         threads.firstOrNull { it.artistId.equals(artistId, true) && it.bookingId == bookingId }?.let { return it.id }
+        // Refused for the same reason the real seam refuses it, and in the same
+        // place: an existing booking thread is still reachable from the artist
+        // seat, but minting one would be a self-thread (0081).
+        if (artistId.equals(userId, ignoreCase = true)) throw MessagesRepositoryError.SelfThread
         // Only the client seat can mint a thread (see the real impl), so the
         // viewer IS the client here — carry that so the new row has both seats.
         val thread = Thread(
@@ -543,9 +611,18 @@ class FakeMessagesRepository(
         return thread.id
     }
 
-    override suspend fun markThreadRead(threadId: String) {
+    /** Every mark-read the caller asked for, as `threadId to viewerIsArtist`. */
+    val readSeats = mutableListOf<Pair<String, Boolean>>()
+
+    override suspend fun markThreadRead(threadId: String, viewerIsArtist: Boolean) {
+        readSeats += threadId to viewerIsArtist
         val index = threads.indexOfFirst { it.id == threadId }
-        if (index >= 0) threads[index] = threads[index].copy(unreadCount = 0)
+        if (index < 0) return
+        // Mirrors the real seam: the PATCH is filtered on the named seat, so a
+        // write aimed at the counterparty's column clears nothing at all rather
+        // than falling through to the viewer's.
+        if (threads[index].artistId.equals(userId, ignoreCase = true) != viewerIsArtist) return
+        threads[index] = threads[index].copy(unreadCount = 0)
     }
     override suspend fun markThreadReadReceipt(threadId: String) = Unit
     override suspend fun counterpartLastRead(threadId: String): Long? = null

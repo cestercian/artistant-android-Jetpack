@@ -56,7 +56,16 @@ fun PaywallScreen(
     val space = AppTheme.dimens.space
     val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
-    val isArtist = state.isArtist
+    // Which membership this page sells is a fact this composable was HANDED, so
+    // it reads the parameter rather than the bound copy in state: `bindRole`
+    // runs in a LaunchedEffect, i.e. after the first composition, and
+    // `PaywallUiState.isArtist` defaults to true — so a client used to get one
+    // frame of "ARTIST MEMBERSHIP / Stay listed." and the artist perk list
+    // before it swapped. iOS derives the same flag from the id it is passed
+    // (`PaywallView.isArtist`), never from store state. `bindRole` stays: the
+    // product query is the ViewModel's, and it is the seam that becomes
+    // role-aware when Play Billing is wired (see AppEnvironment).
+    val isArtist = role == AppRole.Artist
 
     LaunchedEffect(role) { viewModel.bindRole(role) }
 

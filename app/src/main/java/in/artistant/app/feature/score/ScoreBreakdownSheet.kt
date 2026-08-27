@@ -26,6 +26,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
+import java.util.Locale
 
 /**
  * Client-facing Bookability Score sheet — port of iOS ScoreBreakdownSheet.
@@ -166,9 +167,13 @@ private fun ReviewRow(avg: Double?, count: Int, failed: Boolean) {
     when {
         failed -> RealRow("Reviews", "Couldn't load")
         avg == null || count == 0 -> RealRow("Reviews", "none yet")
+        // Locale.US, not the device default: the row is mono numerals sitting
+        // beside "$gigs" and "96%", and a French/Arabic device would render this
+        // one figure as "4,5" (or in Eastern-Arabic digits) inside an otherwise
+        // ASCII column.
         else -> RealRow(
             "Reviews",
-            String.format("%.1f", avg),
+            String.format(Locale.US, "%.1f", avg),
             if (count == 1) "across 1 review" else "across $count reviews",
         )
     }

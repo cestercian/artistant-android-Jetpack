@@ -147,14 +147,19 @@ class ArtistHomeViewModel @Inject constructor(
                 // hold the others. Only the bookings read is allowed to fail the
                 // whole screen: an empty list rendered after a failed fetch is
                 // indistinguishable from a genuinely empty dashboard, and would
-                // paint booked days as open. The quote read degrades to its own
-                // truthful default; the profile and score reads carry their
-                // outcome forward instead, because "the read failed" and "the
-                // field is empty" are different answers and both the banners and
-                // the standing card below depend on which.
+                // paint booked days as open. The other three carry their outcome
+                // forward as a Result instead, because "the read failed" and
+                // "the field is empty" are different answers, and the banners,
+                // the quote rail and the standing card below all depend on which.
                 val loaded = coroutineScope {
                     val bookingsJob = async { bookingsRepository.listForArtist() }
-                    val quotesJob = async { runCatching { requestsRepository.listForArtist() }.getOrDefault(emptyList()) }
+                    // The bookings reasoning one table over, and it bites harder
+                    // here: `getOrDefault(emptyList())` rendered a 403 or a
+                    // timeout on `gig_requests` as a rail with nothing in it, and
+                    // `quoteRequestsSection` self-hides when it is empty — so an
+                    // artist with three unanswered negotiations was shown a
+                    // dashboard saying there was nothing to answer, silently.
+                    val quotesJob = async { runCatching { requestsRepository.listForArtist() } }
                     // Kept as a Result, not flattened to null: `fetchSelfProfile`
                     // returns null for a genuinely-absent row and THROWS on a
                     // network/RLS failure, and the completeness banner below means
@@ -190,10 +195,14 @@ class ArtistHomeViewModel @Inject constructor(
                 // a second failure surface — but name the half that didn't land,
                 // because the detail line is the only thing telling the artist why
                 // their standing (or their name, or the completeness flag) looks
-                // wrong. Profile first when both fail: it's the wider outage.
+                // wrong. Profile first when several fail: it's the widest outage.
+                // Quotes outrank the score because a missing rail is work the
+                // artist can't answer, where a missing score is only reference.
                 val partialFailure = when {
                     loaded.profile.isFailure || artistResult?.isFailure == true ->
                         "Couldn't load your profile details. Check your connection and try again."
+                    loaded.quotes.isFailure ->
+                        "Couldn't load your quote requests. Check your connection and try again."
                     loaded.breakdown.isFailure ->
                         "Couldn't load your Bookability Score. Check your connection and try again."
                     else -> null
@@ -234,7 +243,11 @@ class ArtistHomeViewModel @Inject constructor(
                             artist?.name?.takeIf { it.isNotBlank() } ?: "Artist"
                         },
                         todayLabel = todayLabel(),
-                        openQuotes = openGigRequests(loaded.quotes),
+                        // Same rule as the identity and the standing card: a read
+                        // that failed is not news that the rail is empty, so keep
+                        // whatever the last good refresh put there.
+                        openQuotes = loaded.quotes.getOrNull()?.let { openGigRequests(it) }
+                            ?: prev.openQuotes,
                         // Same rule as the identity above: a blipped read is not
                         // news that the artist is new. `NewArtist` is the
                         // pre-hydration default only — never a failure fallback.
@@ -278,7 +291,8 @@ class ArtistHomeViewModel @Inject constructor(
 
     private data class LoadedDashboard(
         val bookings: List<Booking>,
-        val quotes: List<StoredRequest>,
+        /** success = the rail is known (empty included); failure = the read threw. */
+        val quotes: Result<List<StoredRequest>>,
         /** success(null) = no users row; failure = the read threw. Not interchangeable. */
         val profile: Result<SelfProfile?>,
         /** success = the row was read (zeros included); failure = the read threw. */

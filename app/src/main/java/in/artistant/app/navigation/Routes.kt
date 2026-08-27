@@ -1,32 +1,18 @@
 package `in`.artistant.app.navigation
 
-import kotlinx.serialization.Serializable
-
 /**
- * Type-safe Navigation-Compose routes (the two iOS `Route` enums' analogue).
- * M0 ships the top-level graph markers + stubbed per-role routes; screen args
- * fill in as those screens land (M1+).
+ * The route literals both NavHosts navigate by (the two iOS `Route` enums' analogue).
+ *
+ * Strings rather than Navigation-Compose's type-safe destinations. This file used to
+ * carry a second, `@Serializable` copy of the same table — graph markers plus a
+ * `ClientRoute`/`ArtistRoute` sealed interface per role — written in M0 against a typed-nav
+ * migration that never happened. Nothing referenced any of it through M0–M7 while both
+ * NavHosts routed through the constants below, so all it did was drift: `ClientRoute.Search`
+ * existed while the string layer never had a SEARCH constant at all. Deleted. If typed nav
+ * lands it lands as one migration of the live table, not as scaffolding kept warm beside it.
  */
 
-// Top-level graph destinations gated by ArtistantRoot.
-@Serializable data object SignupGraph
-@Serializable data object ClientGraph
-@Serializable data object ArtistGraph
-
-/** Client-side pushed routes. */
-sealed interface ClientRoute {
-    @Serializable data class ArtistProfile(val artistId: String) : ClientRoute
-    @Serializable data class Chat(val threadId: String) : ClientRoute
-    @Serializable data object Search : ClientRoute
-    /** M3 — booking funnel (request → accept). */
-    @Serializable data class BookingCompose(val artistId: String) : ClientRoute
-    @Serializable data object Checkout : ClientRoute
-    @Serializable data class Confirmed(val bookingId: String) : ClientRoute
-    @Serializable data class BookingDetail(val bookingId: String) : ClientRoute
-    @Serializable data class RequestQuote(val artistId: String) : ClientRoute
-}
-
-/** String routes for the client NavHost (mirrors [ClientRoute] until typed nav lands). */
+/** String routes for the client NavHost. */
 object ClientNavRoutes {
     const val CHAT = "chat/{threadId}"
     const val BOOKING = "booking/{artistId}"
@@ -53,15 +39,7 @@ object ClientNavRoutes {
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
 }
 
-/** Artist-side pushed routes. */
-sealed interface ArtistRoute {
-    @Serializable data class GigRequest(val id: String) : ArtistRoute
-    @Serializable data class BookingDetail(val bookingId: String) : ArtistRoute
-    @Serializable data object ScoreExplainer : ArtistRoute
-    @Serializable data object Wizard : ArtistRoute
-}
-
-/** String routes for the artist NavHost (mirrors [ArtistRoute] until typed nav lands). */
+/** String routes for the artist NavHost. */
 object ArtistNavRoutes {
     const val BOOKING_DETAIL = "booking_detail/{bookingId}"
     const val GIG_REQUEST = "gig_request/{requestId}"
