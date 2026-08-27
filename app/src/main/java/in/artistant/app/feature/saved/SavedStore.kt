@@ -5,6 +5,7 @@ import `in`.artistant.app.data.repository.SavedArtistsRepositoryError
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -63,10 +64,21 @@ class SavedStore @Inject constructor(
 
     fun toggle(artistId: String) {
         val id = artistId.lowercase()
-        _ids.update { if (id in it) it - id else it + id }
-        persistLocal()
-        jobs[id]?.cancel()
-        val job = scope.launch {
+        // Registered as unsettled BEFORE the optimistic set is published.
+        //
+        // [refreshFromServer] runs on this class's own IO scope (the init
+        // refresh) while taps arrive on Main, so the two genuinely interleave.
+        // Publishing first left a window where `_ids` already showed the heart
+        // and [jobs] did not yet name it: a refresh landing in that window read
+        // local={id}, remote={} (its `list()` predates the tap) and no in-flight
+        // protection, reconciled the tap away, and [persistLocal] then wrote the
+        // reverted set to disk — visibly un-hearting an artist whose `add` was
+        // about to succeed. Cold start plus a fast tap on Discover is exactly
+        // when the init refresh is in flight.
+        //
+        // LAZY because the body re-reads the desired state from `_ids`, so it
+        // must not run until the publish below has happened.
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             mutexFor(id).withLock {
                 // Re-read desired state after any superseded toggles.
                 val wantSaved = id in _ids.value
@@ -75,12 +87,16 @@ class SavedStore @Inject constructor(
                 }.onFailure { if (it is CancellationException) throw it }
             }
         }
-        jobs[id] = job
+        val superseded = jobs.put(id, job)
         // Prune on completion so the map means "writes still in flight" rather
         // than "artists ever hearted". Conditional on identity: a superseding
         // toggle cancels this job and installs its own, and this handler must not
         // then remove the newer entry.
         job.invokeOnCompletion { jobs.remove(id, job) }
+        _ids.update { if (id in it) it - id else it + id }
+        persistLocal()
+        superseded?.cancel()
+        job.start()
     }
 
     /**

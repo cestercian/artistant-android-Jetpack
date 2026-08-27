@@ -75,10 +75,17 @@ object PackagePricing {
      * still applies (a dock with no number reads as broken mid-load); once true
      * and the set is empty, there is no minimum and the dock says so instead of
      * inventing one.
+     *
+     * A non-positive figure is not a price on EITHER branch. `SearchRepository`
+     * maps a null `min_price` to `0`, so a package-less artist opened from a
+     * search or browse tile arrives here with `fallback = 0` while the stitch is
+     * still in flight — and the dock renders any non-null number, so that `0`
+     * read as "₹0", permanently if the stitch never landed. Same rule the tiles
+     * use in `DiscoverHeroLogic.fromPriceLabel`: positive or on request.
      */
     fun dockPrice(packages: List<ArtistPackage>, fallback: Int, packagesLoaded: Boolean): Int? = when {
-        packages.isNotEmpty() -> packages.minOf { it.price }
+        packages.isNotEmpty() -> packages.minOf { it.price }.takeIf { it > 0 }
         packagesLoaded -> null
-        else -> fallback
+        else -> fallback.takeIf { it > 0 }
     }
 }

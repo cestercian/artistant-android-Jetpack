@@ -128,6 +128,23 @@ class PackagePricingTest {
     }
 
     @Test
+    fun dockPrice_isNull_whenTheLoadingFallbackIsItselfZero() {
+        // SearchRepository maps a null `min_price` to 0, so a package-less artist
+        // opened from a search tile arrives with fallback 0 while the stitch is
+        // still in flight. ActionDock renders any non-null number, so returning 0
+        // here printed "₹0" — and permanently if the stitch never landed.
+        assertEquals(null, PackagePricing.dockPrice(emptyList(), fallback = 0, packagesLoaded = false))
+    }
+
+    @Test
+    fun dockPrice_isNull_whenEveryPublishedTierIsFree() {
+        // Same rule on the other branch: a zero minimum is not a price to quote.
+        val free = listOf(pkg("p0", "Guest spot", 0))
+
+        assertEquals(null, PackagePricing.dockPrice(free, fallback = 210_000, packagesLoaded = true))
+    }
+
+    @Test
     fun dockPrice_agreesWithFromPrice_wheneverTiersExist() {
         val packages = listOf(pkg("p0", "A", 40_000), pkg("p1", "B", 15_000))
 
