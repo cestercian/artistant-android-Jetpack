@@ -53,6 +53,59 @@ class ObservabilityTest {
         assertFalse("email should be scrubbed: $scrubbed", scrubbed.contains("alice@example.com"))
     }
 
+    @Test
+    fun `pii scrub redacts a phone number in any of its three shapes`() {
+        val contiguous = PiiScrub.scrub("call +919876543210 about the gig")
+        assertFalse("+91 number must be scrubbed: $contiguous", contiguous.contains("9876543210"))
+        assertTrue(contiguous.contains("[REDACTED:PHONE]"))
+
+        val spaceGrouped = PiiScrub.scrub("call 98765 43210 about the gig")
+        assertFalse("space-grouped number must be scrubbed: $spaceGrouped", spaceGrouped.contains("98765"))
+        assertTrue(spaceGrouped.contains("[REDACTED:PHONE]"))
+
+        val dashGrouped = PiiScrub.scrub("call 98765-43210 about the gig")
+        assertFalse("dash-grouped number must be scrubbed: $dashGrouped", dashGrouped.contains("43210"))
+        assertTrue(dashGrouped.contains("[REDACTED:PHONE]"))
+
+        val bare = PiiScrub.scrub("call 9876543210 about the gig")
+        assertFalse("bare 10-digit run must be scrubbed: $bare", bare.contains("9876543210"))
+        assertTrue(bare.contains("[REDACTED:PHONE]"))
+    }
+
+    /**
+     * The header's ORDER invariant, pinned: "a URL can embed a phone — flag the
+     * whole URL, don't split it." If a phone pass ever ran before the URL pass,
+     * this would leave a dangling [REDACTED:PHONE] token inside a mangled link
+     * instead of one clean URL redaction.
+     */
+    @Test
+    fun `pii scrub redacts a contact-leak url whole, embedded phone included`() {
+        val whatsapp = PiiScrub.scrub("ping me on wa.me/919876543210 instead")
+        assertFalse("link digits must not survive as a bare number: $whatsapp", whatsapp.contains("9876543210"))
+        assertTrue(whatsapp.contains("[REDACTED:URL]"))
+        assertFalse(
+            "the URL pass must consume the phone, not leave a second token: $whatsapp",
+            whatsapp.contains("[REDACTED:PHONE]"),
+        )
+
+        val telegram = PiiScrub.scrub("or t.me/x works too")
+        assertFalse(telegram.contains("t.me/x"))
+        assertTrue(telegram.contains("[REDACTED:URL]"))
+    }
+
+    /** The stated false-positive boundary: short digit runs with no phone/email/URL shape. */
+    @Test
+    fun `pii scrub leaves benign short numbers untouched`() {
+        val price = "total is ₹1,00,000 for the evening"
+        assertEquals(price, PiiScrub.scrub(price))
+
+        val time = "load-in is at 8:30 PM sharp"
+        assertEquals(time, PiiScrub.scrub(time))
+
+        val date = "booked for 2026-08-15"
+        assertEquals(date, PiiScrub.scrub(date))
+    }
+
     /**
      * The leak this pins: `record` used to scrub only `throwable.message` and hand the RAW
      * throwable on, and the PII in a wrapped repository failure lives in the CAUSE — so the

@@ -138,23 +138,38 @@ class DiscoverViewModel @Inject constructor(
             top.artists + city.artists + fresh.artists + comedy.artists,
         )
 
-        _state.update {
-            it.copy(
-                hero = top.artists.take(5),
-                featured = top.artists.take(8),
-                topIndia = top.artists.take(10),
-                topBangalore = city.artists.take(10),
-                newOnArtistant = fresh.artists.take(10),
-                comedy = comedy.artists.take(10),
-                isLoading = false,
-                loadError = null,
-            )
-        }
+        _state.update { applyRails(it, top.artists, city.artists, fresh.artists, comedy.artists) }
     }
 
     companion object {
         private const val TOP_CITY = "Bangalore"
         private val COMEDY_CATEGORIES = listOf("Stand-up")
+
+        /**
+         * The six-rail projection [loadRails] applies once all four queries land.
+         *
+         * Pure and `internal` (not `private`) so the mapping — which artist page
+         * feeds which rail, and how many rows each keeps — can be pinned by a JVM
+         * test without a ViewModel runtime, the same trade [monthGridCells] makes.
+         * `top` alone feeds three rails (hero/featured/topIndia); `city`/`fresh`/
+         * `comedy` are each one dedicated query.
+         */
+        internal fun applyRails(
+            state: DiscoverUiState,
+            top: List<Artist>,
+            city: List<Artist>,
+            fresh: List<Artist>,
+            comedy: List<Artist>,
+        ): DiscoverUiState = state.copy(
+            hero = top.take(5),
+            featured = top.take(8),
+            topIndia = top.take(10),
+            topBangalore = city.take(10),
+            newOnArtistant = fresh.take(10),
+            comedy = comedy.take(10),
+            isLoading = false,
+            loadError = null,
+        )
 
         /**
          * The detail line under both failure surfaces — the full-screen empty

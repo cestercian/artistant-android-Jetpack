@@ -93,6 +93,15 @@ class MessagesRepositoryLogicTest {
     // does — the domain `Thread` collapses them to one viewer-relative flag, so
     // asserting through that would read the same field for both seats and could
     // never catch a cross-side write.
+    //
+    // What these four do NOT pin: which patch type `SupabaseMessagesRepository
+    // .setMuted` itself picks. That decision is inline in a suspend function that
+    // needs a live `SupabaseClient`, so it isn't reachable from a JVM test until
+    // the seat/patch choice is pulled out into a pure helper the way `nextCursor`
+    // was for search paging. Until then these four pin the FAKE's contract — the
+    // one the ViewModel tests page through — not the server write; a wrong-column
+    // regression there is at least loud rather than silent (the guard trigger
+    // above), which is the whole reason it is graded a minor gap and not a bug.
 
     @Test
     fun mutingAsTheClientWritesTheClientColumnAndLeavesTheArtistsUntouched() = runTest {

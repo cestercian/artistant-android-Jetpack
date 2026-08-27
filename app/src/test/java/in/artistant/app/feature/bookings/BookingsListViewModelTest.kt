@@ -100,11 +100,9 @@ class BookingsListViewModelTest {
     }
 
     @Test
-    fun groupingNeverLosesOrReordersRows() = runTest {
-        // NOTE: `monthLabelFromDateLabel` does NOT currently fold the canonical
-        // "EEE, MMM d, yyyy" label down to "MMM yyyy" — see the Findings section
-        // of the PR — so this asserts only the part that holds today: every row
-        // survives grouping, in list order.
+    fun groupingFoldsSameMonthRowsUnderOneHeaderAndNeverLosesOrReordersRows() = runTest {
+        // b1/b2 share May, b3 is June: this pins PR #50's fix — same-month rows
+        // fold under ONE header instead of one header per row.
         val model = vm(
             FakeBookingsRepository(
                 listOf(
@@ -116,11 +114,12 @@ class BookingsListViewModelTest {
         )
 
         val grouped = model.groupedByMonth()
+        assertEquals(listOf("May 2026", "June 2026"), grouped.map { it.first })
+        assertEquals(2, grouped.first().second.size)
         assertEquals(
             listOf("b1", "b2", "b3"),
             grouped.flatMap { it.second }.map { it.booking.id },
         )
-        assertTrue(grouped.all { it.first.isNotBlank() })
     }
 
     @Test

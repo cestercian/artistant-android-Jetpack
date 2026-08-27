@@ -212,8 +212,15 @@ object HarnessRepositories {
     // Pages the whole fixture roster rather than the single fixture artist: Discover's rails
     // group by category and the filter sheet derives its facets from the distinct categories
     // and cities present, so a one-card roster would render neither.
+    //
+    // Handed `artistsImpl` for the same reason the real search holds an ArtistsRepository: it
+    // feeds every returned partial into the by-id cache. SearchViewModel has no cache of its
+    // own, and ArtistProfileViewModel resolves a tapped card through find()/ensureFull() —
+    // which, with artistsImpl seeded with the fixture artist ALONE, answered for nobody else
+    // on the roster. Tapping a search result rendered "Artist not found." unless Discover had
+    // happened to warm the cache first.
     private val searchImpl: FakeSearchRepository by lazy {
-        FakeSearchRepository(roster)
+        FakeSearchRepository(roster, artistsRepository = artistsImpl)
     }
 
     private val reviewsImpl: FakeReviewsRepository by lazy {

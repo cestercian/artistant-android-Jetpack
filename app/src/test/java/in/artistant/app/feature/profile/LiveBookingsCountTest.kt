@@ -89,7 +89,9 @@ class LiveBookingsCountTest {
         BookingStatus.entries.forEach { status ->
             val one = listOf(booking(status = status))
             val live = liveBookingsCount(one)
-            val completed = one.count { it.status == BookingStatus.Completed }
+            // The shipped expression, not a copy of it — a change to what
+            // `completedBookingsCount` counts must be able to break this test.
+            val completed = completedBookingsCount(one)
             assertEquals("$status counted in both columns", 0, live * completed)
         }
     }

@@ -1,5 +1,6 @@
 package `in`.artistant.app.data.repository
 
+import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.designsystem.theme.ArtistGradient
@@ -24,6 +25,17 @@ class FakeArtistsRepository(
      * from one that renders the "Artist" placeholder forever.
      */
     remote: List<Artist> = emptyList(),
+    /**
+     * The signed-in artist — the one row [mutateSelf], [updateAvailability] and
+     * [setPublished] are allowed to touch. Leave it unset when at most one
+     * artist is ever seeded, where "self" is unambiguous; name it explicitly
+     * for a multi-artist fake. Before this parameter existed, every self-row
+     * edit resolved its target as `byId.keys.firstOrNull()` — insertion order,
+     * not identity — so a multi-artist fixture could have a press-kit save
+     * land on the WRONG artist while "my edit is visible on the next read"
+     * still passed.
+     */
+    private val selfId: String? = null,
 ) : ArtistsRepository {
 
     private val byId = seed.associateBy { it.id.lowercase() }.toMutableMap()
@@ -144,6 +156,10 @@ class FakeArtistsRepository(
         private set
 
     override suspend fun setPublished(artistId: String, published: Boolean) {
+        // Mirrors the real repository's `require(userId == artistId.lowercase())`
+        // self-only guard — resolveSelfId() throws the same NotFoundOrUnauthorized
+        // signal the real one throws when there's no session to check against.
+        require(resolveSelfId() == artistId.lowercase()) { "Can only publish self." }
         this.published = published
         setupComplete = true
     }
@@ -152,13 +168,13 @@ class FakeArtistsRepository(
 
     override suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>) {
         lastAvailability = AvailabilityDraft(daysAvailable, timeSlots)
-        val id = byId.keys.firstOrNull() ?: return
-        byId[id] = byId[id]!!.copy(daysAvailable = daysAvailable, timeSlots = timeSlots)
+        val id = resolveSelfId()
+        byId[id] = byId.getValue(id).copy(daysAvailable = daysAvailable, timeSlots = timeSlots)
         _cacheGeneration.value = _cacheGeneration.value + 1
     }
 
     /**
-     * The narrow self-row edits, applied to whichever artist the fake holds.
+     * The narrow self-row edits, applied to [resolveSelfId]'s target only.
      *
      * They mutate the cached row rather than only recording the call, because the
      * thing worth testing about them is that a save is VISIBLE on the next read —
@@ -206,9 +222,21 @@ class FakeArtistsRepository(
         }
 
     private fun mutateSelf(transform: (Artist) -> Artist) {
-        val id = byId.keys.firstOrNull() ?: return
+        val id = resolveSelfId()
         byId[id] = transform(byId.getValue(id))
         _cacheGeneration.value = _cacheGeneration.value + 1
+    }
+
+    /**
+     * [selfId] when named, else the one artist a single-artist fake holds.
+     * Throws the same signal the real repository throws when there's no
+     * session, rather than silently guessing a target the way
+     * `byId.keys.firstOrNull()` used to (see [selfId]'s doc).
+     */
+    private fun resolveSelfId(): String {
+        val id = (selfId ?: byId.keys.singleOrNull())?.lowercase()
+        if (id == null || id !in byId) throw AppError.NotFoundOrUnauthorized
+        return id
     }
 
     fun seedFull(artists: List<Artist>) {

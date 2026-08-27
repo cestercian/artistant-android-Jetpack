@@ -1,8 +1,11 @@
 package `in`.artistant.app.data.repository
 
+import `in`.artistant.app.core.result.AppError
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -59,8 +62,76 @@ class ArtistsRepositoryLogicTest {
         assertEquals(ARTIST, repo.ensureFull(ARTIST)?.id)
     }
 
+    @Test
+    fun cache_neverDowngradesAHydratedArtist() = runTest {
+        val full = FakeArtistsRepository.sample(id = "a1", name = "Full Name").copy(bio = "full bio")
+        val repo = FakeArtistsRepository(seed = listOf(full))
+        repo.cache(listOf(FakeArtistsRepository.sample(id = "a1", name = "Partial").copy(bio = "")))
+        assertEquals("Full Name", repo.find("a1")?.name)
+        assertEquals("full bio", repo.find("a1")?.bio)
+    }
+
+    @Test
+    fun ensureFull_returnsNullOnFailure() = runTest {
+        val repo = FakeArtistsRepository(seed = listOf(FakeArtistsRepository.sample()))
+        repo.failFetch = true
+        assertNull(repo.ensureFull("a1"))
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Self-row edits — mutateSelf/updateAvailability/setPublished used to
+    // resolve their target as `byId.keys.firstOrNull()`, insertion order
+    // rather than identity, so a multi-artist fake could have a press-kit
+    // save land on the WRONG artist while "my edit is visible on the next
+    // read" still passed.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun aSelfRowEditOnAMultiArtistFakeWithNoSelfIdRefusesRatherThanGuess() = runTest {
+        val repo = FakeArtistsRepository(
+            seed = listOf(
+                FakeArtistsRepository.sample(id = ARTIST),
+                FakeArtistsRepository.sample(id = OTHER_ARTIST),
+            ),
+        )
+
+        val err = runCatching { repo.updateBio("new bio") }.exceptionOrNull()
+
+        assertTrue("expected NotFoundOrUnauthorized, got $err", err is AppError.NotFoundOrUnauthorized)
+        // Neither row moved — the old bug wrote silently to whichever key came first.
+        assertEquals("Live sets for rooftops and weddings.", repo.find(ARTIST)?.bio)
+        assertEquals("Live sets for rooftops and weddings.", repo.find(OTHER_ARTIST)?.bio)
+    }
+
+    @Test
+    fun aSelfRowEditTargetsTheNamedSelfId_notWhicheverArtistWasSeededFirst() = runTest {
+        val repo = FakeArtistsRepository(
+            seed = listOf(
+                FakeArtistsRepository.sample(id = ARTIST),
+                FakeArtistsRepository.sample(id = OTHER_ARTIST),
+            ),
+            selfId = OTHER_ARTIST,
+        )
+
+        repo.updateBio("new bio")
+
+        assertEquals("Live sets for rooftops and weddings.", repo.find(ARTIST)?.bio)
+        assertEquals("new bio", repo.find(OTHER_ARTIST)?.bio)
+    }
+
+    @Test
+    fun setPublished_refusesAnArtistIdThatIsNotSelf() = runTest {
+        val repo = FakeArtistsRepository(seed = listOf(FakeArtistsRepository.sample(id = ARTIST)))
+
+        val err = runCatching { repo.setPublished(OTHER_ARTIST, published = true) }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $err", err is IllegalArgumentException)
+        assertFalse(repo.published)
+    }
+
     private companion object {
         const val ARTIST = "11111111-1111-1111-1111-111111111111"
+        const val OTHER_ARTIST = "22222222-2222-2222-2222-222222222222"
         const val NOT_AN_ARTIST = "33333333-3333-3333-3333-333333333333"
     }
 }

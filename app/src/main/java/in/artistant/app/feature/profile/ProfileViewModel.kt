@@ -221,7 +221,7 @@ class ProfileViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         bookingsCount = liveBookingsCount(bookings),
-                        completedCount = bookings.count { b -> b.status == BookingStatus.Completed },
+                        completedCount = completedBookingsCount(bookings),
                         savedCount = savedStore.ids.value.size,
                     )
                 }
@@ -481,6 +481,19 @@ internal suspend fun cleanUpAfterSignOut(
  * visible at all (the Bookings tab filters it out entirely).
  */
 fun liveBookingsCount(bookings: List<Booking>): Int = bookings.count { it.status.isLive() }
+
+/**
+ * The profile header's "Completed" column — [liveBookingsCount]'s counterpart.
+ *
+ * A plain equality on [BookingStatus.Completed], but pulled out beside it
+ * rather than inlined at the call site: the two counts are asserted never to
+ * double-count a single booking (`no status is counted in both columns`, in
+ * the test suite), and that assertion is only worth anything if it calls the
+ * SAME expression that ships — duplicating it in-test would let the two drift
+ * apart silently.
+ */
+fun completedBookingsCount(bookings: List<Booking>): Int =
+    bookings.count { it.status == BookingStatus.Completed }
 
 /**
  * What one column of the profile stat band prints.

@@ -10,6 +10,8 @@ import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.artist
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -198,6 +200,33 @@ class BlockedAccountsViewModelTest {
 
         assertEquals(1, model.state.value.rows.size)
         assertNotNull(model.state.value.actionError)
+    }
+
+    /**
+     * Pins [FakeBlockedUsersStore.toggle]'s own contract, independent of
+     * whatever the ViewModel's collector happens to catch: a failed write must
+     * still emit the optimistic removal BEFORE it rolls back — exactly what
+     * `ServerBlockedUsersStore.toggle` does — not skip touching the set at all.
+     * A double that short-circuits on `failWrites` before flipping anything
+     * (the bug this fixes) would leave [seen] with only the one entry.
+     */
+    @Test
+    fun fakeBlockedUsersStoreEmitsTheOptimisticRemovalBeforeRollingBackAFailedWrite() = runTest {
+        val store = FakeBlockedUsersStore(setOf(ARTIST_ID.lowercase())).apply { failWrites = true }
+        val seen = mutableListOf<Set<String>>()
+        // A truly unconfined collector, not the test scheduler's dispatcher: it
+        // must observe each of the store's emissions in order, including the
+        // one that gets superseded a line later.
+        val job = launch(Dispatchers.Unconfined) { store.blocked.collect { seen += it } }
+
+        val wrote = store.toggle(ARTIST_ID)
+
+        assertFalse(wrote)
+        assertEquals(
+            listOf(setOf(ARTIST_ID.lowercase()), emptySet(), setOf(ARTIST_ID.lowercase())),
+            seen,
+        )
+        job.cancel()
     }
 
     @Test
