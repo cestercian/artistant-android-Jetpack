@@ -15,6 +15,7 @@ import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -56,6 +57,20 @@ class AuthViewModel @Inject constructor(
                 }
             }
         }
+
+        // Everything this VM holds describes the attempt in front of the user, but the VM
+        // itself is Activity-scoped (the auth screen sits outside any NavHost, so
+        // `hiltViewModel()` binds it to the Activity) — so nothing ever drops it. A failed
+        // Google sign-in the user works around with Apple leaves "Sign-in failed" in
+        // `error` for the whole process, and the next person to reach this screen after a
+        // sign-out is shown the previous account's error / "check your inbox" note. A
+        // COMPLETED sign-in spends every one of those outcomes, so clear them there.
+        // `signInGeneration` rather than the session status: it bumps on a genuine sign-in
+        // only (never a restore or a background token refresh), and `drop(1)` skips the
+        // value the StateFlow replays when this collector starts.
+        viewModelScope.launch {
+            session.signInGeneration.drop(1).collect { _state.value = AuthUiState() }
+        }
     }
 
     fun signInWithGoogle(activityContext: Context) {
@@ -86,6 +101,7 @@ class AuthViewModel @Inject constructor(
 
     /** Email sign-in. Client-validates first, then defers to GoTrue. */
     fun signInWithEmail(email: String, password: String) {
+        beginEmailAttempt()
         if (!EmailRules.isValid(email)) {
             _state.update { it.copy(error = "Enter a valid email.") }
             return
@@ -110,6 +126,7 @@ class AuthViewModel @Inject constructor(
 
     /** Email sign-up. On confirmation-required, flips [AuthUiState.confirmationRequired]. */
     fun signUpWithEmail(email: String, password: String, fullName: String?) {
+        beginEmailAttempt()
         if (!EmailRules.isValid(email)) {
             _state.update { it.copy(error = "Enter a valid email.") }
             return
@@ -134,7 +151,18 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun clearError() = _state.update { it.copy(error = null) }
+    /**
+     * A new email submit supersedes the previous one's outcome. The "check your inbox" note
+     * is the outcome of ONE sign-up, and nothing else clears it — every later `_state.update`
+     * copies the flag forward — so a second address, a switch to sign-in or a re-opened sheet
+     * would keep claiming a confirmation mail is waiting for an email that never got one.
+     * parity: iOS clears the shared notice slot at the top of `submit()` (EmailAuthView).
+     */
+    private fun beginEmailAttempt() =
+        _state.update { it.copy(error = null, confirmationRequired = false) }
+
+    /** Sheet dismissed — drop both inline messages so a re-open starts clean. */
+    fun clearError() = _state.update { it.copy(error = null, confirmationRequired = false) }
 
     /**
      * Map a caught throwable to the error message to show, or null to stay silent.

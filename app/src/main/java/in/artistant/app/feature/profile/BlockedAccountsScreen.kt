@@ -90,8 +90,12 @@ fun BlockedAccountsScreen(
                         title = "Couldn't load your blocked accounts",
                         body = "This isn't the same as nobody being blocked — we couldn't reach " +
                             "your list to find out. Anyone you've blocked stays blocked.",
-                        actionLabel = "Retry",
-                        onAction = viewModel::refresh,
+                        // A retry that fails resolves to the screen it started
+                        // on, so with no in-flight label there is nothing to
+                        // tell a working button from a dead one — and offline is
+                        // the state this control exists for.
+                        actionLabel = if (state.isRefreshing) "Retrying…" else "Retry",
+                        onAction = { if (!state.isRefreshing) viewModel.refresh() },
                     )
                 }
 
@@ -123,7 +127,10 @@ fun BlockedAccountsScreen(
                         // device's own mirror — but it must not present itself
                         // as the whole truth.
                         if (state.status == BlockedAccountsStatus.Stale) {
-                            StaleNotice(onRetry = viewModel::refresh)
+                            StaleNotice(
+                                isRetrying = state.isRefreshing,
+                                onRetry = viewModel::refresh,
+                            )
                         }
 
                         state.actionError?.let { message ->
@@ -140,8 +147,11 @@ fun BlockedAccountsScreen(
                         }
 
                         if (state.rows.isEmpty()) {
-                            // Reached only when the server answered, so this can
-                            // safely claim the list is empty.
+                            // Either the server answered and there is nobody, or
+                            // this device's copy has been emptied by the Unblock
+                            // above while the server was unreachable. The claim
+                            // is safe in both: the stale case carries the notice
+                            // that qualifies it, one line up.
                             Box(Modifier.semantics { testTag = "blockedAccounts.empty" }) {
                                 EmptyState(
                                     title = "No one is blocked",
@@ -254,7 +264,7 @@ private fun BlockedAccountRowUi(
 
 /** The list is showing, but it's this device's copy and the server didn't answer. */
 @Composable
-private fun StaleNotice(onRetry: () -> Unit) {
+private fun StaleNotice(isRetrying: Boolean, onRetry: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(
@@ -270,15 +280,19 @@ private fun StaleNotice(onRetry: () -> Unit) {
             color = colors.warm,
         )
         Text(
-            "Retry",
+            // The retry says so while it runs. Offline it resolves back to this
+            // same notice, and a control that never acknowledges the tap reads
+            // as broken — which is the wrong impression to leave on the only way
+            // out of an accidental block.
+            if (isRetrying) "Retrying…" else "Retry",
             style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Bold),
-            color = colors.brand,
+            color = if (isRetrying) colors.ink3 else colors.brand,
             modifier = Modifier
                 // Same reason as Unblock: a footnote-sized word needs the tap
                 // node grown around it to clear the touch floor.
                 .heightIn(min = AppTheme.dimens.size.rowMin)
                 .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                .clickable(onClick = onRetry)
+                .clickable(enabled = !isRetrying, onClick = onRetry)
                 .wrapContentHeight()
                 .padding(vertical = space.xs)
                 .semantics { testTag = "blockedAccounts.retry" },

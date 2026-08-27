@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,8 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
@@ -74,6 +75,19 @@ fun ArtistGigsScreen(
     val busyDays = remember(state.items, year, month) {
         state.items.mapNotNull { dayOfMonthInMonth(it.booking.date, year, month) }.toSet()
     }
+    // Both hoisted out of the list body below: `LazyListScope` is not a
+    // composable scope, so nothing inside the LazyColumn can `remember`.
+    // Null = no day picked, which is a different answer from "that day is empty".
+    val selectedRows = remember(state.items, selectedDay, year, month) {
+        selectedDay?.let { day ->
+            state.items.filter { dayOfMonthInMonth(it.booking.date, year, month) == day }
+        }
+    }
+    // Grouped once per list rather than once per recomposition, and keyed on the
+    // COLLECTED state: `groupedByMonth()` reads `_state.value` directly, which is
+    // not a snapshot read, so this scope's subscription to `items` used to be
+    // inherited from the branch conditions below rather than stated here.
+    val monthGroups = remember(state.items) { viewModel.groupedByMonth() }
 
     PullToRefreshBox(
         isRefreshing = state.isLoading && state.items.isNotEmpty(),
@@ -96,53 +110,63 @@ fun ArtistGigsScreen(
                 )
             }
             state.items.isEmpty() -> {
+                // Not "Confirmed bookings": this list is everything that isn't
+                // cancelled, so an unanswered `pending_confirm` request lands here
+                // too and shades its day on the grid. Promising only confirmed
+                // work and then shading a request the artist hasn't accepted is
+                // the screen contradicting itself.
                 EmptyState(
                     title = "No gigs yet",
-                    body = "Confirmed bookings will show up on your calendar.",
+                    body = "Requests and confirmed gigs will show up on your calendar.",
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
             else -> {
                 RevealOnAppear {
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
+                    // One LazyColumn for the whole list, for the reason the
+                    // artist dashboard spells out at length: same artist, same
+                    // mid-range phone. As an eager `Column(verticalScroll)` an
+                    // artist with a year of gigs composed, measured and laid out
+                    // every row of every month — plus a header per month — before
+                    // the first frame, while the dashboard next door composes
+                    // only what's on screen.
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = space.xxl),
                     ) {
                         // No screen heading — see the matching note on the
                         // client Bookings tab. The month header IS this
                         // screen's title, and two serif titles a line apart
                         // read as a mistake.
-                        MonthCalendarHeader(
-                            monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
-                            onPrevMonth = { stepMonth(-1) },
-                            onNextMonth = { stepMonth(1) },
-                            onSelectMonth = pickMonth,
-                        )
-                        MonthDayGrid(
-                            year = year,
-                            month = month,
-                            busyDays = busyDays,
-                            selectedDay = selectedDay,
-                            onDayClick = { day ->
-                                selectedDay = if (selectedDay == day) null else day
-                            },
-                        )
-                        Spacer(Modifier.height(space.lg))
-                        state.error?.let { msg ->
-                            Text(
-                                msg,
-                                style = AppTheme.type.footnote,
-                                color = colors.hot,
-                                modifier = Modifier.padding(horizontal = space.lg),
+                        item(key = "monthHeader") {
+                            MonthCalendarHeader(
+                                monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
+                                onPrevMonth = { stepMonth(-1) },
+                                onNextMonth = { stepMonth(1) },
+                                onSelectMonth = pickMonth,
                             )
-                            Spacer(Modifier.height(space.md))
                         }
-                        val selectedRows = if (selectedDay == null) {
-                            null
-                        } else {
-                            state.items.filter {
-                                dayOfMonthInMonth(it.booking.date, year, month) == selectedDay
+                        item(key = "grid") {
+                            MonthDayGrid(
+                                year = year,
+                                month = month,
+                                busyDays = busyDays,
+                                selectedDay = selectedDay,
+                                onDayClick = { day ->
+                                    selectedDay = if (selectedDay == day) null else day
+                                },
+                            )
+                            Spacer(Modifier.height(space.lg))
+                        }
+                        state.error?.let { msg ->
+                            item(key = "refreshError") {
+                                Text(
+                                    msg,
+                                    style = AppTheme.type.footnote,
+                                    color = colors.hot,
+                                    modifier = Modifier.padding(horizontal = space.lg),
+                                )
+                                Spacer(Modifier.height(space.md))
                             }
                         }
                         // Same as the client calendar: a day tap filters, so the
@@ -155,41 +179,45 @@ fun ArtistGigsScreen(
                         // only other escape is re-tapping the grid tile, which is
                         // invisible unless you remember tapping it.
                         selectedDay?.let { day ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = space.lg),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    selectedDayLabel(year, month, day),
-                                    style = AppTheme.type.headline,
-                                    color = colors.ink,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    "Show all",
-                                    style = AppTheme.type.footnote,
-                                    color = colors.brand,
-                                    modifier = Modifier
-                                        .heightIn(min = AppTheme.dimens.size.rowMin)
-                                        .clickable(role = Role.Button) { selectedDay = null }
-                                        .wrapContentHeight()
-                                        .padding(start = space.md),
-                                )
+                            item(key = "selectedDay") {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = space.lg),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        selectedDayLabel(year, month, day),
+                                        style = AppTheme.type.headline,
+                                        color = colors.ink,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        "Show all",
+                                        style = AppTheme.type.footnote,
+                                        color = colors.brand,
+                                        modifier = Modifier
+                                            .heightIn(min = AppTheme.dimens.size.rowMin)
+                                            .clickable(role = Role.Button) { selectedDay = null }
+                                            .wrapContentHeight()
+                                            .padding(start = space.md),
+                                    )
+                                }
+                                Spacer(Modifier.height(space.sm))
                             }
-                            Spacer(Modifier.height(space.sm))
                         }
                         if (selectedRows != null && selectedRows.isEmpty()) {
-                            Text(
-                                "No gigs on this day",
-                                style = AppTheme.type.footnote,
-                                color = colors.ink3,
-                                modifier = Modifier.padding(horizontal = space.lg),
-                            )
+                            item(key = "emptyDay") {
+                                Text(
+                                    "No gigs on this day",
+                                    style = AppTheme.type.footnote,
+                                    color = colors.ink3,
+                                    modifier = Modifier.padding(horizontal = space.lg),
+                                )
+                            }
                         } else {
                             val rows = if (selectedRows == null) {
-                                viewModel.groupedByMonth()
+                                monthGroups
                             } else {
                                 listOf("Selected" to selectedRows)
                             }
@@ -197,9 +225,13 @@ fun ArtistGigsScreen(
                             // grid's 0-based Calendar.MONTH in this scope, and the
                             // two are very different things to shadow.
                             rows.forEach { (groupLabel, group) ->
-                                if (selectedDay == null) MonthCalendarHeader(monthLabel = groupLabel)
-                                group.forEach { item ->
-                                    val b = item.booking
+                                if (selectedDay == null) {
+                                    item(key = "month-$groupLabel") {
+                                        MonthCalendarHeader(monthLabel = groupLabel)
+                                    }
+                                }
+                                items(group, key = { "gig-${it.booking.id}" }) { row ->
+                                    val b = row.booking
                                     Column(
                                         Modifier
                                             .clickable { onBookingClick(b.id) }
@@ -207,7 +239,7 @@ fun ArtistGigsScreen(
                                     ) {
                                         Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
                                         Spacer(Modifier.height(space.xs))
-                                        Text(item.clientName, style = AppTheme.type.headline, color = colors.ink)
+                                        Text(row.clientName, style = AppTheme.type.headline, color = colors.ink)
                                         Text(
                                             "${b.time} · ${b.status.label}",
                                             style = AppTheme.type.footnote,
@@ -218,7 +250,6 @@ fun ArtistGigsScreen(
                                 }
                             }
                         }
-                        Spacer(Modifier.height(space.xxl))
                     }
                 }
             }

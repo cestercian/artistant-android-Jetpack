@@ -70,113 +70,129 @@ fun BookingsScreen(
         if (selectedDay == null) state.items
         else state.items.filter { dayOfMonthInMonth(it.booking.date, year, month) == selectedDay }
     }
+    // Grouped once per list rather than once per recomposition, and keyed on the
+    // COLLECTED state: `groupedByMonth()` reads `_state.value` directly, which is
+    // not a snapshot read, so this scope's subscription to `items` used to be
+    // inherited from the branch conditions below rather than stated here.
+    val monthGroups = remember(state.items) { viewModel.groupedByMonth() }
 
-    when {
-        state.isLoading && state.items.isEmpty() -> {
-            Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+    // The screen's chrome is painted in one place. The error and empty branches
+    // used to drop both the caller's `modifier` and the flat `colors.bg`, so the
+    // two states a test is most likely to target lost any padding/testTag passed
+    // in and rendered on the scaffold's ambient wash instead of the background
+    // every other state paints.
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(colors.bg),
+    ) {
+        when {
+            state.isLoading && state.items.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = colors.brand)
+                }
             }
-        }
-        state.error != null && state.items.isEmpty() -> {
-            EmptyState(
-                title = "Couldn't load bookings",
-                body = state.error,
-                actionLabel = "Retry",
-                onAction = viewModel::refresh,
-            )
-        }
-        state.items.isEmpty() -> {
-            EmptyState(
-                title = "No bookings yet",
-                body = "When you send a request, it'll show up here.",
-            )
-        }
-        else -> {
-            RevealOnAppear {
-                Column(
-                    modifier
-                        .fillMaxSize()
-                        .background(colors.bg)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    // No screen heading. The month IS the heading here — the
-                    // calendar header sets it at the display step — and stacking
-                    // a serif "Bookings" above a serif "August" gave the screen
-                    // two competing titles one line apart. The tab bar already
-                    // says which tab this is.
-                    MonthCalendarHeader(
-                        monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
-                        onPrevMonth = { stepMonth(-1) },
-                        onNextMonth = { stepMonth(1) },
-                        onSelectMonth = pickMonth,
-                    )
-                    MonthDayGrid(
-                        year = year,
-                        month = month,
-                        busyDays = busyDays,
-                        selectedDay = selectedDay,
-                        onDayClick = { day ->
-                            selectedDay = if (selectedDay == day) null else day
-                        },
-                    )
-                    Spacer(Modifier.height(space.lg))
-                    // Picking a day filters the list, and until now nothing said
-                    // so — the reference names the selected day above its
-                    // schedule, and that heading is what tells you a short list
-                    // is short because you filtered it. It also gives the empty
-                    // case a date to be empty about.
-                    selectedDay?.let { day ->
-                        Text(
-                            selectedDayLabel(year, month, day),
-                            style = AppTheme.type.headline,
-                            color = colors.ink,
-                            modifier = Modifier.padding(horizontal = space.lg),
+            state.error != null && state.items.isEmpty() -> {
+                EmptyState(
+                    title = "Couldn't load bookings",
+                    body = state.error,
+                    actionLabel = "Retry",
+                    onAction = viewModel::refresh,
+                )
+            }
+            state.items.isEmpty() -> {
+                EmptyState(
+                    title = "No bookings yet",
+                    body = "When you send a request, it'll show up here.",
+                )
+            }
+            else -> {
+                RevealOnAppear {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        // No screen heading. The month IS the heading here — the
+                        // calendar header sets it at the display step — and
+                        // stacking a serif "Bookings" above a serif "August" gave
+                        // the screen two competing titles one line apart. The tab
+                        // bar already says which tab this is.
+                        MonthCalendarHeader(
+                            monthLabel = monthLabelFromEpoch(displayedMonth.firstDayEpochMs),
+                            onPrevMonth = { stepMonth(-1) },
+                            onNextMonth = { stepMonth(1) },
+                            onSelectMonth = pickMonth,
                         )
-                        Spacer(Modifier.height(space.sm))
-                    }
-                    if (selectedDay != null && filtered.isEmpty()) {
-                        Text(
-                            "No bookings on this day",
-                            style = AppTheme.type.footnote,
-                            color = colors.ink3,
-                            modifier = Modifier
-                                .padding(horizontal = space.lg)
-                                .clickable { selectedDay = null },
+                        MonthDayGrid(
+                            year = year,
+                            month = month,
+                            busyDays = busyDays,
+                            selectedDay = selectedDay,
+                            onDayClick = { day ->
+                                selectedDay = if (selectedDay == day) null else day
+                            },
                         )
-                    } else {
-                        val groups = if (selectedDay == null) {
-                            viewModel.groupedByMonth()
-                        } else {
-                            listOf("Selected" to filtered)
+                        Spacer(Modifier.height(space.lg))
+                        // Picking a day filters the list, and until now nothing
+                        // said so — the reference names the selected day above
+                        // its schedule, and that heading is what tells you a
+                        // short list is short because you filtered it. It also
+                        // gives the empty case a date to be empty about.
+                        selectedDay?.let { day ->
+                            Text(
+                                selectedDayLabel(year, month, day),
+                                style = AppTheme.type.headline,
+                                color = colors.ink,
+                                modifier = Modifier.padding(horizontal = space.lg),
+                            )
+                            Spacer(Modifier.height(space.sm))
                         }
-                        groups.forEach { (monthLabel, rows) ->
-                            if (selectedDay == null) MonthCalendarHeader(monthLabel = monthLabel)
-                            rows.forEach { item ->
-                                val b = item.booking
-                                Column(
-                                    Modifier
-                                        .clickable { onBookingClick(b.id) }
-                                        .padding(horizontal = space.lg, vertical = space.md),
-                                ) {
-                                    Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
-                                    Spacer(Modifier.height(space.xs))
-                                    Text(item.artistName, style = AppTheme.type.headline, color = colors.ink)
-                                    Text(
-                                        "${b.time} · ${b.venue}",
-                                        style = AppTheme.type.footnote,
-                                        color = colors.ink2,
-                                    )
-                                    Spacer(Modifier.height(space.xs))
-                                    // Status colour comes from the shared mapping, not a blanket
-                                    // brand tint: "Confirmed" and "Awaiting confirm" used to render
-                                    // in the same lime, so the label carried no signal.
-                                    Pill(b.status.label, tone = bookingStatusTone(b.status))
+                        if (selectedDay != null && filtered.isEmpty()) {
+                            Text(
+                                "No bookings on this day",
+                                style = AppTheme.type.footnote,
+                                color = colors.ink3,
+                                modifier = Modifier
+                                    .padding(horizontal = space.lg)
+                                    .clickable { selectedDay = null },
+                            )
+                        } else {
+                            val groups = if (selectedDay == null) {
+                                monthGroups
+                            } else {
+                                listOf("Selected" to filtered)
+                            }
+                            groups.forEach { (monthLabel, rows) ->
+                                if (selectedDay == null) MonthCalendarHeader(monthLabel = monthLabel)
+                                rows.forEach { item ->
+                                    val b = item.booking
+                                    Column(
+                                        Modifier
+                                            .clickable { onBookingClick(b.id) }
+                                            .padding(horizontal = space.lg, vertical = space.md),
+                                    ) {
+                                        Text(b.date, style = AppTheme.type.caption, color = colors.ink3)
+                                        Spacer(Modifier.height(space.xs))
+                                        Text(item.artistName, style = AppTheme.type.headline, color = colors.ink)
+                                        Text(
+                                            "${b.time} · ${b.venue}",
+                                            style = AppTheme.type.footnote,
+                                            color = colors.ink2,
+                                        )
+                                        Spacer(Modifier.height(space.xs))
+                                        // Status colour comes from the shared mapping, not a
+                                        // blanket brand tint: "Confirmed" and "Awaiting confirm"
+                                        // used to render in the same lime, so the label carried
+                                        // no signal.
+                                        Pill(b.status.label, tone = bookingStatusTone(b.status))
+                                    }
+                                    HRule(modifier = Modifier.padding(horizontal = space.lg))
                                 }
-                                HRule(modifier = Modifier.padding(horizontal = space.lg))
                             }
                         }
+                        Spacer(Modifier.height(space.xxl))
                     }
-                    Spacer(Modifier.height(space.xxl))
                 }
             }
         }

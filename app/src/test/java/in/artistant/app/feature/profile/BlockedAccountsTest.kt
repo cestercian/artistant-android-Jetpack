@@ -30,7 +30,12 @@ class BlockedAccountsTest {
     fun beforeTheFirstLoadCompletesTheScreenClaimsNothing() {
         assertEquals(
             BlockedAccountsStatus.Loading,
-            BlockedAccounts.status(loadCompleted = false, serverReadOk = false, rowCount = 0),
+            BlockedAccounts.status(
+                loadCompleted = false,
+                serverReadOk = false,
+                rowCount = 0,
+                everHadRows = false,
+            ),
         )
     }
 
@@ -38,7 +43,12 @@ class BlockedAccountsTest {
     fun aServerReadThatReturnedNothingMeansNobodyIsBlocked() {
         assertEquals(
             BlockedAccountsStatus.Ready,
-            BlockedAccounts.status(loadCompleted = true, serverReadOk = true, rowCount = 0),
+            BlockedAccounts.status(
+                loadCompleted = true,
+                serverReadOk = true,
+                rowCount = 0,
+                everHadRows = false,
+            ),
         )
     }
 
@@ -50,7 +60,12 @@ class BlockedAccountsTest {
         // person last week that they hadn't.
         assertEquals(
             BlockedAccountsStatus.Unavailable,
-            BlockedAccounts.status(loadCompleted = true, serverReadOk = false, rowCount = 0),
+            BlockedAccounts.status(
+                loadCompleted = true,
+                serverReadOk = false,
+                rowCount = 0,
+                everHadRows = false,
+            ),
         )
     }
 
@@ -61,7 +76,29 @@ class BlockedAccountsTest {
         // the complete list.
         assertEquals(
             BlockedAccountsStatus.Stale,
-            BlockedAccounts.status(loadCompleted = true, serverReadOk = false, rowCount = 2),
+            BlockedAccounts.status(
+                loadCompleted = true,
+                serverReadOk = false,
+                rowCount = 2,
+                everHadRows = true,
+            ),
+        )
+    }
+
+    @Test
+    fun emptyingAStaleListYourselfIsStillStaleNotAFailedLoad() {
+        // The user unblocked the last row while offline. Nothing about what we
+        // can READ changed — only what they asked for — so collapsing to
+        // Unavailable here would report a successful unblock as "Couldn't load
+        // your blocked accounts" and swap the whole body for an error.
+        assertEquals(
+            BlockedAccountsStatus.Stale,
+            BlockedAccounts.status(
+                loadCompleted = true,
+                serverReadOk = false,
+                rowCount = 0,
+                everHadRows = true,
+            ),
         )
     }
 

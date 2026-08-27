@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.signup
 
+import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +11,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +66,7 @@ fun LegalScreen(doc: LegalDoc, onClose: () -> Unit, modifier: Modifier = Modifie
     val space = AppTheme.dimens.space
     val context = LocalContext.current
     val sections = if (doc == LegalDoc.Terms) termsSections else privacySections
+    var linkError by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier
@@ -83,15 +89,30 @@ fun LegalScreen(doc: LegalDoc, onClose: () -> Unit, modifier: Modifier = Modifie
         }
 
         // Footer link out to the hosted version — the operator repoints the URL if needed.
-        Text(
-            "View online at ${doc.url.removePrefix("https://").substringBefore('/')}",
-            style = AppTheme.type.caption,
-            color = colors.brand,
-            modifier = Modifier.clickable {
-                context.startActivity(Intent(Intent.ACTION_VIEW, doc.url.toUri()))
-            },
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
+            Text(
+                "View online at ${doc.url.removePrefix("https://").substringBefore('/')}",
+                style = AppTheme.type.caption,
+                color = colors.brand,
+                modifier = Modifier.clickable { linkError = openLegalDoc(context, doc.url) },
+            )
+            linkError?.let {
+                Text(it, style = AppTheme.type.caption, color = colors.hot)
+            }
+        }
 
         PrimaryButton(text = "Close", onClick = onClose, fullWidth = true)
     }
 }
+
+/**
+ * Hand the hosted doc to the browser, reporting a failure instead of taking the app with it.
+ *
+ * `startActivity` throws `ActivityNotFoundException` on an image with no http(s) VIEW handler
+ * (kiosk/enterprise builds, stripped emulators), and this sheet hangs off the welcome screen —
+ * the first thing a new user sees, before any session exists. Same shape as `openMaps`/`shareGig`
+ * on BookingDetailScreen: null on success, the message to show on failure.
+ */
+private fun openLegalDoc(context: Context, url: String): String? =
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())); null }
+        .getOrElse { "Couldn't open a browser on this device." }

@@ -125,6 +125,12 @@ class FakeScoreRepository(
     var byId: Map<String, ScoreBreakdown> = emptyMap(),
     var history: List<ScoreHistoryPoint> = emptyList(),
     var failSelf: Boolean = false,
+    /**
+     * The history read throws, like the Supabase twin does on any transport/RLS
+     * failure. Its own flag rather than an empty [history], because "no rows" and
+     * "couldn't ask" are the distinction the explainer has to render differently.
+     */
+    var failHistory: Boolean = false,
 ) : ScoreRepository {
     override suspend fun breakdownForSelf(): ScoreBreakdown {
         if (failSelf) throw AppError.Unknown(IllegalStateException("score fail"))
@@ -134,7 +140,10 @@ class FakeScoreRepository(
     override suspend fun breakdown(artistId: String): ScoreBreakdown =
         byId[artistId.lowercase()] ?: ScoreBreakdown.NewArtist
 
-    override suspend fun historyForSelf(): List<ScoreHistoryPoint> = history
+    override suspend fun historyForSelf(): List<ScoreHistoryPoint> {
+        if (failHistory) throw AppError.Unknown(IllegalStateException("history fail"))
+        return history
+    }
 }
 
 @Serializable

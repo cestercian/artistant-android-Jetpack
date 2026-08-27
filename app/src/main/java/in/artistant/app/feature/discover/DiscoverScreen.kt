@@ -39,7 +39,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,7 +49,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -67,10 +65,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.availabilityKicker
-import `in`.artistant.app.common.util.formatInrShort
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.designsystem.component.ArtistTile
+import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
+import `in`.artistant.app.designsystem.component.InlineBanner
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.heroGlass
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -145,9 +144,20 @@ fun DiscoverScreen(
                 state.topIndia.isEmpty() &&
                 state.newOnArtistant.isEmpty() &&
                 state.comedy.isEmpty() -> {
+                // The copy used to read "Pull to refresh once the roster is
+                // live." — an instruction for the one gesture this branch cannot
+                // receive. PullToRefreshBox listens on a nested-scroll
+                // connection, and `EmptyState` is a plain Column with nothing
+                // scrollable in it, so no delta ever reaches the connection.
+                // Discover is also the NavHost start destination, so its
+                // ViewModel is never re-created and a tab switch won't refetch
+                // either: without a button of its own, an empty roster was a dead
+                // end. Same escape hatch the inbox's empty state carries.
                 EmptyState(
                     title = "No artists yet",
-                    body = "Pull to refresh once the roster is live.",
+                    body = "We're onboarding the first artists right now — check back in a moment.",
+                    actionLabel = "Refresh",
+                    onAction = viewModel::refresh,
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
@@ -171,6 +181,30 @@ fun DiscoverScreen(
                         // inset. With no hero (a city/comedy-only roster) the
                         // first rail would otherwise start under the clock.
                         item(key = "statusInset") { Spacer(Modifier.statusBarsPadding()) }
+                    }
+                    // A refresh that fails over a roster already on screen used
+                    // to be completely silent: the error branch above requires an
+                    // empty hero, so all a failed pull did was retract the
+                    // indicator — indistinguishable from a successful one, and
+                    // the user walks away believing the rails are current. It
+                    // sits here rather than above the hero because the hero owns
+                    // the status-bar inset and the first screenful; this is the
+                    // first thing in the rail stack. `refresh()` clears
+                    // `loadError`, so it self-hides on the next good load.
+                    if (state.loadError != null) {
+                        item(key = "refreshError") {
+                            InlineBanner(
+                                title = "Couldn't refresh the roster",
+                                detail = state.loadError,
+                                tone = BannerTone.Failure,
+                                actionLabel = "Retry",
+                                onAction = viewModel::refresh,
+                                modifier = Modifier
+                                    .padding(horizontal = AppTheme.dimens.space.xl)
+                                    .padding(top = AppTheme.dimens.space.md)
+                                    .semantics { testTag = "discover.refreshErrorBanner" },
+                            )
+                        }
                     }
                     if (state.featured.isNotEmpty()) {
                         item(key = "featured") {
@@ -474,7 +508,7 @@ private fun HeroMetaLine(artist: Artist) {
             )
         }
         MetaDot()
-        MetaText("FROM ${formatInrShort(artist.packages.firstOrNull()?.price ?: artist.price)}", ink)
+        MetaText(DiscoverHeroLogic.fromPriceLabel(artist.packages, artist.price), ink)
     }
 }
 
@@ -730,7 +764,7 @@ private fun FeatureFrame(artist: Artist, onClick: () -> Unit) {
                 )
                 MetaDot()
                 Text(
-                    "FROM ${formatInrShort(artist.packages.firstOrNull()?.price ?: artist.price)}",
+                    DiscoverHeroLogic.fromPriceLabel(artist.packages, artist.price),
                     style = AppTheme.type.frameMeta,
                     color = colors.inkOnMedia,
                     maxLines = 1,

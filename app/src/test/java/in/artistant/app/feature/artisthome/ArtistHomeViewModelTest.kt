@@ -2,7 +2,10 @@ package `in`.artistant.app.feature.artisthome
 
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.GigRequest
+import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.SelfProfile
+import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.FakeArtistsRepository
@@ -83,14 +86,21 @@ class ArtistHomeViewModelTest {
         artists: ArtistsRepository = FakeArtistsRepository(listOf(artist(id = ARTIST_ID))),
         users: UsersRepository = FakeUsersRepository(selfProfile = completeProfile),
         score: FakeScoreRepository = FakeScoreRepository(),
+        requests: FakeRequestsRepository = FakeRequestsRepository(),
     ) = ArtistHomeViewModel(
         bookingsRepository = bookings,
-        requestsRepository = FakeRequestsRepository(),
+        requestsRepository = requests,
         usersRepository = users,
         artistsRepository = artists,
         scoreRepository = score,
         entitlements = EntitlementStore(),
         viewer = ViewerIdentity { ARTIST_ID },
+    )
+
+    /** One unanswered negotiation — the row `quoteRequestsSection` renders. */
+    private fun openQuote(id: String) = StoredRequest(
+        raw = GigRequest(id = id, client = null, message = "Diwali set?", date = "Sat, Nov 7, 2026", amount = 40_000),
+        status = GigRequestStatus.Open,
     )
 
     private val newerBookings = listOf(
@@ -309,6 +319,57 @@ class ArtistHomeViewModelTest {
         assertEquals(ScoreTier.New, model.state.value.breakdown.tier)
         assertNull(model.state.value.breakdown.numericScore)
         assertNull("a successful read of zeros is not a failure", model.state.value.error)
+    }
+
+    // ── A failed quote read is not an empty inbox ───────────────────────────
+    //
+    // Same trap as the two above, on the one rail that is pure unanswered work.
+    // `getOrDefault(emptyList())` turned a 403 or a timeout on `gig_requests`
+    // into a rail with nothing in it — and the rail self-hides when it is empty,
+    // so the dashboard silently told an artist with open negotiations that there
+    // was nothing to answer, with no banner anywhere to contradict it.
+
+    @Test
+    fun blippedQuoteRead_doesNotEmptyTheQuoteRail() = runTest {
+        val requests = FakeRequestsRepository(listOf(openQuote("q-1"), openQuote("q-2")))
+        val model = vm(bookings = FakeBookingsRepository(), requests = requests)
+        advanceUntilIdle()
+        assertEquals(listOf("q-1", "q-2"), model.state.value.openQuotes.map { it.id })
+
+        // Second refresh, the gig_requests read blips.
+        requests.signedIn = false
+        model.refresh()
+        advanceUntilIdle()
+
+        assertEquals(
+            "a blipped quote read must not retract work the artist still owes an answer to",
+            listOf("q-1", "q-2"),
+            model.state.value.openQuotes.map { it.id },
+        )
+    }
+
+    @Test
+    fun failedQuoteRead_surfacesTheBanner_ratherThanSayingNothing() = runTest {
+        val model = vm(
+            bookings = FakeBookingsRepository(),
+            requests = FakeRequestsRepository(listOf(openQuote("q-1"))).apply { signedIn = false },
+        )
+        advanceUntilIdle()
+
+        // Nothing is knowable about the rail on a cold start, so it stays empty —
+        // but the artist has to be told that is a failure, not a quiet week.
+        assertTrue(model.state.value.openQuotes.isEmpty())
+        assertNotNull("the failure banner must say the quote half didn't load", model.state.value.error)
+    }
+
+    /** The other side of the fix: a genuinely quiet inbox must not raise a banner. */
+    @Test
+    fun aGenuinelyEmptyQuoteRail_isNotAFailure() = runTest {
+        val model = vm(bookings = FakeBookingsRepository(), requests = FakeRequestsRepository())
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.openQuotes.isEmpty())
+        assertNull("a successful read of nothing is not a failure", model.state.value.error)
     }
 
     /** Ranked and well clear of the `<5 gigs` New short-circuit. */

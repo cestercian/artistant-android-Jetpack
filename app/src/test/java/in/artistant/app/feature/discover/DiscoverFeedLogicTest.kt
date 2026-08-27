@@ -7,6 +7,7 @@ import `in`.artistant.app.data.repository.FakeSearchRepository
 import `in`.artistant.app.data.repository.SearchRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -42,6 +43,26 @@ class DiscoverFeedLogicTest {
             IllegalStateException("Could not find the function search_artists"),
         )
         assertTrue(msg.contains("couldn't load", ignoreCase = true))
+    }
+
+    /**
+     * The failure line lands on a plain `EmptyState` whenever there are no rails
+     * to show, and an `EmptyState` has nothing scrollable in it — so
+     * `PullToRefreshBox`'s nested-scroll connection never sees the gesture. The
+     * copy must not send the user after it; both surfaces carry a button.
+     */
+    @Test
+    fun `messageFor never instructs a pull-to-refresh the empty screen cannot receive`() {
+        val errors = listOf(
+            IllegalStateException("Could not find the function search_artists"),
+            IllegalStateException("socket closed"),
+        )
+        errors.forEach { e ->
+            assertFalse(
+                "failure copy points at the Retry button, not at a dead gesture",
+                DiscoverViewModel.messageFor(e).contains("pull to refresh", ignoreCase = true),
+            )
+        }
     }
 
     @Test

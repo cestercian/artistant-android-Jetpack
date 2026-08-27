@@ -58,6 +58,17 @@ import kotlin.math.min
 data class ScoreExplainerUiState(
     val breakdown: ScoreBreakdown = ScoreBreakdown.NewArtist,
     val history: List<ScoreHistoryPoint> = emptyList(),
+    /**
+     * The history read THREW, as opposed to returning nothing.
+     *
+     * Both arrive as an empty list and they mean opposite things: "no gigs have
+     * landed yet" against "we couldn't ask". Flattening them hid the History
+     * section entirely on a transport/RLS failure and, once the sheet was open,
+     * made ScoreHistorySheet's "No history yet" a statement we hadn't earned.
+     * iOS carries the same flag (`ScoreHistorySheet.fetchError`, and
+     * `breakdownError` for the sibling read).
+     */
+    val historyFailed: Boolean = false,
     val isLoading: Boolean = true,
     val error: String? = null,
 )
@@ -77,10 +88,20 @@ class ScoreExplainerViewModel @Inject constructor(
         _state.update { it.copy(isLoading = true, error = null) }
         runCatching {
             val b = scores.breakdownForSelf()
-            val h = runCatching { scores.historyForSelf() }.getOrDefault(emptyList())
-            b to h
-        }.onSuccess { (b, h) ->
-            _state.update { it.copy(breakdown = b, history = h, isLoading = false) }
+            // The history read stays subordinate — the ring is the screen, and a
+            // dead sparkline must not blank it. But the failure is CARRIED, not
+            // discarded: see [ScoreExplainerUiState.historyFailed].
+            val h = runCatching { scores.historyForSelf() }
+            Triple(b, h.getOrDefault(emptyList()), h.isFailure)
+        }.onSuccess { (b, h, historyFailed) ->
+            _state.update {
+                it.copy(
+                    breakdown = b,
+                    history = h,
+                    historyFailed = historyFailed,
+                    isLoading = false,
+                )
+            }
         }.onFailure { e ->
             _state.update {
                 it.copy(isLoading = false, error = e.message ?: "Couldn't load score.")
@@ -194,19 +215,37 @@ fun ScoreExplainerScreen(
                     MetricBar("Reply speed", 20, clamp(b.replySpeed))
                     MetricBar("Cancellations", 15, clamp(100 - b.cancellationRate))
                     MetricBar("Social proof", 10, clamp(b.socialProof))
-                    if (state.history.isNotEmpty()) {
+                    // A failed history read keeps the section — hiding it made the
+                    // failure look like an artist who has no history, and left the
+                    // only retry behind a "Full history" button that never
+                    // rendered. Same distinction iOS draws (`fetchError`).
+                    if (state.history.isNotEmpty() || state.historyFailed) {
                         Spacer(Modifier.height(space.xl))
                         HRule()
                         Spacer(Modifier.height(space.lg))
                         Text("History", style = AppTheme.type.caption, color = colors.ink3)
                         Spacer(Modifier.height(space.sm))
-                        Sparkline(values = state.history.map { it.score })
-                        Spacer(Modifier.height(space.md))
-                        PrimaryButton(
-                            text = "Full history",
-                            onClick = { showHistory = true },
-                            fullWidth = true,
-                        )
+                        if (state.historyFailed) {
+                            Text(
+                                "Couldn't load history.",
+                                style = AppTheme.type.body,
+                                color = colors.ink3,
+                            )
+                            Spacer(Modifier.height(space.md))
+                            PrimaryButton(
+                                text = "Retry",
+                                onClick = viewModel::refresh,
+                                fullWidth = true,
+                            )
+                        } else {
+                            Sparkline(values = state.history.map { it.score })
+                            Spacer(Modifier.height(space.md))
+                            PrimaryButton(
+                                text = "Full history",
+                                onClick = { showHistory = true },
+                                fullWidth = true,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(space.xxl))
                 }

@@ -1,7 +1,6 @@
 package `in`.artistant.app.data.payments
 
 import `in`.artistant.app.data.model.BookingDraft
-import `in`.artistant.app.data.model.PaymentMethod
 import kotlinx.coroutines.delay
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,7 +26,12 @@ interface PaymentsService {
 
 @Singleton
 class MockPaymentsService @Inject constructor() : PaymentsService {
-    /** When true, throws after the latency beat — UITest / unit fault seam. */
+    /**
+     * When true, throws after the latency beat — the fault seam that covers
+     * checkout's untyped catch. Nothing else can reach it: the bookings fake
+     * only throws `BookingRepositoryError`, which the typed branch above it
+     * takes, so a payment failure is the one way in.
+     */
     @Volatile var failCollect: Boolean = false
 
     override suspend fun collectPayment(draft: BookingDraft): PaymentResult {
@@ -43,5 +47,3 @@ class MockPaymentsService @Inject constructor() : PaymentsService {
         )
     }
 }
-
-fun PaymentMethod.toMethodLabel(): String = label

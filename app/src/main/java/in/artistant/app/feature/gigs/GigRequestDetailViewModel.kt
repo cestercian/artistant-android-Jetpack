@@ -6,32 +6,54 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
+import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.RequestsRepositoryError
+import `in`.artistant.app.platform.calendar.CalendarSyncPlanner
+import `in`.artistant.app.platform.calendar.CalendarSyncService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import javax.inject.Inject
+
+/** The three mutations the artist's dock offers on an open request. */
+enum class GigRequestAction { Accept, Decline, Counter }
 
 data class GigRequestDetailUiState(
     val request: StoredRequest? = null,
-    val clashes: List<`in`.artistant.app.platform.calendar.CalendarSyncPlanner.Clash> = emptyList(),
+    val clashes: List<CalendarSyncPlanner.Clash> = emptyList(),
     val isLoading: Boolean = true,
     val loadError: String? = null,
-    val isActing: Boolean = false,
+    /**
+     * WHICH mutation is in flight, or null when none is.
+     *
+     * A bare `isActing` boolean was ambiguous here for the same reason it was on
+     * BookingDetailUiState: the dock renders Accept and Decline together, both
+     * read the flag, so tapping either made the page announce "Accepting…" and
+     * "Declining…" at once — over two actions with opposite consequences for the
+     * client's request. The label belongs to the button that was tapped; the
+     * others are merely disabled.
+     */
+    val actingAction: GigRequestAction? = null,
     val actionError: String? = null,
     val showCounterSheet: Boolean = false,
     val counterAmount: String = "",
-)
+) {
+    /** Any mutation in flight — every dock control is disabled while one is. */
+    val isActing: Boolean get() = actingAction != null
+}
 
 @HiltViewModel
 class GigRequestDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val requestsRepository: RequestsRepository,
-    private val calendarSync: `in`.artistant.app.platform.calendar.CalendarSyncService,
-    private val bookingsRepository: `in`.artistant.app.data.repository.BookingsRepository,
+    private val calendarSync: CalendarSyncService,
+    private val bookingsRepository: BookingsRepository,
 ) : ViewModel() {
 
     private val requestId: String = checkNotNull(savedStateHandle["requestId"])
@@ -70,9 +92,7 @@ class GigRequestDetailViewModel @Inject constructor(
         }
     }
 
-    private fun resolveClashes(
-        request: StoredRequest,
-    ): List<`in`.artistant.app.platform.calendar.CalendarSyncPlanner.Clash> {
+    private fun resolveClashes(request: StoredRequest): List<CalendarSyncPlanner.Clash> {
         val epoch = parseGigDateLabel(request.raw.date) ?: return emptyList()
         return calendarSync.clashes(onDayOfEpochMs = epoch)
     }
@@ -80,8 +100,8 @@ class GigRequestDetailViewModel @Inject constructor(
     /** Best-effort parse of the display date label ("EEE, MMM d, yyyy"). */
     private fun parseGigDateLabel(label: String): Long? {
         if (label.isBlank()) return null
-        val f = java.text.SimpleDateFormat("EEE, MMM d, yyyy", java.util.Locale.US)
-        f.timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+        val f = SimpleDateFormat("EEE, MMM d, yyyy", Locale.US)
+        f.timeZone = TimeZone.getTimeZone("Asia/Kolkata")
         return runCatching { f.parse(label)?.time }.getOrNull()
     }
 
@@ -98,9 +118,9 @@ class GigRequestDetailViewModel @Inject constructor(
         _state.update { it.copy(counterAmount = value.filter { ch -> ch.isDigit() }) }
     }
 
-    fun accept() = mutate { requestsRepository.accept(requestId) }
+    fun accept() = mutate(GigRequestAction.Accept) { requestsRepository.accept(requestId) }
 
-    fun decline() = mutate { requestsRepository.decline(requestId) }
+    fun decline() = mutate(GigRequestAction.Decline) { requestsRepository.decline(requestId) }
 
     fun sendCounter() {
         val amount = _state.value.counterAmount.toIntOrNull() ?: 0
@@ -108,7 +128,7 @@ class GigRequestDetailViewModel @Inject constructor(
             _state.update { it.copy(actionError = "Enter a counter amount above ₹0.") }
             return
         }
-        mutate {
+        mutate(GigRequestAction.Counter) {
             requestsRepository.counter(requestId, amount)
             _state.update { it.copy(showCounterSheet = false) }
         }
@@ -117,20 +137,19 @@ class GigRequestDetailViewModel @Inject constructor(
     fun showActions(): Boolean =
         _state.value.request?.status == GigRequestStatus.Open
 
-    private fun mutate(after: (() -> Unit)? = null, block: suspend () -> Unit) {
+    private fun mutate(action: GigRequestAction, block: suspend () -> Unit) {
         if (_state.value.isActing) return
         viewModelScope.launch {
-            _state.update { it.copy(isActing = true, actionError = null) }
+            _state.update { it.copy(actingAction = action, actionError = null) }
             try {
                 block()
-                after?.invoke()
                 refresh()
-                _state.update { it.copy(isActing = false) }
+                _state.update { it.copy(actingAction = null) }
             } catch (e: RequestsRepositoryError) {
-                _state.update { it.copy(isActing = false, actionError = e.message) }
+                _state.update { it.copy(actingAction = null, actionError = e.message) }
             } catch (e: Exception) {
                 _state.update {
-                    it.copy(isActing = false, actionError = e.message ?: "Action failed.")
+                    it.copy(actingAction = null, actionError = e.message ?: "Action failed.")
                 }
             }
         }

@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.signup
 
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -35,12 +36,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.core.content.getSystemService
 import kotlinx.coroutines.delay
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -53,24 +56,27 @@ import `in`.artistant.app.designsystem.theme.motionTween
  * artist (violet) — each previewing that role's accent. **Tap = commit**: set the role, show a
  * brief selected state (border + glow + check, sibling dims), then advance. A short appear-
  * debounce blocks a touch carried over from the welcome transition from auto-committing.
- *
- * @param testMode true under instrumentation/a11y so the debounce is skipped (deliberate taps,
- *   never carry-over) — parity with iOS `UITestSupport.isUITest || VoiceOver`.
  */
 @Composable
 fun RoleScreen(
     onPick: (AppRole) -> Unit,
     onAdvance: () -> Unit,
     modifier: Modifier = Modifier,
-    testMode: Boolean = false,
 ) {
     val space = AppTheme.dimens.space
+    val context = LocalContext.current
+    // Arm immediately under touch exploration: a TalkBack double-tap is always deliberate, so
+    // there is no carry-over to debounce — the window only swallowed the tap, silently. This is
+    // the VoiceOver half of the iOS `UITestSupport.isUITest || VoiceOver` rule; the UITest half
+    // has no Android counterpart (there is no androidTest source set), so it isn't ported.
+    val touchExploration = remember(context) {
+        context.getSystemService<AccessibilityManager>()?.isTouchExplorationEnabled == true
+    }
     // The committing role (null until a panel is tapped): drives the selected/dimmed visuals and
     // blocks a second commit during the hand-off.
     var committing by remember { mutableStateOf<AppRole?>(null) }
-    // Arm a beat after appearing so a carried-over touch can't auto-commit. Deliberate taps under
-    // test/a11y arm immediately.
-    var armed by remember { mutableStateOf(testMode) }
+    // Arm a beat after appearing so a carried-over touch can't auto-commit.
+    var armed by remember { mutableStateOf(touchExploration) }
     LaunchedEffect(Unit) {
         if (!armed) { delay(450); armed = true }
     }

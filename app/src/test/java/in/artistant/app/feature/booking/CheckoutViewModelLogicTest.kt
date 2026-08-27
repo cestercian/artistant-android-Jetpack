@@ -89,11 +89,12 @@ class CheckoutViewModelLogicTest {
         draftStore: BookingDraftStore,
         bookings: FakeBookingsRepository = FakeBookingsRepository(),
         artists: FakeArtistsRepository = FakeArtistsRepository(),
+        payments: MockPaymentsService = MockPaymentsService(),
     ) = CheckoutViewModel(
         draftStore = draftStore,
         artistsRepository = artists,
         bookingsRepository = bookings,
-        paymentsService = MockPaymentsService(),
+        paymentsService = payments,
         entitlements = EntitlementStore(),
     )
 
@@ -167,6 +168,37 @@ class CheckoutViewModelLogicTest {
         assertNull(s.confirmedBookingId)
         // The draft survives so Retry has something to send.
         assertNotNull(s.draft)
+    }
+
+    /**
+     * The other half of a failed send. A throwing collect is the only way into
+     * checkout's untyped catch — the bookings fake throws
+     * `BookingRepositoryError`, which the typed branch above it takes — so this
+     * is what pins the fault seam on [MockPaymentsService] to a real path.
+     * Same contract as a failed write: no overlay left standing over the
+     * banner, and the draft survives so Retry has something to send.
+     */
+    @Test
+    fun aFailedPaymentCollect_dropsTheWaitOverlay_andFilesNothing() = runTest {
+        val bookings = FakeBookingsRepository()
+        val vm = vm(
+            storeWithDraft(),
+            bookings = bookings,
+            payments = MockPaymentsService().apply { failCollect = true },
+        )
+        advanceUntilIdle()
+
+        vm.sendRequest()
+        advanceUntilIdle()
+
+        val s = vm.state.value
+        assertEquals("Simulated payment failure", s.lastCreateErrorMessage)
+        assertNull("a failure hidden behind a full-screen wait is a dead end", s.waitPhase)
+        assertFalse(s.isSubmitting)
+        assertNull(s.confirmedBookingId)
+        assertNotNull(s.draft)
+        // The collect throws before create is reached, so nothing was written.
+        assertTrue(bookings.listForClient().isEmpty())
     }
 
     @Test

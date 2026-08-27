@@ -8,14 +8,22 @@ import `in`.artistant.app.designsystem.theme.AppRole
 
 /**
  * In-memory [UsersRepository] for tests / previews (the iOS `FakeUsersRepository` twin).
- * Handles marked taken via [taken] read as unavailable; valid-format unknown handles read
- * available. [selfProfile] is what fetchSelfProfile returns; set [failFetch] to exercise
- * the degrade path.
+ * Handles in [taken] read as unavailable, every other handle reads available.
+ * [selfProfile] is what fetchSelfProfile returns; set [failFetch] or
+ * [failAvailability] to exercise the two degrade paths.
  */
 class FakeUsersRepository(
     var selfProfile: SelfProfile? = null,
     var failFetch: Boolean = false,
     private val taken: Set<String> = emptySet(),
+    /**
+     * When true, [handleIsAvailable] answers [HandleAvailability.Failure] — the
+     * real impl catches everything into it, and that branch drives the whole
+     * degrade contract (Failure → `HandleStatus.Error`, which still counts as
+     * available so a blip can't wedge Continue). Without the knob the seam
+     * could only ever say Available/Unavailable.
+     */
+    var failAvailability: Boolean = false,
 ) : UsersRepository {
 
     /** Records the last upsert so tests can assert what was written. */
@@ -35,8 +43,13 @@ class FakeUsersRepository(
         private set
 
     override suspend fun handleIsAvailable(handle: String): HandleAvailability {
+        if (failAvailability) return HandleAvailability.Failure("fake availability failure")
+        // Format is deliberately NOT consulted: the RPC is `not exists (select 1
+        // from users where handle = lower(trim($1)))`, so a badly formatted
+        // handle nobody holds comes back AVAILABLE. Callers gate on format
+        // themselves; a fake that answered Unavailable here would teach the
+        // opposite of the real contract.
         val h = HandleRules.normalize(handle)
-        if (!HandleRules.isValidFormat(h)) return HandleAvailability.Unavailable
         return if (h in taken) HandleAvailability.Unavailable else HandleAvailability.Available
     }
 

@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,17 +61,17 @@ fun rememberSamplePlayer(samples: List<Sample>): SamplePlayerHandle {
     val lifecycleOwner = LocalLifecycleOwner.current
     val playback = remember { mutableStateOf(SamplePlayback()) }
 
-    val player = remember {
-        buildPlayer(context.applicationContext).also { exo ->
-            exo.addListener(playerListener(exo, playback))
-        }
-    }
-
     // Release with the composition. Without this the decoder, the audio track
-    // and the loading thread all outlive the screen.
-    DisposableEffect(player) {
-        onDispose { player.release() }
-    }
+    // and the loading thread all outlive the screen. The holder rather than a
+    // DisposableEffect because the effect misses one of the two ways out —
+    // see [SamplePlayerHolder].
+    val player = remember {
+        SamplePlayerHolder(
+            buildPlayer(context.applicationContext).also { exo ->
+                exo.addListener(playerListener(exo, playback))
+            },
+        )
+    }.player
 
     // Backgrounding stops playback — see the KDoc. ON_STOP rather than ON_PAUSE
     // so a transient overlay (a permission dialog, the share sheet) doesn't cut
@@ -155,6 +156,42 @@ class SamplePlayerHandle internal constructor(
 }
 
 private const val POSITION_POLL_MS = 200L
+
+/**
+ * Owns the player's lifetime, releasing it on BOTH ways out of a composition.
+ *
+ * The player was built in `remember` and released from a `DisposableEffect`, which covers
+ * only one of them: the `remember` factory runs during composition, but an effect's
+ * `onDispose` runs only for a composition Compose went on to APPLY. Abandon one in between
+ * — navigating away mid-composition, a subcomposition discarded during measurement — and
+ * the player has been built with nothing left to release it: decoder, audio track, loading
+ * thread and an outstanding audio-focus request, alive for the rest of the process and
+ * ducking whatever the user plays next. [onAbandoned] is the hook for exactly that case,
+ * and Compose only calls it on a value the `remember` factory RETURNS — hence a holder
+ * rather than the bare player.
+ */
+private class SamplePlayerHolder(val player: ExoPlayer) : RememberObserver {
+    /**
+     * The two callbacks below are mutually exclusive in normal operation — Compose either
+     * remembers a value or abandons it — but `release()` is not documented as re-entrant
+     * and abnormal composition is the whole reason this class exists.
+     */
+    private var released = false
+
+    override fun onRemembered() = Unit
+
+    /** Left the composition the ordinary way. */
+    override fun onForgotten() = release()
+
+    /** Never entered one — the composition that built this player was thrown away. */
+    override fun onAbandoned() = release()
+
+    private fun release() {
+        if (released) return
+        released = true
+        player.release()
+    }
+}
 
 @OptIn(UnstableApi::class)
 private fun buildPlayer(context: android.content.Context): ExoPlayer =

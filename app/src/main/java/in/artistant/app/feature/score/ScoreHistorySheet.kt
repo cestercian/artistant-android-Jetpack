@@ -1,6 +1,5 @@
 package `in`.artistant.app.feature.score
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,7 +46,11 @@ fun ScoreHistorySheet(
             Text("Score history", style = AppTheme.type.displaySmall, color = colors.ink)
             Spacer(Modifier.height(space.xs))
             Text(
-                "Last ${history.size.coerceAtLeast(0)} computations",
+                // A List size is never negative, so the old `coerceAtLeast(0)`
+                // guarded nothing; the plural was the real bug — the sheet only
+                // opens off a non-empty history, so a single point is an
+                // ordinary state and it read "Last 1 computations".
+                if (history.size == 1) "Last 1 computation" else "Last ${history.size} computations",
                 style = AppTheme.type.footnote,
                 color = colors.ink3,
             )

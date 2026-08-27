@@ -259,6 +259,12 @@ data class Hero(
     /** Rail tile (smaller than the design-system default — Discover packs more). */
     val tileWidth: Dp = 150.dp,
     val tileHeight: Dp = 200.dp,
+    /**
+     * Search's two-up results grid. Height only: the tile's width comes from the
+     * weighted grid column, which is what iOS says too — `ArtistTile(size:
+     * CGSize(width: 0, height: 220), fullWidth: true)` in `SearchView`.
+     */
+    val gridTileHeight: Dp = 220.dp,
     /** Trailing scroll tailroom so the last rail clears the floating tab bar. */
     val scrollTailroom: Dp = 130.dp,
     /** Hero auto-advance interval. */

@@ -1,20 +1,27 @@
 package `in`.artistant.app.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -230,23 +237,38 @@ fun ClientTabsScaffold() {
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
                 val chatOpen: ChatOpenViewModel = hiltViewModel()
-                // Second full-bleed destination (Discover is the other): the
-                // cover runs under the status bar, so this one also takes NO
-                // scaffold inset and applies the system-bar padding itself —
-                // to the floating hero controls at the top and to the action
-                // dock at the bottom. Wrapping it in [TabPane] pushed the whole
-                // page down by the status-bar height and left a letterbox of
-                // page background above the photo.
-                ArtistProfileScreen(
-                    onBack = { nav.popBackStack() },
-                    onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
-                    onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
-                    onMessage = { artistId ->
-                        chatOpen.open(artistId, bookingId = null) { threadId ->
-                            nav.navigate(ClientNavRoutes.chat(threadId))
-                        }
-                    },
-                )
+                // Both of the VM's flows are collected here because nothing else
+                // reads them on this route: the Message tap sat silent through the
+                // find-or-create round-trip, and when that call threw (offline, an
+                // RLS denial) `_error` was written to a flow no composable observed
+                // — so the button simply did nothing, with no message, ever.
+                // BookingDetail's dock renders the same pair. See [ChatOpenFeedback].
+                val openingChat by chatOpen.opening.collectAsStateWithLifecycle()
+                val chatError by chatOpen.error.collectAsStateWithLifecycle()
+                Box(Modifier.fillMaxSize()) {
+                    // Second full-bleed destination (Discover is the other): the
+                    // cover runs under the status bar, so this one also takes NO
+                    // scaffold inset and applies the system-bar padding itself —
+                    // to the floating hero controls at the top and to the action
+                    // dock at the bottom. Wrapping it in [TabPane] pushed the whole
+                    // page down by the status-bar height and left a letterbox of
+                    // page background above the photo.
+                    ArtistProfileScreen(
+                        onBack = { nav.popBackStack() },
+                        onBook = { artistId -> nav.navigate(ClientNavRoutes.bookingCompose(artistId)) },
+                        onRequestQuote = { artistId -> nav.navigate(ClientNavRoutes.requestQuote(artistId)) },
+                        onMessage = { artistId ->
+                            chatOpen.open(artistId, bookingId = null) { threadId ->
+                                nav.navigate(ClientNavRoutes.chat(threadId))
+                            }
+                        },
+                    )
+                    ChatOpenFeedback(
+                        opening = openingChat,
+                        error = chatError,
+                        onDismissError = chatOpen::dismissError,
+                    )
+                }
             }
             composable(
                 route = ClientNavRoutes.CHAT,
@@ -277,9 +299,20 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     CheckoutScreen(
                         onBack = { nav.popBackStack() },
+                        // The WHOLE funnel goes, not just this step. Popping only
+                        // checkout left `booking/{artistId}` under the confirmation,
+                        // so system back from "Request sent." re-entered the composer
+                        // for the request that had just been filed — with its
+                        // ViewModel state intact but the draft store already cleared
+                        // — and Continue walked the client into checkout again to
+                        // file a duplicate the no-overlap constraint then rejected,
+                        // reporting an error for a booking that had actually
+                        // succeeded. Back now lands on the artist's profile, where
+                        // the funnel started. The screen's own "Back to discover"
+                        // and "View booking" pop to the tab root and are unaffected.
                         onConfirmed = { bookingId ->
                             nav.navigate(ClientNavRoutes.confirmed(bookingId)) {
-                                popUpTo(ClientNavRoutes.CHECKOUT) { inclusive = true }
+                                popUpTo(ClientNavRoutes.BOOKING) { inclusive = true }
                             }
                         },
                         onPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
@@ -329,5 +362,48 @@ fun ClientTabsScaffold() {
                 }
             }
         }
+    }
+}
+
+/**
+ * What the artist profile's Message button has to say for itself.
+ *
+ * The tap is not a navigation — [ChatOpenViewModel] resolves (or creates) the thread row first,
+ * so there is a round-trip behind it and the round-trip can fail. BookingDetail renders both
+ * facts in its dock; this page has no dock to hang them on (its Message control is a glyph
+ * floating on the cover), so they render over it: a scrim + spinner while the call is in flight
+ * — the flag's own KDoc calls it a blocking spinner — and a dismissible dialog when it throws.
+ *
+ * The scrim swallows taps for the duration. `open()` already guards a second Message tap, but
+ * the page underneath still carries Book and Request a quote, and a navigation fired from there
+ * would race the chat push landing on top of it. It uses `glassScrim` — the strongest black in
+ * the ladder — for the same reason: over a cover photo a lighter wash reads as a tint rather
+ * than as a page that is busy.
+ */
+@Composable
+private fun ChatOpenFeedback(opening: Boolean, error: String?, onDismissError: () -> Unit) {
+    val colors = AppTheme.colors
+    if (opening) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(colors.glassScrim)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { /* swallow */ },
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = colors.brand)
+        }
+    }
+    error?.let { message ->
+        AlertDialog(
+            shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
+            onDismissRequest = onDismissError,
+            title = { Text("Couldn't open the chat") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = onDismissError) { Text("OK") } },
+        )
     }
 }

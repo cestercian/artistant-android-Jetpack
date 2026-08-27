@@ -67,17 +67,16 @@ class DiscoverViewModel @Inject constructor(
 
     init {
         refresh()
-        loadIdentity()
     }
 
     /** Optimistic save/unsave for the hero's heart. */
     fun toggleSaved(artistId: String) = savedStore.toggle(artistId)
 
     /**
-     * Masthead personalisation. Deliberately a separate coroutine from
-     * [refresh]: the headline is cosmetic, so a failed profile read must not
-     * surface as a roster error or retry the rails. On failure we simply keep
-     * the national fallback.
+     * Masthead personalisation. Deliberately a separate coroutine from the rails
+     * below: the headline is cosmetic, so a failed profile read must not surface
+     * as a roster error or retry the rails. On failure we simply keep whatever
+     * the masthead already had — the national fallback on a cold start.
      */
     private fun loadIdentity() {
         viewModelScope.launch {
@@ -87,7 +86,17 @@ class DiscoverViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Reloads the rails AND the masthead.
+     *
+     * The identity read used to run once, from `init`. Discover is the NavHost
+     * start destination and its entry is never popped, so its ViewModel lives for
+     * the whole session: a profile read that blipped at cold start left "Tonight
+     * in India." pinned there for good, with pull-to-refresh visibly doing
+     * nothing about it. The retry the user reaches for has to cover both halves.
+     */
     fun refresh() {
+        loadIdentity()
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, loadError = null) }
             try {
@@ -147,6 +156,18 @@ class DiscoverViewModel @Inject constructor(
         private const val TOP_CITY = "Bangalore"
         private val COMEDY_CATEGORIES = listOf("Stand-up")
 
+        /**
+         * The detail line under both failure surfaces — the full-screen empty
+         * state (no rails at all) and the inline banner over a roster that is
+         * already up.
+         *
+         * It used to end "Pull to refresh in a moment." Wrong on the branch it
+         * shows on most: with no rails the screen is a plain `EmptyState`, which
+         * has nothing scrollable in it, so `PullToRefreshBox`'s nested-scroll
+         * connection never sees a delta and the gesture the sentence asks for
+         * does nothing. Both surfaces carry a button instead, so the copy points
+         * at the button.
+         */
         fun messageFor(error: Throwable): String {
             val m = error.message.orEmpty().lowercase()
             if (m.contains("could not find the function") ||
@@ -154,7 +175,7 @@ class DiscoverViewModel @Inject constructor(
                 m.contains("42883") ||
                 m.contains("does not exist")
             ) {
-                return "We couldn't load the roster right now. Pull to refresh in a moment."
+                return "We couldn't load the roster right now. Try again in a moment."
             }
             return "Something went wrong loading the roster."
         }

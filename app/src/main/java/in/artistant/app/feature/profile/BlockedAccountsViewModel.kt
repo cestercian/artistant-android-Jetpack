@@ -8,6 +8,9 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.feature.messages.BlockedUsersStore
 import `in`.artistant.app.feature.messages.ThreadCounterpart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -80,15 +83,28 @@ enum class BlockedAccountsStatus {
  */
 object BlockedAccounts {
 
-    /** See [BlockedAccountsStatus]. `rowCount` is what we would draw right now. */
+    /**
+     * See [BlockedAccountsStatus]. `rowCount` is what we would draw right now;
+     * [everHadRows] is whether this screen has drawn one at any point since it
+     * opened.
+     *
+     * The second flag is what stops a successful unblock from reporting itself
+     * as a failed load. [Unavailable] means "the read failed and we know of
+     * nobody" — but somebody who unblocks the last row of a [Stale] list emptied
+     * it themselves, and we know exactly as much about their blocks as we did a
+     * frame earlier. Decided on the current row count alone, the screen swapped
+     * its whole body for "Couldn't load your blocked accounts" the instant the
+     * unblock landed, which is the one thing that did not happen.
+     */
     fun status(
         loadCompleted: Boolean,
         serverReadOk: Boolean,
         rowCount: Int,
+        everHadRows: Boolean,
     ): BlockedAccountsStatus = when {
         !loadCompleted -> BlockedAccountsStatus.Loading
         serverReadOk -> BlockedAccountsStatus.Ready
-        rowCount > 0 -> BlockedAccountsStatus.Stale
+        rowCount > 0 || everHadRows -> BlockedAccountsStatus.Stale
         else -> BlockedAccountsStatus.Unavailable
     }
 
@@ -175,7 +191,11 @@ object BlockedAccounts {
 data class BlockedAccountsUiState(
     val rows: List<BlockedAccountRow> = emptyList(),
     val status: BlockedAccountsStatus = BlockedAccountsStatus.Loading,
-    /** A retry is in flight over a list that is already on screen. */
+    /**
+     * A load is in flight. Read by both Retry controls, which is the whole
+     * reason it exists: a retry pressed offline resolves to the same screen it
+     * started on, so with no in-flight label the control reads as dead.
+     */
     val isRefreshing: Boolean = false,
     /** Set when an unblock write failed and the row came back. */
     val actionError: String? = null,
@@ -212,6 +232,12 @@ class BlockedAccountsViewModel @Inject constructor(
     private var threads: List<Thread> = emptyList()
     private var loadCompleted = false
     private var serverReadOk = false
+
+    /**
+     * Whether this screen has ever had a row to draw. Sticky, and consulted only
+     * when the server copy could not be read — see [BlockedAccounts.status].
+     */
+    private var everHadRows = false
 
     init {
         // A subscription, not a one-shot read: an unblock performed here — or a
@@ -275,17 +301,29 @@ class BlockedAccountsViewModel @Inject constructor(
      * are attempted too: an artist row is public, so this is the one chance to
      * name a block whose conversation we couldn't read. `ensureFull` swallows
      * transport errors and returns null, so a blocked CLIENT id (never in the
-     * artists table) costs one wasted request and yields a nameless row, which
-     * is the honest outcome anyway.
+     * artists table) yields a nameless row, which is the honest outcome anyway —
+     * and the repository remembers that confirmed miss, so a retry doesn't pay
+     * for it again.
+     *
+     * Asked in ONE wait rather than one after another. Each `ensureFull` is a
+     * five-table stitch, so three ids with no thread between them used to be
+     * three serialised fan-outs with the screen holding its spinner through all
+     * of them; fanned out, the wait is the slowest one instead of their sum.
+     * Same shape as `ArtistListViewModel.hydrateArtists`, for the same reason.
      */
     private suspend fun hydrateNames() {
-        val ids = blockedUsers.blocked.value.map { it.lowercase() }
         val clientSeats = threads
             .filter { it.clientId.isNotBlank() }
             .map { it.clientId.lowercase() }
             .toSet()
-        ids.filter { it !in clientSeats && artistsRepository.find(it) == null }
-            .forEach { artistsRepository.ensureFull(it) }
+        val wanted = blockedUsers.blocked.value
+            .map { it.lowercase() }
+            .distinct()
+            .filter { it !in clientSeats && artistsRepository.find(it) == null }
+        if (wanted.isEmpty()) return
+        coroutineScope {
+            wanted.map { id -> async { artistsRepository.ensureFull(id) } }.awaitAll()
+        }
     }
 
     private fun project() {
@@ -294,10 +332,16 @@ class BlockedAccountsViewModel @Inject constructor(
             threads = threads,
             artistName = { id -> artistsRepository.find(id)?.name },
         )
+        if (rows.isNotEmpty()) everHadRows = true
         _state.update {
             it.copy(
                 rows = rows,
-                status = BlockedAccounts.status(loadCompleted, serverReadOk, rows.size),
+                status = BlockedAccounts.status(
+                    loadCompleted = loadCompleted,
+                    serverReadOk = serverReadOk,
+                    rowCount = rows.size,
+                    everHadRows = everHadRows,
+                ),
             )
         }
     }

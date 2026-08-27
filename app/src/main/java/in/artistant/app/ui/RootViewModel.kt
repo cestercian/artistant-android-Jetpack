@@ -12,6 +12,7 @@ import `in`.artistant.app.domain.auth.authAdvanceKey
 import `in`.artistant.app.domain.auth.returningLoginRoute
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.AppPreferences
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +53,27 @@ class RootViewModel @Inject constructor(
     // recomposition — the iOS `.task(id: authAdvanceKey)` equivalent.
     private var lastRoutedKey: String? = null
 
+    /**
+     * Newest routing pass wins, however the network resolves.
+     *
+     * Routing is re-entered from four places — the session collector below, the hydration
+     * banner's Retry, and the two flow-finished nudges — and every pass ends in an
+     * unconditional write of `_profile`, `_profileHydrationError` and `_gate` after up to
+     * three fetch attempts (over a second of wall clock). The Retry is a plain tappable
+     * label with no in-flight state, so overlapping passes are the expected case, not a
+     * rarity: without a stamp the pass that finishes LAST wins even when it is the older
+     * one, and a slow failure landing after a fast success re-raises the error banner and
+     * drops a user who had already routed into Tabs back to Onboarding.
+     *
+     * Same shape ArtistHomeViewModel uses for its overlapping refreshes: cancel the
+     * in-flight job AND stamp each pass. The cancel only stops work nobody wants — a
+     * pass already past its last suspension point runs on to its writes regardless — so the
+     * stamp is what orders them. Sign-out bumps it too, or a pass still in flight could
+     * write the departed account's profile back over a NotSignedIn gate.
+     */
+    private var routingJob: Job? = null
+    private var routingGeneration = 0
+
     init {
         viewModelScope.launch {
             // Re-run routing whenever EITHER the session status OR the sign-in generation
@@ -72,6 +94,10 @@ class RootViewModel @Inject constructor(
                         is SessionStatus.Initializing -> _gate.value = RootGate.Loading
                         else -> {
                             lastRoutedKey = null
+                            // A pass still in flight belongs to the session that just
+                            // ended: stop it and invalidate its writes (routingGeneration).
+                            routingJob?.cancel()
+                            routingGeneration++
                             // The hydration payload leaves with the session. `profile`
                             // feeds the signup flow's prefill and the error feeds its
                             // Retry banner, so keeping either past a sign-out means the
@@ -94,9 +120,14 @@ class RootViewModel @Inject constructor(
      * out a transient failure, then classify.
      */
     private suspend fun routeSignedIn() {
+        val gen = ++routingGeneration
         // Result.success(null) = genuinely-absent row; Result.failure = a thrown fetch — the
         // distinction returningLoginRoute needs (a failed fetch must NOT re-onboard).
         val result = fetchWithRetry()
+        // Everything below WRITES. A pass that has been superseded — by a newer pass or by
+        // the sign-out that invalidates all of them — stops here instead of reinstating its
+        // own answer over the current one.
+        if (gen != routingGeneration) return
         val profile = result.getOrNull()
         _profile.value = profile
         // Surface a failed fetch as a Retry banner (cleared on success); a null row is NOT an
@@ -107,14 +138,22 @@ class RootViewModel @Inject constructor(
         // RouteIn(Artist) also hydrates the role gate before we pick the tier; do it here since
         // gateFor is pure and can't touch prefs.
         if (route is ReturningLoginRoute.RouteIn) prefs.setRole(route.role)
+        // That write suspends, so re-check before the one that actually moves the user.
+        if (gen != routingGeneration) return
         _gate.value = gateFor(route, profile)
         // Auth is hydrated — resume any UploadQueue snapshot left by a killed session.
         uploadQueue.resumeAfterLaunch()
     }
 
+    /** Newest pass wins: cancel whatever is in flight, then run one (see [routingGeneration]). */
+    private fun launchRouting() {
+        routingJob?.cancel()
+        routingJob = viewModelScope.launch { routeSignedIn() }
+    }
+
     /** Re-run the routing fetch (the signup flow's hydration-error Retry). */
     fun retryRouting() {
-        viewModelScope.launch { routeSignedIn() }
+        launchRouting()
     }
 
     /**
@@ -124,12 +163,12 @@ class RootViewModel @Inject constructor(
      * explicit nudge. Idempotent: a re-fetch of a complete profile just lands on Tabs again.
      */
     fun markSignupComplete() {
-        viewModelScope.launch { routeSignedIn() }
+        launchRouting()
     }
 
     /** Wizard Done → re-fetch profile so setup_complete routes the artist into tabs. */
     fun markWizardComplete() {
-        viewModelScope.launch { routeSignedIn() }
+        launchRouting()
     }
 
     private suspend fun fetchWithRetry(attempts: Int = 3): Result<SelfProfile?> {
@@ -171,7 +210,3 @@ fun gateFor(route: ReturningLoginRoute, profile: SelfProfile?): RootGate = when 
     // shows onboarding.
     ReturningLoginRoute.Onboard, ReturningLoginRoute.Degrade -> RootGate.Onboarding
 }
-
-/** Artist with a complete users row but incomplete EPK — show wizard, not signup. */
-fun shouldShowArtistWizard(profile: SelfProfile?): Boolean =
-    profile?.role == AppRole.Artist && profile.isComplete && profile.artistSetupComplete != true

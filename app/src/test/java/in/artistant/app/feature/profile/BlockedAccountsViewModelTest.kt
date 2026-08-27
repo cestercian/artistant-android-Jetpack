@@ -104,6 +104,45 @@ class BlockedAccountsViewModelTest {
     }
 
     @Test
+    fun unblockingTheLastStaleRowStaysStaleInsteadOfReportingAFailedLoad() = runTest {
+        // The one path where the row count drops to zero without anything about
+        // the READ having changed. Decided on the count alone, the screen swapped
+        // its whole body for "Couldn't load your blocked accounts" the instant the
+        // unblock landed — a successful write reported as a failed read, on the
+        // screen whose entire job is telling those two apart.
+        val store = FakeBlockedUsersStore(setOf(ARTIST_ID.lowercase())).apply {
+            refreshSucceeds = false
+        }
+        val model = vm(blocked = store)
+        assertEquals(BlockedAccountsStatus.Stale, model.state.value.status)
+
+        model.unblock(ARTIST_ID)
+
+        assertTrue(model.state.value.rows.isEmpty())
+        assertEquals(BlockedAccountsStatus.Stale, model.state.value.status)
+    }
+
+    @Test
+    fun aRetryDoesNotAskTheArtistsTableAgainForAnIdThatIsNotAnArtist() = runTest {
+        // A block with no readable thread — made on another device, say — is the
+        // case this screen exists for, and the id behind it is usually a CLIENT,
+        // which is never in `artists`. Every ask is a five-table stitch, so a
+        // lookup that can only miss must not be re-run on every Retry.
+        val notAnArtist = "99999999-9999-9999-9999-999999999999"
+        val artists = FakeArtistsRepository()
+        val model = vm(
+            blocked = FakeBlockedUsersStore(setOf(notAnArtist)),
+            messages = StaticThreads(failList = true),
+            artists = artists,
+        )
+        assertEquals(listOf(notAnArtist), artists.fetchedIds)
+
+        model.refresh()
+
+        assertEquals("a confirmed miss is remembered", listOf(notAnArtist), artists.fetchedIds)
+    }
+
+    @Test
     fun aRetryAfterTheServerComesBackFlipsUnavailableToReady() = runTest {
         val store = FakeBlockedUsersStore().apply { refreshSucceeds = false }
         val model = vm(blocked = store)

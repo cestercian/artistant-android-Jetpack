@@ -29,7 +29,8 @@ class SearchViewModelLogicTest {
         val repo = FakeSearchRepository(roster)
         val page1 = repo.search(SearchFilters(sort = SearchSort.Bookability), SearchCursor.Start)
         assertEquals(20, page1.artists.size)
-        assertTrue(page1.nextCursor is SearchCursor.Offset)
+        // The default sort keysets, like the server does — see FakeSearchRepositoryTest.
+        assertTrue(page1.nextCursor is SearchCursor.Keyset)
         val page2 = repo.search(SearchFilters(sort = SearchSort.Bookability), page1.nextCursor)
         assertEquals(5, page2.artists.size)
         assertEquals(SearchCursor.End, page2.nextCursor)

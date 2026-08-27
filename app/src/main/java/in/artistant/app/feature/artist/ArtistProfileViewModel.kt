@@ -21,6 +21,22 @@ import javax.inject.Inject
 
 data class ArtistProfileUiState(
     val artist: Artist? = null,
+    /**
+     * True once a full stitch has landed, i.e. once an empty
+     * [Artist.packages] is a FACT about the artist rather than a mid-load
+     * state.
+     *
+     * [artist] goes non-null the moment the cached Discover/Search tile is
+     * found — before the profile round-trip returns — and that projection
+     * carries no packages beside a real `min_price`. Without this flag the dock
+     * asked `PackagePricing.dockPrice` with `packagesLoaded = true` against
+     * that tile and quoted "On request / PRICING" for an artist with tiers,
+     * then snapped to a price; on a failed stitch it stayed wrong for good.
+     *
+     * Never reset by a later failed refresh: the packages already on screen
+     * came from a stitch, and a dropped packet does not un-load them.
+     */
+    val packagesLoaded: Boolean = false,
     val reviews: List<Review> = emptyList(),
     val reviewsFailed: Boolean = false,
     val scoreBreakdown: ScoreBreakdown? = null,
@@ -123,6 +139,7 @@ class ArtistProfileViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     artist = full,
+                    packagesLoaded = true,
                     reviews = reviews,
                     reviewsFailed = reviewsFailed,
                     scoreBreakdown = breakdown,

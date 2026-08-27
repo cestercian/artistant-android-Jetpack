@@ -35,6 +35,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.GigRequestStatus
+import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.EmptyState
@@ -149,15 +150,21 @@ fun GigRequestDetailScreen(
                                 .padding(space.lg),
                             verticalArrangement = Arrangement.spacedBy(space.sm),
                         ) {
+                            // Each button speaks only for ITSELF: the in-flight
+                            // label keys off which action is running, while every
+                            // control disables on any of them. Read from the one
+                            // `isActing` boolean, the dock announced "Accepting…"
+                            // and "Declining…" at the same time.
+                            val acting = state.actingAction
                             PrimaryButton(
-                                text = if (state.isActing) "Accepting…" else "Accept",
+                                text = if (acting == GigRequestAction.Accept) "Accepting…" else "Accept",
                                 onClick = viewModel::accept,
                                 fullWidth = true,
                                 enabled = !state.isActing,
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
                                 PrimaryButton(
-                                    text = if (state.isActing) "Declining…" else "Decline",
+                                    text = if (acting == GigRequestAction.Decline) "Declining…" else "Decline",
                                     onClick = { confirmingDecline = true },
                                     variant = ButtonVariant.Ghost,
                                     fullWidth = true,
@@ -206,7 +213,11 @@ fun GigRequestDetailScreen(
         CounterDialog(
             theirOffer = request?.raw?.amount ?: 0,
             amount = state.counterAmount,
-            isActing = state.isActing,
+            // This button's own progress, not "something is running". While the
+            // sheet is up it is the only action that CAN be running — the dialog
+            // is modal and the dock's controls are disabled behind it — so the
+            // two agree here; the label is honest either way.
+            isSending = state.actingAction == GigRequestAction.Counter,
             onAmountChange = viewModel::setCounterAmount,
             onDismiss = viewModel::dismissCounterSheet,
             onSend = viewModel::sendCounter,
@@ -215,7 +226,7 @@ fun GigRequestDetailScreen(
 }
 
 @Composable
-private fun OfferBlock(request: `in`.artistant.app.data.model.StoredRequest) {
+private fun OfferBlock(request: StoredRequest) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
@@ -250,7 +261,7 @@ private fun OfferBlock(request: `in`.artistant.app.data.model.StoredRequest) {
 private fun CounterDialog(
     theirOffer: Int,
     amount: String,
-    isActing: Boolean,
+    isSending: Boolean,
     onAmountChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onSend: () -> Unit,
@@ -292,8 +303,8 @@ private fun CounterDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onSend, enabled = !isActing && parsed > 0) {
-                Text(if (isActing) "Sending…" else "Send counter")
+            TextButton(onClick = onSend, enabled = !isSending && parsed > 0) {
+                Text(if (isSending) "Sending…" else "Send counter")
             }
         },
         dismissButton = {

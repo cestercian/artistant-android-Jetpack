@@ -58,6 +58,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.BannerTone
@@ -408,7 +409,7 @@ private fun EarningsHero(
                 },
             )
             Spacer(Modifier.height(space.sm))
-            AxisLabels(range = range)
+            AxisLabels(range = range, dayKey = state.todayLabel)
         } else {
             Text(
                 // Two different truths. An all-time artist whose only work
@@ -428,13 +429,21 @@ private fun EarningsHero(
     }
 }
 
-/** Start / middle / end dates of the chart window. */
+/**
+ * Start / middle / end dates of the chart window.
+ *
+ * [dayKey] is the state's own dateline — a value, not a clock read, and
+ * recomputed by the same refresh that rebuilds `series`. Keying the cache on
+ * `range` alone froze these three dates at the day the card was first composed,
+ * so a dashboard left open across IST midnight and then refreshed printed
+ * yesterday's date under today's bar.
+ */
 @Composable
-private fun AxisLabels(range: EarningsRange) {
+private fun AxisLabels(range: EarningsRange, dayKey: String) {
     val colors = AppTheme.colors
-    // Recomputed only when the window changes — three date formats per
-    // recomposition would otherwise ride along on every scroll frame.
-    val labels = remember(range) {
+    // Recomputed only when the window or the day changes — three date formats
+    // per recomposition would otherwise ride along on every scroll frame.
+    val labels = remember(range, dayKey) {
         val last = range.bucketCount - 1
         Triple(windowLabel(last), windowLabel(last / 2), windowLabel(0))
     }
@@ -1090,7 +1099,10 @@ private fun QuoteRequestRow(request: StoredRequest, onClick: () -> Unit) {
                 )
                 Text(
                     listOfNotNull(
-                        request.raw.timeAgo.takeIf { it.isNotBlank() }?.let { "$it ago" },
+                        // No " ago" suffix here: the repository's `relativeTimeAgo`
+                        // already returns whole phrases ("just now", "3h ago"), so
+                        // appending one rendered "3h ago ago" / "just now ago".
+                        request.raw.timeAgo.takeIf { it.isNotBlank() },
                         request.raw.packageLabel.takeIf { it.isNotBlank() },
                     ).joinToString(" · "),
                     style = AppTheme.type.footnote,
@@ -1132,9 +1144,9 @@ private fun QuoteRequestRow(request: StoredRequest, onClick: () -> Unit) {
 
 @Composable
 private fun statusTint(request: StoredRequest) = when (request.status) {
-    `in`.artistant.app.data.model.GigRequestStatus.Open -> AppTheme.colors.brand
-    `in`.artistant.app.data.model.GigRequestStatus.Countered -> AppTheme.colors.warm
-    `in`.artistant.app.data.model.GigRequestStatus.Accepted -> AppTheme.colors.good
+    GigRequestStatus.Open -> AppTheme.colors.brand
+    GigRequestStatus.Countered -> AppTheme.colors.warm
+    GigRequestStatus.Accepted -> AppTheme.colors.good
     else -> AppTheme.colors.ink3
 }
 
@@ -1143,7 +1155,12 @@ private fun UpcomingRow(booking: Booking, onClick: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val interaction = remember { MutableInteractionSource() }
-    val parts = remember(booking.id, booking.date, booking.time) { gigDateParts(booking) }
+    // Keyed on the whole immutable row, not on id/date/time: `gigDateParts`
+    // resolves through `resolvedStartEpochMs()`, which PREFERS `startDatetimeIso`
+    // and only falls back to those labels. The list keys its items by id, so the
+    // slot survives a refresh — and a corrected `start_datetime` that left the
+    // display labels alone would have left a stale day/weekday block behind it.
+    val parts = remember(booking) { gigDateParts(booking) }
 
     Row(
         Modifier

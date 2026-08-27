@@ -25,6 +25,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 
 /**
  * The stateful half of the signup port: synchronous handle-status mapping, the terms gate, the
@@ -44,16 +45,20 @@ class SignupViewModelTest {
     private class FakeConsentStore(
         agreed: Boolean = false,
         terms: Boolean = false,
+        /** A preferences file that can't be written — what `DataStore.edit` throws on. */
+        private val failWrites: Boolean = false,
     ) : SignupConsentStore {
         private val _agreed = MutableStateFlow(agreed)
         override val communityAgreed: StateFlow<Boolean> = _agreed.asStateFlow()
         override suspend fun setCommunityAgreed(agreed: Boolean) {
+            if (failWrites) throw IOException("unwritable preferences")
             _agreed.value = agreed
         }
 
         private val _terms = MutableStateFlow(terms)
         override val termsAccepted: StateFlow<Boolean> = _terms.asStateFlow()
         override suspend fun setTermsAccepted(accepted: Boolean) {
+            if (failWrites) throw IOException("unwritable preferences")
             _terms.value = accepted
         }
     }
@@ -110,6 +115,21 @@ class SignupViewModelTest {
     }
 
     @Test
+    fun `a failed availability check degrades to Error and still lets Continue through`() = runTest(dispatcher) {
+        // The real repo catches every RPC failure into `HandleAvailability.Failure`,
+        // which maps to `HandleStatus.Error` — and Error deliberately counts as
+        // available, because a transient blip must not wedge Continue on a handle
+        // the upsert's unique constraint will adjudicate anyway.
+        val vm = vm(FakeUsersRepository(failAvailability = true))
+        vm.setName("Yash"); vm.setCity("Bangalore"); vm.setHandle("free_handle")
+        advanceUntilIdle()
+
+        assertEquals(HandleStatus.Error, vm.state.value.handleStatus)
+        assertTrue(vm.state.value.handleAvailable)
+        assertTrue(vm.state.value.profileValid)
+    }
+
+    @Test
     fun `terms gate toggles independently of the flow`() {
         val vm = vm()
         assertFalse(vm.state.value.termsAccepted)
@@ -162,6 +182,29 @@ class SignupViewModelTest {
 
         vm.setTerms(false)
         advanceUntilIdle()
+        assertFalse(consents.termsAccepted.value)
+    }
+
+    @Test
+    fun `a consent write the store cannot keep is answered from state, not by crashing`() = runTest(dispatcher) {
+        // `DataStore.edit` throws IOException on a preferences file it can't read or write, and
+        // both consent writes ran bare inside `viewModelScope.launch` — no handler on that
+        // scope, so the throw went to the thread's default one and took the app down on the
+        // pledge screen. Both taps must still be answered from state: the pledge screen only
+        // swaps for the role picker when the flag flips, and if the write never landed the
+        // store says no next launch and simply asks again.
+        val consents = FakeConsentStore(failWrites = true)
+        val vm = vm(consents = consents)
+        advanceUntilIdle()
+
+        vm.agreeCommunity()
+        advanceUntilIdle()
+        assertTrue(vm.state.value.communityAgreed)
+        assertFalse(consents.communityAgreed.value)
+
+        vm.setTerms(true)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.termsAccepted)
         assertFalse(consents.termsAccepted.value)
     }
 
@@ -240,6 +283,54 @@ class SignupViewModelTest {
         // pledge screen whose Agree writes the value the store already holds, which
         // emits nothing, so nothing would move the screen on.
         assertTrue(s.communityAgreed)
+    }
+
+    @Test
+    fun `a hydrated handle arrives available, and the live check leaves it alone`() = runTest(dispatcher) {
+        // `handle_is_available` (mig 0007) is a bare "does any row hold this" existence check —
+        // it has to be, it is granted to anon and runs before sign-in — so it answers TAKEN for
+        // the user's OWN handle. Hydrate used to fill the field and leave the status at Empty:
+        // Continue sat disabled under a handle the user could plainly see, and the debounced
+        // check then flipped the field red for a handle they already own.
+        val vm = vm(FakeUsersRepository(taken = setOf("asha")))
+        vm.hydrate(AppRole.Artist, "Asha Rao", "Mumbai", "Asha")
+
+        assertEquals("asha", vm.state.value.handle) // normalized on the way in
+        assertEquals(HandleStatus.Available, vm.state.value.handleStatus)
+        assertTrue(vm.state.value.profileValid)
+
+        advanceUntilIdle() // the debounced check must not ask the RPC about their own handle
+        assertEquals(HandleStatus.Available, vm.state.value.handleStatus)
+        assertTrue(vm.state.value.profileValid)
+    }
+
+    @Test
+    fun `a hydrated handle that no longer passes the rules is not waved through`() = runTest(dispatcher) {
+        // Available is asserted because the ROW is theirs, not because the string is fine. A
+        // handle stored under older rules still has to be re-picked before Continue lights.
+        val vm = vm()
+        vm.hydrate(AppRole.Client, "Asha Rao", "Mumbai", "ab") // two chars — under the 3 floor
+        assertEquals(HandleStatus.Invalid, vm.state.value.handleStatus)
+        assertFalse(vm.state.value.profileValid)
+        advanceUntilIdle()
+        assertEquals(HandleStatus.Invalid, vm.state.value.handleStatus)
+    }
+
+    @Test
+    fun `reset drops the departing accounts own-handle exemption`() = runTest(dispatcher) {
+        // The exemption is the only reason the RPC is skipped. Kept across a sign-out it would
+        // report Available for a handle the next person does NOT own, and the upsert's unique
+        // constraint would be the one to break the news.
+        val vm = vm(FakeUsersRepository(taken = setOf("asha")))
+        vm.hydrate(AppRole.Artist, "Asha Rao", "Mumbai", "asha")
+        advanceUntilIdle()
+        assertEquals(HandleStatus.Available, vm.state.value.handleStatus)
+
+        vm.reset()
+        advanceUntilIdle() // the live check sees the cleared field...
+        vm.setHandle("asha") // ...so the next person typing the same handle is a real change
+        advanceUntilIdle()
+        assertEquals(HandleStatus.Taken, vm.state.value.handleStatus)
     }
 
     @Test
@@ -328,6 +419,31 @@ class SignupViewModelTest {
         vm.setSignedIn(true)
         assertEquals(SignupStep.Notif, vm.state.value.step)
         assertTrue(vm.state.value.signedIn)
+    }
+
+    @Test
+    fun `back from auth lands on the role picker, not on the home screen`() {
+        // The container's system-back handler now covers `.Auth` and gates on `canGoBack`.
+        // Unhandled, the press fell through to the Activity and finished it, so the only way
+        // out of a role the user had just picked was to quit the app — `.Role` is a purely
+        // local choice with no auth state attached, which is exactly where back belongs.
+        val vm = vm()
+        vm.startSignup()
+        vm.advance() // Role → Auth
+        assertEquals(SignupStep.Auth, vm.state.value.step)
+        assertTrue(vm.state.value.canGoBack)
+        vm.back()
+        assertEquals(SignupStep.Role, vm.state.value.step)
+    }
+
+    @Test
+    fun `back from auth in login mode lands on welcome`() {
+        // Login skips `.Role`, so the step behind the auth screen is the welcome screen.
+        val vm = vm()
+        vm.startLogin() // parks straight on Auth
+        assertTrue(vm.state.value.canGoBack)
+        vm.back()
+        assertEquals(SignupStep.Welcome, vm.state.value.step)
     }
 
     @Test

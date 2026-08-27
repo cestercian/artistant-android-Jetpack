@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -307,9 +308,20 @@ class SessionManager @Inject constructor(
 
     // MARK: - Helpers
 
-    /** Bump the generation on a genuine (non-refresh) completed sign-in. Idempotent per call. */
+    /**
+     * Bump the generation on a genuine (non-refresh) completed sign-in.
+     *
+     * `update` rather than `value += 1`: the read-modify-write is not atomic, and this is
+     * not called from one thread. The email/Google paths reach it from `viewModelScope`
+     * (Main), while the OAuth path reaches it from [handleDeepLink]'s `handleDeeplinks`
+     * callback, which supabase-kt completes on whatever thread finished the exchange. A
+     * lost increment leaves [signInGeneration] unchanged, and an unchanged generation is
+     * exactly the state this counter exists to rule out — the router keyed on
+     * `(uid, generation)` never re-fires and a returning user re-authenticating into the
+     * same uuid stays on the auth screen.
+     */
     private fun completedSignIn() {
-        _signInGeneration.value += 1
+        _signInGeneration.update { it + 1 }
         // Re-claim this device's push token for whoever just signed in. Every sign-in path
         // funnels through here, and none of them passes through `ArtistantApplication.onCreate`
         // — the only other registration site — so without this a returning user gets no pushes

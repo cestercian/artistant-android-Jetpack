@@ -249,8 +249,10 @@ internal fun upcomingSnapshot(
     if (upcoming.isEmpty()) return UpcomingSnapshot(0, "No upcoming gigs")
 
     val todayStart = istStartOfDay(nowEpochMs)
+    // Non-empty by construction: `upcomingConfirmed` admits a booking only when
+    // `resolvedStartEpochMs()` answered, and that is a pure parse of the same
+    // immutable row — so min/max cannot see an empty list here.
     val starts = upcoming.mapNotNull { it.resolvedStartEpochMs() }
-    if (starts.isEmpty()) return UpcomingSnapshot(upcoming.size, "Upcoming gig")
 
     // Negative deltas are impossible here — `upcomingConfirmed` already dropped
     // anything before today — so no clamp is needed.
@@ -258,7 +260,8 @@ internal fun upcomingSnapshot(
     val furthest = ((istStartOfDay(starts.max()) - todayStart) / MS_PER_DAY).toInt()
     val copy = when {
         soonest == 0 && furthest == 0 -> "Next gig today"
-        soonest == furthest || upcoming.size == 1 -> "Next gig in $soonest ${dayWord(soonest)}"
+        // One gig is already covered: with a single start, min == max.
+        soonest == furthest -> "Next gig in $soonest ${dayWord(soonest)}"
         else -> "Spread over $furthest days"
     }
     return UpcomingSnapshot(upcoming.size, copy)
