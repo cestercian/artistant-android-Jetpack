@@ -44,18 +44,13 @@ class SupabaseAccountRepository @Inject constructor(
     private val client: SupabaseClient,
 ) : AccountRepository {
 
-    private val json = Json { ignoreUnknownKeys = true }
-
     override suspend fun deleteAccount() {
         try {
             val response = client.functions.invoke(
                 function = "delete-account",
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
-            val parsed = json.decodeFromString<DeleteResponse>(response.bodyAsText())
-            if (!parsed.deleted) {
-                throw AccountRepositoryError.DeleteFailed("Server returned deleted=false")
-            }
+            requireDeleted(response.bodyAsText())
         } catch (e: AccountRepositoryError) {
             throw e
         } catch (t: Throwable) {
@@ -69,19 +64,7 @@ class SupabaseAccountRepository @Inject constructor(
                 function = "data-export",
                 headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             ).bodyAsText()
-            val envelope = runCatching { json.decodeFromString<SignedUrlEnvelope>(raw) }.getOrNull()
-            if (envelope?.mode == "signed_url") {
-                if (envelope.url.isBlank()) {
-                    throw AccountRepositoryError.Underlying(
-                        IllegalStateException("data-export returned an empty signed URL"),
-                    )
-                }
-                return ExportResult.SignedUrl(
-                    url = envelope.url,
-                    expiresInSeconds = envelope.expiresInSeconds,
-                )
-            }
-            return ExportResult.Inline(json = raw)
+            return parseExportResponse(raw)
         } catch (e: AccountRepositoryError) {
             throw e
         } catch (t: Throwable) {
@@ -89,15 +72,59 @@ class SupabaseAccountRepository @Inject constructor(
         }
     }
 
-    @Serializable
-    private data class DeleteResponse(val deleted: Boolean)
+}
 
-    @Serializable
-    private data class SignedUrlEnvelope(
-        val mode: String,
-        val url: String,
-        @SerialName("expires_in_seconds") val expiresInSeconds: Int = 3600,
-    )
+@Serializable
+internal data class DeleteResponse(val deleted: Boolean)
+
+@Serializable
+internal data class SignedUrlEnvelope(
+    val mode: String,
+    val url: String,
+    @SerialName("expires_in_seconds") val expiresInSeconds: Int = 3600,
+)
+
+private val accountJson = Json { ignoreUnknownKeys = true }
+
+/**
+ * Accept a delete only if the server actually said it deleted the account.
+ *
+ * `delete-account` answers 200 with a body either way, so the HTTP status is not
+ * the answer — `{"deleted": false}` is a REFUSAL, and treating it as success
+ * would tell someone exercising their DPDP §11 erasure right that their data was
+ * gone when it was not. Extracted from the invoke call so the decision is
+ * reachable without a live SupabaseClient: it is the one place in this file that
+ * decides whether an erasure happened.
+ */
+internal fun requireDeleted(body: String) {
+    val parsed = runCatching { accountJson.decodeFromString<DeleteResponse>(body) }.getOrNull()
+        ?: throw AccountRepositoryError.DeleteFailed("Unreadable response: ${body.take(120)}")
+    if (!parsed.deleted) {
+        throw AccountRepositoryError.DeleteFailed("Server returned deleted=false")
+    }
+}
+
+/**
+ * Read the export envelope: a signed URL for a large payload, else the body
+ * itself as inline JSON.
+ *
+ * The mode is decided by the envelope, not by shape-guessing — anything that is
+ * not a well-formed `signed_url` envelope IS the export, which is what makes the
+ * inline path work for a body that happens to contain other keys. A `signed_url`
+ * envelope carrying a blank URL is a server bug rather than an export, and is
+ * rejected instead of handing the caller a link that opens nothing.
+ */
+internal fun parseExportResponse(raw: String): ExportResult {
+    val envelope = runCatching { accountJson.decodeFromString<SignedUrlEnvelope>(raw) }.getOrNull()
+    if (envelope?.mode == "signed_url") {
+        if (envelope.url.isBlank()) {
+            throw AccountRepositoryError.Underlying(
+                IllegalStateException("data-export returned an empty signed URL"),
+            )
+        }
+        return ExportResult.SignedUrl(url = envelope.url, expiresInSeconds = envelope.expiresInSeconds)
+    }
+    return ExportResult.Inline(json = raw)
 }
 
 /** Test / preview twin — mirrors iOS `FakeAccountService`. */
