@@ -121,7 +121,11 @@ class FakeReviewsRepository(
     private val byArtist: Map<String, List<Review>> = emptyMap(),
     private val bookings: Map<String, FakeBookingMeta> = emptyMap(),
 ) : ReviewsRepository {
-    private val inserted = mutableListOf<Review>()
+    /** Inserted reviews, keyed by artist id — mirrors the real `eq("artist_id", …)` filter. */
+    private val insertedByArtist = mutableMapOf<String, MutableList<Review>>()
+
+    /** One review per booking, like the real `reviews` table's unique constraint. */
+    private val reviewedBookingIds = mutableSetOf<String>()
 
     data class FakeBookingMeta(
         val artistId: String,
@@ -129,8 +133,10 @@ class FakeReviewsRepository(
         val startDatetime: String? = null,
     )
 
-    override suspend fun listForArtist(artistId: String): List<Review> =
-        byArtist[artistId.lowercase()].orEmpty() + inserted.filter { true }
+    override suspend fun listForArtist(artistId: String): List<Review> {
+        val key = artistId.lowercase()
+        return byArtist[key].orEmpty() + insertedByArtist[key].orEmpty()
+    }
 
     override suspend fun insert(
         bookingId: String,
@@ -139,17 +145,22 @@ class FakeReviewsRepository(
         categories: Map<String, Int>?,
     ): Review {
         if (rating !in 1..5) throw ReviewRepositoryError.InvalidRating
-        val meta = bookings[bookingId.lowercase()] ?: throw ReviewRepositoryError.BookingNotFound
+        val id = bookingId.lowercase()
+        val meta = bookings[id] ?: throw ReviewRepositoryError.BookingNotFound
         if (meta.status != "completed") throw ReviewRepositoryError.BookingNotCompleted
+        // Same signal the real seam derives from a 23505 on a second insert for
+        // the same booking (L101-103 above).
+        if (id in reviewedBookingIds) throw ReviewRepositoryError.AlreadyReviewed
         val review = Review(
-            id = "fake-review-${inserted.size}",
+            id = "fake-review-${reviewedBookingIds.size}",
             name = "You",
             org = "",
             rating = rating,
             body = body.orEmpty(),
             categories = categories,
         )
-        inserted.add(review)
+        reviewedBookingIds.add(id)
+        insertedByArtist.getOrPut(meta.artistId.lowercase()) { mutableListOf() }.add(review)
         return review
     }
 }

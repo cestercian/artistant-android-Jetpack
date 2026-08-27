@@ -34,5 +34,13 @@ class SearchViewModelLogicTest {
         val page2 = repo.search(SearchFilters(sort = SearchSort.Bookability), page1.nextCursor)
         assertEquals(5, page2.artists.size)
         assertEquals(SearchCursor.End, page2.nextCursor)
+
+        // Keyset RESUME, not just keyset emission: page2 must be the roster's
+        // remaining tail — not a repeat of anything page1 already returned, and
+        // not a gap either.
+        val page1Ids = page1.artists.map { it.id }.toSet()
+        val page2Ids = page2.artists.map { it.id }.toSet()
+        assertTrue("page2 repeats a row page1 already returned", page1Ids.intersect(page2Ids).isEmpty())
+        assertEquals(roster.map { it.id }.toSet(), page1Ids + page2Ids)
     }
 }

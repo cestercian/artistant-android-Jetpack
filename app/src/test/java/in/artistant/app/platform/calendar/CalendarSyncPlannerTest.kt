@@ -149,7 +149,6 @@ class CalendarSyncPlannerTest {
         val a = sample(id = "b1", status = BookingStatus.Confirmed)
         val pending = sample(id = "b2", status = BookingStatus.PendingConfirm)
         // 2026-07-10 UTC day window covering the sample start
-        val dayStart = 1_752_134_400_000L // approx — use start of sample day via planner start
         val start = CalendarSyncPlanner.resolvedStartEpochMs(a)!!
         val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Kolkata")).apply {
             timeInMillis = start

@@ -8,9 +8,13 @@ import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.PaymentMethod
 import `in`.artistant.app.data.payments.PaymentEscrowState
 import `in`.artistant.app.data.payments.PaymentResult
+import `in`.artistant.app.testsupport.ARTIST_ID
+import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
+import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.text.SimpleDateFormat
@@ -70,6 +74,23 @@ class BookingsRepositoryLogicTest {
         assertEquals("Evening set", booking.packageName)
     }
 
+    /**
+     * The real insert always writes non-null `start_datetime`/`end_datetime`
+     * (computed by [SupabaseBookingsRepository.startEndIso]) and the `select()`
+     * echo carries them back onto [in.artistant.app.data.model.Booking
+     * .startDatetimeIso]/`endDatetimeIso`. A fake that left both null made every
+     * booking it produced diverge from a real one on the ISO-only "Add to
+     * calendar" path.
+     */
+    @Test
+    fun create_stampsStartAndEndDatetimeIso_theSameWayTheRealInsertDoes() = runTest {
+        val d = draft()
+        val booking = FakeBookingsRepository().create(d, pay)
+        val (expectedStart, expectedEnd) = SupabaseBookingsRepository.startEndIso(d)
+        assertEquals(expectedStart, booking.startDatetimeIso)
+        assertEquals(expectedEnd, booking.endDatetimeIso)
+    }
+
     @Test
     fun accept_flipsConfirmed() = runTest {
         val repo = FakeBookingsRepository()
@@ -107,6 +128,90 @@ class BookingsRepositoryLogicTest {
             "expected NotFoundOrUnauthorized, got $err",
             err is BookingRepositoryError.NotFoundOrUnauthorized,
         )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // listForArtist — the artist seat, named rather than delegated to the
+    // client list
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun listForArtist_withNoNamedViewer_keepsReturningEverySeededRow() = runTest {
+        // Unset viewerId is the default every existing fixture relies on — this
+        // pins that the default stays "return everything", same as before.
+        val mine = booking(id = "b-1", artistId = ARTIST_ID)
+        val someoneElses = booking(id = "b-2", artistId = OTHER_ARTIST_ID)
+        val repo = FakeBookingsRepository(seed = listOf(mine, someoneElses))
+
+        assertEquals(listOf("b-1", "b-2"), repo.listForArtist().map { it.id })
+    }
+
+    @Test
+    fun listForArtist_withANamedViewer_onlySeesItsOwnBookings() = runTest {
+        val mine = booking(id = "b-1", artistId = ARTIST_ID)
+        val someoneElses = booking(id = "b-2", artistId = OTHER_ARTIST_ID)
+        val repo = FakeBookingsRepository(seed = listOf(mine, someoneElses), viewerId = ARTIST_ID)
+
+        assertEquals(listOf("b-1"), repo.listForArtist().map { it.id })
+        // listForClient is untouched by viewerId — Booking carries no client id
+        // to filter on, so it keeps returning everything seeded.
+        assertEquals(listOf("b-1", "b-2"), repo.listForClient().map { it.id })
+    }
+
+    /**
+     * Both real list reads end in `order("start_datetime", Order.DESCENDING)`, so
+     * a screen never receives them in insert order. A fake that handed back its
+     * seed order let a list ViewModel be written against an ordering production
+     * does not produce.
+     */
+    @Test
+    fun bothListReads_comeBackNewestFirst_theWayTheServerOrdersThem() = runTest {
+        val repo = FakeBookingsRepository(
+            seed = listOf(
+                booking(id = "may", startIso = "2026-05-16T15:00:00Z"),
+                booking(id = "july", startIso = "2026-07-04T15:00:00Z"),
+                booking(id = "june", startIso = "2026-06-01T15:00:00Z"),
+            ),
+        )
+
+        assertEquals(listOf("july", "june", "may"), repo.listForClient().map { it.id })
+        assertEquals(listOf("july", "june", "may"), repo.listForArtist().map { it.id })
+    }
+
+    @Test
+    fun aRowWithNoStartDatetimeKeepsItsSeededPlace_ratherThanBeingDated() = runTest {
+        // The ordering is the COLUMN, not the date/time labels: `start_datetime`
+        // is all the server sorts on, so a row without one has no position to
+        // take. Postgres puts those first for DESC; a stable sort keeps them in
+        // the order they were seeded, which is what every label-only fixture in
+        // this suite reads back.
+        val repo = FakeBookingsRepository(
+            seed = listOf(
+                booking(id = "u1"),
+                booking(id = "dated", startIso = "2026-07-04T15:00:00Z"),
+                booking(id = "u2"),
+            ),
+        )
+
+        assertEquals(listOf("u1", "u2", "dated"), repo.listForClient().map { it.id })
+    }
+
+    /**
+     * The real insert's `select()` echo carries back migration 0080's
+     * denormalized `client_name`, which is the only thing that names the client
+     * on the artist seat (`ArtistHomeLogic.artistClientDisplayName`,
+     * `CalendarSyncPlanner.eventTitle`). A fake that never stamped it could only
+     * ever exercise those in their "Client"/venue fallback shape.
+     */
+    @Test
+    fun create_stampsTheDenormalizedClientName_theArtistSeatRenders() = runTest {
+        val named = FakeBookingsRepository(clientName = "  Asha Rao  ").create(draft(), pay)
+        assertEquals("Asha Rao", named.clientFullName)
+
+        // Blank is the same non-answer as absent, exactly as the decoder reads it.
+        assertNull(FakeBookingsRepository(clientName = "   ").create(draft(), pay).clientFullName)
+        // And unnamed stays the default, so the fallback path stays reachable.
+        assertNull(FakeBookingsRepository().create(draft(), pay).clientFullName)
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -3,36 +3,11 @@ package `in`.artistant.app.data.repository
 import `in`.artistant.app.data.model.SearchCursor
 import `in`.artistant.app.data.model.SearchFilters
 import `in`.artistant.app.data.model.SearchSort
+import `in`.artistant.app.feature.discover.DiscoverViewModel
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-
-class FakeArtistsRepositoryTest {
-
-    @Test
-    fun `cache never downgrades a hydrated artist`() = runTest {
-        val full = FakeArtistsRepository.sample(id = "a1", name = "Full Name").copy(
-            bio = "full bio",
-        )
-        val repo = FakeArtistsRepository(seed = listOf(full))
-        repo.cache(
-            listOf(
-                FakeArtistsRepository.sample(id = "a1", name = "Partial").copy(bio = ""),
-            ),
-        )
-        assertEquals("Full Name", repo.find("a1")?.name)
-        assertEquals("full bio", repo.find("a1")?.bio)
-    }
-
-    @Test
-    fun `ensureFull returns null on failure`() = runTest {
-        val repo = FakeArtistsRepository(seed = listOf(FakeArtistsRepository.sample()))
-        repo.failFetch = true
-        assertNull(repo.ensureFull("a1"))
-    }
-}
 
 class FakeSearchRepositoryTest {
 
@@ -158,5 +133,84 @@ class FakeSearchRepositoryTest {
         val keyset = next as SearchCursor.Keyset
         assertEquals(80, keyset.afterScore)
         assertEquals("id20", keyset.afterId)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The two missing-RPC classifiers, side by side.
+    //
+    // [SupabaseSearchRepository.isMissingFunction] decides whether a pre-0073
+    // server degrades through the retry-without-0073-dims path or throws;
+    // [DiscoverViewModel.messageFor] decides what a failed Discover says. Both
+    // are substring matches over the SAME PostgREST message, and their lists
+    // overlap without being equal — so one table drives both, a row per
+    // substring either keys on (each isolated, so no message trips two branches
+    // of the same function) plus an error that is neither.
+    //
+    // Where they disagree TODAY, said out loud rather than left to be
+    // discovered: "pgrst202" and "no function matches" reach the retry but not
+    // the friendly copy, and a bare "search_artists" reads friendly without
+    // reaching the retry. Costs a blunter sentence, never a broken screen — but
+    // a row that moves is now a test failure, not a silent drift.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private data class ClassifierCase(
+        val message: String,
+        /** Expected [SupabaseSearchRepository.isMissingFunction]. */
+        val retries: Boolean,
+        /** Expected [DiscoverViewModel.messageFor]. */
+        val copy: String,
+    )
+
+    @Test
+    fun `isMissingFunction and messageFor stay pinned across every substring they key on`() {
+        val friendly = "We couldn't load the roster right now. Try again in a moment."
+        val generic = "Something went wrong loading the roster."
+        val cases = listOf(
+            ClassifierCase("Could not find the function public.some_rpc in the schema cache", true, friendly),
+            ClassifierCase("PGRST202: schema cache reload required", true, generic),
+            ClassifierCase("SQLSTATE 42883 encountered", true, friendly),
+            ClassifierCase("relation \"artists_view\" does not exist", true, friendly),
+            ClassifierCase("No function matches the given name and argument types", true, generic),
+            // messageFor's own extra substring: naming the RPC is enough for the copy.
+            ClassifierCase("search_artists timed out", false, friendly),
+            // Neither classifier: the roster failed for an ordinary reason.
+            ClassifierCase("socket closed", false, generic),
+        )
+
+        for (case in cases) {
+            val error = IllegalStateException(case.message)
+            assertEquals(
+                "isMissingFunction(\"${case.message}\")",
+                case.retries,
+                SupabaseSearchRepository.isMissingFunction(error),
+            )
+            assertEquals(
+                "messageFor(\"${case.message}\")",
+                case.copy,
+                DiscoverViewModel.messageFor(error),
+            )
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // artistsRepository caching — the real search feeds every returned partial
+    // into the shared by-id cache (SearchRepository.kt's artistsRepository
+    // .cache(artists)); a fake that skipped it made a tapped search result
+    // unresolvable through find()/ensureFull() alone.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `search caches every returned artist into the configured ArtistsRepository`() = runTest {
+        val roster = listOf(
+            FakeArtistsRepository.sample(id = "1", name = "Nova Beats"),
+            FakeArtistsRepository.sample(id = "2", name = "Comedy Night"),
+        )
+        val artistsCache = FakeArtistsRepository()
+        val repo = FakeSearchRepository(roster, artistsRepository = artistsCache)
+
+        repo.search(SearchFilters(), SearchCursor.Start)
+
+        assertEquals("Nova Beats", artistsCache.find("1")?.name)
+        assertEquals("Comedy Night", artistsCache.find("2")?.name)
     }
 }

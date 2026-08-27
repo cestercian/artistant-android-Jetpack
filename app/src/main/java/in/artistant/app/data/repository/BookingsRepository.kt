@@ -11,6 +11,7 @@ import `in`.artistant.app.data.model.BookingDraft
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.EscrowStatus
 import `in`.artistant.app.data.model.PaymentMethod
+import `in`.artistant.app.data.model.resolvedStartEpochMs
 import `in`.artistant.app.data.payments.PaymentResult
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -583,6 +584,26 @@ private data class DbBookingWithClient(
  */
 class FakeBookingsRepository(
     seed: List<Booking> = emptyList(),
+    /**
+     * The signed-in user's id. Unset by default, so every existing single-role
+     * fixture keeps seeing the full seeded set from both [listForClient] and
+     * [listForArtist] — exactly as before. Name it to model the ARTIST seat:
+     * [listForArtist] then filters to rows where `artistId == viewerId`
+     * instead of silently delegating to [listForClient]'s unfiltered list, the
+     * way a multi-artist fixture (a harness roster, a future cross-artist
+     * test) could otherwise show bookings the viewer does not own.
+     */
+    private val viewerId: String? = null,
+    /**
+     * The booking client's display name — migration 0080's denormalized
+     * `client_name`, which the server stamps on insert and the real `create`'s
+     * `select()` echo carries back for the artist seat to render.
+     *
+     * Unset by default, so a fixture that says nothing keeps producing the
+     * unnamed row every "falls back to 'Client'" test needs; name it to model a
+     * create the way the server answers it.
+     */
+    private val clientName: String? = null,
 ) : BookingsRepository {
     private val rows = seed.toMutableList()
     var signedIn: Boolean = true
@@ -592,6 +613,11 @@ class FakeBookingsRepository(
         if (!signedIn) throw BookingRepositoryError.NotSignedIn
         if (failCreate) throw BookingRepositoryError.Underlying(IllegalStateException("fake create fail"))
         val charges = draft.charges
+        // Same helper the real insert computes start/end from (BookingsRepository
+        // .startEndIso), so a booking this fake creates carries the same
+        // startDatetimeIso/endDatetimeIso a real one would — the columns
+        // Booking.resolvedStartEpochMs and the "Add to calendar" path key off.
+        val (startIso, endIso) = SupabaseBookingsRepository.startEndIso(draft)
         val booking = Booking(
             id = UUID.randomUUID().toString(),
             artistId = draft.artistId.lowercase(),
@@ -612,6 +638,11 @@ class FakeBookingsRepository(
             paymentMethod = draft.paymentMethod,
             protectionEnabled = true,
             createdAtEpochMs = System.currentTimeMillis(),
+            // Trimmed-and-blank-dropped like the decoder does with `client_name`,
+            // so a fixture full of spaces can't reach the artist seat as a name.
+            clientFullName = clientName?.trim()?.takeIf { it.isNotEmpty() },
+            startDatetimeIso = startIso,
+            endDatetimeIso = endIso,
             venueNotes = draft.venueNotes.trim().takeIf { it.isNotEmpty() },
         )
         rows.add(0, booking)
@@ -620,10 +651,16 @@ class FakeBookingsRepository(
 
     override suspend fun listForClient(): List<Booking> {
         if (!signedIn) throw BookingRepositoryError.NotSignedIn
-        return rows.toList()
+        return rows.startDatetimeDescending()
     }
 
-    override suspend fun listForArtist(): List<Booking> = listForClient()
+    override suspend fun listForArtist(): List<Booking> {
+        if (!signedIn) throw BookingRepositoryError.NotSignedIn
+        val viewer = viewerId
+        val mine =
+            if (viewer == null) rows else rows.filter { it.artistId.equals(viewer, ignoreCase = true) }
+        return mine.startDatetimeDescending()
+    }
 
     override suspend fun fetchOne(id: String): Booking? =
         rows.firstOrNull { it.id.equals(id, ignoreCase = true) }
@@ -646,6 +683,23 @@ class FakeBookingsRepository(
     override suspend fun submitFeedback(body: String, isBug: Boolean): Boolean {
         if (body.trim().isEmpty() || !signedIn) return false
         return true
+    }
+
+    /**
+     * `order("start_datetime", Order.DESCENDING)`, done in memory — the clause
+     * BOTH real list reads carry, so a list off this fake arrives in the order a
+     * screen would really receive it.
+     *
+     * The key is the start COLUMN, never [resolvedStartEpochMs]'s date/time-label
+     * fallback: the server sorts on the column alone, so a row carrying none has
+     * no place in that ordering. Those keep the order they were seeded in, ahead
+     * of the dated rows — a stable sort, and `DESC` is `NULLS FIRST` in Postgres.
+     */
+    private fun List<Booking>.startDatetimeDescending(): List<Booking> {
+        val byStartDesc = compareBy<Booking, Long?>(nullsFirst(reverseOrder<Long>())) { b ->
+            b.startDatetimeIso?.takeIf { it.isNotBlank() }?.let { b.resolvedStartEpochMs() }
+        }
+        return sortedWith(byStartDesc)
     }
 
     private fun mutate(id: String, transform: (Booking) -> Booking): Booking {

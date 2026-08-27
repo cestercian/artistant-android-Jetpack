@@ -105,7 +105,14 @@ object HarnessRepositories {
         // seedFull (not the constructor's plain seed) marks the row HYDRATED, so
         // `fetchArtist` returns the full profile — packages, samples, tech rider and all —
         // instead of a tile-shaped partial that would render a half-empty EPK.
-        FakeArtistsRepository().apply { seedFull(listOf(coveredArtist)) }
+        //
+        // The REST of the roster goes in as `remote`: rows the fake's "server" can answer
+        // for, which `find()` misses until a fetch hydrates them. Without it, tapping a
+        // non-fixture search result had only the cached tile to work with — and since a
+        // tile no longer satisfies `fetchArtist` (it never should have), that tap would
+        // read "Artist not found." Seeding them remotely is what makes the profile resolve
+        // the way the real five-table stitch does.
+        FakeArtistsRepository(remote = roster.drop(1)).apply { seedFull(listOf(coveredArtist)) }
     }
 
     private val bookingsImpl: FakeBookingsRepository by lazy {
@@ -212,8 +219,15 @@ object HarnessRepositories {
     // Pages the whole fixture roster rather than the single fixture artist: Discover's rails
     // group by category and the filter sheet derives its facets from the distinct categories
     // and cities present, so a one-card roster would render neither.
+    //
+    // Handed `artistsImpl` for the same reason the real search holds an ArtistsRepository: it
+    // feeds every returned partial into the by-id cache. SearchViewModel has no cache of its
+    // own, and ArtistProfileViewModel resolves a tapped card through find()/ensureFull() —
+    // which, with artistsImpl seeded with the fixture artist ALONE, answered for nobody else
+    // on the roster. Tapping a search result rendered "Artist not found." unless Discover had
+    // happened to warm the cache first.
     private val searchImpl: FakeSearchRepository by lazy {
-        FakeSearchRepository(roster)
+        FakeSearchRepository(roster, artistsRepository = artistsImpl)
     }
 
     private val reviewsImpl: FakeReviewsRepository by lazy {

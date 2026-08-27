@@ -171,12 +171,20 @@ class FakeSamplesRepository : SamplesRepository {
         artistId: String,
     ): Sample {
         uploadedFiles.add(audioFile)
+        val id = UUID.randomUUID().toString().lowercase()
+        val artist = artistId.lowercase()
+        val (ext, _) = SupabaseSamplesRepository.audioFormat(audioFile)
+        // Mirrors the real write: a trimmed/defaulted title and a resolvable
+        // audioUrl. Sample.audioUrl == null is the app's "unplayable" signal
+        // (see the doc on that field), so a fake that left it null made every
+        // freshly uploaded sample untestable through the playback control.
         val sample = Sample(
-            id = UUID.randomUUID().toString().lowercase(),
-            title = title,
+            id = id,
+            title = title.trim().ifBlank { "Sample" },
             duration = SupabaseSamplesRepository.formatDuration(durationSeconds),
+            audioUrl = "https://fake/artist-samples/$artist/$id.$ext",
         )
-        byArtist.getOrPut(artistId.lowercase()) { mutableListOf() }.add(sample)
+        byArtist.getOrPut(artist) { mutableListOf() }.add(sample)
         return sample
     }
 

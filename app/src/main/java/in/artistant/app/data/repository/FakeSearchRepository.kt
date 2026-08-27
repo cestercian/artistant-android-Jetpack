@@ -15,10 +15,20 @@ import `in`.artistant.app.data.model.SearchTuning
  */
 class FakeSearchRepository(
     private val roster: () -> List<Artist> = { emptyList() },
+    /**
+     * Fed every page this fake returns, the same way [SupabaseSearchRepository
+     * .search] feeds [ArtistsRepository.cache] — the contract that makes a
+     * search result tappable without a further fetch (`ArtistProfileViewModel
+     * .refresh` resolves purely through `find`/`ensureFull`, never a search).
+     * Optional and defaulted to null so every existing seed-only caller keeps
+     * behaving exactly as before.
+     */
+    private val artistsRepository: ArtistsRepository? = null,
 ) : SearchRepository {
 
     /** Convenience ctor that holds a fixed list. */
-    constructor(artists: List<Artist>) : this({ artists })
+    constructor(artists: List<Artist>, artistsRepository: ArtistsRepository? = null) :
+        this({ artists }, artistsRepository)
 
     var failSearch: Boolean = false
 
@@ -70,6 +80,11 @@ class FakeSearchRepository(
             }
             else -> SearchCursor.Offset(offset + limit)
         }
+        // Same order as the real repository: feed the by-id cache before handing
+        // the page back, so a caller with no ArtistsRepository of its own (the
+        // Search screen — see the doc on the constructor param) can still resolve
+        // a tapped result.
+        artistsRepository?.cache(page)
         return SearchPage(artists = page, nextCursor = next)
     }
 

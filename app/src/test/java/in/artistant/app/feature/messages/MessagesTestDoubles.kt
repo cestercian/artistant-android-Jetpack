@@ -102,8 +102,10 @@ class FakeThreadFlagsStore(initial: ThreadFlags = ThreadFlags()) : ThreadFlagsSt
 /**
  * In-memory [BlockedUsersStore] — the real one needs DataStore for its offline
  * mirror, which a JVM test can't build. Keeps the same contract that matters to
- * the ViewModels: the set flips immediately, and [toggle] returns false without
- * having changed anything when the write is set to fail.
+ * the ViewModels: [toggle] ALWAYS flips the set and emits before the write is
+ * even attempted (mirroring [ServerBlockedUsersStore]'s optimistic update), and
+ * on a failed write flips it back — recomputed from the CURRENT set, not the
+ * pre-toggle snapshot, exactly as the real store does — and returns false.
  */
 class FakeBlockedUsersStore(initial: Set<String> = emptySet()) : BlockedUsersStore {
     private val state = MutableStateFlow(initial)
@@ -128,9 +130,16 @@ class FakeBlockedUsersStore(initial: Set<String> = emptySet()) : BlockedUsersSto
     }
 
     override suspend fun toggle(userId: String): Boolean {
-        if (failWrites) return false
         val id = userId.lowercase()
-        state.value = if (id in state.value) state.value - id else state.value + id
+        val wasBlocked = id in state.value
+        state.value = if (wasBlocked) state.value - id else state.value + id
+        if (failWrites) {
+            // Roll back from wherever the set is NOW, not the pre-toggle
+            // snapshot — another id may have flipped while this write was
+            // "in flight", same as ServerBlockedUsersStore.toggle.
+            state.value = if (wasBlocked) state.value + id else state.value - id
+            return false
+        }
         return true
     }
 }
