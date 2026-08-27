@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.booking
 import `in`.artistant.app.data.model.BookingDateFormat
 import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
 
 /** Wizard canonical slots — mirrors iOS `ArtistOnboardingStore.allTimeSlots`. */
 val DefaultTimeSlots = listOf("6:00 PM", "7:30 PM", "8:30 PM", "9:00 PM", "10:00 PM", "11:00 PM")
@@ -110,15 +111,28 @@ fun slotMinutesOfDay(slot: String): Int? {
     return hour24 * 60 + minute
 }
 
+/**
+ * The gig clock is Asia/Kolkata, not the device's.
+ *
+ * `BookingsRepository.startEndIso` composes the instant it writes in IST, so a
+ * label like "11:00 PM" always means 23:00 in India whoever is holding the
+ * phone. Reading "now" in the device zone instead let a client west of India
+ * keep slots that had already passed there — a client in Dubai at 22:00 sees
+ * 23:30 IST, and the filter that exists to stop backdated requests waved the
+ * 11:00 PM slot through. Both halves of the comparison are IST now.
+ */
 private fun minutesOfDay(epochMs: Long): Int {
-    val cal = Calendar.getInstance().apply { timeInMillis = epochMs }
+    val cal = Calendar.getInstance(IST).apply { timeInMillis = epochMs }
     return cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
 }
 
-private fun startOfDayMs(epochMs: Long): Long = Calendar.getInstance().apply {
+private fun startOfDayMs(epochMs: Long): Long = Calendar.getInstance(IST).apply {
     timeInMillis = epochMs
     set(Calendar.HOUR_OF_DAY, 0)
     set(Calendar.MINUTE, 0)
     set(Calendar.SECOND, 0)
     set(Calendar.MILLISECOND, 0)
 }.timeInMillis
+
+/** The wall clock every gig label is written and read in. */
+private val IST: TimeZone get() = TimeZone.getTimeZone("Asia/Kolkata")

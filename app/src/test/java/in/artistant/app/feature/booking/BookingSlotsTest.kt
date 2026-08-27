@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
+import java.util.TimeZone
 
 /**
  * The funnel's date/time strip, pinned against a fixed clock.
@@ -22,9 +23,15 @@ import java.util.Calendar
  */
 class BookingSlotsTest {
 
-    /** Local wall-clock instant — the same zone `Calendar.getInstance()` resolves. */
+    /**
+     * An IST wall-clock instant, because that is the clock a gig label means.
+     *
+     * Deliberately NOT `Calendar.getInstance()`: the filter reads both halves of
+     * its comparison in Asia/Kolkata, so a helper on the device zone would make
+     * every case here pass only on a machine that happens to sit in India.
+     */
     private fun at(hour: Int, minute: Int, day: Int = 15): Long =
-        Calendar.getInstance().apply {
+        Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata")).apply {
             clear()
             set(2026, Calendar.AUGUST, day, hour, minute, 0)
         }.timeInMillis
@@ -66,6 +73,23 @@ class BookingSlotsTest {
             listOf("8:30 PM", "9:00 PM", "10:00 PM", "11:00 PM"),
             bookableTimeSlots(DefaultTimeSlots, dayEpochMs = now, nowMs = now),
         )
+    }
+
+    @Test
+    fun bookableTimeSlots_readsTheGigClockNotTheDevices() {
+        // 22:00 in Dubai is 23:30 in India, so an 11:00 PM show is already gone
+        // — even though the device's own clock still reads ten in the evening.
+        val default = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Dubai"))
+            val istNow = at(hour = 23, minute = 30)
+
+            assertFalse(
+                "11:00 PM" in bookableTimeSlots(DefaultTimeSlots, dayEpochMs = istNow, nowMs = istNow),
+            )
+        } finally {
+            TimeZone.setDefault(default)
+        }
     }
 
     @Test

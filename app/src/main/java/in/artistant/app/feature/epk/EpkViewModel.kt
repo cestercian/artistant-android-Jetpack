@@ -157,6 +157,19 @@ data class EpkUiState(
      */
     val samplesUploading: Int = 0,
 
+    /**
+     * Clips being copied into the media cache that have not reached the queue yet.
+     *
+     * [samplesUploading] can only see a clip once `enqueueAudioSample` has run,
+     * and the copy before it — a whole file, plus a duration probe, plus a
+     * provider name query, all off a SAF pick that may be cloud-backed — takes
+     * seconds. In that window the clip was in neither number, so a second pick
+     * saw the same room the first one did and the pair landed the artist over
+     * [MAX_SAMPLES]. Counted separately from the queue's number because the
+     * queue observer rewrites that one wholesale on every emission.
+     */
+    val samplesStaging: Int = 0,
+
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val savingPackages: Boolean = false,
@@ -1216,12 +1229,20 @@ class EpkViewModel @Inject constructor(
     fun onSamplePicked(uri: Uri) {
         val userId = session.currentUserId ?: return
         val current = _state.value
-        if (!canAddSample(stored = current.samples.size, uploading = current.samplesUploading)) {
+        if (!canAddSample(
+                stored = current.samples.size,
+                uploading = current.samplesUploading + current.samplesStaging,
+            )
+        ) {
             _state.update {
                 it.copy(saveError = "You can keep up to $MAX_SAMPLES samples — remove one to add another.")
             }
             return
         }
+        // Claimed before the first suspension point, so a second pick arriving
+        // while this one is still copying sees the seat taken. Both picks land on
+        // Main, so the check above and this increment cannot interleave.
+        _state.update { it.copy(samplesStaging = it.samplesStaging + 1) }
         viewModelScope.launch {
             saveCatching {
                 withContext(Dispatchers.IO) {
@@ -1244,6 +1265,9 @@ class EpkViewModel @Inject constructor(
                 .onFailure {
                     _state.update { it.copy(saveError = "Couldn't add that sample — try a different file.") }
                 }
+            // Released only once the queue can see the clip (or the staging died),
+            // so the seat is never free while the clip is invisible to both counts.
+            _state.update { it.copy(samplesStaging = (it.samplesStaging - 1).coerceAtLeast(0)) }
         }
     }
 

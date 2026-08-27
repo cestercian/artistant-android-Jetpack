@@ -381,9 +381,11 @@ private fun EpkEditor(
         item(key = "samples") {
             SamplesSection(
                 samples = state.samples,
-                // Clips the queue is still carrying. They have no row yet but they
-                // are about to, so the cap counts them — see [EpkUiState.samplesUploading].
-                uploading = state.samplesUploading,
+                // Clips the queue is still carrying, plus the one still being
+                // copied into the cache. Neither has a row yet but both are about
+                // to, so the cap counts them — see [EpkUiState.samplesUploading]
+                // and [EpkUiState.samplesStaging].
+                uploading = state.samplesUploading + state.samplesStaging,
                 // The State, not its value: read inside the section so a position
                 // tick five times a second recomposes one row group rather than
                 // every section in the editor.
