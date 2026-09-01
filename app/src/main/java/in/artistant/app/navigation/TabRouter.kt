@@ -74,7 +74,36 @@ class TabRouter @Inject constructor() {
         _pendingArtistTab.value = null
     }
 
+    /**
+     * Apply one push TAP: wipe whatever an earlier tap left unconsumed, then arm only the
+     * channels this event needs.
+     *
+     * The wipe-first order is the iOS `handleNotificationPayload` contract and it is
+     * load-bearing: a `booking_review_request` leaves `pendingReviewSheet` set, and a
+     * later `booking_confirmed_client` tap overwrites only `pendingBookingDetail` — so
+     * without it the old review sheet auto-presents on top of a different booking.
+     *
+     * [PushDeepLinkAction.Ignore] is the one action that must NOT wipe, and it returns
+     * above the clear. It arms nothing, so clearing on its behalf was pure loss: a payload
+     * this build can't interpret — a server event newer than the app, or one whose id went
+     * missing — silently cancelled a deep link the user HAD asked for by tapping, and left
+     * them with nothing for either tap. `pushNotificationPlan` posts a notification for any
+     * payload carrying an event, ids included or not, so an Ignore-routed tap is a state
+     * the user can actually reach. And [in.artistant.app.platform.push.PushService] routes
+     * on an IO coroutine after an async role read, so two taps landing close together (the
+     * launcher intent, then `onNewIntent`) are not ordered relative to each other — an
+     * Ignore could eat a good link it never even arrived after. "Ignore" now means what it
+     * says: nothing is read from the payload and nothing is written.
+     *
+     * That last part diverges from iOS, which clears ahead of its `switch` and so wipes on
+     * an unknown event too. iOS can afford it — `clientTab`/`artistTab` are persistent
+     * selections there, excluded from `clearTransients()`, so its unknown-event tap still
+     * leaves the user's tab alone. Here the tabs are transients (see [pendingArtistTab])
+     * and they are the ONLY channel `ArtistGigs`/`ArtistHome` have, so the same wipe costs
+     * strictly more than it does on iOS.
+     */
     fun apply(action: PushDeepLinkAction) {
+        if (action == PushDeepLinkAction.Ignore) return
         clearTransients()
         when (action) {
             is PushDeepLinkAction.OpenThread -> {
@@ -93,6 +122,7 @@ class TabRouter @Inject constructor() {
             }
             PushDeepLinkAction.ArtistGigs -> _pendingArtistTab.value = ArtistDeepTab.Gigs
             PushDeepLinkAction.ArtistHome -> _pendingArtistTab.value = ArtistDeepTab.Home
+            // Returned above, before the clear — this branch only satisfies exhaustiveness.
             PushDeepLinkAction.Ignore -> Unit
         }
     }
@@ -133,24 +163,53 @@ object PushPayloadRouter {
         requestId: String?,
         role: AppRole,
     ): PushDeepLinkAction {
-        if (event.isNullOrBlank()) return PushDeepLinkAction.Ignore
-        return when (event) {
+        // Every field arrives as an FCM data string, so "absent" and "arrived empty" are
+        // the same fact and have to be read as one. `pushNotificationPlan` already
+        // normalizes this same payload when it picks a channel and a collapse key; the two
+        // halves of a push disagreeing about whether an id is present is how a tap ends up
+        // somewhere the notification never promised. Untrimmed, a blank
+        // `artistant_booking_id` sailed through the `?.let` below as a real id:
+        // `OpenBookingDetail("")` reached the scaffold, which navigated to
+        // `booking_detail/` — a string no destination in either graph matches — so a
+        // malformed push CRASHED on tap instead of being ignored. The event name is
+        // normalized by the same rule, because the plan half trims it before choosing a
+        // channel: " message " was shown on the messages channel and then routed nowhere.
+        val name = event.pushValue() ?: return PushDeepLinkAction.Ignore
+        val booking = bookingId.pushValue()
+        val thread = threadId.pushValue()
+        val request = requestId.pushValue()
+        return when (name) {
             "booking_confirmed_client" ->
-                bookingId?.let { PushDeepLinkAction.OpenBookingDetail(it) } ?: PushDeepLinkAction.Ignore
+                booking?.let { PushDeepLinkAction.OpenBookingDetail(it) } ?: PushDeepLinkAction.Ignore
             "booking_confirmed_artist" -> PushDeepLinkAction.ArtistGigs
             "booking_reminder_24h" ->
                 if (role == AppRole.Artist) PushDeepLinkAction.ArtistGigs
-                else bookingId?.let { PushDeepLinkAction.OpenBookingDetail(it) } ?: PushDeepLinkAction.Ignore
+                else booking?.let { PushDeepLinkAction.OpenBookingDetail(it) } ?: PushDeepLinkAction.Ignore
             "booking_review_request" ->
-                bookingId?.let { PushDeepLinkAction.OpenBookingDetail(it, autoReview = true) }
+                booking?.let { PushDeepLinkAction.OpenBookingDetail(it, autoReview = true) }
                     ?: PushDeepLinkAction.Ignore
+            // A `message` with no usable thread id still lands on the INBOX rather than on
+            // nowhere: [TabRouter.apply] arms the Messages tab above the id, and the
+            // scaffolds' id effect returns early on null. Same call iOS makes — "a payload
+            // without a thread id still lands on the thread list, which beats the old
+            // last-tab no-op". Not `Ignore`: the user was shown a message notification and
+            // tapping it has to reach their messages.
             "message" -> PushDeepLinkAction.OpenThread(
-                threadId = threadId,
+                threadId = thread,
                 artistSide = role == AppRole.Artist,
             )
-            "gig_request" -> PushDeepLinkAction.OpenGigRequest(requestId)
+            "gig_request" -> PushDeepLinkAction.OpenGigRequest(request)
             "booking_request" -> PushDeepLinkAction.ArtistHome
             else -> PushDeepLinkAction.Ignore
         }
     }
 }
+
+/**
+ * One payload string, or null when it says nothing — the [PushPayloadRouter] copy of
+ * `PushNotificationPlan`'s private helper of the same name. Two one-liners in two packages
+ * beats a shared util nobody else would ever call, but they must stay the SAME rule: the
+ * plan decides what the user is shown and the router decides where the tap goes, and those
+ * two answering differently about one payload is a bug by construction.
+ */
+private fun String?.pushValue(): String? = this?.trim()?.takeIf { it.isNotEmpty() }

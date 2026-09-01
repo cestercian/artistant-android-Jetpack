@@ -2,6 +2,7 @@ package `in`.artistant.app.navigation
 
 import `in`.artistant.app.designsystem.theme.AppRole
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -98,6 +99,74 @@ class PushPayloadMatrixTest {
             PushDeepLinkAction.OpenGigRequest(null),
             route("gig_request", requestId = null, role = AppRole.Artist),
         )
+    }
+
+    /**
+     * …and what "the tab still switches" actually buys, through the router that carries it:
+     * an id-less `message` push lands the tap on the INBOX, not on a null thread. The
+     * action's null `threadId` is not a destination, it is the absence of one — the
+     * Messages tab is the destination, and the scaffold's id effect returns early.
+     * Mirrors iOS, which lands the same payload on the thread list.
+     */
+    @Test
+    fun anIdLessMessagePush_landsOnTheInbox_notOnANullThread() {
+        val clientRouter = TabRouter()
+        clientRouter.apply(route("message", threadId = null, role = AppRole.Client))
+        assertEquals(ClientDeepTab.Messages, clientRouter.consumePendingClientTab())
+        assertNull(clientRouter.consumePendingThread())
+
+        val artistRouter = TabRouter()
+        artistRouter.apply(route("message", threadId = null, role = AppRole.Artist))
+        assertEquals(ArtistDeepTab.Messages, artistRouter.consumePendingArtistTab())
+        assertNull(artistRouter.consumePendingThread())
+    }
+
+    /**
+     * A blank id is as absent as a missing one, and used to not be.
+     *
+     * FCM hands every field over as a String, so a server that sends `""` is saying exactly
+     * what one that sends nothing says. The `?.let` guards only saw null, so
+     * `OpenBookingDetail("")` reached the scaffold and `nav.navigate("booking_detail/")`
+     * matched no destination in the graph — the malformed push crashed on tap rather than
+     * being ignored. `pushNotificationPlan` had always normalized the same payload; now the
+     * showing half and the routing half agree on what "no id" means.
+     */
+    @Test
+    fun blankIdsCountAsMissing_notAsIds() {
+        assertTrue(route("booking_confirmed_client", bookingId = "") is PushDeepLinkAction.Ignore)
+        assertTrue(route("booking_review_request", bookingId = "   ") is PushDeepLinkAction.Ignore)
+        assertTrue(
+            route("booking_reminder_24h", bookingId = "", role = AppRole.Client) is PushDeepLinkAction.Ignore,
+        )
+        // The id-less rows keep their tab-only behaviour rather than becoming Ignore.
+        assertEquals(PushDeepLinkAction.OpenThread(null, artistSide = false), route("message", threadId = ""))
+        assertEquals(
+            PushDeepLinkAction.OpenGigRequest(null),
+            route("gig_request", requestId = "  ", role = AppRole.Artist),
+        )
+    }
+
+    /** Padding is trimmed off an id, never carried into the route string. */
+    @Test
+    fun idsAreTrimmed_soNoRouteIsBuiltFromPaddedText() {
+        assertEquals(
+            PushDeepLinkAction.OpenBookingDetail("b-1"),
+            route("booking_confirmed_client", bookingId = " b-1 "),
+        )
+        assertEquals(PushDeepLinkAction.OpenThread("t-1", artistSide = false), route("message", threadId = "\tt-1 "))
+    }
+
+    /**
+     * The event name is normalized by that same rule, because `pushNotificationPlan` trims
+     * it before choosing a channel: " message " was shown to the user on the messages
+     * channel and then routed to Ignore, so the notification promised a thread and the tap
+     * delivered nothing. Trimming is all that changes — the contract stays case-sensitive.
+     */
+    @Test
+    fun eventNameIsTrimmed_soTheChannelShownAndTheRouteTakenAgree() {
+        assertEquals(PushDeepLinkAction.OpenThread("t-1", artistSide = false), route(" message ", threadId = "t-1"))
+        assertEquals(PushDeepLinkAction.ArtistGigs, route("booking_confirmed_artist\n", role = AppRole.Artist))
+        assertTrue(route(" MESSAGE ") is PushDeepLinkAction.Ignore)
     }
 
     @Test

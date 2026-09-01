@@ -63,8 +63,10 @@ class PushService @Inject constructor(
 
     /**
      * Notification **TAP** routing — `MainActivity`'s launcher/`onNewIntent` extras, and
-     * nothing else. Clears prior transients first so a stale pending* can't leak across
-     * events (iOS PushService contract).
+     * nothing else. A routable event clears prior transients before arming its own, so a
+     * stale pending* can't leak across events (iOS PushService contract); a payload that
+     * routes to `Ignore` leaves them alone rather than cancelling an earlier tap's deep
+     * link on its way to doing nothing — see [TabRouter.apply].
      *
      * Deliberately NOT called when a push arrives: this ends in [TabRouter.apply], which
      * selects a tab and sets the pending deep-link id, so calling it from

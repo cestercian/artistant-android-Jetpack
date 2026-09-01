@@ -180,11 +180,15 @@ walked on the emulator. **Suite 737, 0 failures.**
 `google-services.json` + `send-push` FCM, OAuth dashboard config, flip
 `subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.
 (Profile stats + community pledge shipped on `feature/parity-polish`.)
-Small parked findings from the Aug-5 wave: `BookingStatusTimeline` is
-dead design-system code (no call site); `ProfileViewModel.bookingsCount`
-counts cancelled bookings; `PushPayloadRouter` maps an id-less push to
-`OpenThread(null)` and drops an unconsumed earlier deep link; ship
-`mapping.txt` with every Play release (see RELEASE.md §0).
+The Aug-5 parked findings are **closed**: the audit series had already given
+`BookingStatusTimeline` two call sites (ConfirmedScreen + BookingDetail's
+Progress section) and already keyed `bookingsCount` on `liveBookingsCount`
+(cancelled excluded); the push pair is fixed here — `PushPayloadRouter` now
+reads a blank id as an absent one (a blank `booking_id` used to reach
+`nav.navigate("booking_detail/")`, which matches no destination) and
+`TabRouter.apply(Ignore)` is inert, so an unroutable payload no longer wipes
+the deep link an earlier tap armed. Still open: ship `mapping.txt` with every
+Play release (see RELEASE.md §0).
 
 ---
 
