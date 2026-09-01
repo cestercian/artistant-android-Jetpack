@@ -112,7 +112,12 @@ object HarnessRepositories {
         // tile no longer satisfies `fetchArtist` (it never should have), that tap would
         // read "Artist not found." Seeding them remotely is what makes the profile resolve
         // the way the real five-table stitch does.
-        FakeArtistsRepository(remote = roster.drop(1)).apply { seedFull(listOf(coveredArtist)) }
+        // selfId is REQUIRED now, not a nicety: browsing another artist hydrates a
+        // second row into the fake's byId map, and resolveSelfId() refuses to guess
+        // between two rows — so without naming the fixture artist, every EPK save in
+        // the harness would throw NotFoundOrUnauthorized after one profile visit.
+        FakeArtistsRepository(remote = roster.drop(1), selfId = HarnessFixtures.ARTIST_ID)
+            .apply { seedFull(listOf(coveredArtist)) }
     }
 
     private val bookingsImpl: FakeBookingsRepository by lazy {

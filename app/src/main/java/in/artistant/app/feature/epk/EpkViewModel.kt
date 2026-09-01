@@ -52,6 +52,14 @@ data class EpkUiState(
      * Identity + the read-only halves of the profile (bio, socials, gradient).
      * Sourced from the artist row; see [loadIdentity] for why the mutable sets
      * deliberately do NOT come from here.
+     *
+     * Its **id is the owner every self-row write on this screen passes down**, and
+     * it is the honest one to pass: [loadIdentity] read this row for the signed-in
+     * artist and seeded the drafts from it, so it names the account each edit was
+     * composed FOR. `session.currentUserId` re-read at save time would name
+     * whoever is signed in when the write happens — which is the same thing right
+     * up until it isn't, and [onCleared] flushes owed saves from a scope that
+     * outlives both the screen and, potentially, the session.
      */
     val artist: Artist? = null,
     val setupComplete: Boolean = true,
@@ -505,9 +513,10 @@ class EpkViewModel @Inject constructor(
             published = current.artist?.coverGradientIndex ?: 0,
             requested = index,
         ) ?: return
+        val owner = current.artist?.id ?: return
         _state.update { it.copy(coverGradientIndex = clamped, saveError = null) }
         viewModelScope.launch {
-            runCatching { artists.updateCoverGradient(clamped) }
+            runCatching { artists.updateCoverGradient(owner, clamped) }
                 .onSuccess {
                     _state.update {
                         it.copy(
@@ -559,9 +568,10 @@ class EpkViewModel @Inject constructor(
             current.artist?.newArtistDiscountPct ?: 0,
         )
         val target = newArtistDiscountToggleTarget(shown)
+        val owner = current.artist?.id ?: return
         _state.update { it.copy(newArtistDiscountPct = target, saveError = null) }
         viewModelScope.launch {
-            runCatching { artists.updateNewArtistDiscount(target) }
+            runCatching { artists.updateNewArtistDiscount(owner, target) }
                 .onSuccess {
                     _state.update {
                         it.copy(
@@ -606,9 +616,10 @@ class EpkViewModel @Inject constructor(
             current.artist?.weekendPremiumPct ?: 0,
         )
         val target = weekendPremiumStepTarget(shown)
+        val owner = current.artist?.id ?: return
         _state.update { it.copy(weekendPremiumPct = target, saveError = null) }
         viewModelScope.launch {
-            runCatching { artists.updateWeekendPremium(target) }
+            runCatching { artists.updateWeekendPremium(owner, target) }
                 .onSuccess {
                     _state.update {
                         it.copy(
@@ -678,8 +689,12 @@ class EpkViewModel @Inject constructor(
             _state.update { it.copy(savingPrompts = false) }
             return
         }
+        // The row these answers were typed against — see [EpkUiState.artist]. Read
+        // before the flag goes up so a persist with nothing to aim at cannot leave
+        // "Saving…" on screen.
+        val owner = _state.value.artist?.id ?: return
         _state.update { it.copy(savingPrompts = true) }
-        saveCatching { artists.updatePrompts(draft) }
+        saveCatching { artists.updatePrompts(owner, draft) }
             .onSuccess {
                 _state.update {
                     it.copy(
@@ -740,9 +755,10 @@ class EpkViewModel @Inject constructor(
             }
             return
         }
+        val owner = current.artist?.id ?: return
         _state.update { it.copy(serviceTags = next, saveError = null) }
         viewModelScope.launch {
-            runCatching { artists.updateServiceTags(next) }
+            runCatching { artists.updateServiceTags(owner, next) }
                 .onSuccess {
                     _state.update {
                         it.copy(
@@ -802,8 +818,10 @@ class EpkViewModel @Inject constructor(
             _state.update { it.copy(savingBio = false) }
             return
         }
+        // The row this bio was typed against — see [EpkUiState.artist].
+        val owner = _state.value.artist?.id ?: return
         _state.update { it.copy(savingBio = true) }
-        saveCatching { artists.updateBio(draft) }
+        saveCatching { artists.updateBio(owner, draft) }
             .onSuccess {
                 _state.update {
                     it.copy(
@@ -878,6 +896,11 @@ class EpkViewModel @Inject constructor(
             _state.update { it.copy(savingSocials = false) }
             return
         }
+        // The row these three links were read from and edited against — see
+        // [EpkUiState.artist]. Sharpest of the three here: this write replaces all
+        // three columns, so landing it on the wrong account both overwrites their
+        // links and publishes this artist's.
+        val owner = _state.value.artist?.id ?: return
         _state.update { it.copy(savingSocials = true) }
         saveCatching {
             // Named, not positional. The parameter order here is
@@ -886,6 +909,7 @@ class EpkViewModel @Inject constructor(
             // fine and silently files an artist's Spotify URL as their Instagram
             // handle.
             artists.updateSocialLinks(
+                expectedOwner = owner,
                 instagram = draft.instagram,
                 spotify = draft.spotify,
                 youtube = draft.youtube,
@@ -1376,15 +1400,20 @@ class EpkViewModel @Inject constructor(
         val owed = armedSaves.toList()
         if (owed.isEmpty()) return
         // The owner these drafts were composed for. Detaching the write from
-        // `viewModelScope` also detached it from the SESSION, and
-        // `ArtistsRepository.patchSelf` resolves its target from
-        // `currentSessionOrNull()` at execution time without checking that the
-        // patch was built for that user — so an owed save still queued when the
-        // artist signs out and someone else signs in on the same device would
-        // land THIS artist's bio, pricing, rider, socials or prompts on the new
-        // account's public row. RLS permits it: the JWT is theirs and the row is
-        // theirs. The same file already guards its two other write paths this
-        // way (`require(userId == ...)` on wizard publish and setPublished).
+        // `viewModelScope` also detaches it from the SESSION, so an owed save
+        // still queued when the artist signs out and someone else signs in on the
+        // same device would otherwise run under the new user — landing THIS
+        // artist's bio, pricing, rider, socials or prompts on the new account's
+        // public row, which RLS permits because the JWT is theirs and the row is
+        // theirs.
+        //
+        // Kept even though the artists seam now refuses a patch composed for
+        // another account (`require(userId == expectedOwner)` in `patchSelf`).
+        // Two reasons: this loop also drives the packages and tech-rider
+        // repositories, which take the id they are given, and stopping BEFORE the
+        // first write is better than throwing at it — a refused patch would be
+        // caught by the `runCatching` below and the flush would carry on to the
+        // next owed save, one by one, all the way to the end.
         val owner = session.currentUserId ?: return
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
             owed.forEach { save ->
