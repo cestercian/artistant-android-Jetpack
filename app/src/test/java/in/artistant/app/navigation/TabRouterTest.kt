@@ -11,7 +11,8 @@ import org.junit.Test
  * that reason, so these tests pin the leakage contract:
  *
  *  - sign-out wipes every pending channel,
- *  - a new push wipes stale channels BEFORE writing its own,
+ *  - a new ROUTABLE push wipes stale channels BEFORE writing its own,
+ *  - an unroutable one (`Ignore`) writes nothing and so wipes nothing,
  *  - consuming a channel is one-shot.
  *
  * The tab channels are held to the same contract as the ids, because they are
@@ -55,17 +56,61 @@ class TabRouterTest {
         assertEquals(ClientDeepTab.Messages, router.pendingClientTab.value)
     }
 
+    /**
+     * `Ignore` is inert, in both directions.
+     *
+     * This pinned the opposite until now ("an unroutable payload must not leave the
+     * gig-request push's tab armed to fire later — that tab belonged to the event we just
+     * decided to ignore"), and the reasoning had the ownership backwards: the tab belonged
+     * to the gig-request push, which the user DID tap and which we did NOT ignore. Only the
+     * second payload is the one being ignored, and it is the one nothing is known about.
+     *
+     * So the old contract spent a link the user asked for on a payload that asked for
+     * nothing — and an Ignore-routed tap is reachable, not theoretical: `pushNotificationPlan`
+     * shows a notification for any payload carrying an event, so a server event newer than
+     * this build, or a booking push whose id went missing, is posted, tapped, and routed to
+     * `Ignore`. Nothing about that tap says the earlier one was withdrawn.
+     */
     @Test
-    fun ignoredPush_stillClearsStaleTransients_andArmsNoTab() {
+    fun ignoredPush_leavesAnEarlierTapsLinkAlone() {
         val router = TabRouter()
         router.apply(PushDeepLinkAction.OpenGigRequest("r-1"))
 
         router.apply(PushDeepLinkAction.Ignore)
 
+        assertEquals("r-1", router.pendingGigRequestId.value)
+        assertEquals(ArtistDeepTab.Home, router.pendingArtistTab.value)
+    }
+
+    /** The other direction: it arms nothing of its own either. */
+    @Test
+    fun ignoredPush_armsNothing() {
+        val router = TabRouter()
+
+        router.apply(PushDeepLinkAction.Ignore)
+
+        assertNull(router.pendingBookingDetail.value)
+        assertNull(router.pendingReviewSheet.value)
+        assertNull(router.pendingThreadId.value)
         assertNull(router.pendingGigRequestId.value)
-        // An unroutable payload must not leave the gig-request push's tab armed to
-        // fire later — that tab belonged to the event we just decided to ignore.
+        assertNull(router.pendingClientTab.value)
         assertNull(router.pendingArtistTab.value)
+    }
+
+    /**
+     * The wipe still happens for every routable action, which is the half of the contract
+     * the Ignore change must not cost us — a review sheet armed by one tap auto-presenting
+     * on the booking of a later one is the iOS bug this ordering exists to prevent.
+     */
+    @Test
+    fun aRoutablePush_stillWipesAnEarlierTapsReviewSheet() {
+        val router = TabRouter()
+        router.apply(PushDeepLinkAction.OpenBookingDetail("b-1", autoReview = true))
+
+        router.apply(PushDeepLinkAction.OpenBookingDetail("b-2"))
+
+        assertEquals("b-2", router.pendingBookingDetail.value)
+        assertNull(router.pendingReviewSheet.value)
     }
 
     @Test
