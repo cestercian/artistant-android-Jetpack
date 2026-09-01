@@ -203,47 +203,74 @@ class FakeArtistsRepository(
      * masked by a stale cache entry, and a fake that only records would pass
      * whether or not the production code invalidated.
      */
-    override suspend fun updateBio(bio: String) = mutateSelf { it.copy(bio = bio.trim()) }
+    override suspend fun updateBio(expectedOwner: String, bio: String) =
+        mutateSelf(expectedOwner) { it.copy(bio = bio.trim()) }
 
-    override suspend fun updateCoverGradient(index: Int) = mutateSelf {
-        val clamped = ArtistGradient.clampIndex(index)
-        it.copy(coverGradientIndex = clamped, gradient = ArtistGradient.palette(clamped))
-    }
-
-    override suspend fun updateNewArtistDiscount(pct: Int) = mutateSelf {
-        it.copy(newArtistDiscountPct = pct.coerceIn(0, 100))
-    }
-
-    override suspend fun updateServiceTags(tags: List<String>) = mutateSelf {
-        // Normalized here too, because the production repository normalizes on
-        // the way out — a fake that stored the raw list would let a test pass on
-        // a set the server would never have received.
-        it.copy(serviceTags = ServiceTags.normalize(tags))
-    }
-
-    override suspend fun updateWeekendPremium(pct: Int) = mutateSelf {
-        it.copy(weekendPremiumPct = pct.coerceIn(0, 100))
-    }
-
-    override suspend fun updatePrompts(prompts: List<ArtistPrompt>) = mutateSelf {
-        // Round-tripped through encode/decode rather than stored as handed in, so
-        // the fake holds what the SERVER would hold — blank answers dropped,
-        // answers clamped. A fake that stored the draft verbatim would hide
-        // exactly the encoding bugs these helpers exist to prevent.
-        it.copy(prompts = ArtistPrompts.decode(ArtistPrompts.encode(prompts)))
-    }
-
-    override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
-        mutateSelf {
-            it.copy(
-                instagramHandle = instagram?.trim()?.ifBlank { null },
-                spotifyArtistUrl = spotify?.trim()?.ifBlank { null },
-                youtubeChannelUrl = youtube?.trim()?.ifBlank { null },
-            )
+    override suspend fun updateCoverGradient(expectedOwner: String, index: Int) =
+        mutateSelf(expectedOwner) {
+            val clamped = ArtistGradient.clampIndex(index)
+            it.copy(coverGradientIndex = clamped, gradient = ArtistGradient.palette(clamped))
         }
 
-    private fun mutateSelf(transform: (Artist) -> Artist) {
+    override suspend fun updateNewArtistDiscount(expectedOwner: String, pct: Int) =
+        mutateSelf(expectedOwner) {
+            it.copy(newArtistDiscountPct = pct.coerceIn(0, 100))
+        }
+
+    override suspend fun updateServiceTags(expectedOwner: String, tags: List<String>) =
+        mutateSelf(expectedOwner) {
+            // Normalized here too, because the production repository normalizes on
+            // the way out — a fake that stored the raw list would let a test pass on
+            // a set the server would never have received.
+            it.copy(serviceTags = ServiceTags.normalize(tags))
+        }
+
+    override suspend fun updateWeekendPremium(expectedOwner: String, pct: Int) =
+        mutateSelf(expectedOwner) {
+            it.copy(weekendPremiumPct = pct.coerceIn(0, 100))
+        }
+
+    override suspend fun updatePrompts(expectedOwner: String, prompts: List<ArtistPrompt>) =
+        mutateSelf(expectedOwner) {
+            // Round-tripped through encode/decode rather than stored as handed in, so
+            // the fake holds what the SERVER would hold — blank answers dropped,
+            // answers clamped. A fake that stored the draft verbatim would hide
+            // exactly the encoding bugs these helpers exist to prevent.
+            it.copy(prompts = ArtistPrompts.decode(ArtistPrompts.encode(prompts)))
+        }
+
+    override suspend fun updateSocialLinks(
+        expectedOwner: String,
+        instagram: String?,
+        spotify: String?,
+        youtube: String?,
+    ) = mutateSelf(expectedOwner) {
+        it.copy(
+            instagramHandle = instagram?.trim()?.ifBlank { null },
+            spotifyArtistUrl = spotify?.trim()?.ifBlank { null },
+            youtubeChannelUrl = youtube?.trim()?.ifBlank { null },
+        )
+    }
+
+    /**
+     * Resolve "self", then refuse the edit unless it was composed FOR self.
+     *
+     * The two checks answer different questions and both have to be asked, in
+     * this order, because that is the order the real repository asks them in: no
+     * session at all is [AppError.NotFoundOrUnauthorized], a session belonging to
+     * somebody other than the account the draft was built for is the
+     * `require` — an `IllegalArgumentException`, the same family the wizard
+     * publish and `setPublished` guards throw.
+     *
+     * Enforced here and not only in production because a fake that let a
+     * cross-account write through is a fake that would pass the very test written
+     * to prove the seam refuses one.
+     */
+    private fun mutateSelf(expectedOwner: String, transform: (Artist) -> Artist) {
         val id = resolveSelfId()
+        require(id == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         byId[id] = transform(byId.getValue(id))
         _cacheGeneration.value = _cacheGeneration.value + 1
     }

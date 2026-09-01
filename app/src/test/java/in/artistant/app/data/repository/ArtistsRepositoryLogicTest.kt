@@ -105,7 +105,7 @@ class ArtistsRepositoryLogicTest {
             ),
         )
 
-        val err = runCatching { repo.updateBio("new bio") }.exceptionOrNull()
+        val err = runCatching { repo.updateBio(ARTIST, "new bio") }.exceptionOrNull()
 
         assertTrue("expected NotFoundOrUnauthorized, got $err", err is AppError.NotFoundOrUnauthorized)
         // Neither row moved — the old bug wrote silently to whichever key came first.
@@ -123,7 +123,7 @@ class ArtistsRepositoryLogicTest {
             selfId = OTHER_ARTIST,
         )
 
-        repo.updateBio("new bio")
+        repo.updateBio(OTHER_ARTIST, "new bio")
 
         assertEquals("Live sets for rooftops and weddings.", repo.find(ARTIST)?.bio)
         assertEquals("new bio", repo.find(OTHER_ARTIST)?.bio)
@@ -139,10 +139,121 @@ class ArtistsRepositoryLogicTest {
         assertFalse(repo.published)
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // …and the same edits must also target the account they were COMPOSED for.
+    //
+    // "Self" was resolved from the live session at execution time and compared
+    // to nothing, which only holds while composing and executing happen under one
+    // session. The press-kit editor breaks that on purpose: it flushes its owed
+    // saves from a scope that outlives the screen, so a save typed by one artist
+    // could run after somebody else signed in on the same device and PATCH THEIR
+    // public row — a write the server has no reason to refuse, since the JWT is
+    // the new user's and the row is theirs. Every narrow edit now names the
+    // account it was built for and the seam refuses the mismatch, in the same
+    // `require`/IllegalArgumentException family as the two guards above.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun aSelfRowEditComposedForTheSignedInOwnerLands() = runTest {
+        val repo = FakeArtistsRepository(
+            seed = listOf(FakeArtistsRepository.sample(id = HEX_ARTIST)),
+            selfId = HEX_ARTIST,
+        )
+
+        // Handed in UPPERCASE on purpose (which is why this id carries hex
+        // letters and the others do not). Ids reach a caller from the session,
+        // from a decoded row and from a deep link, and this repo's standing rule
+        // is that a UUID is compared lowercased — a guard that tripped on case
+        // would refuse an artist's own edit on whichever path skips the
+        // normalisation, which is a worse bug than the one being fixed.
+        repo.updateBio(HEX_ARTIST.uppercase(), "new bio")
+
+        assertEquals("new bio", repo.find(HEX_ARTIST)?.bio)
+    }
+
+    @Test
+    fun aSelfRowEditComposedForAnotherAccountIsRefused_bothDirections() = runTest {
+        // Signed in as ARTIST, with a draft composed under OTHER_ARTIST: the
+        // sign-out/sign-in case, where the previous artist's owed save arrives
+        // holding the new user's session.
+        val signedInAsArtist = FakeArtistsRepository(
+            seed = listOf(
+                FakeArtistsRepository.sample(id = ARTIST),
+                FakeArtistsRepository.sample(id = OTHER_ARTIST),
+            ),
+            selfId = ARTIST,
+        )
+
+        val err = runCatching {
+            signedInAsArtist.updateBio(OTHER_ARTIST, "composed elsewhere")
+        }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $err", err is IllegalArgumentException)
+        // Neither row: not the signed-in one (which would be the exploit — the
+        // previous artist's words on this account's public profile) and not the
+        // one the draft named (which RLS would have refused anyway).
+        assertEquals("Live sets for rooftops and weddings.", signedInAsArtist.find(ARTIST)?.bio)
+        assertEquals("Live sets for rooftops and weddings.", signedInAsArtist.find(OTHER_ARTIST)?.bio)
+
+        // And the mirror image, which is the same bug seen from the other seat.
+        val signedInAsOther = FakeArtistsRepository(
+            seed = listOf(
+                FakeArtistsRepository.sample(id = ARTIST),
+                FakeArtistsRepository.sample(id = OTHER_ARTIST),
+            ),
+            selfId = OTHER_ARTIST,
+        )
+
+        val mirrored = runCatching {
+            signedInAsOther.updateBio(ARTIST, "composed elsewhere")
+        }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $mirrored", mirrored is IllegalArgumentException)
+        assertEquals("Live sets for rooftops and weddings.", signedInAsOther.find(ARTIST)?.bio)
+        assertEquals("Live sets for rooftops and weddings.", signedInAsOther.find(OTHER_ARTIST)?.bio)
+    }
+
+    /**
+     * The guard covers the whole narrow-edit family, not the one method a test
+     * happened to pick — it lives in the single write path they all share.
+     *
+     * Pinned through the socials write because it is the costliest one to get
+     * wrong: it replaces all three link columns every time, so a cross-account
+     * landing would overwrite the victim's accounts AND publish the composer's
+     * under the victim's name.
+     */
+    @Test
+    fun theWholeSetSocialWriteIsGuardedTheSameWay() = runTest {
+        val repo = FakeArtistsRepository(
+            seed = listOf(
+                FakeArtistsRepository.sample(id = ARTIST)
+                    .copy(instagramHandle = "theirhandle"),
+                FakeArtistsRepository.sample(id = OTHER_ARTIST),
+            ),
+            selfId = ARTIST,
+        )
+
+        val err = runCatching {
+            repo.updateSocialLinks(
+                expectedOwner = OTHER_ARTIST,
+                instagram = "myhandle",
+                spotify = null,
+                youtube = null,
+            )
+        }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $err", err is IllegalArgumentException)
+        assertEquals("theirhandle", repo.find(ARTIST)?.instagramHandle)
+        assertNull(repo.find(OTHER_ARTIST)?.instagramHandle)
+    }
+
     private companion object {
         const val ARTIST = "11111111-1111-1111-1111-111111111111"
         const val OTHER_ARTIST = "22222222-2222-2222-2222-222222222222"
         const val NOT_AN_ARTIST = "33333333-3333-3333-3333-333333333333"
+
+        /** All-digit ids `uppercase()` to themselves — this one can actually change case. */
+        const val HEX_ARTIST = "aabbccdd-1111-2222-3333-444455556666"
     }
 
     /**

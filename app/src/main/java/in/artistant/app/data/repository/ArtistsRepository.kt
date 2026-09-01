@@ -91,12 +91,40 @@ interface ArtistsRepository {
     // so the editor rendered those sections read-only instead. A PATCH per concern
     // is what makes them editable without that collateral, and it is the same
     // shape [updateAvailability] already uses.
+    //
+    // Every one of them names the account the edit was composed FOR, and the
+    // implementation refuses the write unless the signed-in user IS that account.
+    // The target used to be resolved from the session at EXECUTION time and
+    // compared to nothing, which is only the same thing while the two cannot
+    // drift — and they do drift: the press-kit editor finishes its owed saves from
+    // a scope that deliberately outlives the screen (`EpkViewModel.onCleared`), so
+    // a save composed under one artist can execute after somebody else has signed
+    // in on the same device and land on THEIR public row. RLS cannot see that —
+    // the JWT is the new user's and the row is theirs, so the write is legitimate
+    // by every rule the server has. Carrying the identity down is what turns
+    // "whoever is signed in" into a checkable claim, with the same `require`
+    // [publishWizardProfile] and [setPublished] already carry.
+    //
+    // It only earns its keep if callers pass the identity the DRAFT belongs to —
+    // the hydrated row's id, captured when the edit was composed. Passing
+    // `session.currentUserId` read at call time would compare the session against
+    // itself and always pass, which is a guard in shape only.
 
-    /** `artists.bio`. Blank persists as NULL — an empty bio is absent, not "". */
-    suspend fun updateBio(bio: String)
+    /**
+     * `artists.bio`. Blank persists as NULL — an empty bio is absent, not "".
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
+     */
+    suspend fun updateBio(expectedOwner: String, bio: String)
 
-    /** `artists.cover_gradient_index`. Clamped to the palette range before it goes. */
-    suspend fun updateCoverGradient(index: Int)
+    /**
+     * `artists.cover_gradient_index`. Clamped to the palette range before it goes.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
+     */
+    suspend fun updateCoverGradient(expectedOwner: String, index: Int)
 
     /**
      * `artists.new_artist_discount_pct`, clamped to 0–100.
@@ -106,8 +134,11 @@ interface ArtistsRepository {
      * even the wizard. On a backend shared with another client that DOES set it,
      * that left an artist with a discount advertised on their own profile and no
      * way to withdraw it.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
      */
-    suspend fun updateNewArtistDiscount(pct: Int)
+    suspend fun updateNewArtistDiscount(expectedOwner: String, pct: Int)
 
     /**
      * `artists.service_tags` — the whole set, every time.
@@ -119,8 +150,11 @@ interface ArtistsRepository {
      *
      * Slugs, not labels — see `ServiceTags` for why an exact-match filter makes
      * that the difference between a findable artist and an invisible one.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
      */
-    suspend fun updateServiceTags(tags: List<String>)
+    suspend fun updateServiceTags(expectedOwner: String, tags: List<String>)
 
     /**
      * `artists.weekend_premium_pct`, clamped to 0–100 to match the column's CHECK.
@@ -129,8 +163,11 @@ interface ArtistsRepository {
      * "pricing extras" call: they are toggled from two independent controls, and a
      * combined write would make changing one send the other's value too — the
      * whole-set hazard, reintroduced for two fields that never needed it.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
      */
-    suspend fun updateWeekendPremium(pct: Int)
+    suspend fun updateWeekendPremium(expectedOwner: String, pct: Int)
 
     /**
      * `artists.prompts` — the whole deck, every time.
@@ -138,8 +175,11 @@ interface ArtistsRepository {
      * Whole-set like [updateServiceTags], and gated the same way: the array
      * replaces what is stored, so an un-hydrated caller would erase every answer
      * the artist wrote on another device.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
      */
-    suspend fun updatePrompts(prompts: List<ArtistPrompt>)
+    suspend fun updatePrompts(expectedOwner: String, prompts: List<ArtistPrompt>)
 
     /**
      * The three social columns, all three every time.
@@ -148,8 +188,16 @@ interface ArtistsRepository {
      * the two it is not editing, so an un-hydrated caller cannot send two nulls and
      * silently unlink them. See the editor's save path for the guard that enforces
      * it has read them first.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
      */
-    suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?)
+    suspend fun updateSocialLinks(
+        expectedOwner: String,
+        instagram: String?,
+        spotify: String?,
+        youtube: String?,
+    )
 }
 
 /** Days + preferred start times on `artists` (not a separate table). */
@@ -307,35 +355,51 @@ class SupabaseArtistsRepository @Inject constructor(
         invalidate(userId)
     }
 
-    override suspend fun updateBio(bio: String) =
-        patchSelf(BioPatch(bio.trim().ifBlank { null }))
+    override suspend fun updateBio(expectedOwner: String, bio: String) =
+        patchSelf(expectedOwner, BioPatch(bio.trim().ifBlank { null }))
 
-    override suspend fun updateCoverGradient(index: Int) =
-        patchSelf(CoverGradientPatch(ArtistGradient.clampIndex(index)))
+    override suspend fun updateCoverGradient(expectedOwner: String, index: Int) =
+        patchSelf(expectedOwner, CoverGradientPatch(ArtistGradient.clampIndex(index)))
 
-    override suspend fun updateNewArtistDiscount(pct: Int) =
-        patchSelf(NewArtistDiscountPatch(pct.coerceIn(0, MAX_PCT)))
+    override suspend fun updateNewArtistDiscount(expectedOwner: String, pct: Int) =
+        patchSelf(expectedOwner, NewArtistDiscountPatch(pct.coerceIn(0, MAX_PCT)))
 
-    override suspend fun updateServiceTags(tags: List<String>) =
-        patchSelf(ServiceTagsPatch(ServiceTags.normalize(tags)))
+    override suspend fun updateServiceTags(expectedOwner: String, tags: List<String>) =
+        patchSelf(expectedOwner, ServiceTagsPatch(ServiceTags.normalize(tags)))
 
-    override suspend fun updateWeekendPremium(pct: Int) =
-        patchSelf(WeekendPremiumPatch(pct.coerceIn(0, MAX_PCT)))
+    override suspend fun updateWeekendPremium(expectedOwner: String, pct: Int) =
+        patchSelf(expectedOwner, WeekendPremiumPatch(pct.coerceIn(0, MAX_PCT)))
 
-    override suspend fun updatePrompts(prompts: List<ArtistPrompt>) =
-        patchSelf(PromptsPatch(ArtistPrompts.encode(prompts)))
+    override suspend fun updatePrompts(expectedOwner: String, prompts: List<ArtistPrompt>) =
+        patchSelf(expectedOwner, PromptsPatch(ArtistPrompts.encode(prompts)))
 
-    override suspend fun updateSocialLinks(instagram: String?, spotify: String?, youtube: String?) =
-        patchSelf(
-            SocialLinksPatch(
-                instagramHandle = instagram?.trim()?.ifBlank { null },
-                spotifyArtistUrl = spotify?.trim()?.ifBlank { null },
-                youtubeChannelUrl = youtube?.trim()?.ifBlank { null },
-            ),
-        )
+    override suspend fun updateSocialLinks(
+        expectedOwner: String,
+        instagram: String?,
+        spotify: String?,
+        youtube: String?,
+    ) = patchSelf(
+        expectedOwner,
+        SocialLinksPatch(
+            instagramHandle = instagram?.trim()?.ifBlank { null },
+            spotifyArtistUrl = spotify?.trim()?.ifBlank { null },
+            youtubeChannelUrl = youtube?.trim()?.ifBlank { null },
+        ),
+    )
 
     /**
      * One PATCH against the signed-in artist's own row, then drop the cache entry.
+     *
+     * [expectedOwner] is the account the patch was COMPOSED for, and the `require`
+     * is what makes "self" a checked fact instead of an assumption. The session is
+     * still where the write's target comes from — it has to be, since that is the
+     * identity the JWT and RLS agree on — but a target nobody compared to anything
+     * is only correct while composing and executing happen under one session.
+     * Detached work breaks that: an owed press-kit save flushed from
+     * `EpkViewModel.onCleared` after a sign-out/sign-in would PATCH the new user's
+     * row with the previous artist's drafts, and the server would accept it as an
+     * ordinary self-edit. Mirrors the guard [publishWizardProfile] and
+     * [setPublished] already carry, error family included.
      *
      * The invalidation is not optional. [fetchArtist] returns a hydrated entry
      * WITHOUT re-reading, so a successful write followed by a refresh would hand
@@ -347,9 +411,12 @@ class SupabaseArtistsRepository @Inject constructor(
      * forgotten field and a targeted edit becomes a whole-row overwrite, which is
      * exactly what these methods exist to avoid.
      */
-    private suspend inline fun <reified T : Any> patchSelf(patch: T) {
+    private suspend inline fun <reified T : Any> patchSelf(expectedOwner: String, patch: T) {
         val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
             ?: throw AppError.NotFoundOrUnauthorized
+        require(userId == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         try {
             client.from("artists").update(patch) {
                 filter { eq("id", userId) }
