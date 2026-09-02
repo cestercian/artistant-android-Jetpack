@@ -998,10 +998,16 @@ class EpkViewModel @Inject constructor(
     }
 
     private suspend fun persistPackages() {
-        val userId = session.currentUserId ?: return
+        // The row these tiers were composed against — see [EpkUiState.artist] — is
+        // the owner this replace is aimed at, the same compose-time identity the
+        // narrow patch writes pass. Read before the flag goes up so a persist with
+        // nothing to aim at cannot leave "Saving…" on screen, and passed to the
+        // seam so a replace flushed from [onCleared] after an account switch is
+        // refused there rather than landing on the new user's row.
+        val owner = _state.value.artist?.id ?: return
         val drafts = packageDrafts(_state.value.packageRows)
         _state.update { it.copy(savingPackages = true) }
-        saveCatching { packages.replaceAll(userId, drafts) }
+        saveCatching { packages.replaceAll(owner, drafts) }
             .onSuccess {
                 _state.update {
                     it.copy(savingPackages = false, saveError = null, statusNote = "Pricing saved.")
@@ -1041,10 +1047,14 @@ class EpkViewModel @Inject constructor(
     }
 
     private suspend fun persistTech() {
-        val userId = session.currentUserId ?: return
+        // The row this rider was composed against — see [EpkUiState.artist] — and
+        // the owner the replace is aimed at, matching [persistPackages] and the
+        // narrow patch writes. Read before the flag so a persist with nothing to
+        // aim at cannot strand "Saving…".
+        val owner = _state.value.artist?.id ?: return
         val items = _state.value.techItems
         _state.update { it.copy(savingTech = true) }
-        saveCatching { techRider.replaceAll(userId, items) }
+        saveCatching { techRider.replaceAll(owner, items) }
             .onSuccess {
                 _state.update { it.copy(savingTech = false, saveError = null, statusNote = "Tech rider saved.") }
             }
@@ -1407,13 +1417,16 @@ class EpkViewModel @Inject constructor(
         // public row, which RLS permits because the JWT is theirs and the row is
         // theirs.
         //
-        // Kept even though the artists seam now refuses a patch composed for
-        // another account (`require(userId == expectedOwner)` in `patchSelf`).
-        // Two reasons: this loop also drives the packages and tech-rider
-        // repositories, which take the id they are given, and stopping BEFORE the
-        // first write is better than throwing at it — a refused patch would be
-        // caught by the `runCatching` below and the flush would carry on to the
-        // next owed save, one by one, all the way to the end.
+        // Kept even though all three seams this loop drives now refuse a write
+        // composed for another account — `require(userId == expectedOwner)` in
+        // `patchSelf`, and the same guard on `PackagesRepository` /
+        // `TechRiderRepository` `replaceAll`. The belt still earns its place:
+        // stopping BEFORE the first write is better than throwing at it — a
+        // refused write would be caught by the `runCatching` below and the flush
+        // would carry on to the next owed save, one by one, all the way to the
+        // end. This checks once up front and again per save so the flush simply
+        // does nothing after a session change, rather than firing five guards
+        // that each throw.
         val owner = session.currentUserId ?: return
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
             owed.forEach { save ->

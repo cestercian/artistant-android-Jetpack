@@ -141,14 +141,19 @@ object HarnessRepositories {
         )
     }
 
+    // selfId is REQUIRED now, like FakeArtistsRepository above: replaceAll refuses
+    // a write composed for any account but the signed-in one, and the seed below
+    // IS a replaceAll for the fixture artist — without naming it, that very seed
+    // would throw NotFoundOrUnauthorized. It also makes the harness EPK's own
+    // pricing/rider saves (which pass state.artist.id = the fixture artist) land.
     private val packagesImpl: FakePackagesRepository by lazy {
-        FakePackagesRepository().also { fake ->
+        FakePackagesRepository(selfId = HarnessFixtures.ARTIST_ID).also { fake ->
             seedBlocking { fake.replaceAll(HarnessFixtures.ARTIST_ID, HarnessFixtures.packageDrafts) }
         }
     }
 
     private val techRiderImpl: FakeTechRiderRepository by lazy {
-        FakeTechRiderRepository().also { fake ->
+        FakeTechRiderRepository(selfId = HarnessFixtures.ARTIST_ID).also { fake ->
             seedBlocking { fake.replaceAll(HarnessFixtures.ARTIST_ID, HarnessFixtures.techRider) }
         }
     }

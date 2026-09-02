@@ -187,9 +187,20 @@ class FakeArtistsRepository(
 
     override suspend fun fetchSelfAvailability(): AvailabilityDraft? = lastAvailability
 
-    override suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>) {
-        lastAvailability = AvailabilityDraft(daysAvailable, timeSlots)
+    override suspend fun updateAvailability(
+        expectedOwner: String,
+        daysAvailable: List<String>,
+        timeSlots: List<String>,
+    ) {
+        // Same two-question guard as [mutateSelf], in the same order: resolve
+        // "self", then refuse the write unless it was composed FOR self. Recorded
+        // only after the guard passes, so a refused availability write leaves
+        // neither [lastAvailability] nor the row touched.
         val id = resolveSelfId()
+        require(id == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
+        lastAvailability = AvailabilityDraft(daysAvailable, timeSlots)
         byId[id] = byId.getValue(id).copy(daysAvailable = daysAvailable, timeSlots = timeSlots)
         _cacheGeneration.value = _cacheGeneration.value + 1
     }

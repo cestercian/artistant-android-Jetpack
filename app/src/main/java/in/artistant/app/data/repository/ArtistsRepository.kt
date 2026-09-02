@@ -78,7 +78,27 @@ interface ArtistsRepository {
     /** Own availability columns — ManageAvailability + wizard seed. */
     suspend fun fetchSelfAvailability(): AvailabilityDraft?
 
-    suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>)
+    /**
+     * Replace the signed-in artist's availability columns (days + preferred start
+     * times), then drop the cache entry.
+     *
+     * Guarded like the narrow self-row edits below: the write target still comes
+     * from the session, but the caller names the account the edit was COMPOSED
+     * for so a save composed under one artist can never PATCH another's row. The
+     * hazard is the same detached-write one `patchSelf` documents, on the column
+     * pair `ManageAvailability` owns. `ManageAvailability` seeds from
+     * [fetchSelfAvailability], which returns the columns WITHOUT the id, so the
+     * caller captures the id from the session at the moment of that read rather
+     * than re-reading it here at write time.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
+     */
+    suspend fun updateAvailability(
+        expectedOwner: String,
+        daysAvailable: List<String>,
+        timeSlots: List<String>,
+    )
 
     // ── Narrow self-row edits (the press-kit editor) ─────────────────────────
     //
@@ -340,9 +360,16 @@ class SupabaseArtistsRepository @Inject constructor(
         }
     }
 
-    override suspend fun updateAvailability(daysAvailable: List<String>, timeSlots: List<String>) {
+    override suspend fun updateAvailability(
+        expectedOwner: String,
+        daysAvailable: List<String>,
+        timeSlots: List<String>,
+    ) {
         val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
             ?: throw AppError.NotFoundOrUnauthorized
+        require(userId == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         try {
             client.from("artists").update(
                 AvailabilityPatch(daysAvailable = daysAvailable, defaultTimeSlots = timeSlots),
