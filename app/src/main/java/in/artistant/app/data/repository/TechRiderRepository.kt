@@ -1,6 +1,7 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
@@ -18,7 +19,20 @@ import javax.inject.Singleton
  */
 interface TechRiderRepository {
     suspend fun list(artistId: String): List<String>
-    suspend fun replaceAll(artistId: String, items: List<String>)
+
+    /**
+     * Wipe + re-insert the whole rider for the signed-in artist.
+     *
+     * Guarded like `ArtistsRepository.patchSelf` and the sibling
+     * `PackagesRepository.replaceAll`: the write runs as the session (the RPC's
+     * `owns_artist` enforces that), but the caller names the account the edit was
+     * COMPOSED for so a replace flushed from `EpkViewModel.onCleared` after an
+     * account switch can never land this artist's rider on the new user's row.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
+     */
+    suspend fun replaceAll(expectedOwner: String, items: List<String>)
 }
 
 @Singleton
@@ -38,10 +52,18 @@ class SupabaseTechRiderRepository @Inject constructor(
             throw mapPostgrest(t)
         }
 
-    override suspend fun replaceAll(artistId: String, items: List<String>) {
+    override suspend fun replaceAll(expectedOwner: String, items: List<String>) {
+        // Same guard, order and error family as `patchSelf`: the target is the
+        // session, and the require checks it against the account the rider was
+        // composed for before anything reaches the RPC.
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        require(userId == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         val trimmed = items.map { it.trim() }.filter { it.isNotEmpty() }
         val payload = ReplaceTechParams(
-            targetArtistId = artistId.lowercase(),
+            targetArtistId = userId,
             items = trimmed,
         )
         try {
@@ -52,7 +74,16 @@ class SupabaseTechRiderRepository @Inject constructor(
     }
 }
 
-class FakeTechRiderRepository : TechRiderRepository {
+class FakeTechRiderRepository(
+    /**
+     * The signed-in artist — the one id [replaceAll] may target. Same role as
+     * [FakePackagesRepository]'s: named, it refuses a replace composed for another
+     * account in the `require`/IllegalArgumentException family; null, it models
+     * "no session" and throws [AppError.NotFoundOrUnauthorized]. No single-row
+     * fallback, because `byArtist` is empty until the first write seeds it.
+     */
+    private val selfId: String? = null,
+) : TechRiderRepository {
     private val byArtist = mutableMapOf<String, List<String>>()
     var lastReplace: Pair<String, List<String>>? = null
         private set
@@ -61,11 +92,18 @@ class FakeTechRiderRepository : TechRiderRepository {
     override suspend fun list(artistId: String): List<String> =
         byArtist[artistId.lowercase()].orEmpty()
 
-    override suspend fun replaceAll(artistId: String, items: List<String>) {
+    override suspend fun replaceAll(expectedOwner: String, items: List<String>) {
+        // Guard before the simulated failure, exactly as the real repo checks the
+        // session before the RPC — a cross-account write is refused regardless of
+        // [failReplace].
+        val self = selfId?.lowercase() ?: throw AppError.NotFoundOrUnauthorized
+        require(self == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         if (failReplace) throw AppError.Unknown(IllegalStateException("fake tech failure"))
         val trimmed = items.map { it.trim() }.filter { it.isNotEmpty() }
-        lastReplace = artistId.lowercase() to trimmed
-        byArtist[artistId.lowercase()] = trimmed
+        lastReplace = self to trimmed
+        byArtist[self] = trimmed
     }
 }
 

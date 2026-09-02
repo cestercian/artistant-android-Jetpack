@@ -1,6 +1,7 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
@@ -20,7 +21,24 @@ import javax.inject.Singleton
  */
 interface PackagesRepository {
     suspend fun list(artistId: String): List<ArtistPackage>
-    suspend fun replaceAll(artistId: String, packages: List<PackageDraft>)
+
+    /**
+     * Wipe + re-insert the whole tier list for the signed-in artist.
+     *
+     * Guarded like `ArtistsRepository.patchSelf`: the write still runs as the
+     * session (the RPC's `owns_artist` and the JWT agree on that), but the caller
+     * names the account the edit was COMPOSED for and the seam refuses the write
+     * unless the session IS that account. The EPK editor flushes owed saves from
+     * a scope that outlives the screen (`EpkViewModel.onCleared`), so a replace
+     * composed under one artist could otherwise run after somebody else signed in
+     * on the same device and land THIS artist's pricing on the new user's row —
+     * a write the server has no reason to refuse, since the JWT is theirs and the
+     * row is theirs. Same hazard `patchSelf` closes, on a different seam.
+     *
+     * @param expectedOwner the account this edit was composed for, not whoever is
+     *   signed in when it runs.
+     */
+    suspend fun replaceAll(expectedOwner: String, packages: List<PackageDraft>)
 }
 
 /** Wizard / EPK draft row — in-memory id is not the DB id. */
@@ -49,9 +67,18 @@ class SupabasePackagesRepository @Inject constructor(
             throw mapPostgrest(t)
         }
 
-    override suspend fun replaceAll(artistId: String, packages: List<PackageDraft>) {
+    override suspend fun replaceAll(expectedOwner: String, packages: List<PackageDraft>) {
+        // Same guard, same order, same error family as `patchSelf`: the target is
+        // the session (which is what the RPC's owns_artist enforces), and the
+        // require turns "whoever is signed in" into a checkable claim against the
+        // account the drafts were composed for.
+        val userId = client.auth.currentSessionOrNull()?.user?.id?.lowercase()
+            ?: throw AppError.NotFoundOrUnauthorized
+        require(userId == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         val payload = ReplacePackagesParams(
-            targetArtistId = artistId.lowercase(),
+            targetArtistId = userId,
             packagesJson = packages.mapIndexed { idx, pkg ->
                 PackageJson(
                     position = idx,
@@ -71,7 +98,19 @@ class SupabasePackagesRepository @Inject constructor(
     }
 }
 
-class FakePackagesRepository : PackagesRepository {
+class FakePackagesRepository(
+    /**
+     * The signed-in artist — the one id [replaceAll] may target. Stands in for
+     * the session the real repository resolves: named, the fake refuses a replace
+     * composed for any other account in the same `require`/IllegalArgumentException
+     * family the real seam uses; left null it models "no session", where every
+     * write throws [AppError.NotFoundOrUnauthorized]. There is no single-row
+     * fallback like [FakeArtistsRepository]'s, because `byArtist` is empty until
+     * the first `replaceAll` seeds it — the seam has to know "self" independently
+     * of what it has stored.
+     */
+    private val selfId: String? = null,
+) : PackagesRepository {
     private val byArtist = mutableMapOf<String, List<ArtistPackage>>()
     var lastReplace: Pair<String, List<PackageDraft>>? = null
         private set
@@ -80,10 +119,17 @@ class FakePackagesRepository : PackagesRepository {
     override suspend fun list(artistId: String): List<ArtistPackage> =
         byArtist[artistId.lowercase()].orEmpty()
 
-    override suspend fun replaceAll(artistId: String, packages: List<PackageDraft>) {
+    override suspend fun replaceAll(expectedOwner: String, packages: List<PackageDraft>) {
+        // Guard before the simulated network failure, exactly as the real repo
+        // checks the session before issuing the RPC: a cross-account write is
+        // refused whether or not [failReplace] is set.
+        val self = selfId?.lowercase() ?: throw AppError.NotFoundOrUnauthorized
+        require(self == expectedOwner.lowercase()) {
+            "Self-row edit must target the account it was composed for."
+        }
         if (failReplace) throw AppError.Unknown(IllegalStateException("fake packages failure"))
-        lastReplace = artistId.lowercase() to packages
-        byArtist[artistId.lowercase()] = packages.mapIndexed { idx, pkg ->
+        lastReplace = self to packages
+        byArtist[self] = packages.mapIndexed { idx, pkg ->
             ArtistPackage(
                 id = "pkg-$idx",
                 name = pkg.name,

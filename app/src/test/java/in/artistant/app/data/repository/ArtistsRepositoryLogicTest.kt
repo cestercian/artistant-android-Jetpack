@@ -247,6 +247,46 @@ class ArtistsRepositoryLogicTest {
         assertNull(repo.find(OTHER_ARTIST)?.instagramHandle)
     }
 
+    /**
+     * `updateAvailability` is in the same family: it resolved "self" from the
+     * session at execution and compared it to nothing, so an availability edit
+     * composed under one artist could land on another. It now names the account
+     * it was composed for, and refuses the mismatch in the same guard.
+     */
+    @Test
+    fun updateAvailability_composedForSelf_lands() = runTest {
+        val repo = FakeArtistsRepository(
+            seed = listOf(FakeArtistsRepository.sample(id = ARTIST)),
+            selfId = ARTIST,
+        )
+
+        repo.updateAvailability(ARTIST, daysAvailable = listOf("Mon"), timeSlots = listOf("Evening"))
+
+        assertEquals(listOf("Mon"), repo.find(ARTIST)?.daysAvailable)
+        assertEquals(listOf("Evening"), repo.find(ARTIST)?.timeSlots)
+    }
+
+    @Test
+    fun updateAvailability_composedForAnotherAccount_refused() = runTest {
+        val repo = FakeArtistsRepository(
+            seed = listOf(
+                FakeArtistsRepository.sample(id = ARTIST),
+                FakeArtistsRepository.sample(id = OTHER_ARTIST),
+            ),
+            selfId = ARTIST,
+        )
+
+        val err = runCatching {
+            repo.updateAvailability(OTHER_ARTIST, daysAvailable = listOf("Mon"), timeSlots = listOf("Evening"))
+        }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $err", err is IllegalArgumentException)
+        // Neither row's availability moved — not the signed-in one (the exploit)
+        // and not the one the draft named (which RLS would refuse anyway).
+        assertTrue(repo.find(ARTIST)?.daysAvailable.isNullOrEmpty())
+        assertTrue(repo.find(OTHER_ARTIST)?.daysAvailable.isNullOrEmpty())
+    }
+
     private companion object {
         const val ARTIST = "11111111-1111-1111-1111-111111111111"
         const val OTHER_ARTIST = "22222222-2222-2222-2222-222222222222"
