@@ -73,8 +73,11 @@ fun OtpField(
             value = value,
             onValueChange = { raw ->
                 val digits = raw.filter(Char::isDigit).take(length)
-                if (digits != value) onValueChange(digits)
-                if (digits.length == length) onFilled?.invoke()
+                val changed = digits != value
+                if (changed) onValueChange(digits)
+                // Only on the transition INTO a full code: a keystroke that leaves
+                // the value unchanged (typing past the end) must not re-submit.
+                if (changed && digits.length == length) onFilled?.invoke()
             },
             enabled = enabled,
             singleLine = true,
@@ -83,7 +86,8 @@ fun OtpField(
                 keyboardType = KeyboardType.NumberPassword,
                 imeAction = ImeAction.Done,
             ),
-            keyboardActions = KeyboardActions(onDone = { onFilled?.invoke() }),
+            // Done on an incomplete code is a no-op; the boxes show what is missing.
+            keyboardActions = KeyboardActions(onDone = { if (value.length == length) onFilled?.invoke() }),
             interactionSource = interaction,
             modifier = Modifier
                 .fillMaxWidth()
