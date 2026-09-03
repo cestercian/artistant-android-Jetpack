@@ -208,15 +208,14 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Components/Skeleton.swift` | `designsystem/component/Skeleton.kt` | done | |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
-| `Components/HeaderBar.swift` | — | missing | |
+| `Components/HeaderBar.swift` | `designsystem/component/ScreenTitleBar.kt` + `feature/booking/BookingChrome.kt` (`FunnelHeader`) | done | Tab roots use `ScreenTitleBar`; pushed screens use `FunnelHeader` (back control + centred title). Deliberately not a Material `TopAppBar` |
 | `Components/Haptic.swift` | `designsystem/Haptics.kt` | done | 7 verbs + `rememberHaptics()`. Fired at 22 of iOS's 26 non-signup sites; the 4 gaps have no Android surface (ReportArtistSheet ×2, per-category review dots, and the thread report picker, which files on the reason tap so there is no separate select moment) |
-| Theme tokens | `designsystem/theme/*` | done | Brand fonts TTF drop still operator (#15) |
+| Theme tokens | `designsystem/theme/*` | done | Instrument Serif + Geist + Geist Mono bundled in `res/font/` (#56) |
 
 ---
 
 ## Explicitly deferred (not this wave)
 
-- Brand font TTFs in `res/font/` — polish, not a product blocker
 - Operator Google/Apple dashboard config + `google-services.json` / FCM server path
 - Artist profile PROF-* Airbnb extras (hero pager, review search/sort)
 
