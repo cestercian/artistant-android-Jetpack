@@ -19,6 +19,36 @@ val secretsProps = Properties().apply {
 }
 fun secret(key: String, default: String): String = secretsProps.getProperty(key) ?: default
 
+// Release signing. Reads a gitignored `keystore.properties` at the repo root
+// (RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS /
+// RELEASE_KEY_PASSWORD — docs/RELEASE.md "Signing"). When that file is absent the
+// release build type signs with the ANDROID DEBUG KEY instead, so
+// `assembleDevRelease` still yields an installable APK and the real R8 + AOT build
+// can be walked on a device — the debug build type is a different, slower app.
+// A debug-signed release APK can never reach Play (Play App Signing enforces the
+// upload key), so the fallback cannot leak into a store submission.
+val keystoreFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystoreFile.exists()) keystoreFile.inputStream().use { load(it) }
+}
+val releaseSigningKeys = listOf(
+    "RELEASE_STORE_FILE", "RELEASE_STORE_PASSWORD", "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD",
+)
+val presentSigningKeys = releaseSigningKeys.filter { !keystoreProps.getProperty(it).isNullOrBlank() }
+// All four or none: a half-filled file must fail here, with the missing names,
+// not later inside the signing task with a null password.
+if (presentSigningKeys.isNotEmpty() && presentSigningKeys.size != releaseSigningKeys.size) {
+    throw GradleException(
+        "keystore.properties is incomplete — missing ${releaseSigningKeys - presentSigningKeys.toSet()}",
+    )
+}
+val hasReleaseKeystore = presentSigningKeys.size == releaseSigningKeys.size
+if (hasReleaseKeystore && !rootProject.file(keystoreProps.getProperty("RELEASE_STORE_FILE")).exists()) {
+    throw GradleException(
+        "RELEASE_STORE_FILE '${keystoreProps.getProperty("RELEASE_STORE_FILE")}' does not exist",
+    )
+}
+
 android {
     namespace = "in.artistant.app"
     compileSdk = 36
@@ -67,8 +97,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("RELEASE_STORE_FILE"))
+                storePassword = keystoreProps.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = keystoreProps.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = keystoreProps.getProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Upload key when keystore.properties exists. Without it the build type is
+            // UNSIGNED here; dev/staging pick up the debug-key fallback per variant below.
+            signingConfig = if (hasReleaseKeystore) signingConfigs.getByName("release") else null
             // R8 on — shrink + obfuscate + resource-strip. Keep rules for the
             // serialization/nav surfaces R8 could otherwise break live in
             // proguard-rules.pro (a green assemble proves the static pass; the release
@@ -98,6 +142,20 @@ android {
     }
 }
 
+// The debug-key fallback is for phones, not the store. A prodRelease built without
+// the upload keystore stays UNSIGNED (exactly what it was before the fallback
+// existed) rather than debug-signed: a debug-signed build on the production
+// application id would make the first real, upload-key-signed update
+// uninstallable on that device (INSTALL_FAILED_UPDATE_INCOMPATIBLE) until the app
+// — and its data — is removed. dev/staging keep the fallback.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        if (!hasReleaseKeystore && variant.flavorName != "prod") {
+            variant.signingConfig.setConfig(android.signingConfigs.getByName("debug"))
+        }
+    }
+}
+
 // Product flavors mean there is no bare `testDebugUnitTest` task — only the
 // per-flavor `test{Dev,Staging,Prod}DebugUnitTest`. Register the plain name as a
 // lifecycle alias so `./gradlew :app:testDebugUnitTest` runs the debug unit tests
@@ -113,6 +171,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
+    // Installs the baseline profiles Compose/AndroidX ship in their AARs at install
+    // time, so release builds start and scroll AOT-compiled instead of JIT-warm.
+    implementation(libs.androidx.profileinstaller)
 
     // Compose via BOM — keeps all androidx.compose.* artifacts version-aligned.
     implementation(platform(libs.androidx.compose.bom))

@@ -33,6 +33,9 @@ camerax = "1.4.1"
 # EXIF — orientation of a picked photo, before we re-encode it (CameraX already
 # ships this artifact at runtime; declaring it puts it on the compile classpath).
 exifinterface = "1.3.7"
+# Baseline profiles — installs the profiles Compose/AndroidX ship in their AARs
+# so a release build is AOT-compiled for their hot paths on first launch.
+profileinstaller = "1.4.1"
 # Test
 junit = "4.13.2"
 coroutinesTest = "1.9.0"
@@ -55,6 +58,8 @@ androidx-compose-material-icons-extended = { module = "androidx.compose.material
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
 # DataStore
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+# Baseline profiles
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
 # Hilt
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
