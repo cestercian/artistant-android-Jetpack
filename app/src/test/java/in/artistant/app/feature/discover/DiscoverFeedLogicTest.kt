@@ -7,40 +7,142 @@ import `in`.artistant.app.data.repository.FakeSearchRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 
 /**
- * Discover feed logic tests: [DiscoverViewModel.applyRails] for the six-rail
- * slice `loadRails()` applies, [DiscoverViewModel.messageFor] for the
- * failure-copy mapping, and a paging smoke test against FakeSearchRepository
- * (no Android ViewModel runtime needed for any of it).
+ * Discover feed logic tests: [DiscoverViewModel.applyRails] for the rail slice
+ * `loadRails()` applies, [DiscoverViewModel.messageFor] for the failure-copy
+ * mapping, and a paging smoke test against FakeSearchRepository (no Android
+ * ViewModel runtime needed for any of it).
  */
 class DiscoverFeedLogicTest {
 
+    private val saturday = LocalDate.of(2026, 10, 10) // a Saturday
+
+    private fun state() = DiscoverUiState(today = saturday)
+
     /**
      * Drives [DiscoverViewModel.applyRails] itself — the function `loadRails()`
-     * calls once all four queries land — rather than reimplementing the slice
-     * in-test. Each source page uses a disjoint id prefix, so a swapped source
-     * (`topBangalore` fed from `fresh` instead of `city`) fails this test, not
-     * just a wrong rail length.
+     * calls once the queries land — rather than reimplementing the slice in-test.
+     * Each source page uses a disjoint id prefix, so a swapped source (the city
+     * rail fed from `fresh`) fails this test, not just a wrong rail length.
      */
     @Test
-    fun `applyRails maps the four query pages onto their six named rails`() {
+    fun `applyRails maps each query page onto its own named rail`() {
         val top = (1..12).map { FakeArtistsRepository.sample(id = "top$it", name = "Top $it") }
+        val free = (1..12).map { FakeArtistsRepository.sample(id = "free$it", name = "Free $it") }
         val city = (1..12).map { FakeArtistsRepository.sample(id = "city$it", name = "City $it") }
         val fresh = (1..12).map { FakeArtistsRepository.sample(id = "fresh$it", name = "Fresh $it") }
         val comedy = (1..12).map { FakeArtistsRepository.sample(id = "comedy$it", name = "Comedy $it") }
 
-        val state = DiscoverViewModel.applyRails(DiscoverUiState(), top, city, fresh, comedy)
+        val after = DiscoverViewModel.applyRails(state(), top, free, city, fresh, comedy)
 
-        assertEquals(top.take(5), state.hero)
-        assertEquals(top.take(8), state.featured)
-        assertEquals(top.take(10), state.topIndia)
-        assertEquals(city.take(10), state.topBangalore)
-        assertEquals(fresh.take(10), state.newOnArtistant)
-        assertEquals(comedy.take(10), state.comedy)
-        assertFalse(state.isLoading)
+        assertEquals(top.first(), after.hero)
+        assertEquals(listOf("available", "city", "new", "comedy"), after.rails.map { it.id })
+        assertEquals(free.take(10), after.rails.first { it.id == "available" }.artists)
+        assertEquals(city.take(10), after.rails.first { it.id == "city" }.artists)
+        assertEquals(fresh.take(10), after.rails.first { it.id == "new" }.artists)
+        assertEquals(comedy.take(10), after.rails.first { it.id == "comedy" }.artists)
+        assertFalse(after.isLoading)
+    }
+
+    /**
+     * A rail with nothing in it is dropped, not rendered as a title over a blank
+     * strip. A young roster returns empty pages for the narrower queries all the
+     * time, and a heading that promises a section then shows none of it reads as
+     * a loading bug.
+     */
+    @Test
+    fun `an empty page produces no rail at all`() {
+        val top = listOf(FakeArtistsRepository.sample(id = "top1"))
+        val after = DiscoverViewModel.applyRails(
+            state(),
+            top = top,
+            available = emptyList(),
+            city = emptyList(),
+            fresh = top,
+            comedy = emptyList(),
+        )
+        assertEquals(listOf("new"), after.rails.map { it.id })
+    }
+
+    /** No hero when the top page is empty — the card is not drawn over nothing. */
+    @Test
+    fun `no hero when the roster is empty`() {
+        val after = DiscoverViewModel.applyRails(
+            state(),
+            top = emptyList(),
+            available = emptyList(),
+            city = emptyList(),
+            fresh = emptyList(),
+            comedy = emptyList(),
+        )
+        assertNull(after.hero)
+        assertTrue(after.isEmpty)
+    }
+
+    /**
+     * The availability rail re-checks the artist's own `days_available` on top of
+     * the server's `p_date` filter, because `SupabaseSearchRepository` silently
+     * retries a date-filtered search WITHOUT the 0073 dimensions when the RPC
+     * signature is missing. Without this second gate that fallback captions an
+     * unfiltered page "Available Sat night".
+     */
+    @Test
+    fun `the availability rail drops an artist who does not publish that weekday`() {
+        val free = FakeArtistsRepository.sample(id = "free").copy(daysAvailable = listOf("Sat"))
+        val busy = FakeArtistsRepository.sample(id = "busy").copy(daysAvailable = listOf("Mon"))
+        val unknown = FakeArtistsRepository.sample(id = "unknown")
+
+        val after = DiscoverViewModel.applyRails(
+            state(),
+            top = listOf(free),
+            available = listOf(free, busy, unknown),
+            city = emptyList(),
+            fresh = emptyList(),
+            comedy = emptyList(),
+        )
+        val rail = after.rails.first { it.id == "available" }
+        assertEquals(listOf("free", "unknown"), rail.artists.map { it.id })
+    }
+
+    /** The rail title names the day the query was actually scoped to. */
+    @Test
+    fun `the availability rail is titled with its own date`() {
+        val artist = FakeArtistsRepository.sample()
+        val after = DiscoverViewModel.applyRails(
+            state(),
+            top = listOf(artist),
+            available = listOf(artist),
+            city = emptyList(),
+            fresh = emptyList(),
+            comedy = emptyList(),
+        )
+        assertEquals("Available Sat night", after.rails.first { it.id == "available" }.title)
+        assertEquals(saturday.toString(), after.rails.first { it.id == "available" }.seed.dateIso)
+    }
+
+    /**
+     * Under a selected category a comedy rail either duplicates the chip or
+     * contradicts it, so the query is skipped and the rail cannot appear. Every
+     * other rail carries the category into its "See all".
+     */
+    @Test
+    fun `a selected category scopes every rail seed and hides comedy`() {
+        val artist = FakeArtistsRepository.sample()
+        val after = DiscoverViewModel.applyRails(
+            state().copy(selectedCategory = "DJ"),
+            top = listOf(artist),
+            available = listOf(artist),
+            city = listOf(artist),
+            fresh = listOf(artist),
+            comedy = emptyList(),
+        )
+        assertEquals(listOf("available", "city", "new"), after.rails.map { it.id })
+        assertTrue(after.rails.all { it.seed.category == "DJ" })
     }
 
     @Test

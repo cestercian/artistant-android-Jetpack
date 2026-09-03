@@ -54,6 +54,7 @@ import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.profile.ArtistListKind
 import `in`.artistant.app.feature.profile.ArtistListScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
@@ -186,12 +187,20 @@ fun ClientTabsScaffold() {
             popEnterTransition = navPopEnter(motion, reduceMotion, tabRoutes),
             popExitTransition = navPopExit(motion, reduceMotion, tabRoutes),
         ) {
-            // Discover is the ONE full-bleed destination: its hero photo runs
-            // under the status bar and its rails scroll behind the floating tab
-            // bar, so it takes no scaffold insets and reserves its own tailroom.
-            // Every other destination gets the normal inset pane via [TabPane].
+            // Discover takes the ordinary inset pane now. Its hero used to be a
+            // full-bleed photograph that owned the status-bar area; the light
+            // design makes it a 262dp card on an ordinary page, so the screen has
+            // nothing left that wants to run under the system bars.
             composable(ClientTab.Discover.route) {
-                DiscoverScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
+                TabPane(inner) {
+                    DiscoverScreen(
+                        onArtistClick = { id -> nav.navigate("artist/$id") },
+                        onOpenSearch = { navigateToTab(nav, ClientTab.Search.route) },
+                        onOpenSaved = {
+                            nav.navigate(ClientNavRoutes.artistList(ArtistListKind.Saved.raw))
+                        },
+                    )
+                }
             }
             composable(ClientTab.Bookings.route) {
                 TabPane(inner) {
