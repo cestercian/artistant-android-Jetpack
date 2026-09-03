@@ -36,11 +36,14 @@ Dark-only, phone-only, portrait, INR.
 
 1. **Green tree gate.** Nothing merges unless `./gradlew :app:assembleDebug`
    compiles and `./gradlew :app:testDebugUnitTest` passes. That is *the* gate.
-2. **Design parity with iOS.** Match the iOS screen/flow/feel. Use the design
-   tokens (`AppColors`/`AppType`/`Space`/`Size`/`Radii`) — **never** a raw
-   hex/dp/sp. Hairlines, no card chrome, mono numerals, editorial serif headlines,
-   **accent = one signal per screen** (client lime `#C8FF00` / artist violet
-   `#7C5CFF`). The UI direction is locked; don't "improve" it.
+2. **Design parity with the "Artistant iOS Light" design (Sep 2026).** The
+   product owner replaced the dark, dual-accent look with a light, single-accent
+   design of 138 screens — `docs/REDESIGN_2026-09.md` is the plan and the token
+   sheet; the extracted screens live outside the repo (path in that doc). Use the
+   design tokens (`AppColors`/`AppType`/`Space`/`Size`/`Radii`) — **never** a raw
+   hex/dp/sp. Plus Jakarta Sans + JetBrains Mono, hairlines, no card chrome, one
+   lime accent (`#d6f84b`) per screen for both roles, honest loading/empty/failed
+   states. Match the design screen; don't "improve" it.
 3. **Same backend, respect its rules.** RLS is the whole authorization model.
    Lowercase every UUID. **Never `select("*")` on `messages`** (`body_raw` 403s —
    use explicit columns). Read denormalized `client_name` (never embed `users`).
@@ -222,6 +225,7 @@ Play release (see RELEASE.md §0).
 | `docs/FEATURE_CHECKLIST.md` | Features → tasks (complexity/deps/risk) |
 | `docs/IMPLEMENTATION_ROADMAP.md` | Milestones M0–M8 |
 | `docs/RISKS_AND_DECISIONS.md` | iOS-only APIs, risks, security, a11y, ADRs |
+| `docs/REDESIGN_2026-09.md` | **The Sep-2026 light redesign: design language, token map, phases, agent rules** |
 
 ## The one thing I'd tell my replacement
 
