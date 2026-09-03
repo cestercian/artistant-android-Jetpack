@@ -165,6 +165,26 @@ data class AppType(
         fontFamily = SansFamily, fontSize = 50.sp,
         fontWeight = FontWeight.Bold, letterSpacing = (-1).sp,
     ),
+    /**
+     * The signup welcome headline — "Book India's *best* artists.", the first
+     * editorial line anyone sees.
+     *
+     * A step above [displayHero] (40sp), which every other serif moment takes,
+     * because this one carries a screen that is otherwise a gradient and two
+     * buttons: at the shared step it stops being the thing the eye lands on. Not
+     * [signupDisplay] either — that step is SANS, and deliberately so (the
+     * profile step switches face on purpose), whereas this is the editorial
+     * serif doing its normal job at an unusual size.
+     *
+     * It was the last raw `fontSize` in the app: `displayHero.copy(fontSize =
+     * 52.sp)` inlined at the call site, which is how a size nobody can grep for
+     * drifts. Naming it does not move a pixel. iOS sets the same headline at
+     * 56pt (`SignupWelcomeView`, `.system(size: 56, design: .serif)`) with -1.6
+     * kerning; closing that 4pt gap is a look-at-it-on-a-device call for the
+     * design owner, not a rename, so the two numbers are parked here where they
+     * can be compared instead of rediscovered.
+     */
+    val welcomeDisplay: TextStyle = TextStyle(fontFamily = SerifFamily, fontSize = 52.sp),
     val headline: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
     val body: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 16.sp),
     val callout: TextStyle = TextStyle(fontFamily = SansFamily, fontSize = 15.sp, fontWeight = FontWeight.Medium),
