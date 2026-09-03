@@ -45,7 +45,9 @@ import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
+import `in`.artistant.app.feature.score.ScoreHistoryScreen
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -188,7 +190,26 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
                 TabPane(inner) {
-                    ScoreExplainerScreen(onBack = { nav.popBackStack() })
+                    ScoreExplainerScreen(
+                        onBack = { nav.popBackStack() },
+                        // Every opportunity opens the thing it edits (design 50).
+                        // Two destinations cover the five: the press kit owns the
+                        // listing (samples, photos, packages, bio) and the wizard
+                        // owns the steps that were never surfaced anywhere else
+                        // (tech rider, socials).
+                        onOpenEditor = { editor ->
+                            when (editor) {
+                                ScoreEditor.PressKit -> nav.navigate(ArtistTab.Epk.route)
+                                ScoreEditor.Wizard -> nav.navigate(ArtistNavRoutes.WIZARD)
+                            }
+                        },
+                        onSeeHistory = { nav.navigate(ArtistNavRoutes.SCORE_HISTORY) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SCORE_HISTORY) {
+                TabPane(inner) {
+                    ScoreHistoryScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(ArtistNavRoutes.PAYWALL) {

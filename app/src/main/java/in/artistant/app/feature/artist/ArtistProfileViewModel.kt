@@ -7,10 +7,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.ReportOutcome
+import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.feature.booking.BookingDraftStore
+import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.feature.saved.SavedStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +43,36 @@ data class ArtistProfileUiState(
     val reviews: List<Review> = emptyList(),
     val reviewsFailed: Boolean = false,
     val scoreBreakdown: ScoreBreakdown? = null,
+    /**
+     * The breakdown read THREW. Screen 99's whole subject.
+     *
+     * Distinct from a null [scoreBreakdown], which is also what "we never asked"
+     * looks like: the sheet renders the artist row's own score plus the factors
+     * it can still back, and says the rest could not be itemised — but only when
+     * a fetch actually failed. Without the flag it would say that during the
+     * first frame of every profile, before the fetch has returned.
+     */
+    val scoreFailed: Boolean = false,
     val showScoreSheet: Boolean = false,
+    /** Screen 04's "···" — the sheet carrying Save / Share / Report. */
+    val showActionSheet: Boolean = false,
+    /** Screen 56. Opened from the action sheet, which closes as it opens. */
+    val showReportSheet: Boolean = false,
+    /**
+     * Set once a report has been filed, and read by the toast.
+     *
+     * [ReportOutcome.Queued] is not a failure and the copy must not call it one
+     * — see screen 56's note. Cleared when the toast is dismissed so a second
+     * report can raise a second toast.
+     */
+    val reportOutcome: ReportOutcome? = null,
+    /**
+     * The signed-in user IS this artist (screen 103).
+     *
+     * Booking controls come off rather than being left to fail against the
+     * server's self-booking guard, and the page says which side it is showing.
+     */
+    val isSelf: Boolean = false,
     val isLoading: Boolean = true,
     /**
      * Non-null means **what is on screen is not a loaded profile** — either
@@ -87,13 +119,21 @@ class ArtistProfileViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val reviewsRepository: ReviewsRepository,
     private val scoreRepository: ScoreRepository,
+    private val reportsRepository: ReportsRepository,
     private val savedStore: SavedStore,
     private val draftStore: BookingDraftStore,
+    viewer: ViewerIdentity,
 ) : ViewModel() {
 
     private val artistId: String = checkNotNull(savedStateHandle["artistId"])
 
-    private val _state = MutableStateFlow(ArtistProfileUiState())
+    private val _state = MutableStateFlow(
+        // Resolved once, in the constructor: an artist's own id does not change
+        // while the page is open, and a signed-out reader is simply not self.
+        ArtistProfileUiState(
+            isSelf = viewer.currentUserId()?.lowercase() == artistId.lowercase(),
+        ),
+    )
     val state: StateFlow<ArtistProfileUiState> = _state.asStateFlow()
 
     init {
@@ -135,14 +175,15 @@ class ArtistProfileViewModel @Inject constructor(
             val reviews = runCatching { reviewsRepository.listForArtist(artistId) }
                 .onFailure { reviewsFailed = true }
                 .getOrDefault(emptyList())
-            val breakdown = runCatching { scoreRepository.breakdown(artistId) }.getOrNull()
+            val breakdownRead = runCatching { scoreRepository.breakdown(artistId) }
             _state.update {
                 it.copy(
                     artist = full,
                     packagesLoaded = true,
                     reviews = reviews,
                     reviewsFailed = reviewsFailed,
-                    scoreBreakdown = breakdown,
+                    scoreBreakdown = breakdownRead.getOrNull(),
+                    scoreFailed = breakdownRead.isFailure,
                     selectedPackageIndex = popularIdx,
                     isLoading = false,
                     loadError = null,
@@ -154,6 +195,45 @@ class ArtistProfileViewModel @Inject constructor(
 
     fun openScoreSheet() = _state.update { it.copy(showScoreSheet = true) }
     fun dismissScoreSheet() = _state.update { it.copy(showScoreSheet = false) }
+
+    fun openActionSheet() = _state.update { it.copy(showActionSheet = true) }
+    fun dismissActionSheet() = _state.update { it.copy(showActionSheet = false) }
+
+    /**
+     * The action sheet closes as the report sheet opens.
+     *
+     * Two `ModalBottomSheet`s alive at once stack two scrims, and dismissing the
+     * report would drop the reader back onto the menu they left — so the menu is
+     * gone before the form arrives.
+     */
+    fun openReportSheet() =
+        _state.update { it.copy(showActionSheet = false, showReportSheet = true) }
+
+    fun dismissReportSheet() = _state.update { it.copy(showReportSheet = false) }
+
+    /**
+     * File the report and remember whether it landed.
+     *
+     * The sheet closes immediately, before the round-trip: the report is
+     * fire-and-forget by contract (`ReportsRepository` never throws), the reader
+     * has nothing to decide while it is in flight, and holding a spinner over a
+     * form they have finished with is the pattern the design's "narrated, not a
+     * spinner" note is written against. The toast that follows says which of the
+     * two things happened.
+     */
+    fun submitReport(reason: String, details: String?) {
+        _state.update { it.copy(showReportSheet = false) }
+        viewModelScope.launch {
+            val outcome = runCatching { reportsRepository.reportArtist(artistId, reason, details) }
+                // A throw here is a contract violation, not an ordinary failure;
+                // it still must not lose the reader's report silently, so it
+                // reads as the weaker of the two claims.
+                .getOrDefault(ReportOutcome.Queued)
+            _state.update { it.copy(reportOutcome = outcome) }
+        }
+    }
+
+    fun dismissReportToast() = _state.update { it.copy(reportOutcome = null) }
 
     fun selectPackage(index: Int) {
         _state.update { it.copy(selectedPackageIndex = index) }

@@ -42,6 +42,8 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artist.ArtistProfileScreen
+import `in`.artistant.app.feature.artist.ArtistReviewsScreen
+import `in`.artistant.app.feature.score.BookabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.booking.BookingScreen
 import `in`.artistant.app.feature.booking.CheckoutScreen
@@ -279,12 +281,49 @@ fun ClientTabsScaffold() {
                                 nav.navigate(ClientNavRoutes.chat(threadId))
                             }
                         },
+                        // Screen 55's route out. Not `popBackStack` — a stale
+                        // share link opens this destination with nothing under
+                        // it, and popping an empty stack leaves the app on a
+                        // blank frame. Discover is somewhere to be.
+                        onBrowse = {
+                            nav.navigate(ClientTab.Discover.route) {
+                                popUpTo(ClientTab.Discover.route) { inclusive = true }
+                            }
+                        },
+                        onSeeReviews = { artistId ->
+                            nav.navigate(ClientNavRoutes.artistReviews(artistId))
+                        },
+                        onSeeBookability = { artistId ->
+                            nav.navigate(ClientNavRoutes.bookability(artistId))
+                        },
                     )
                     ChatOpenFeedback(
                         opening = openingChat,
                         error = chatError,
                         onDismissError = chatOpen::dismissError,
                     )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.ARTIST_REVIEWS,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    val artistId = entry.arguments?.getString("artistId").orEmpty()
+                    ArtistReviewsScreen(
+                        onBack = { nav.popBackStack() },
+                        onRequestQuote = {
+                            nav.navigate(ClientNavRoutes.requestQuote(artistId))
+                        },
+                    )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.BOOKABILITY,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) {
+                TabPane(inner) {
+                    BookabilityScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(

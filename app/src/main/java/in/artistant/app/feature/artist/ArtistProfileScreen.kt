@@ -24,19 +24,20 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,62 +49,69 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.GalleryPhoto
 import `in`.artistant.app.data.model.Review
+import `in`.artistant.app.data.model.Sample
+import `in`.artistant.app.data.repository.ReportOutcome
+import `in`.artistant.app.designsystem.component.AccentNote
+import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
+import `in`.artistant.app.designsystem.component.EyebrowLabel
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.InlineBanner
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.ListRow
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
-import `in`.artistant.app.designsystem.component.ScoreRing
-import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.designsystem.component.SampleRow
+import `in`.artistant.app.designsystem.component.SectionHeader
+import `in`.artistant.app.designsystem.component.SkeletonBlock
+import `in`.artistant.app.designsystem.component.SkeletonCircle
+import `in`.artistant.app.designsystem.component.ToastHost
 import `in`.artistant.app.designsystem.rememberHaptics
-import `in`.artistant.app.platform.media.rememberSamplePlayer
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.domain.artist.spotifyEmbedUrl
-import `in`.artistant.app.domain.score.ScoreBands
-import `in`.artistant.app.domain.score.ScoreTier
-import `in`.artistant.app.domain.score.tierColor
-import `in`.artistant.app.feature.booking.CircleIconButton
-import `in`.artistant.app.feature.booking.FunnelCta
-import `in`.artistant.app.feature.booking.PackageOptionRow
 import `in`.artistant.app.feature.score.ScoreBreakdownSheet
-import java.util.Locale
+import `in`.artistant.app.platform.media.rememberSamplePlayer
 
 /**
- * Artist profile.
+ * The artist profile — design screens 04 / 54 / 55 / 101 / 103.
  *
- * The page is a hero and then a column of editorial blocks: a full-bleed cover
- * carrying the whole identity (chips, name, genre, Bookability Score), a
- * hairline stat strip, About, Booking, Packages, Reviews, and a pinned action
- * dock. Nothing is a card except the things the client picks between.
+ * A **listing, not a feed**. The redesign retired the full-bleed hero that used
+ * to open this page: the identity is a 96dp round portrait beside the name, and
+ * the space that photo was spending goes to the things a host actually decides
+ * on — three stats they can check, the packages, and the clips.
  *
- * The hero is 48% of the screen and the identity sits ON it rather than in a
- * header below it, because on a two-sided marketplace the photo is the pitch —
- * the earlier layout led with a 360dp band of cover and then restated the name,
- * category and city underneath in chrome, which spent the top third of the page
- * saying one thing twice.
+ * **Packages replaced the rate card, and the price rides the CTA.** A rate card
+ * states a number the host then has to convert into "what do I get"; a package
+ * is the unit they buy. The dock therefore quotes the *minimum* over the loaded
+ * packages ("Check availability · ₹26,000"), because "from" means minimum — not
+ * the selected tier, and not `artists.min_price`, which is denormalized and
+ * confirmed stale on dev.
  *
- * Action placement mirrors iOS rather than stacking every CTA in the bar: the
- * dock carries the "from" price plus the one primary action, Message rides in
- * the hero cluster, and Request a quote sits with the pricing it negotiates.
+ * Three branches, and they are three different screens on purpose (§2): a
+ * skeleton with **no navigation bar** while the cached tile is stitched into a
+ * full record (54), a named cause with a route out when there is no such artist
+ * (55), and the page itself. Everything below the page's fold degrades on its
+ * own — reviews can fail without taking the profile down (100), the score can
+ * fail to itemise without taking the number down (99), and an artist with no
+ * audio gets a section that names the signal to use instead (101).
  */
 @Composable
 fun ArtistProfileScreen(
@@ -111,510 +119,548 @@ fun ArtistProfileScreen(
     onBook: (artistId: String) -> Unit = {},
     onRequestQuote: (artistId: String) -> Unit = {},
     onMessage: (artistId: String) -> Unit = {},
+    onBrowse: () -> Unit = onBack,
+    onSeeReviews: (artistId: String) -> Unit = {},
+    onSeeBookability: (artistId: String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ArtistProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val space = AppTheme.dimens.space
     val colors = AppTheme.colors
     val context = LocalContext.current
 
-    when {
-        state.isLoading && state.artist == null -> {
-            Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.accentInk)
-            }
-        }
-        state.artist == null -> {
-            // The screen takes no scaffold inset (see the nav host), so every
-            // branch owes itself the status-bar padding the loaded page applies
-            // to its floating hero controls.
-            Column(modifier.fillMaxSize().background(colors.bg).statusBarsPadding()) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
-                }
-                EmptyState(
-                    // The message IS the headline: it already says whether the row
-                    // is missing or the read failed. A fixed "Artist not found"
-                    // title asserted the first for a dropped request too, and then
-                    // repeated itself in the body.
-                    title = state.loadError ?: ARTIST_NOT_FOUND,
-                    actionLabel = "Retry",
-                    onAction = viewModel::refresh,
-                )
-            }
-        }
-        else -> {
-            val artist = state.artist!!
-            val tier = ScoreBands.tier(artist.score, artist.gigs)
-            RevealOnAppear {
-                Column(modifier.fillMaxSize().background(colors.bg)) {
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Hero(
-                            artist = artist,
-                            tier = tier,
-                            onBack = onBack,
-                            isSaved = state.isSaved,
-                            onToggleSaved = viewModel::toggleSaved,
-                            onMessage = { onMessage(artist.id) },
-                            onShare = { shareArtist(context, artist) },
-                            onScoreClick = viewModel::openScoreSheet,
-                        )
-                        StatStrip(reviews = state.reviews, tier = tier)
-                        Column(
-                            Modifier.padding(horizontal = space.lg, vertical = space.xl),
-                            verticalArrangement = Arrangement.spacedBy(space.xl),
-                        ) {
-                            // A profile can be drawn from the Discover/Search TILE
-                            // when hydration failed, and the tile carries no
-                            // packages, bio, samples or reviews — so every block
-                            // below states an absence it cannot actually vouch for
-                            // ("Pricing on request", "No reviews yet."). The
-                            // failure has to be visible and retryable here; the
-                            // Retry on the empty state only exists for the
-                            // nothing-loaded case, and there is no other refresh
-                            // affordance on this screen.
-                            state.loadError?.let { message ->
-                                InlineBanner(
-                                    title = message,
-                                    detail = "Pricing and packages may be missing.",
-                                    tone = BannerTone.Failure,
-                                    actionLabel = "Retry",
-                                    onAction = viewModel::refresh,
-                                )
-                            }
-                            // The strip is part of About, so About renders for a
-                            // bio-less artist who has photos — an artist who
-                            // skipped the wizard's bio step still has work to
-                            // show, and iOS keeps the section (and its header)
-                            // standing on an empty bio for the same reason.
-                            if (artist.bio.isNotBlank() || artist.gallery.isNotEmpty()) {
-                                AboutBlock(bio = artist.bio, gallery = artist.gallery)
-                            }
-                            if (artist.serviceTags.isNotEmpty()) {
-                                ServicesBlock(tags = artist.serviceTags)
-                            }
-                            if (artist.prompts.isNotEmpty()) {
-                                PromptsBlock(prompts = artist.prompts)
-                            }
-                            // Above Booking on purpose: hearing the act is the
-                            // question a client has before "what does it cost",
-                            // and this page previously had no answer to it at all
-                            // — the samples were fetched and then never rendered.
-                            val spotifyEmbed = spotifyEmbedUrl(artist.spotifyArtistUrl)
-                            if (artist.samples.isNotEmpty() || spotifyEmbed != null) {
-                                SoundBlock(samples = artist.samples, spotifyEmbed = spotifyEmbed)
-                            }
-                            BookingBlock(
-                                artist = artist,
-                                packagesLoaded = state.packagesLoaded,
-                            )
-                            PackagesBlock(
-                                artist = artist,
-                                selectedIndex = state.selectedPackageIndex,
-                                onSelect = viewModel::selectPackage,
-                                onRequestQuote = { onRequestQuote(artist.id) },
-                            )
-                            ReviewsBlock(
-                                reviews = state.reviews,
-                                failed = state.reviewsFailed,
-                                onRetry = viewModel::refresh,
-                            )
-                            Spacer(Modifier.height(space.md))
-                        }
-                    }
-                    // "from" means MINIMUM, so it is computed over the packages we
-                    // actually loaded — not the selected row (which made the page
-                    // advertise the dearest tier) and not `artist.price`, the
-                    // server's denormalized `artists.min_price`, which is confirmed
-                    // stale on dev (a row reading ₹51,000 while a ₹22,000 package
-                    // exists). `artist.price` survives only as the empty-set
-                    // fallback. iOS does the same thing via `cheapestPackage`.
-                    // packagesLoaded is the state's fact, not `true`: this branch
-                    // is entered as soon as `artist` is non-null, which the cached
-                    // Discover/Search tile makes true BEFORE the stitch returns —
-                    // and that tile has no packages beside a real min_price. Hard-
-                    // coding true made the dock read "On request" mid-load for an
-                    // artist with tiers, permanently so if the stitch failed.
-                    val fromPrice = PackagePricing.dockPrice(
-                        artist.packages,
-                        fallback = artist.price,
-                        packagesLoaded = state.packagesLoaded,
-                    )
-                    ActionDock(
-                        fromPrice = fromPrice,
-                        // Hand the tapped tier over BEFORE navigating — the route
-                        // carries only the artist id, so the booking screen reads the
-                        // selection from the shared draft store on the way in.
-                        onBook = {
-                            viewModel.startBooking()
-                            onBook(artist.id)
-                        },
-                    )
-                }
-            }
-            if (state.showScoreSheet) {
-                ScoreBreakdownSheet(
+    Box(modifier.fillMaxSize().background(colors.surface)) {
+        when {
+            state.isLoading && state.artist == null -> ArtistProfileSkeleton()
+
+            state.artist == null -> ArtistNotFound(
+                // ARTIST_NOT_FOUND is the server saying there is no such row; any
+                // other message is a read that failed, and the two get different
+                // copy because they license different actions. Retry is pointless
+                // for the first and the only useful control for the second.
+                notFound = state.loadError == ARTIST_NOT_FOUND,
+                onBack = onBack,
+                onBrowse = onBrowse,
+                onRetry = viewModel::refresh,
+            )
+
+            else -> {
+                val artist = state.artist!!
+                LoadedProfile(
+                    state = state,
                     artist = artist,
-                    breakdown = state.scoreBreakdown,
-                    reviews = state.reviews,
-                    reviewsFailed = state.reviewsFailed,
-                    onDismiss = viewModel::dismissScoreSheet,
+                    onBack = onBack,
+                    onOverflow = viewModel::openActionSheet,
+                    onScore = viewModel::openScoreSheet,
+                    onSelectPackage = viewModel::selectPackage,
+                    onRequestQuote = { onRequestQuote(artist.id) },
+                    onSeeReviews = { onSeeReviews(artist.id) },
+                    onRetryReviews = viewModel::refresh,
+                    onMessage = { onMessage(artist.id) },
+                    onBook = {
+                        // Hand the tapped tier over BEFORE navigating — the route
+                        // carries only the artist id, so the booking screen reads
+                        // the selection from the shared draft store on the way in.
+                        viewModel.startBooking()
+                        onBook(artist.id)
+                    },
                 )
+
+                if (state.showActionSheet) {
+                    ProfileActionSheet(
+                        artistName = artist.name,
+                        isSaved = state.isSaved,
+                        isSelf = state.isSelf,
+                        onToggleSaved = viewModel::toggleSaved,
+                        onShare = { shareArtist(context, artist) },
+                        onReport = viewModel::openReportSheet,
+                        onDismiss = viewModel::dismissActionSheet,
+                    )
+                }
+                if (state.showReportSheet) {
+                    ReportArtistSheet(
+                        artistName = artist.name,
+                        onSubmit = viewModel::submitReport,
+                        onDismiss = viewModel::dismissReportSheet,
+                    )
+                }
+                if (state.showScoreSheet) {
+                    ScoreBreakdownSheet(
+                        artist = artist,
+                        breakdown = state.scoreBreakdown,
+                        breakdownFailed = state.scoreFailed,
+                        reviews = state.reviews,
+                        reviewsFailed = state.reviewsFailed,
+                        onRetry = viewModel::refresh,
+                        onSeeBookability = {
+                            viewModel.dismissScoreSheet()
+                            onSeeBookability(artist.id)
+                        },
+                        onDismiss = viewModel::dismissScoreSheet,
+                    )
+                }
             }
         }
+        // "Queued", never "received" — the insert soft-fails into a local log and
+        // the reader is owed the difference (screen 56's note).
+        ToastHost(
+            message = when (state.reportOutcome) {
+                ReportOutcome.Sent -> "Report sent to Artistant."
+                ReportOutcome.Queued -> "Report queued on this device."
+                null -> null
+            },
+            onDismiss = viewModel::dismissReportToast,
+            icon = Icons.Filled.Flag,
+        )
     }
 }
 
-/**
- * Hand the artist's public link to the system share sheet.
- *
- * The link is the artist's handle on the marketing domain — the same address the
- * press kit is meant to live at. The page may not be live during beta, but a
- * shareable artist link is still the right affordance, and a handle-less artist
- * falls back to the bare domain rather than to a broken path.
- *
- * `runCatching` because a device with no app able to handle `ACTION_SEND` throws
- * on `startActivity`, and a share button is not worth crashing a profile over.
- */
-private fun shareArtist(context: Context, artist: Artist) {
-    val handle = artist.handle.trim()
-    val url = if (handle.isEmpty()) ARTIST_SHARE_ORIGIN else "$ARTIST_SHARE_ORIGIN/$handle"
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_SUBJECT, artist.name)
-        putExtra(Intent.EXTRA_TEXT, "Book ${artist.name} on Artistant\n$url")
-    }
-    runCatching { context.startActivity(Intent.createChooser(intent, null)) }
-}
-
-private const val ARTIST_SHARE_ORIGIN = "https://artistant.in"
+// ── Branch: loading (screen 54) ──────────────────────────────────────────────
 
 /**
- * Full-bleed cover with the identity resting on its bottom edge.
+ * Screen 54. The page's own rhythm in grey, and **no navigation bar**.
  *
- * The dissolve at the bottom is a gradient ending on the PAGE background, not on
- * black. Ramping to black bottoms out darker than `bg` and leaves a visible step
- * exactly where the seam is meant to vanish; ending on `bg` makes the join exact
- * by definition.
- *
- * Height is a fraction of the screen rather than a fixed Dp — the proportion is
- * the design, and a 360dp band is a different picture on every device.
+ * The bar is what would flash: this screen is what a push lands on while the
+ * cached Discover/Search tile is being stitched into a full record, and a
+ * centred title over an empty page reads as a screen that arrived broken. The
+ * blocks below are the real layout's — portrait, name, stat strip, About,
+ * packages — so the content does not jump when it lands.
  */
 @Composable
-private fun Hero(
-    artist: Artist,
-    tier: ScoreTier,
+private fun ArtistProfileSkeleton(modifier: Modifier = Modifier) {
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    Column(
+        modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = dimens.component.gutter)
+            .padding(top = space.xxl),
+        verticalArrangement = Arrangement.spacedBy(space.xl),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(space.lg),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SkeletonCircle(dimens.size.avatarXl)
+            Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+                SkeletonBlock(
+                    Modifier
+                        .width(dimens.component.skeletonSectionWidth)
+                        .height(dimens.component.skeletonTitleHeight),
+                )
+                SkeletonBlock(
+                    Modifier
+                        .width(dimens.component.skeletonSubtitleWidth)
+                        .height(dimens.component.skeletonLineHeight),
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+            repeat(STAT_CELLS) {
+                SkeletonBlock(
+                    Modifier
+                        .weight(1f)
+                        .height(dimens.size.dateCellH),
+                    radius = dimens.radii.lg,
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+            repeat(SKELETON_BODY_LINES) { line ->
+                SkeletonBlock(
+                    Modifier
+                        .fillMaxWidth(SKELETON_LINE_WIDTHS[line])
+                        .height(dimens.component.skeletonLineHeight),
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+            SkeletonBlock(
+                Modifier
+                    .width(dimens.component.skeletonTitleWidth)
+                    .height(dimens.component.skeletonTitleHeight),
+            )
+            SkeletonBlock(
+                Modifier
+                    .fillMaxWidth()
+                    .height(dimens.component.skeletonTile),
+                radius = dimens.radii.lg,
+            )
+        }
+    }
+}
+
+private const val STAT_CELLS = 3
+private const val SKELETON_BODY_LINES = 3
+private val SKELETON_LINE_WIDTHS = listOf(1f, 0.94f, 0.62f)
+
+// ── Branch: nothing to show (screen 55) ─────────────────────────────────────
+
+/**
+ * Screen 55. Names the likely cause and offers the route out.
+ *
+ * The one thing this screen must not do is go blank: it is where a stale share
+ * link lands, and "nothing here" with a back arrow gives the reader no account
+ * of what happened. A read that FAILED gets Retry instead — retrying a row the
+ * server says does not exist is a button that cannot work.
+ */
+@Composable
+private fun ArtistNotFound(
+    notFound: Boolean,
     onBack: () -> Unit,
-    isSaved: Boolean,
-    onToggleSaved: () -> Unit,
+    onBrowse: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val dimens = AppTheme.dimens
+    Column(
+        modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = dimens.component.gutter),
+    ) {
+        IconCircle(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Back",
+            onClick = onBack,
+            modifier = Modifier.padding(top = dimens.space.sm),
+        )
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            if (notFound) {
+                EmptyState(
+                    icon = Icons.Filled.Search,
+                    title = "We can't find this artist",
+                    body = "This artist may have been unpublished. Head back to " +
+                        "Discover to see who's available.",
+                    actionLabel = "Back to Discover",
+                    onAction = onBrowse,
+                )
+            } else {
+                EmptyState(
+                    icon = Icons.Filled.Search,
+                    title = "Couldn't load this profile",
+                    body = "The profile is there — we couldn't reach it. Check your " +
+                        "connection and try again.",
+                    actionLabel = "Retry",
+                    onAction = onRetry,
+                    secondaryLabel = "Back to Discover",
+                    onSecondary = onBrowse,
+                )
+            }
+        }
+    }
+}
+
+// ── Branch: the page (screens 04 / 101 / 103) ────────────────────────────────
+
+@Composable
+private fun LoadedProfile(
+    state: ArtistProfileUiState,
+    artist: Artist,
+    onBack: () -> Unit,
+    onOverflow: () -> Unit,
+    onScore: () -> Unit,
+    onSelectPackage: (Int) -> Unit,
+    onRequestQuote: () -> Unit,
+    onSeeReviews: () -> Unit,
+    onRetryReviews: () -> Unit,
     onMessage: () -> Unit,
-    onShare: () -> Unit,
-    onScoreClick: () -> Unit,
+    onBook: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    val heroHeight = LocalConfiguration.current.screenHeightDp.dp * dimens.fraction.artistHero
-    // Save and the score chip are the hero's two haptic taps, as on iOS. Message,
-    // Back and Share are plain navigation and stay silent.
-    val haptics = rememberHaptics()
 
-    Box(
+    RevealOnAppear {
+        Column(Modifier.fillMaxSize().background(colors.surface)) {
+            ProfileHeader(
+                isSelf = state.isSelf,
+                onBack = onBack,
+                onOverflow = onOverflow,
+            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = dimens.component.gutter),
+                verticalArrangement = Arrangement.spacedBy(space.xl),
+            ) {
+                if (state.isSelf) {
+                    // Screen 103. Stated at the top rather than implied by the
+                    // missing Book button, because "why can't I book" is the
+                    // question a missing control raises and never answers.
+                    AccentNote(
+                        lead = "This is how clients see your profile.",
+                        text = "Booking controls are off while you're looking at " +
+                            "your own act.",
+                        modifier = Modifier.padding(top = space.md),
+                    )
+                }
+                // A profile can be drawn from the Discover/Search TILE when
+                // hydration failed, and the tile carries no packages, bio,
+                // samples or reviews — so every block below would state an
+                // absence it cannot vouch for. The failure has to be visible and
+                // retryable here.
+                state.loadError?.let { message ->
+                    Banner(
+                        title = message,
+                        detail = "Pricing and packages may be missing.",
+                        tone = BannerTone.Failure,
+                        actionLabel = "Retry",
+                        onAction = onRetryReviews,
+                        modifier = Modifier.padding(top = space.md),
+                    )
+                }
+
+                IdentityBlock(
+                    artist = artist,
+                    ratingLabel = ArtistProfileFacts.ratingLabel(state.reviews),
+                    modifier = Modifier.padding(top = space.lg),
+                )
+                StatStrip(artist = artist, onScore = onScore)
+
+                if (artist.bio.isNotBlank()) {
+                    AboutBlock(bio = artist.bio)
+                }
+                PackagesBlock(
+                    packages = artist.packages,
+                    packagesLoaded = state.packagesLoaded,
+                    selectedIndex = state.selectedPackageIndex,
+                    onSelect = onSelectPackage,
+                    weekendPremiumPct = artist.weekendPremiumPct,
+                    newArtistDiscountPct = artist.newArtistDiscountPct,
+                    onRequestQuote = onRequestQuote.takeUnless { state.isSelf },
+                )
+                if (artist.gallery.isNotEmpty()) {
+                    GalleryBlock(photos = artist.gallery)
+                }
+                ListenBlock(
+                    samples = artist.samples,
+                    spotifyEmbed = spotifyEmbedUrl(artist.spotifyArtistUrl),
+                )
+                if (artist.prompts.isNotEmpty()) {
+                    PromptsBlock(prompts = artist.prompts)
+                }
+                if (artist.serviceTags.isNotEmpty()) {
+                    ServicesBlock(tags = artist.serviceTags)
+                }
+                ReviewsBlock(
+                    reviews = state.reviews,
+                    failed = state.reviewsFailed,
+                    artist = artist,
+                    onRetry = onRetryReviews,
+                    onSeeAll = onSeeReviews,
+                )
+                Spacer(Modifier.height(space.md))
+            }
+            ActionDock(
+                isSelf = state.isSelf,
+                price = PackagePricing.dockPrice(
+                    artist.packages,
+                    fallback = artist.price,
+                    packagesLoaded = state.packagesLoaded,
+                ),
+                onMessage = onMessage,
+                onBook = onBook,
+            )
+        }
+    }
+}
+
+/**
+ * The pushed-screen bar: a back circle, a centred title, and the "···".
+ *
+ * The overflow is a sheet rather than a dropdown — the design has no dropdown in
+ * it, and the three things behind this control (save, share, report) are the
+ * same three a sheet already carries elsewhere in the app.
+ */
+@Composable
+private fun ProfileHeader(isSelf: Boolean, onBack: () -> Unit, onOverflow: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
         Modifier
             .fillMaxWidth()
-            .height(heroHeight),
+            .statusBarsPadding()
+            .padding(horizontal = dimens.component.gutter)
+            .padding(top = dimens.space.sm, bottom = dimens.space.sm),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Gradient floor first so a slow/failed cover load never shows a hole.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(artist.gradient)),
+        IconCircle(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Back",
+            onClick = onBack,
         )
-        if (!artist.coverUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = artist.coverUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        1f - dimens.fraction.heroFade to Color.Transparent,
-                        1f to colors.bg,
-                    ),
-                ),
-        )
-
-        Row(
-            Modifier
-                .align(Alignment.TopStart)
-                .fillMaxWidth()
-                // The cover bleeds under the status bar, so the controls that
-                // float on it — and only they — carry the inset. Same shape as
-                // the reference build, which pads its control row by the top
-                // safe area plus one small step.
-                .statusBarsPadding()
-                .padding(horizontal = space.lg, vertical = space.xs),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircleIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                onClick = onBack,
-                tint = Color.White,
-            )
-            // Message + Save + Share share the hero's trailing cluster. Message
-            // lives here (not in the dock) so the bottom bar stays one row and
-            // the primary CTA never competes for width with a secondary.
-            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                CircleIconButton(
-                    icon = Icons.Filled.Chat,
-                    contentDescription = "Message ${artist.name}",
-                    onClick = onMessage,
-                    tint = Color.White,
-                )
-                CircleIconButton(
-                    icon = if (isSaved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = if (isSaved) "Unsave" else "Save",
-                    onClick = {
-                        haptics.tap()
-                        onToggleSaved()
-                    },
-                    tint = if (isSaved) colors.brand else Color.White,
-                )
-                CircleIconButton(
-                    // The tray-and-arrow glyph rather than Material's share
-                    // node: this cluster is a port of the reference build's,
-                    // and the node icon reads as a different affordance beside
-                    // the same two neighbours.
-                    icon = Icons.Filled.IosShare,
-                    contentDescription = "Share artist",
-                    onClick = onShare,
-                    tint = Color.White,
-                )
-            }
-        }
-
         Column(
-            Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .padding(bottom = space.xl),
-            // 12, not 8: the reference stacks a 4-unit list spacing under an
-            // 8-unit bottom pad on the chip row, which lands on 12 between the
-            // chips and the name. At 8 the chips crowded the display serif.
-            verticalArrangement = Arrangement.spacedBy(space.md),
+            Modifier.weight(1f).padding(horizontal = dimens.space.sm),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                MediaChip(artist.category)
-                MediaChip(artist.city, icon = Icons.Filled.LocationOn)
-            }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(space.md),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(space.xs)) {
-                    // NOT on media, despite sitting inside the hero: this block
-                    // is in the bottom band where the cover has faded to `bg`.
-                    // That fade terminates on a token, so it followed the
-                    // palette into daylight and took white text with it.
-                    Text(
-                        artist.name,
-                        style = AppTheme.type.profileHeroName,
-                        color = colors.ink,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(artist.genre, style = AppTheme.type.callout, color = colors.ink2)
-                }
-                // The score trails the name so it reads as PART of the identity
-                // ("Test Artist — 82 Trusted") rather than a stat exiled to a
-                // strip below. It is the only number on the first screen.
-                ScoreChip(
-                    score = artist.score,
-                    gigs = artist.gigs,
-                    tier = tier,
-                    onClick = {
-                        haptics.tap()
-                        onScoreClick()
-                    },
+            Text(
+                text = if (isSelf) "Your profile" else "Artist profile",
+                style = AppTheme.type.sectionTitle,
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (isSelf) {
+                Text(
+                    "How clients see you",
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                    maxLines = 1,
                 )
+            }
+        }
+        IconCircle(
+            icon = Icons.Filled.MoreHoriz,
+            contentDescription = "More actions",
+            onClick = onOverflow,
+        )
+    }
+}
+
+/**
+ * Portrait, name, one line of who-and-where, and the rating pill.
+ *
+ * The portrait falls back to the artist's own cover gradient rather than to a
+ * grey disc: every artist row carries a `cover_gradient_index`, so there is
+ * always something of theirs to draw and never a hole in the identity.
+ */
+@Composable
+private fun IdentityBlock(
+    artist: Artist,
+    ratingLabel: String?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(dimens.size.avatarXl)
+                .clip(CircleShape)
+                .background(Brush.verticalGradient(artist.gradient)),
+        ) {
+            if (!artist.coverUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = artist.coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(dimens.space.xs),
+        ) {
+            Text(
+                artist.name,
+                style = AppTheme.type.displaySub,
+                color = colors.ink,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val subtitle = ArtistProfileFacts.subtitle(artist)
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    subtitle,
+                    style = AppTheme.type.subtitle,
+                    color = colors.ink4,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (ratingLabel != null) {
+                RatingPill(ratingLabel, Modifier.padding(top = dimens.space.xs))
             }
         }
     }
 }
 
 /**
- * A quiet chip resting on the cover. Translucent white rather than a surface
- * token: an opaque fill would punch a hole in the photo, and these are captions
- * on the image, not controls over it.
+ * "★ 4.92 (128)" on a wash of the accent.
+ *
+ * Rendered only when reviews were loaded and there is at least one — a failed
+ * read arrives as the same empty list, and a pill reading "0.00 (0)" beside an
+ * artist's name is a claim the marketplace has not earned.
  */
 @Composable
-private fun MediaChip(text: String, icon: ImageVector? = null) {
+private fun RatingPill(label: String, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Row(
-        Modifier
+        modifier
             .clip(CircleShape)
-            .background(colors.surface2)
-            .border(dimens.size.hairline, colors.hairline, CircleShape)
-            .padding(horizontal = dimens.space.md, vertical = dimens.space.xs),
+            .background(colors.accent.copy(alpha = RATING_PILL_ALPHA))
+            .padding(horizontal = dimens.space.md, vertical = dimens.space.xs)
+            .semantics(mergeDescendants = true) { contentDescription = "Rated $label" },
         horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) {
-            Icon(
-                icon,
-                // The chip's own text names the place; the pin is decoration.
-                contentDescription = null,
-                tint = colors.ink2,
-                modifier = Modifier.size(dimens.size.iconSm),
-            )
-        }
-        Text(text, style = AppTheme.type.caption, color = colors.ink2)
-    }
-}
-
-/**
- * The Bookability Score, as a tappable capsule on the hero: the ring, the tier
- * word, and a disclosure into the breakdown.
- *
- * It renders straight off the artist row's cached score, so the hero never
- * paints without it — the breakdown fetch only feeds the sheet. A New-tier
- * artist gets the ring's "NEW" state (an honest "no data yet"), and the label
- * names the metric instead of echoing "NEW" twice.
- *
- * **Contrast is the constraint here, not decoration.** This capsule is the only
- * place small text sits directly on an artist-supplied photo, and it has to hold
- * for every tier over every cover. Two things make that true: a darkening
- * backdrop (a lightening wash leaves the result at the mercy of the image — over
- * this hero's mid-tone gradient it landed on the *same luminance* as the muted
- * New-tier ink, rendering the label at 1.2:1 against its own fill), and, for the
- * New state, an on-media ink instead of the tier map's `ink4`. That grey is
- * correct on the `bg` ladder and invisible on a photo. Nothing here overrides a
- * SCORED tier's colour: those are the signal, and they are bright enough to
- * carry themselves against the dark backdrop.
- */
-@Composable
-private fun ScoreChip(score: Int, gigs: Int, tier: ScoreTier, onClick: () -> Unit) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    val isNew = tier == ScoreTier.New
-    Row(
-        Modifier
-            .clip(CircleShape)
-            .background(colors.glassDark)
-            .border(dimens.size.hairline, colors.glassLine, CircleShape)
-            .clickable(onClick = onClick)
-            .padding(start = dimens.space.sm, end = dimens.space.md, top = dimens.space.xs, bottom = dimens.space.xs)
-            .semantics(mergeDescendants = true) {
-                contentDescription = if (isNew) {
-                    "Bookability score: New, score not established yet. Tap for details."
-                } else {
-                    "Bookability score: $score out of 100, ${tier.label} tier. Tap for details."
-                }
-            },
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ScoreRing(
-            value = if (isNew) null else score,
-            size = dimens.size.ringXs,
-            stroke = dimens.size.ringXsStroke,
-            showLabel = false,
-            totalGigs = gigs,
-            mutedTint = colors.inkOnMedia,
+        Icon(
+            Icons.Filled.Star,
+            contentDescription = null,
+            tint = colors.accentDeep,
+            modifier = Modifier.size(dimens.size.iconSm),
         )
-        Column {
-            Text(
-                if (isNew) "BOOKABILITY" else tier.label.uppercase(Locale.US),
-                style = AppTheme.type.monoMicro,
-                // For a scored tier this word IS the tier, so it carries the tier
-                // colour. For New it reads "BOOKABILITY" — the name of the
-                // metric, not a tier — so tinting it with the tier map's grey was
-                // a category error on top of a contrast failure.
-                color = if (isNew) colors.inkOnMedia else tierColor(tier, colors),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Details", style = AppTheme.type.monoMicroSoft, color = colors.inkOnMediaSoft)
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = colors.inkOnMediaSoft,
-                    modifier = Modifier.size(dimens.size.iconSm),
-                )
-            }
-        }
+        Text(
+            label,
+            style = AppTheme.type.badge,
+            color = colors.accentDeep,
+            maxLines = 1,
+        )
     }
 }
 
+private const val RATING_PILL_ALPHA = 0.3f
+
 /**
- * Rating · tier · review count, ruled above and below.
+ * Shows · Bookability · Replies in, ruled above and below.
  *
- * Rendered ONLY when the artist has reviews: with none, the sole cell backed by
- * data is the tier — which the hero chip already states — and a lone redundant
- * cell is worse than no strip. Rating and count are computed from the same list
- * the Reviews block renders, so the two surfaces cannot disagree.
+ * Always three cells, always rendered: this is the strip a host scans before
+ * anything else, and dropping it for an artist with no gigs would hide the one
+ * fact that most wants stating — that they are new. Each cell knows how to say
+ * "we don't know" ([ArtistProfileFacts]); none of them invents a figure.
  *
- * That includes a FAILED read, which arrives as the same empty list: there is no
- * average to print, so the strip stays away and the Reviews block below carries
- * the "couldn't load" line and the retry.
+ * The middle cell is the only tappable one. It opens the breakdown, because the
+ * number it shows is the one the reader is most likely to want an account of.
  */
 @Composable
-private fun StatStrip(reviews: List<Review>, tier: ScoreTier) {
-    if (reviews.isEmpty()) return
+private fun StatStrip(artist: Artist, onScore: () -> Unit) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val average = reviews.map { it.rating }.average()
-
-    Column(
-        // Top padding only. The block column underneath already opens with its
-        // own 24 of air, so a matching bottom pad here stacked into a 40-unit
-        // trench between the strip and About — measurably wider than the same
-        // seam on the reference build.
-        Modifier.padding(horizontal = space.lg).padding(top = space.lg),
-    ) {
+    Column {
         HRule()
         // IntrinsicSize.Min so the hairline dividers can measure themselves
         // against the tallest cell instead of collapsing to zero height.
         Row(Modifier.height(IntrinsicSize.Min)) {
             StatCell(
                 modifier = Modifier.weight(1f),
-                value = "%.1f".format(Locale.US, average),
-                label = "Rating",
-                valueColor = colors.ink,
-                star = true,
-            )
-            StatDivider()
-            // The tier is a WORD, so it opts out of the mono-numerals rule; its
-            // colour is the signal (elite / trusted / rising / new).
-            StatCell(
-                modifier = Modifier.weight(1f),
-                value = tier.label,
-                label = "Tier",
-                valueColor = tierColor(tier, colors),
-                mono = false,
+                value = ArtistProfileFacts.showsCell(artist),
+                label = "Shows",
             )
             StatDivider()
             StatCell(
                 modifier = Modifier.weight(1f),
-                value = "${reviews.size}",
-                label = if (reviews.size == 1) "Review" else "Reviews",
-                valueColor = colors.ink,
+                value = ArtistProfileFacts.scoreCell(artist),
+                label = "Bookability",
+                onClick = onScore,
+            )
+            StatDivider()
+            StatCell(
+                modifier = Modifier.weight(1f),
+                value = ArtistProfileFacts.replyCell(artist),
+                label = "Replies in",
             )
         }
         HRule()
+        Spacer(Modifier.height(space.xs))
     }
 }
 
@@ -626,7 +672,7 @@ private fun StatDivider() {
             .fillMaxHeight()
             .padding(vertical = dimens.space.md)
             .width(dimens.size.hairline)
-            .background(AppTheme.colors.lineSoft),
+            .background(AppTheme.colors.hairline),
     )
 }
 
@@ -634,127 +680,317 @@ private fun StatDivider() {
 private fun StatCell(
     value: String,
     label: String,
-    valueColor: Color,
     modifier: Modifier = Modifier,
-    mono: Boolean = true,
-    star: Boolean = false,
+    onClick: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Column(
         modifier
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = dimens.space.lg)
-            .semantics(mergeDescendants = true) { contentDescription = "$label: $value" },
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (onClick != null) {
+                    "$label: $value. Tap for the breakdown."
+                } else {
+                    "$label: $value"
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(dimens.space.xs),
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (star) {
-                Icon(
-                    Icons.Filled.Star,
-                    contentDescription = null,
-                    tint = colors.accentInk,
-                    modifier = Modifier.size(dimens.size.iconSm),
-                )
-            }
-            Text(
-                value,
-                style = if (mono) AppTheme.type.monoStat else AppTheme.type.headline,
-                color = valueColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(label.uppercase(Locale.US), style = AppTheme.type.caption, color = colors.ink3)
+        Text(
+            value,
+            style = AppTheme.type.displaySmall,
+            color = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(label, style = AppTheme.type.caption, color = colors.ink4, maxLines = 1)
     }
 }
 
+/**
+ * The bio, clamped to four lines with a "More" that expands it.
+ *
+ * The affordance appears only when the text actually overflows — measured, not
+ * guessed from a character count, because the same bio wraps differently at
+ * every font scale and a "More" that expands nothing is worse than no control.
+ */
 @Composable
-private fun AboutBlock(bio: String, gallery: List<GalleryPhoto>) {
+private fun AboutBlock(bio: String) {
     val colors = AppTheme.colors
-    Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.lg)) {
-        Text("About", style = AppTheme.type.displaySmall, color = colors.ink)
-        if (bio.isNotBlank()) {
-            Text(bio, style = AppTheme.type.body, color = colors.ink2)
+    val space = AppTheme.dimens.space
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var overflows by rememberSaveable { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
+        SectionHeader("About")
+        Text(
+            bio,
+            style = AppTheme.type.body,
+            color = colors.ink2,
+            maxLines = if (expanded) Int.MAX_VALUE else ABOUT_COLLAPSED_LINES,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { result -> if (result.hasVisualOverflow) overflows = true },
+        )
+        if (overflows) {
+            Text(
+                if (expanded) "Less" else "More",
+                style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.accentInk,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = space.xs),
+            )
         }
-        // Under the bio, inside the page's own gutter — the strip scrolls within
-        // the text column rather than bleeding to the screen edge, which is
-        // where iOS puts it too.
-        if (gallery.isNotEmpty()) {
-            GalleryStrip(gallery)
+    }
+}
+
+private const val ABOUT_COLLAPSED_LINES = 4
+
+/**
+ * The tiers, and under them the way out of the tiers.
+ *
+ * The heading and rows are conditional; **the quote row is not**. Every artist
+ * has no packages until they finish the wizard, and guarding the whole block on
+ * a non-empty list took the negotiation entry down with it — leaving the client
+ * with the least to go on the fewest ways to start a conversation.
+ *
+ * The two pricing modifiers render identically because a client is owed the same
+ * clarity about the one that raises the price as about the one that lowers it.
+ */
+@Composable
+private fun PackagesBlock(
+    packages: List<ArtistPackage>,
+    packagesLoaded: Boolean,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    weekendPremiumPct: Int,
+    newArtistDiscountPct: Int,
+    onRequestQuote: (() -> Unit)?,
+) {
+    val colors = AppTheme.colors
+    val space = AppTheme.dimens.space
+    // Picking a tier here is browsing, not committing — iOS buzzes on the
+    // profile and stays silent in the booking screen's own package list.
+    val haptics = rememberHaptics()
+    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+        SectionHeader("Packages")
+        if (packages.isEmpty()) {
+            Text(
+                // Only once the stitch has landed is an empty set a FACT about
+                // the artist. Before then it is "we don't know yet", and the
+                // page says nothing rather than announcing an artist with three
+                // tiers has no prices.
+                if (packagesLoaded) {
+                    "This artist quotes on request rather than publishing tiers."
+                } else {
+                    "Loading packages…"
+                },
+                style = AppTheme.type.body,
+                color = colors.ink3,
+            )
+        } else {
+            // Asked once per set, not per row: existing server rows carry
+            // `popular = true` on every package, and a badge every row shares
+            // distinguishes nothing.
+            val badgesMeanSomething = PackagePricing.popularBadgeIsMeaningful(packages)
+            packages.forEachIndexed { index, pkg ->
+                PackageRow(
+                    pkg = pkg,
+                    selected = index == selectedIndex,
+                    showPopular = badgesMeanSomething && pkg.popular,
+                    onClick = {
+                        haptics.tap()
+                        onSelect(index)
+                    },
+                )
+            }
+        }
+        if (newArtistDiscountPct > 0) {
+            Text(
+                "New-artist offer: $newArtistDiscountPct% off your booking",
+                style = AppTheme.type.caption,
+                color = colors.ink3,
+            )
+        }
+        if (weekendPremiumPct > 0) {
+            Text(
+                "Fri–Sun: +$weekendPremiumPct% on the quoted price",
+                style = AppTheme.type.caption,
+                color = colors.ink3,
+            )
+        }
+        if (onRequestQuote != null) {
+            ListRow(
+                title = "Custom date or budget?",
+                subtitle = "Ask for a quote instead",
+                onClick = onRequestQuote,
+                showHairline = false,
+            )
         }
     }
 }
 
 /**
- * What this artist plays, as the client's own filter vocabulary.
+ * One tier: name and what is in it on the left, the price on the right.
  *
- * The labels here are the same nine the search sheet offers, which is the point:
- * a client who filtered for "Full band" should see the words they ticked on the
- * profile they landed on, rather than having to infer the match from a bio.
- *
- * Hairline outline chips, never filled — a filled chip is the *selected* state in
- * this app's chip language, and nothing on a read-only profile is selected. An
- * unrecognised slug renders verbatim via [ServiceTags.label] rather than being
- * dropped, so a tag written by another client still describes the artist.
+ * Selection is a real state — the tap seeds the booking draft — so it is drawn,
+ * quietly: an accent hairline and a wash, rather than a filled card. A filled
+ * row would out-shout the CTA, which is the screen's one accent.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ServicesBlock(tags: List<String>) {
+private fun PackageRow(
+    pkg: ArtistPackage,
+    selected: Boolean,
+    showPopular: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.buttonLg)
+    val detail = (listOf(pkg.duration) + pkg.includes)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString(" · ")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (selected) colors.accent.copy(alpha = SELECTED_ROW_ALPHA) else colors.surface3)
+            .border(
+                dimens.size.hairline,
+                if (selected) colors.accent else colors.hairline,
+                shape,
+            )
+            .clickable(onClick = onClick)
+            .padding(dimens.space.md)
+            .semantics(mergeDescendants = true) {
+                contentDescription = buildString {
+                    append(pkg.name)
+                    if (detail.isNotEmpty()) append(". $detail")
+                    append(". ${formatInr(pkg.price)}")
+                    if (selected) append(". Selected")
+                }
+            },
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    pkg.name,
+                    style = AppTheme.type.rowTitle,
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (showPopular) {
+                    Text(
+                        "POPULAR",
+                        style = AppTheme.type.monoLabel,
+                        color = colors.accentInk,
+                    )
+                }
+            }
+            if (detail.isNotEmpty()) {
+                Text(
+                    detail,
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            formatInr(pkg.price),
+            style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+            maxLines = 1,
+        )
+    }
+}
+
+private const val SELECTED_ROW_ALPHA = 0.22f
+
+/**
+ * The artist's other photos, as a strip under the packages.
+ *
+ * No "View all": the full-screen pager is iOS PROF-10 and is not built, and a
+ * disclosure that dead-ends is worse than none.
+ */
+@Composable
+private fun GalleryBlock(photos: List<GalleryPhoto>) {
+    val space = AppTheme.dimens.space
+    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+        SectionHeader("Gallery")
+        GalleryStrip(photos)
+    }
+}
+
+/**
+ * What the artist sounds like — or, on screen 101, what to listen to instead.
+ *
+ * The empty state is the point of that screen: an act with no audio is not an
+ * apology, it is a redirect to the signal a host should use (the clips and the
+ * reviews, both of which are on this page). One player for the whole block, so
+ * starting a second clip replaces the first rather than layering two.
+ */
+@Composable
+private fun ListenBlock(samples: List<Sample>, spotifyEmbed: String?) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("What they play", style = AppTheme.type.displaySmall, color = colors.ink)
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(space.sm),
-            verticalArrangement = Arrangement.spacedBy(space.sm),
-        ) {
-            ServiceTags.labels(tags).forEach { label ->
-                Text(
-                    label,
-                    style = AppTheme.type.footnote,
-                    color = colors.ink2,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .border(dimens.size.hairline, colors.line, CircleShape)
-                        .padding(horizontal = space.md, vertical = space.sm),
-                )
-            }
-        }
-    }
-}
-
-/**
- * What the artist sounds like.
- *
- * The samples were already being fetched into `Artist.samples` and then never
- * rendered, so a client could read every word about an act and not hear a second
- * of it — on a page whose entire job is deciding whether to book them.
- *
- * One player for the block, not one per row: the handle holds a single ExoPlayer,
- * so starting a second clip replaces the first rather than layering two. Leaving
- * the screen disposes it and the audio stops with the page.
- *
- * Samples and Spotify BOTH render when the artist has both, where iOS shows the
- * embed *instead of* the sample rows. That `else if` is a fact about iOS, not
- * about the product: its rows are read-only placeholders (PR #60 pulled their
- * playback), so falling back to them behind a working player costs nothing
- * there. Here the rows play, and hiding an artist's own uploaded clips because
- * they also pasted a Spotify link would be dropping the better recording of the
- * two — theirs, of the act being booked, rather than a studio cut.
- */
-@Composable
-private fun SoundBlock(samples: List<Sample>, spotifyEmbed: String?) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
     var spotifyExpanded by rememberSaveable { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("Listen", style = AppTheme.type.displaySmall, color = colors.ink)
+        SectionHeader("Listen")
+        if (samples.isEmpty() && spotifyEmbed == null) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(dimens.radii.xl))
+                    .background(colors.surface3)
+                    .padding(horizontal = dimens.space.lg, vertical = dimens.space.xl),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(space.sm),
+            ) {
+                Box(
+                    Modifier
+                        .size(dimens.component.emptyGlyphCircle)
+                        .clip(CircleShape)
+                        .background(colors.hairline),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.LibraryMusic,
+                        contentDescription = null,
+                        tint = colors.ink3,
+                        modifier = Modifier.size(dimens.component.emptyGlyph),
+                    )
+                }
+                Text(
+                    "No tracks listed yet",
+                    style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                    color = colors.ink,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    "This act hasn't linked audio. Their gallery and reviews are the " +
+                        "best signal here.",
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            return@Column
+        }
         Column {
             HRule()
             // Behind an `if`, so a Spotify-only artist does not cost an
@@ -794,335 +1030,310 @@ private fun SampleRows(samples: List<Sample>) {
 }
 
 /**
- * The artist in their own words.
+ * The artist in their own words — screen 101's "Most clients ask about".
  *
- * Question above, answer below, hairline between — no card, no quote marks. The
- * question is the quiet half (caption weight, dimmed) because the answer is what
- * the client came to read; a bolded question would make the page look like an
- * FAQ about the artist rather than the artist talking.
- *
- * Only answered prompts reach here — the decode drops blank answers — so there is
- * no empty state to design and no risk of rendering a question with nothing
- * under it.
+ * Question above, answer below, on a quiet fill. The question is the smaller
+ * half because the answer is what the client came to read.
  */
 @Composable
 private fun PromptsBlock(prompts: List<ArtistPrompt>) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("In their words", style = AppTheme.type.displaySmall, color = colors.ink)
-        Column {
-            HRule()
-            prompts.forEach { prompt ->
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = space.md),
-                    verticalArrangement = Arrangement.spacedBy(space.xs),
-                ) {
-                    Text(prompt.question, style = AppTheme.type.caption, color = colors.ink3)
-                    Text(prompt.answer, style = AppTheme.type.body, color = colors.ink2)
-                }
-                HRule()
-            }
-        }
-    }
-}
-
-/**
- * The "from" figure as an editorial line: a big mono number with the tier it
- * belongs to trailing it on the same baseline. It restates the dock's price
- * deliberately — the dock is a control the eye skips, this is the page saying
- * what booking this artist costs.
- *
- * With no published packages there is no minimum, so the figure is omitted
- * rather than back-filled from the artist row's own price. That value is the
- * server's denormalized `min_price`, which is confirmed stale on dev — the dock
- * keeps it as a last-resort fallback because a control with no number at all is
- * worse, but this line is the page *stating* a price, and stating a known-stale
- * one as a headline is the exact bug the "from means minimum" fix was about.
- * "Pricing on request" is true, and the quote row below acts on it.
- *
- * That claim is gated on [packagesLoaded] for the same reason the dock's is: an
- * empty package set only means "takes custom requests" once a full stitch has
- * landed. Before then it means "we don't know yet", and this block says nothing
- * rather than announcing an artist with three tiers has no prices.
- */
-@Composable
-private fun BookingBlock(artist: Artist, packagesLoaded: Boolean) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val cheapest = artist.packages.minByOrNull { it.price }
-    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("Booking", style = AppTheme.type.displaySmall, color = colors.ink)
-        if (cheapest != null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+        SectionHeader("Most clients ask about")
+        prompts.forEach { prompt ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(dimens.radii.buttonLg))
+                    .background(colors.surface3)
+                    .padding(dimens.space.md),
+                verticalArrangement = Arrangement.spacedBy(space.xs),
+            ) {
                 Text(
-                    formatInr(cheapest.price),
-                    style = AppTheme.type.monoHero,
+                    prompt.question,
+                    style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
                     color = colors.ink,
-                    modifier = Modifier.alignByBaseline(),
                 )
-                Text(
-                    "from · ${cheapest.name}",
-                    style = AppTheme.type.footnote,
-                    color = colors.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.alignByBaseline(),
-                )
+                Text(prompt.answer, style = AppTheme.type.caption, color = colors.ink2)
             }
-        } else if (packagesLoaded) {
-            Text(
-                "Pricing on request",
-                style = AppTheme.type.body,
-                color = colors.ink2,
-            )
-        }
-        // Quiet, deliberately NOT lime: they are notes, and the neighbouring
-        // "from · package" caption sets the register. Absent/0 hides the line.
-        //
-        // Both modifiers render the same way because a client is owed the same
-        // clarity about the one that raises the price as about the one that
-        // lowers it — showing only the discount would be the marketplace choosing
-        // which half of the pricing to make prominent.
-        if (artist.newArtistDiscountPct > 0) {
-            Text(
-                "New-artist offer: ${artist.newArtistDiscountPct}% off your booking",
-                style = AppTheme.type.footnote,
-                color = colors.ink2,
-            )
-        }
-        if (artist.weekendPremiumPct > 0) {
-            Text(
-                "Fri–Sun: +${artist.weekendPremiumPct}% on the quoted price",
-                style = AppTheme.type.footnote,
-                color = colors.ink2,
-            )
         }
     }
 }
 
 /**
- * The tiers, and under them the way out of the tiers.
+ * What this artist plays, in the client's own filter vocabulary — the same nine
+ * labels the search sheet offers, so a client who filtered for "Full band" sees
+ * the words they ticked on the profile they landed on.
  *
- * The heading and rows are conditional; **the quote row is not**. An artist with
- * no published packages is an ordinary state — the wizard publishes one, but an
- * artist can have none, and every artist has none until they finish the wizard.
- * Guarding the whole block on a non-empty list took the negotiation entry down
- * with it, so the client left with the least to go on got the fewest ways to
- * start a conversation. The quote row is what that client needs MOST.
+ * Hairline outline, never filled: a filled chip is the *selected* state in this
+ * app's chip language, and nothing on a read-only profile is selected.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PackagesBlock(
-    artist: Artist,
-    selectedIndex: Int,
-    onSelect: (Int) -> Unit,
-    onRequestQuote: () -> Unit,
-) {
+private fun ServicesBlock(tags: List<String>) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    // Picking a tier here is a tap, matching the reference build's ticket cards.
-    // The booking screen's own package list stays silent — iOS buzzes only on
-    // the profile, where the pick is browsing rather than committing.
-    val haptics = rememberHaptics()
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        if (artist.packages.isNotEmpty()) {
-            Text("Packages", style = AppTheme.type.displaySmall, color = colors.ink)
-            // Asked once per set, not per row: existing server rows carry
-            // `popular = true` on every package, and a badge every row shares
-            // distinguishes nothing.
-            val badgesMeanSomething = PackagePricing.popularBadgeIsMeaningful(artist.packages)
-            artist.packages.forEachIndexed { index, pkg ->
-                PackageOptionRow(
-                    pkg = pkg,
-                    selected = index == selectedIndex,
-                    showPopularBadge = badgesMeanSomething && pkg.popular,
-                    onClick = {
-                        haptics.tap()
-                        onSelect(index)
-                    },
+        SectionHeader("What they play")
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(space.sm),
+            verticalArrangement = Arrangement.spacedBy(space.sm),
+        ) {
+            ServiceTags.labels(tags).forEach { label ->
+                Text(
+                    label,
+                    style = AppTheme.type.chip,
+                    color = colors.ink2,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .border(dimens.size.hairline, colors.hairline, CircleShape)
+                        .padding(
+                            horizontal = dimens.component.chipPadH,
+                            vertical = dimens.component.chipPadV,
+                        ),
                 )
             }
         }
-        // The negotiation entry sits HERE, with the pricing context, rather than
-        // in the dock — collapsing the bar to one row is the point of the layout.
-        RequestQuoteRow(onClick = onRequestQuote)
     }
 }
 
 /**
- * The negotiation entry. Muted question + lime answer: lime is the signal (this
- * is the actionable half), the grey lead-in is the framing.
- */
-@Composable
-private fun RequestQuoteRow(onClick: () -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = space.sm),
-        horizontalArrangement = Arrangement.spacedBy(space.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Custom date or budget?", style = AppTheme.type.footnote, color = colors.ink3)
-        Text("Request a quote", style = AppTheme.type.footnote, color = colors.accentInk)
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = colors.accentInk,
-            modifier = Modifier.size(AppTheme.dimens.size.iconMd),
-        )
-    }
-}
-
-/**
- * The artist's track record, or an honest account of why it isn't here.
+ * The artist's track record — or, on screen 100, an honest account of why it is
+ * not here and a reminder that the rest of the page still is.
  *
  * A failed read and a genuinely unreviewed artist arrive as the same empty list
  * and say opposite things, so [failed] is threaded in rather than inferred: "No
  * reviews yet." for a dropped request is a false claim about the artist, made by
- * the marketplace, on the page a client decides from. The score sheet on this
- * same screen already draws the distinction (`ReviewRow`), and so does iOS
- * (`reviewsError`, an explicit retryable surface).
+ * the marketplace, on the page a client decides from.
  *
- * Retry is [ArtistProfileViewModel.refresh] — the reviews read has no narrower
- * entry point, and the page's other Retry only exists in the nothing-loaded
- * branch.
+ * The failure is SCOPED. Screen 100's whole argument is that the artist stays
+ * bookable while reviews are unreachable, so the block states what else is on
+ * the page rather than letting the reader assume the profile is broken.
  */
 @Composable
-private fun ReviewsBlock(reviews: List<Review>, failed: Boolean, onRetry: () -> Unit) {
+private fun ReviewsBlock(
+    reviews: List<Review>,
+    failed: Boolean,
+    artist: Artist,
+    onRetry: () -> Unit,
+    onSeeAll: () -> Unit,
+) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        Text("Reviews", style = AppTheme.type.displaySmall, color = colors.ink)
-        if (failed) {
-            InlineBanner(
-                title = "Couldn't load reviews",
-                detail = "This artist may have reviews — we just couldn't load them.",
-                tone = BannerTone.Failure,
-                actionLabel = "Retry",
-                onAction = onRetry,
-            )
-            return@Column
-        }
-        if (reviews.isEmpty()) {
-            Text("No reviews yet.", style = AppTheme.type.body, color = colors.ink3)
-            return@Column
-        }
-        reviews.take(5).forEach { review ->
-            Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                    Text(review.name, style = AppTheme.type.callout, color = colors.ink)
-                    Text(
-                        "★".repeat(review.rating.coerceIn(0, 5)),
-                        style = AppTheme.type.caption,
-                        color = colors.accentInk,
+        SectionHeader(
+            title = "Reviews",
+            actionLabel = if (reviews.size > REVIEW_PREVIEW) "See all" else null,
+            onAction = onSeeAll.takeIf { reviews.size > REVIEW_PREVIEW },
+        )
+        when {
+            failed -> {
+                Banner(
+                    title = "Couldn't load reviews",
+                    detail = "This artist may have reviews — we just couldn't load " +
+                        "them. Don't read this as \"no reviews\".",
+                    tone = BannerTone.Failure,
+                    actionLabel = "Retry",
+                    onAction = onRetry,
+                )
+                Spacer(Modifier.height(space.xs))
+                EyebrowLabel("The rest of the profile is fine")
+                Column {
+                    ListRow(
+                        title = "Packages",
+                        value = packagesSummary(artist),
+                        showHairline = true,
+                    )
+                    ListRow(
+                        title = "Listen",
+                        value = listenSummary(artist),
+                        showHairline = true,
+                    )
+                    ListRow(
+                        title = "Gallery",
+                        value = if (artist.gallery.isEmpty()) {
+                            "No photos"
+                        } else {
+                            "${artist.gallery.size} photos"
+                        },
+                        showHairline = false,
                     )
                 }
-                if (review.org.isNotBlank()) {
-                    Text(review.org, style = AppTheme.type.caption, color = colors.ink3)
-                }
-                Text(
-                    review.body,
-                    style = AppTheme.type.body,
-                    color = colors.ink2,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            }
+
+            reviews.isEmpty() -> Text(
+                "No reviews yet. This artist hasn't been reviewed on Artistant.",
+                style = AppTheme.type.body,
+                color = colors.ink3,
+            )
+
+            else -> reviews.take(REVIEW_PREVIEW).forEach { review ->
+                ReviewCard(review)
             }
         }
     }
 }
 
-/**
- * Compact bottom action bar.
- *
- * One row: the "from" figure hard-left (informational, deliberately outside the
- * tap target), the filled primary CTA hard-right at its intrinsic width, and the
- * gap between them left as air. It replaces a ~4x taller slab that stacked the
- * price over three full-width buttons and ate roughly a fifth of the screen; the
- * two secondaries moved to where their context is (Request a quote sits with the
- * packages, Message sits in the hero cluster).
- *
- * Nothing is hidden behind it: the dock is a sibling of the scrolling column in
- * the parent `Column`, and that column takes `weight(1f)`, so the scroll viewport
- * is measured as (screen − dock) and the content is inset rather than occluded.
- * The page also carries trailing air so the last row never sits flush against
- * the lid.
- *
- * `FlowRow`, not `Row`, because the bar has to survive accessibility text scales.
- * A `Row` measures its non-weighted children first, so the intrinsic-width CTA
- * claimed the whole bar before a weighted price column was measured: at 18sp the
- * label needs ~213dp of a 360dp phone's 328dp row, and by fontScale 1.5 it needs
- * ~296dp, leaving the price ~32dp to render ₹51,000 in — squeezed, then clipped.
- * FlowRow measures both at their intrinsic width and moves the CTA onto its own
- * line when they no longer share one, so neither is ever truncated and the CTA
- * keeps its tap target. No breakpoint constant is involved — the wrap is decided
- * by what actually fits, which is also how the chip grids in the funnel handle
- * the same problem.
- */
-@OptIn(ExperimentalLayoutApi::class)
+private const val REVIEW_PREVIEW = 3
+
+private fun packagesSummary(artist: Artist): String = when {
+    artist.packages.isEmpty() -> "On request"
+    else -> "${artist.packages.size} tiers · from " +
+        formatInr(artist.packages.minOf { it.price })
+}
+
+private fun listenSummary(artist: Artist): String = when {
+    artist.samples.isNotEmpty() -> "${artist.samples.size} tracks"
+    !artist.spotifyArtistUrl.isNullOrBlank() -> "Spotify"
+    else -> "No tracks"
+}
+
+/** One review: who, how many stars, what they said. Shared with screen 102. */
 @Composable
-private fun ActionDock(fromPrice: Int?, onBook: () -> Unit) {
+internal fun ReviewCard(review: Review, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(Modifier.fillMaxWidth().background(colors.bg)) {
-        // Hairline lid — honest about where the bar begins, instead of a slab of
-        // elevated fill doing the same job with 10x the ink.
-        HRule()
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                // The page opts out of the scaffold insets so the cover can run
-                // under the status bar; the cost is that the dock has to clear
-                // the gesture bar itself. The fill extends under it — only the
-                // row's content is pushed up.
-                .navigationBarsPadding()
-                .padding(horizontal = space.lg, vertical = space.md),
-            // The gap IS the design while both fit on one line; once the CTA
-            // wraps, SpaceBetween leaves each line start-aligned, which is what
-            // a stacked dock should look like anyway.
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalArrangement = Arrangement.spacedBy(space.md),
+    val dimens = AppTheme.dimens
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.buttonLg))
+            .background(colors.surface3)
+            .padding(dimens.space.md),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.xs),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
-                // No weight: a weighted child is measured with whatever the CTA
-                // left over, which is exactly how the price got squeezed.
-                // Intrinsic width + SpaceBetween gives the same look and lets
-                // FlowRow see the real width when it decides to wrap.
-                modifier = Modifier
-                    // Per-item alignment: this Compose version has no
-                    // `itemVerticalAlignment` on FlowRow, so each child centres
-                    // itself against the taller one on the shared line.
-                    .align(Alignment.CenterVertically)
-                    // Read as one phrase; the two stacked lines are typography,
-                    // not two separate facts for a screen reader to announce.
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = fromPrice
-                            ?.let { "From ${formatInr(it)}" }
-                            ?: "Pricing on request"
-                    },
+            Text(
+                review.name,
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Row(
+                Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = "${review.rating} out of 5"
+                },
             ) {
-                // No packages published means there is no minimum to quote. The
-                // Booking block above already says "Pricing on request"; the dock
-                // used to contradict it with the artist row's stale denormalized
-                // price, so one screen stated two different prices.
-                if (fromPrice != null) {
-                    Text(formatInr(fromPrice), style = AppTheme.type.monoDock, color = colors.ink)
-                    Text("FROM", style = AppTheme.type.monoMicro, color = colors.ink3)
-                } else {
-                    Text("On request", style = AppTheme.type.monoDock, color = colors.ink)
-                    Text("PRICING", style = AppTheme.type.monoMicro, color = colors.ink3)
+                repeat(review.rating.coerceIn(0, MAX_STARS)) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = null,
+                        tint = colors.accentInk,
+                        modifier = Modifier.size(dimens.size.iconSm),
+                    )
                 }
             }
-            // Intrinsic width (no fullWidth) so the CTA hugs its label and the
-            // space between the two is air rather than button.
-            FunnelCta(
-                text = "Check availability",
-                onClick = onBook,
-                modifier = Modifier.align(Alignment.CenterVertically),
+        }
+        if (review.org.isNotBlank()) {
+            Text(review.org, style = AppTheme.type.caption, color = colors.ink4, maxLines = 1)
+        }
+        if (review.body.isNotBlank()) {
+            Text(
+                review.body,
+                style = AppTheme.type.body,
+                color = colors.ink2,
+                maxLines = REVIEW_BODY_LINES,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+private const val MAX_STARS = 5
+private const val REVIEW_BODY_LINES = 6
+
+/**
+ * The bottom bar: Message on the left, and the price riding the CTA.
+ *
+ * **The price is on the button.** That is the redesign's decision, and it is the
+ * reason there is no separate price column here any more: a host reads the
+ * commitment and its cost in one glance instead of pairing a figure on the left
+ * with a verb on the right.
+ *
+ * On the self view (103) both controls come off — the server's self-booking
+ * guard would reject the request anyway, and offering a control that cannot work
+ * is worse than not offering it. The note at the top of the page has already
+ * said why.
+ */
+@Composable
+private fun ActionDock(
+    isSelf: Boolean,
+    price: Int?,
+    onMessage: () -> Unit,
+    onBook: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(Modifier.fillMaxWidth().background(colors.surface)) {
+        HRule()
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = dimens.component.gutter, vertical = dimens.space.md),
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isSelf) {
+                Text(
+                    "You're viewing your own profile.",
+                    style = AppTheme.type.subtitle,
+                    color = colors.ink4,
+                )
+                return@Row
+            }
+            IconCircle(
+                icon = Icons.AutoMirrored.Filled.Chat,
+                contentDescription = "Message this artist",
+                onClick = onMessage,
+                background = colors.surface,
+                outlined = true,
+                size = dimens.chrome.actionSize,
+            )
+            PrimaryButton(
+                text = if (price != null) {
+                    "Check availability · ${formatInr(price)}"
+                } else {
+                    "Check availability"
+                },
+                onClick = onBook,
+                fullWidth = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * Hand the artist's public link to the system share sheet.
+ *
+ * `runCatching` because a device with no app able to handle `ACTION_SEND` throws
+ * on `startActivity`, and a share button is not worth crashing a profile over.
+ */
+private fun shareArtist(context: Context, artist: Artist) {
+    val handle = artist.handle.trim()
+    val url = if (handle.isEmpty()) ARTIST_SHARE_ORIGIN else "$ARTIST_SHARE_ORIGIN/$handle"
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, artist.name)
+        putExtra(Intent.EXTRA_TEXT, "Book ${artist.name} on Artistant\n$url")
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, null)) }
+}
+
+private const val ARTIST_SHARE_ORIGIN = "https://artistant.in"
+
+/** Icons the action sheet needs, resolved here so the sheet file stays copy. */
+internal object ProfileActionIcons {
+    val Saved = Icons.Filled.Bookmark
+    val Save = Icons.Filled.BookmarkBorder
+    val Share = Icons.Outlined.IosShare
+    val Report = Icons.Filled.Flag
 }
