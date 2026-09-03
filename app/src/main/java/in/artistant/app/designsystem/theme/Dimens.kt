@@ -37,6 +37,22 @@ data class Radii(
      * not a literal worth leaving alone.
      */
     val buttonLg: Dp = 16.dp,
+    /**
+     * The light design's CONTROL radius — a search bar, a text field, a
+     * secondary button (REDESIGN_2026-09 §2, "search bar: radius 15").
+     *
+     * Off the sm…xxl ladder for the same reason [buttonLg] is: it sits between
+     * [md] (12) and [lg] (18) and there is nothing to snap it to. Rounding it to
+     * either neighbour is visible — at 12 a 48dp bar reads as a box, at 18 it
+     * starts reading as a capsule, and the design wants neither.
+     */
+    val control: Dp = 15.dp,
+    /**
+     * A content card's radius — a booking card, a thread card, a banner block.
+     * Between [lg] (18) and [xl] (24), and measured off the markup, where every
+     * "a thing you can tap that contains a picture and two lines" is 20.
+     */
+    val card: Dp = 20.dp,
 )
 
 /** Icon/control/avatar/ring/hero sizes (SCREEN_INVENTORY §1). */
@@ -182,6 +198,91 @@ data class Size(
 )
 
 /**
+ * Geometry of the v2 component library (`designsystem/component/`), measured off
+ * the "Artistant iOS Light" markup — REDESIGN_2026-09 §2, "Geometry".
+ *
+ * Its own group rather than more fields on [Size] because these are the
+ * dimensions of NAMED CONTROLS, not steps on the icon/avatar/ring ladder [Size]
+ * describes. A reader tuning the CTA height should not have to scan past twelve
+ * icon sizes to find it, and a section agent looking for "how tall is a chip"
+ * should have one place to look.
+ */
+data class Components(
+    /** Page gutter. Every screen's horizontal padding. */
+    val gutter: Dp = 20.dp,
+    /** Primary CTA height. */
+    val cta: Dp = 54.dp,
+    /** Secondary button, text field, the sign-in provider rows. */
+    val control: Dp = 50.dp,
+    /** Header action circle. */
+    val iconCircle: Dp = 42.dp,
+    /** The smaller header circle, where the title band is tighter. */
+    val iconCircleSm: Dp = 40.dp,
+    /** The unread / attention dot that rides on an [iconCircle]. */
+    val iconCircleDot: Dp = 7.dp,
+    /** Search bar. */
+    val searchBar: Dp = 48.dp,
+    /** Hero card. */
+    val heroCard: Dp = 262.dp,
+    /** The circular save control floating on a hero card. */
+    val heroSave: Dp = 34.dp,
+    /** A rail tile's image band. */
+    val tileImage: Dp = 118.dp,
+    // ── Loading skeletons (screen 59) ─────────────────────────────────────
+    // Measured off the loading screen rather than derived from the loaded one,
+    // because the design's note is that the two must MATCH: "skeletons match
+    // rail geometry, so the fill-in doesn't reflow what the eye already parsed".
+    // Keeping them as their own numbers is what lets a reviewer check that.
+    /** A skeleton tile — one whole tile, image plus its two text lines. */
+    val skeletonTile: Dp = 188.dp,
+    /** The bar standing in for a 26sp screen title, and for its subtitle. */
+    val skeletonTitleWidth: Dp = 132.dp,
+    val skeletonTitleHeight: Dp = 22.dp,
+    val skeletonSubtitleWidth: Dp = 92.dp,
+    /** The bar standing in for a section header, and any one-line label. */
+    val skeletonSectionWidth: Dp = 148.dp,
+    val skeletonLineHeight: Dp = 14.dp,
+    /** Chip placeholders — two widths, alternated, so the row reads as words. */
+    val skeletonChipWide: Dp = 78.dp,
+    val skeletonChipNarrow: Dp = 60.dp,
+    val skeletonChipHeight: Dp = 34.dp,
+    /** A list row's minimum height (the design draws 56–64). */
+    val row: Dp = 56.dp,
+    /** One OTP box. */
+    val otpBox: Dp = 60.dp,
+    /** Chip padding: 9 vertical, 16 horizontal, fully rounded. */
+    val chipPadH: Dp = 16.dp,
+    val chipPadV: Dp = 9.dp,
+    /** Sheet grabber. */
+    val grabberW: Dp = 36.dp,
+    val grabberH: Dp = 4.dp,
+    /** The status dot leading a [StatusPill]-style label. */
+    val statusDot: Dp = 7.dp,
+    /** Emphasis stroke on a focused field or a selected OTP box. */
+    val focusStroke: Dp = 1.5.dp,
+    /** The circle behind an empty state's glyph, and the glyph inside it. */
+    val emptyGlyphCircle: Dp = 72.dp,
+    val emptyGlyph: Dp = 28.dp,
+    /**
+     * `max-width: 30ch` on an empty state's body copy, resolved to a Dp.
+     *
+     * A character-relative cap has no Compose equivalent that does not cost an
+     * extra text measurement, and at the design's body size 30ch measures ~280
+     * on the reference device. Fixed rather than computed because the thing it
+     * protects is a READING MEASURE — centred copy running the full width of a
+     * phone gives the eye nowhere reliable to land on the next line — and a
+     * measure that grows with the font scale stops being a measure.
+     */
+    val readingMeasure: Dp = 280.dp,
+    /** The action stack under an empty state's copy. */
+    val emptyActionWidth: Dp = 270.dp,
+    /** Toast: its corner radius is [Radii.buttonLg]; this is the icon disc. */
+    val toastIcon: Dp = 24.dp,
+    /** Air between a toast and whatever chrome is under it. */
+    val toastGap: Dp = 22.dp,
+)
+
+/**
  * Sizes expressed as a share of the viewport rather than a fixed Dp.
  *
  * Kept apart from [Size] because they are unitless: a hero measured in Dp is a
@@ -204,33 +305,46 @@ data class Fractions(
 )
 
 /**
- * Global navigation chrome — the floating tab bar.
+ * Global navigation chrome — the light tab bar (screens 02 / 10 / 19 / 26).
  *
- * Every value here was measured off the shipped iOS build (screenshot pixel
- * measurement at 3× against a 402×874pt viewport) rather than taken from
- * Material's `NavigationBar` defaults, because the brief is iOS parity, not
- * Material convention. iOS points map 1:1 onto dp — both are density-independent
- * units at the same nominal scale — so the numbers transfer unchanged.
+ * The floating, blurred, four-cell pill of the dark design is gone. What
+ * replaces it is a plain opaque bar pinned to the bottom edge with a hairline on
+ * top, four unlabelled glyphs, and one raised accent circle in the middle
+ * carrying the screen's primary action.
+ *
+ * **On the 88 in the design and why it is not [barHeight] here.** The markup
+ * draws an 88-tall bar, but 34 of that is the iPhone's home-indicator zone — a
+ * fixed inset on a device with exactly one bezel. Android's equivalent is not
+ * fixed: gesture nav claims ~24dp and three-button nav ~48dp, and both arrive at
+ * runtime as a window inset. Hard-coding 88 would leave the glyphs floating in
+ * dead space on gesture nav and buried under the nav buttons on three-button.
+ * So the bar is composed instead: [barTopPad] + [tabIcon] + [barBottomPad] of
+ * real content, plus whatever the system says it owes the navigation bar, which
+ * lands on ~88 for the hardware the design was drawn against.
  */
 data class Chrome(
-    /** Height of the floating 4-tab pill (iOS measures 62pt). */
-    val tabBarHeight: Dp = 62.dp,
-    /** Inset from the screen's left/right/bottom edges to the bar. */
-    val tabBarInset: Dp = 21.dp,
-    /** Breathing room reserved ABOVE the bar so content doesn't butt into it. */
-    val tabBarTopGap: Dp = 12.dp,
-    /** Gap between the tab pill and the detached search circle. */
-    val tabBarGap: Dp = 8.dp,
-    /** Diameter of the detached search circle (matches the pill height). */
-    val tabSearchSize: Dp = 62.dp,
-    /** Selected-tab capsule height inside the pill (62 − 4pt top/bottom). */
-    val tabSelectionHeight: Dp = 54.dp,
+    /** Air above the glyph row. */
+    val barTopPad: Dp = 14.dp,
+    /** Air below the glyph row, before the system navigation inset. */
+    val barBottomPad: Dp = 16.dp,
+    /** Left/right gutter — wider than the page gutter, so five slots breathe. */
+    val barPadH: Dp = 30.dp,
     /** Tab glyph box. */
-    val tabIconSize: Dp = 24.dp,
-    /** Gap between a tab's glyph and its label. */
-    val tabIconLabelGap: Dp = 3.dp,
-    /** Search-circle glyph box (iOS magnifier measures ~23pt). */
-    val tabSearchIconSize: Dp = 23.dp,
+    val tabIcon: Dp = 24.dp,
+    /** The raised centre action circle. */
+    val actionSize: Dp = 52.dp,
+    /** How far that circle sits ABOVE the bar's top edge. */
+    val actionLift: Dp = 12.dp,
+    /** Glyph inside the action circle. */
+    val actionIcon: Dp = 24.dp,
+    /**
+     * Tailroom a scrolling tab root reserves under its last row.
+     *
+     * The bar is opaque and the `Scaffold` already insets content above it, so
+     * this is only the visual air a list wants before the hairline — not the
+     * bar's own footprint, which is what the floating design had to reserve.
+     */
+    val contentTailroom: Dp = 16.dp,
 )
 
 /**
@@ -355,6 +469,7 @@ data class Dimens(
     val space: Space = Space(),
     val radii: Radii = Radii(),
     val size: Size = Size(),
+    val component: Components = Components(),
     val aspect: AspectRatios = AspectRatios(),
     val fraction: Fractions = Fractions(),
     val chrome: Chrome = Chrome(),

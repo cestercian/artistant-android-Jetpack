@@ -4,8 +4,8 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import dagger.hilt.android.AndroidEntryPoint
+import `in`.artistant.app.designsystem.theme.applyLightSystemBars
 import `in`.artistant.app.navigation.ArtistantNavHost
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.push.PushService
@@ -22,7 +22,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Edge-to-edge with DARK bar icons and a light window, regardless of the
+        // device's night mode — the app is light-only. See [applyLightSystemBars];
+        // the launch theme stays dark on purpose (screen 01, "the one dark room").
+        applyLightSystemBars()
         // A cold launch from the OAuth redirect carries the callback URL on the launch intent.
         session.handleDeepLink(intent)
         handlePushIntent(intent)

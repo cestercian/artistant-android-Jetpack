@@ -1,12 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder mark: a lime "A" glyph on the adaptive foreground layer.
-     ponytail: swap for the real brand asset when design ships it. -->
+<!-- The Artistant mark: a bold lime "A" on the adaptive foreground layer.
+
+     Drawn as an explicit outline rather than typeset from a font. A drawable
+     cannot reference `res/font`, and even where a launcher could rasterise text
+     the glyph would then depend on which weight instance the platform resolved
+     from a variable face — so the mark would change shape between devices. The
+     path below is the letterform, fixed.
+
+     Geometry: the letter's outer boundary is one closed subpath (apex → right
+     outer edge → right foot → up the inner right edge → across the crossbar's
+     underside → down the inner left edge → left foot → up the outer left edge),
+     and the counter above the crossbar is a second subpath punched out by
+     `fillType="evenOdd"`. It spans 45×44 of the 108 canvas, centred on
+     (54,54) — about 69% of the adaptive icon's 66dp guaranteed-visible circle,
+     so no launcher mask crops it.
+
+     Colour is AppColors.accent (#d6f84b) over AppColors.darkest (#0f100c),
+     which the background layer supplies. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#C8FF00"
-        android:pathData="M54,30 L70,78 L61,78 L57.5,66 L50.5,66 L47,78 L38,78 Z M54,46 L52,59 L56,59 Z" />
+        android:fillColor="@color/brand_lime"
+        android:fillType="evenOdd"
+        android:pathData="M54,32.16 L76.68,75.84 L65.76,75.84 L61.95,65.76 L46.05,65.76 L42.24,75.84 L31.32,75.84 Z M54,44.76 L58.77,57.36 L49.23,57.36 Z" />
 </vector>
