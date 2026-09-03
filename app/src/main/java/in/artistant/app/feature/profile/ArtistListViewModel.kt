@@ -35,9 +35,29 @@ data class ArtistListRow(
 data class ArtistListUiState(
     val kind: ArtistListKind = ArtistListKind.Saved,
     val rows: List<ArtistListRow> = emptyList(),
+    /** null = "All". Filters [rows] down to one act category (screen 32). */
+    val selectedCategory: String? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
-)
+) {
+    /**
+     * The category chips: every act type actually present in the rows.
+     *
+     * Derived rather than fetched, and derived from THESE rows rather than from
+     * the roster's facets: a chip for a category nobody in your saved list plays
+     * is a filter that can only ever empty the screen.
+     */
+    val categories: List<String>
+        get() = rows.mapNotNull { it.artist?.category?.trim()?.takeIf(String::isNotEmpty) }
+            .distinct()
+            .sorted()
+
+    /** The rows the screen draws, after the category chip. */
+    val visibleRows: List<ArtistListRow>
+        get() = selectedCategory?.let { picked ->
+            rows.filter { it.artist?.category.equals(picked, ignoreCase = true) }
+        } ?: rows
+}
 
 @HiltViewModel
 class ArtistListViewModel @Inject constructor(
@@ -56,6 +76,11 @@ class ArtistListViewModel @Inject constructor(
         refresh()
     }
 
+    /** Narrow to one act type, or back to all with null. */
+    fun selectCategory(category: String?) {
+        _state.update { it.copy(selectedCategory = category) }
+    }
+
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }
         runCatching {
@@ -64,7 +89,14 @@ class ArtistListViewModel @Inject constructor(
                 ArtistListKind.Bookings, ArtistListKind.Completed -> loadBookings()
             }
         }.onSuccess { rows ->
-            _state.update { it.copy(rows = rows, isLoading = false) }
+            _state.update {
+                // A category that no longer appears in the new rows would leave
+                // the list filtered to nothing with no chip lit to explain it.
+                val picked = it.selectedCategory?.takeIf { c ->
+                    rows.any { row -> row.artist?.category.equals(c, ignoreCase = true) }
+                }
+                it.copy(rows = rows, selectedCategory = picked, isLoading = false)
+            }
         }.onFailure { e ->
             _state.update {
                 it.copy(isLoading = false, error = e.message ?: "Couldn't load list")
@@ -93,9 +125,22 @@ class ArtistListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The saved list.
+     *
+     * Throws when the server read failed AND there is nothing cached to fall back
+     * on, so the screen renders "couldn't load" with a retry rather than the
+     * design's "Nothing saved yet" — those are opposite facts wearing the same
+     * empty list, and the empty state's only action is "go and save some", which
+     * is exactly the wrong advice for a dropped connection. A cache that survived
+     * the failure is still shown: stale hearts beat no hearts.
+     */
     private suspend fun loadSaved(): List<ArtistListRow> {
-        savedStore.refreshFromServer()
+        val readServer = savedStore.refreshFromServer()
         val ids = savedStore.ids.value.toList()
+        if (!readServer && ids.isEmpty()) {
+            throw IllegalStateException(SAVED_UNREACHABLE)
+        }
         hydrateArtists(ids)
         return ids.map { id ->
             // Hydrated above, so this is the cache: the full stitch when it
@@ -154,5 +199,12 @@ class ArtistListViewModel @Inject constructor(
             out += it.uppercase() to PillTone.Neutral
         }
         return out
+    }
+
+    companion object {
+        /** The detail line under a saved-list failure. */
+        const val SAVED_UNREACHABLE =
+            "We couldn't reach your saved list. This is a connection problem — " +
+                "it is not that you have saved nobody."
     }
 }

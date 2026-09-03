@@ -242,6 +242,19 @@ fun ClientTabsScaffold() {
                         onBack = { nav.popBackStack() },
                         onArtistClick = { id -> nav.navigate("artist/$id") },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // The three kinds are one screen with three row sources
+                        // (screen 32's note), and the kind is a route argument —
+                        // so switching chips REPLACES this entry rather than
+                        // stacking on it. Without the inclusive pop, tapping
+                        // through Saved → Bookings → Completed would leave three
+                        // copies of the same screen on the stack for back to walk
+                        // down one at a time.
+                        onSelectKind = { picked ->
+                            nav.navigate(ClientNavRoutes.artistList(picked.raw)) {
+                                popUpTo(ClientNavRoutes.ARTIST_LIST) { inclusive = true }
+                            }
+                        },
+                        onBrowseDiscover = { navigateToTab(nav, ClientTab.Discover.route) },
                     )
                 }
             }
