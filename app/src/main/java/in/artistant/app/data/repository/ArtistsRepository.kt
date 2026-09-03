@@ -11,6 +11,7 @@ import `in`.artistant.app.core.result.mapPostgrest
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.ArtistPrompt
+import `in`.artistant.app.data.model.GalleryPhoto
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ArtistPrompts
@@ -514,9 +515,14 @@ class SupabaseArtistsRepository @Inject constructor(
                 }
                 .decodeList<DbSample>()
         }
-        val covers = async {
+        // Every photo, not just the cover: this read already returned all six of
+        // them (the cap is 6/artist) and threw five away, and the About strip
+        // wants exactly those five. Folding the gallery in here rather than
+        // giving it its own fetch keeps a profile open at ONE round trip's worth
+        // of artist_media, which is what `fetchMany`'s whole fan-out is for.
+        val photos = async {
             client.from("artist_media")
-                .select(Columns.list("artist_id", "storage_path", "position")) {
+                .select(ARTIST_PHOTO_COLUMNS) {
                     filter {
                         isIn("artist_id", ids)
                         eq("kind", "photo")
@@ -524,12 +530,25 @@ class SupabaseArtistsRepository @Inject constructor(
                     order("artist_id", Order.ASCENDING)
                     order("position", Order.ASCENDING)
                 }
-                .decodeList<DbArtistCover>()
+                .decodeList<DbArtistPhoto>()
         }
-        stitch(artists.await(), packages.await(), tech.await(), samples.await(), covers.await())
+        stitch(artists.await(), packages.await(), tech.await(), samples.await(), photos.await())
     }
 
     companion object {
+        /**
+         * The columns every `artist_media` photo read asks for.
+         *
+         * One list rather than one per call site: both readers (this stitch and
+         * the search cover batch) decode the same [DbArtistPhoto], and a DTO
+         * whose fields are a superset of what some caller selected decodes to
+         * defaults that are indistinguishable from real values — a row silently
+         * claiming `aspect = square` because nobody asked for the column.
+         */
+        internal val ARTIST_PHOTO_COLUMNS: Columns = Columns.list(
+            "id", "artist_id", "kind", "aspect", "storage_path", "position",
+        )
+
         /** Public CDN URL for an `artist-media` storage path. */
         fun coverUrl(storagePath: String): String? {
             if (storagePath.isBlank()) return null
@@ -538,33 +557,88 @@ class SupabaseArtistsRepository @Inject constructor(
             return "$base/storage/v1/object/public/artist-media/$storagePath"
         }
 
+        /**
+         * Split one artist's `artist_media` photo rows into the cover and the
+         * gallery behind it.
+         *
+         * **The cover is the FIRST photo in position order, not the row at
+         * position 0.** iOS keys its cover on `position == 0` exactly and lets
+         * the gallery be `position > 0`, which on a sparse set (photo 0 deleted,
+         * 1 and 2 left) shows no cover and puts every remaining photo in the
+         * strip. Here the two halves are cut from one sorted list instead, so
+         * the same set yields a cover and one gallery photo — and, more to the
+         * point, so the cover can never ALSO appear in the strip below it. This
+         * is already the app's convention: the press-kit editor badges
+         * `photos.first()` as COVER and its "Make cover" action moves a photo to
+         * index 0, not to position 0.
+         *
+         * [url] is a parameter so the split can be covered without a configured
+         * Supabase project — [coverUrl] reads `BuildConfig` and returns null for
+         * the blank URL a test JVM has, which would make every assertion here
+         * pass for the wrong reason.
+         */
+        internal fun artistPhotos(
+            rows: List<DbArtistPhoto>,
+            url: (String) -> String? = { coverUrl(it) },
+        ): ArtistPhotos {
+            // `kind` is filtered server-side too, but this is where the rule
+            // lives: a caller that forgets the filter should get an artist's
+            // photos, never their showreel frame rendered as a photo.
+            val photos = rows.filter { it.kind == PHOTO_KIND }.sortedBy { it.position }
+            val gallery = photos.drop(1).mapNotNull { row ->
+                val href = url(row.storagePath) ?: return@mapNotNull null
+                GalleryPhoto(
+                    id = row.id.lowercase(),
+                    url = href,
+                    // Lenient like `ArtistMediaRepository`'s own decode: an aspect
+                    // this build has never heard of is a tile drawn square, not a
+                    // profile that refuses to open.
+                    aspect = runCatching { ArtistMediaAspect.valueOf(row.aspect) }
+                        .getOrDefault(ArtistMediaAspect.square),
+                )
+            }
+            return ArtistPhotos(
+                coverUrl = photos.firstOrNull()?.let { url(it.storagePath) },
+                gallery = gallery,
+            )
+        }
+
         internal fun stitch(
             artists: List<DbArtist>,
             packages: List<DbPackage>,
             tech: List<DbTechItem>,
             samples: List<DbSample>,
-            covers: List<DbArtistCover>,
+            photos: List<DbArtistPhoto>,
         ): List<Artist> {
             val packagesBy = packages.groupBy { it.artistId.lowercase() }
             val techBy = tech.groupBy { it.artistId.lowercase() }
             val samplesBy = samples.groupBy { it.artistId.lowercase() }
-            val coverBy = covers.groupBy { it.artistId.lowercase() }
-                .mapValues { (_, rows) ->
-                    rows.firstOrNull()?.let { coverUrl(it.storagePath) }
-                }
+            val photosBy = photos.groupBy { it.artistId.lowercase() }
+                .mapValues { (_, rows) -> artistPhotos(rows) }
             return artists.map { row ->
                 val id = row.id.lowercase()
                 val pkgs = packagesBy[id].orEmpty().map { it.toPackage() }
+                val media = photosBy[id] ?: ArtistPhotos()
                 row.toArtist(
                     packages = pkgs,
                     tech = techBy[id].orEmpty().map { it.item },
                     samples = samplesBy[id].orEmpty().map { it.toSample() },
-                    coverUrl = coverBy[id],
+                    coverUrl = media.coverUrl,
+                    gallery = media.gallery,
                 )
             }
         }
     }
 }
+
+/** `media_kind`'s photo member, as it arrives on the wire. */
+internal const val PHOTO_KIND = "photo"
+
+/** One artist's photos, already split into the cover and the strip behind it. */
+internal data class ArtistPhotos(
+    val coverUrl: String? = null,
+    val gallery: List<GalleryPhoto> = emptyList(),
+)
 
 // --- DB row DTOs (explicit columns where we can; artists uses default select
 // matching iOS's full-row decode for the stitch path). ---
@@ -612,6 +686,7 @@ internal data class DbArtist(
         tech: List<String>,
         samples: List<Sample>,
         coverUrl: String?,
+        gallery: List<GalleryPhoto> = emptyList(),
     ): Artist {
         // `Artist.price`/`duration` are the artist's **"from" figures — the
         // cheapest tier**, not the headline one. Every consumer reads them that
@@ -658,6 +733,7 @@ internal data class DbArtist(
             daysAvailable = daysAvailable.orEmpty(),
             timeSlots = defaultTimeSlots.orEmpty(),
             coverUrl = coverUrl,
+            gallery = gallery,
             newArtistDiscountPct = newArtistDiscountPct ?: 0,
             serviceTags = serviceTags.orEmpty(),
             // Clamped on READ as well as on write: the CHECK constraint bounds
@@ -815,9 +891,18 @@ internal data class WizardPublishRow(
     @SerialName("youtube_channel_url") val youtubeChannelUrl: String?,
 )
 
+/**
+ * One `artist_media` row, as both photo readers need it — the profile stitch and
+ * the search cover batch. Select it with
+ * [SupabaseArtistsRepository.ARTIST_PHOTO_COLUMNS] so no field here is a default
+ * standing in for a column nobody asked for.
+ */
 @Serializable
-internal data class DbArtistCover(
+internal data class DbArtistPhoto(
+    val id: String,
     @SerialName("artist_id") val artistId: String,
+    val kind: String,
+    val aspect: String,
     @SerialName("storage_path") val storagePath: String,
     val position: Int = 0,
 )

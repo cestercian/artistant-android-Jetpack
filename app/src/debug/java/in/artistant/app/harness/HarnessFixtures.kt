@@ -196,6 +196,12 @@ object HarnessFixtures {
         samples = samples,
         reviews = emptyList(),
         instagramHandle = "fixtureartist",
+        // Enough to render the Sound section's Spotify disclosure row. The id is
+        // a well-formed base62 string that belongs to nobody — pointing a
+        // fixture at a real artist's catalogue would put someone else's music
+        // under "Fixture Artist", and the harness emulator has no network for
+        // the embed to load over anyway.
+        spotifyArtistUrl = "https://open.spotify.com/artist/0harnessFixture0000aaa",
         daysAvailable = listOf("Fri", "Sat"),
         timeSlots = listOf("8:30 PM", "9:00 PM", "10:00 PM"),
     )

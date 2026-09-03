@@ -254,8 +254,14 @@ are used inside policies, not called by the app.
 Every repo's exact calls (mirror these in `data/repository/Supabase*`):
 
 - **ArtistsRepository** — 5-table fan-out: `artists`(published, order score) +
-  `packages`/`tech_rider`/`samples`/`artist_media(kind=photo)` by `artist_id`;
-  writes `artists.upsert(onConflict=id)` + targeted `update`s; `fetchSelfArtistRow`.
+  `packages`/`tech_rider`/`samples`/`artist_media(kind=photo)` by `artist_id`.
+  The photo read selects `id, artist_id, kind, aspect, storage_path, position`
+  and feeds BOTH the cover and the profile's gallery strip — the cover is the
+  first row in position order, the strip is the rest, so neither can repeat the
+  other. Readable under `artist_media_select_visible` (mig `0006`), which gates
+  on `artist_visible(artist_id)` = published-or-own, i.e. the same rows the
+  artist row itself is readable for.
+  Writes `artists.upsert(onConflict=id)` + targeted `update`s; `fetchSelfArtistRow`.
   In-memory id-keyed cache (`ensureFull` fetch-on-miss).
 - **BookingsRepository** — §3. Calls `CalendarSyncService.ingest` after each op.
 - **UsersRepository** — `rpc(handle_is_available)`; `users.select(role,full_name,
@@ -271,7 +277,9 @@ Every repo's exact calls (mirror these in `data/repository/Supabase*`):
 - **ArtistMediaRepository** — `storage.artist-media` upload + `artist_media`
   insert/delete; `nextPosition` query; rollback on `cap_reached`.
 - **SamplesRepository** — `storage.artist-samples` upload + insert / `replace_samples`.
-- **SearchRepository** — `rpc(search_artists)` + cover batch from `artist_media` +
+- **SearchRepository** — `rpc(search_artists)` + cover batch from `artist_media`
+  (same columns + same cover rule as the profile stitch, so a tile and the page
+  it opens can never show different photos of one artist) +
   `rpc(search_facets)`; caches partials into ArtistsRepository.
 - **ArtistLinksRepository / PackagesRepository / TechRiderRepository /
   SavedArtistsRepository** — straightforward CRUD / RPC as tabled above.
