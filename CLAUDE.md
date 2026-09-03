@@ -176,9 +176,27 @@ null when nothing can answer — `blocked_users` (0087) stores no name. New
 debug-only harness flags: `seed-blocked-user`, `block-list-unavailable`. Device-
 walked on the emulator. **Suite 737, 0 failures.**
 
-**Still operator / follow-ups:** ExoPlayer sample/Spotify embeds, brand `.ttf`,
-`google-services.json` + `send-push` FCM, OAuth dashboard config, flip
-`subscriptionsEnabled`, PROF-* artist polish, M8 instrumented UI / Play upload.
+**Sep 3, 2026 — "why is Android worse than iOS" series (PRs #133–#137).** The
+honest answer was that every phone build had been the **debug build type**: the
+release build type had no signing config, so nothing else was installable, and
+debug Compose (no R8, no AOT, debug composer) is a different, slower app than
+anything TestFlight ships. #133 wires `keystore.properties` signing with a
+debug-key fallback for dev/staging release only (prod stays unsigned) and adds
+`profileinstaller` so the Compose/AndroidX baseline profiles actually install.
+#135 moves to Compose 1.10 / Material3 1.4 (BOM 2025.12.01 — newest that builds
+on AGP 8.9 + compileSdk 36). #136 ports `Haptic.swift` as `designsystem/Haptics.kt`
+and fires it at 22 of iOS's 26 non-signup sites. #134 closes #15 (signup raw
+sp/dp → tokens). #137 closes #18 (gallery strip + Spotify embed; sample playback
+had shipped in #82). The Aug-16 audit series was already fully merged (#84–#118);
+#113 and #26 were stale and closed. **To judge performance, install
+`assembleDevRelease`, never the debug APK** (RELEASE.md §3). **Suite 1252, 0
+failures** on the five branches combined; none device-walked.
+
+**Still operator / follow-ups:** upload keystore + `keystore.properties`,
+`google-services.json` + `send-push` FCM (#24), OAuth dashboard config, flip
+`subscriptionsEnabled`, PROF-10 hero pager, an app-specific baseline profile
+(needs a device), AGP 9.1 + compileSdk 37 to unlock Compose 1.11+, M8
+instrumented UI / Play upload.
 (Profile stats + community pledge shipped on `feature/parity-polish`.)
 The Aug-5 parked findings are **closed**: the audit series had already given
 `BookingStatusTimeline` two call sites (ConfirmedScreen + BookingDetail's
