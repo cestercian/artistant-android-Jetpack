@@ -10,12 +10,31 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.feature.paywall.EntitlementStore
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/**
+ * One-shot outcome buzzes for the two-hop submit.
+ *
+ * They are events rather than reads off the state for a reason specific to the
+ * failure: `lastCreateErrorMessage` is a durable fact ("your last send failed")
+ * that the banner keeps showing until a send succeeds, so a retry that fails
+ * with the *same* message never changes it — an effect keyed on it would go
+ * quiet on exactly the attempt the user most needs acknowledged.
+ */
+sealed interface CheckoutEvent {
+    /** The booking row landed. */
+    data object Sent : CheckoutEvent
+
+    /** Either hop failed — the payment seam threw, or the write didn't land. */
+    data object Failed : CheckoutEvent
+}
 
 data class CheckoutUiState(
     val draft: BookingDraft? = null,
@@ -63,6 +82,9 @@ class CheckoutViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(CheckoutUiState())
     val state: StateFlow<CheckoutUiState> = _state.asStateFlow()
+
+    private val _events = Channel<CheckoutEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
     init {
         viewModelScope.launch {
@@ -125,6 +147,11 @@ class CheckoutViewModel @Inject constructor(
                         confirmedBookingId = booking.id,
                     )
                 }
+                // After the write, never before it. The reference build learned
+                // this the hard way: it buzzed success the moment the payment
+                // seam returned, so a client whose booking row never landed got
+                // a celebration while stranded on checkout.
+                _events.send(CheckoutEvent.Sent)
             } catch (e: BookingRepositoryError) {
                 _state.update {
                     it.copy(
@@ -136,6 +163,7 @@ class CheckoutViewModel @Inject constructor(
                         lastCreateErrorMessage = e.message,
                     )
                 }
+                _events.send(CheckoutEvent.Failed)
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
@@ -144,6 +172,7 @@ class CheckoutViewModel @Inject constructor(
                         lastCreateErrorMessage = e.message ?: "Couldn't send your request.",
                     )
                 }
+                _events.send(CheckoutEvent.Failed)
             }
         }
     }

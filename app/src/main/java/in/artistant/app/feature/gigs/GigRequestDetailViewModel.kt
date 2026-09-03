@@ -11,9 +11,11 @@ import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.RequestsRepositoryError
 import `in`.artistant.app.platform.calendar.CalendarSyncPlanner
 import `in`.artistant.app.platform.calendar.CalendarSyncService
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -23,6 +25,22 @@ import javax.inject.Inject
 
 /** The three mutations the artist's dock offers on an open request. */
 enum class GigRequestAction { Accept, Decline, Counter }
+
+/**
+ * One-shot side effects — today just the accept buzz.
+ *
+ * A Channel rather than a state flag for the usual reason (ARCHITECTURE §3): the
+ * haptic has to fire once, at the moment the accept lands, and a boolean on the
+ * state would re-fire it on every recomposition until something consumed it.
+ *
+ * The reference build buzzes on the *tap* (its store call is fire-and-forget);
+ * we buzz on the *result*, because here we have one. Celebrating an accept that
+ * the server refused is the failure mode iOS's own Checkout comment warns about.
+ */
+sealed interface GigRequestDetailEvent {
+    /** The accept landed on the server. */
+    data object Accepted : GigRequestDetailEvent
+}
 
 data class GigRequestDetailUiState(
     val request: StoredRequest? = null,
@@ -60,6 +78,9 @@ class GigRequestDetailViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(GigRequestDetailUiState())
     val state: StateFlow<GigRequestDetailUiState> = _state.asStateFlow()
+
+    private val _events = Channel<GigRequestDetailEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
     init {
         refresh()
@@ -145,6 +166,9 @@ class GigRequestDetailViewModel @Inject constructor(
                 block()
                 refresh()
                 _state.update { it.copy(actingAction = null) }
+                if (action == GigRequestAction.Accept) {
+                    _events.send(GigRequestDetailEvent.Accepted)
+                }
             } catch (e: RequestsRepositoryError) {
                 _state.update { it.copy(actingAction = null, actionError = e.message) }
             } catch (e: Exception) {

@@ -72,6 +72,7 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.InlineBanner
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.heroGlass
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.MotionSpecs
 import `in`.artistant.app.designsystem.theme.motion
@@ -309,6 +310,7 @@ private fun HeroSlide(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val hero = AppTheme.dimens.hero
+    val haptics = rememberHaptics()
 
     Box(
         Modifier
@@ -437,8 +439,12 @@ private fun HeroSlide(
                         .size(hero.saveSize)
                         .heroGlass(CircleShape)
                         // Intercepts the slide's tap so the heart saves instead
-                        // of navigating.
-                        .clickable(onClick = onToggleSave)
+                        // of navigating. Light tap: saving is a preference, not
+                        // an outcome — the same weight iOS gives it.
+                        .clickable {
+                            haptics.tap()
+                            onToggleSave()
+                        }
                         .semantics {
                             testTag = "discover.featured.save"
                             contentDescription = if (isSaved) "Unsave artist" else "Save artist"

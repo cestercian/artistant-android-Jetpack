@@ -71,6 +71,7 @@ import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.bookingStatusTone
 import `in`.artistant.app.designsystem.component.dockSurface
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import kotlinx.coroutines.delay
@@ -113,6 +114,7 @@ fun BookingDetailScreen(
     val clipboard = LocalClipboardManager.current
     val booking = state.booking
     val viewer = viewerOf(isArtistViewer)
+    val haptics = rememberHaptics()
 
     var showReview by remember { mutableStateOf(false) }
     var showCancel by remember { mutableStateOf(false) }
@@ -123,6 +125,10 @@ fun BookingDetailScreen(
     // review", and reopening would flash shut on the leftover flag.
     LaunchedEffect(review.submitted) {
         if (review.submitted) {
+            // The success buzz for the review lands HERE rather than in the
+            // sheet, for the same reason the rest of this effect does: the sheet
+            // may already be gone when the insert returns.
+            haptics.success()
             reviewVm.consumeSubmitted()
             showReview = false
             // The stars are on the booking row, so re-read it rather than
@@ -204,6 +210,7 @@ fun BookingDetailScreen(
                                     },
                                     onCopy = {
                                         clipboard.setText(AnnotatedString(address))
+                                        haptics.success()
                                         copied = true
                                     },
                                 )
@@ -263,6 +270,10 @@ fun BookingDetailScreen(
                     isDecline = isDecline,
                     onDismiss = { showCancel = false },
                     onConfirm = { reason ->
+                        // Warning at the confirm, as on iOS: cancelling is a
+                        // deliberate act with a cost to the other party, not a
+                        // failure. The result gets no buzz of its own.
+                        haptics.warning()
                         showCancel = false
                         viewModel.cancelBooking(viewer, reason)
                     },

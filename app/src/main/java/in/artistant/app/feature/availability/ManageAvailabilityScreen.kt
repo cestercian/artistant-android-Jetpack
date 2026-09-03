@@ -41,6 +41,7 @@ import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.wizard.WizardWeekdays
@@ -60,6 +61,8 @@ fun ManageAvailabilityScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    // Both chip grids are one `toggle` on iOS, and it fires a light tap.
+    val haptics = rememberHaptics()
 
     Column(
         modifier
@@ -160,7 +163,10 @@ fun ManageAvailabilityScreen(
                                         .toggleable(
                                             value = on,
                                             role = Role.Checkbox,
-                                            onValueChange = { viewModel.toggleDay(day) },
+                                            onValueChange = {
+                                                haptics.tap()
+                                                viewModel.toggleDay(day)
+                                            },
                                         )
                                         .semantics {
                                             contentDescription =
@@ -183,7 +189,10 @@ fun ManageAvailabilityScreen(
                                         .toggleable(
                                             value = on,
                                             role = Role.Checkbox,
-                                            onValueChange = { viewModel.toggleTime(slot) },
+                                            onValueChange = {
+                                                haptics.tap()
+                                                viewModel.toggleTime(slot)
+                                            },
                                         )
                                         .semantics {
                                             contentDescription =
