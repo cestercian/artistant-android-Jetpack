@@ -96,29 +96,43 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 ---
 
-## 3. Signing (operator — required for any Play upload)
+## 3. Signing
 
-The release build is currently **unsigned** (CI has no keystore). Before upload:
+Wired in `app/build.gradle.kts`. The `release` build type reads a gitignored
+`keystore.properties` at the repo root; when that file is absent it signs with the
+Android **debug key** instead, so `assembleDevRelease` always yields an installable
+APK. The fallback exists so the real R8 + AOT build can be walked on a phone — the
+`debug` build type is a different, measurably slower app (no R8, no baseline
+profiles, debug composer) and must not be used to judge performance or jank.
 
-1. Create an **upload keystore** (once):
+**Device testing — no keystore needed:**
+```bash
+./gradlew :app:assembleDevRelease
+adb install -r app/build/outputs/apk/dev/release/app-dev-release.apk
+```
+
+**Play upload (operator, once):**
+
+1. Create an **upload keystore**:
    ```bash
    keytool -genkey -v -keystore artistant-upload.jks -keyalg RSA -keysize 2048 \
      -validity 10000 -alias artistant
    ```
-2. Add to `secrets.properties` (gitignored) and wire a `signingConfigs { release { … } }`
-   block reading those props, then `signingConfig = signingConfigs.getByName("release")`
-   in the `release` build type:
+2. Create `keystore.properties` at the repo root (gitignored — never commit):
    ```properties
    RELEASE_STORE_FILE=/abs/path/artistant-upload.jks
    RELEASE_STORE_PASSWORD=…
    RELEASE_KEY_ALIAS=artistant
    RELEASE_KEY_PASSWORD=…
    ```
+   The build picks it up automatically; `assembleProdRelease` / `bundleProdRelease`
+   are then signed with the upload key.
 3. Enroll in **Play App Signing** (Play generates the app signing key; you keep the
    upload key). This is the default for new apps.
 
-> Left as an operator step, not committed, because the keystore + passwords must
-> never enter git and the build must succeed without them for CI.
+> A debug-signed release APK can never reach Play — Play App Signing enforces the
+> upload key — so the fallback cannot leak into a store submission. CI still builds
+> green without the keystore.
 
 ---
 
@@ -208,6 +222,7 @@ compile-only build.
 - **#18** — gallery strip, Spotify embed, audio/sample playback (operator assets + SDK).
 - **#15** — signup polish tokens + real brand fonts.
 - **#24** — FCM push activation (PUSH_SETUP.md).
-- **#26** — wizard draft persistence.
-- **Instrumented/Compose-UI test suite + baseline profile** — need a device/AVD;
-  the JVM unit net (210) is the current regression guard.
+- **Instrumented/Compose-UI test suite + an app-specific baseline profile** —
+  need a device/AVD (Macrobenchmark); the JVM unit net is the current regression
+  guard. The AndroidX/Compose *library* profiles already ship in their AARs and
+  are installed by `profileinstaller` (wired in `app/build.gradle.kts`).

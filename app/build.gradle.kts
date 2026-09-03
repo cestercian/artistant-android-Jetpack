@@ -19,6 +19,20 @@ val secretsProps = Properties().apply {
 }
 fun secret(key: String, default: String): String = secretsProps.getProperty(key) ?: default
 
+// Release signing. Reads a gitignored `keystore.properties` at the repo root
+// (RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS /
+// RELEASE_KEY_PASSWORD — docs/RELEASE.md "Signing"). When that file is absent the
+// release build type signs with the ANDROID DEBUG KEY instead, so
+// `assembleDevRelease` still yields an installable APK and the real R8 + AOT build
+// can be walked on a device — the debug build type is a different, slower app.
+// A debug-signed release APK can never reach Play (Play App Signing enforces the
+// upload key), so the fallback cannot leak into a store submission.
+val keystoreFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystoreFile.exists()) keystoreFile.inputStream().use { load(it) }
+}
+val hasReleaseKeystore = !keystoreProps.getProperty("RELEASE_STORE_FILE").isNullOrBlank()
+
 android {
     namespace = "in.artistant.app"
     compileSdk = 36
@@ -67,8 +81,21 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("RELEASE_STORE_FILE"))
+                storePassword = keystoreProps.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = keystoreProps.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = keystoreProps.getProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Upload key when keystore.properties exists, else the debug key (see above).
+            signingConfig = signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")
             // R8 on — shrink + obfuscate + resource-strip. Keep rules for the
             // serialization/nav surfaces R8 could otherwise break live in
             // proguard-rules.pro (a green assemble proves the static pass; the release
@@ -113,6 +140,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
+    // Installs the baseline profiles Compose/AndroidX ship in their AARs at install
+    // time, so release builds start and scroll AOT-compiled instead of JIT-warm.
+    implementation(libs.androidx.profileinstaller)
 
     // Compose via BOM — keeps all androidx.compose.* artifacts version-aligned.
     implementation(platform(libs.androidx.compose.bom))
