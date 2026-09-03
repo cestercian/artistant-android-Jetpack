@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
 import `in`.artistant.app.designsystem.component.pressScale
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.feature.epk.EpkRowAction
@@ -285,6 +286,7 @@ private fun CoverAction(
 
 @Composable
 private fun GradientPicker(selected: Int, onSelect: (Int) -> Unit) {
+    val haptics = rememberHaptics()
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val shape = RoundedCornerShape(dimens.radii.sm)
@@ -304,7 +306,10 @@ private fun GradientPicker(selected: Int, onSelect: (Int) -> Unit) {
                         shape,
                     )
                     .pressScale(interaction)
-                    .clickable(interactionSource = interaction, indication = null) { onSelect(index) }
+                    .clickable(interactionSource = interaction, indication = null) {
+                        haptics.select()
+                        onSelect(index)
+                    }
                     .semantics {
                         testTag = "wizard.cover.gradient.$index"
                         contentDescription = "Gradient ${index + 1}${if (isSelected) ", selected" else ""}"

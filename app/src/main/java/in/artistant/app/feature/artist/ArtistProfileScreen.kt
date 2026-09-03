@@ -67,6 +67,7 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScoreRing
 import `in`.artistant.app.data.model.Sample
 import `in`.artistant.app.designsystem.component.SampleRow
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.platform.media.rememberSamplePlayer
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.data.model.ArtistPrompt
@@ -308,6 +309,9 @@ private fun Hero(
     val dimens = AppTheme.dimens
     val space = dimens.space
     val heroHeight = LocalConfiguration.current.screenHeightDp.dp * dimens.fraction.artistHero
+    // Save and the score chip are the hero's two haptic taps, as on iOS. Message,
+    // Back and Share are plain navigation and stay silent.
+    val haptics = rememberHaptics()
 
     Box(
         Modifier
@@ -371,7 +375,10 @@ private fun Hero(
                 CircleIconButton(
                     icon = if (isSaved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                     contentDescription = if (isSaved) "Unsave" else "Save",
-                    onClick = onToggleSaved,
+                    onClick = {
+                        haptics.tap()
+                        onToggleSaved()
+                    },
                     tint = if (isSaved) colors.brand else Color.White,
                 )
                 CircleIconButton(
@@ -423,7 +430,10 @@ private fun Hero(
                     score = artist.score,
                     gigs = artist.gigs,
                     tier = tier,
-                    onClick = onScoreClick,
+                    onClick = {
+                        haptics.tap()
+                        onScoreClick()
+                    },
                 )
             }
         }
@@ -856,6 +866,10 @@ private fun PackagesBlock(
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    // Picking a tier here is a tap, matching the reference build's ticket cards.
+    // The booking screen's own package list stays silent — iOS buzzes only on
+    // the profile, where the pick is browsing rather than committing.
+    val haptics = rememberHaptics()
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
         if (artist.packages.isNotEmpty()) {
             Text("Packages", style = AppTheme.type.displaySmall, color = colors.ink)
@@ -868,7 +882,10 @@ private fun PackagesBlock(
                     pkg = pkg,
                     selected = index == selectedIndex,
                     showPopularBadge = badgesMeanSomething && pkg.popular,
-                    onClick = { onSelect(index) },
+                    onClick = {
+                        haptics.tap()
+                        onSelect(index)
+                    },
                 )
             }
         }

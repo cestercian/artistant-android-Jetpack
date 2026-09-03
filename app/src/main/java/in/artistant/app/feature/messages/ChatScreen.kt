@@ -66,6 +66,7 @@ import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.bookingStatusTone
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.feature.booking.CircleIconButton
 import kotlinx.coroutines.delay
@@ -102,8 +103,26 @@ fun ChatScreen(
     // same "now" — and one midnight timer / lifecycle observer serves both
     // instead of a pair per screen (see rememberDayClock).
     val now = rememberDayClock()
+    val haptics = rememberHaptics()
 
     ResumeEffect(onResumed = viewModel::onResumed)
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                ChatEvent.SendFailed -> haptics.error()
+            }
+        }
+    }
+
+    // The report receipt is the moment the reference build buzzes. Its picker
+    // stages a reason and files on a second tap, so it buzzes select-then-success
+    // over two taps; ours files on the reason tap, so one tap gets one buzz — the
+    // outcome one. `reportSubmitted` resets when the sheet closes, so this can't
+    // re-fire on a later recomposition.
+    LaunchedEffect(state.reportSubmitted) {
+        if (state.reportSubmitted) haptics.success()
+    }
 
     Column(
         modifier
@@ -159,7 +178,13 @@ fun ChatScreen(
         ComposerStack(
             state = state,
             nowMs = now,
-            onSend = viewModel::send,
+            onSend = { body ->
+                // Light tap on send, matching iOS. Fired on the tap, not on the
+                // delivery: the optimistic bubble is already on screen, and the
+                // failure path has its own buzz above.
+                haptics.tap()
+                viewModel.send(body)
+            },
             onRetryRefresh = viewModel::refresh,
             onOpenBooking = onBookingClick,
         )

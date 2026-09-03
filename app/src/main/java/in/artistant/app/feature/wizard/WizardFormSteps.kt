@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.designsystem.component.pressScale
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.feature.epk.EpkChip
@@ -448,6 +449,11 @@ fun WizardChipSection(
     modifier: Modifier = Modifier,
 ) {
     val space = AppTheme.dimens.space
+    // The selection tick lives on the shared section rather than on the one step
+    // iOS happens to buzz (its identity step). Five steps render this exact grid;
+    // a tick on the category chips and silence on the city chips beside them
+    // reads as a bug, not as parity.
+    val haptics = rememberHaptics()
     Column(modifier.semantics { testTag = tag }) {
         EpkSectionHeader(title = title)
         Spacer(Modifier.height(space.sm))
@@ -460,7 +466,10 @@ fun WizardChipSection(
                 EpkChip(
                     label = option,
                     selected = selected,
-                    onClick = { onToggle(option) },
+                    onClick = {
+                        haptics.select()
+                        onToggle(option)
+                    },
                     modifier = Modifier.semantics {
                         contentDescription = "$option${if (selected) ", selected" else ""}"
                     },

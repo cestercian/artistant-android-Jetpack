@@ -36,6 +36,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.pressScale
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.motionTween
@@ -70,11 +71,14 @@ fun WizardScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     var confirmingExit by remember { mutableStateOf(false) }
+    val haptics = rememberHaptics()
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
                 WizardEvent.Finished -> onFinished()
+                WizardEvent.Published -> haptics.success()
+                WizardEvent.PublishFailed -> haptics.error()
             }
         }
     }

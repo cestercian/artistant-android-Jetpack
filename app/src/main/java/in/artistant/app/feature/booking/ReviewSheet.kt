@@ -28,6 +28,7 @@ import `in`.artistant.app.data.repository.ReviewsRepository
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -131,6 +132,7 @@ fun ReviewSheet(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val ui by viewModel.state.collectAsStateWithLifecycle()
+    val haptics = rememberHaptics()
 
     // Rounded top only — this is a bottom sheet, so its lower edge is the screen
     // edge and has no corner to soften.
@@ -150,7 +152,15 @@ fun ReviewSheet(
                     modifier = Modifier
                         .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
                         .background(colors.bgSoft)
-                        .clickable { viewModel.setRating(star) }
+                        .clickable {
+                            // Selection tick on the star row, as on iOS. The
+                            // matching success buzz for a landed insert is the
+                            // HOST's (BookingDetailScreen watches `submitted`) —
+                            // the write outlives this sheet, so an effect here
+                            // would not be in composition when it lands.
+                            haptics.select()
+                            viewModel.setRating(star)
+                        }
                         .padding(horizontal = space.sm, vertical = space.xs),
                 )
             }
