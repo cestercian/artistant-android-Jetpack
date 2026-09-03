@@ -329,7 +329,7 @@ private fun SupportBubble(
                         .background(colors.brandSoft),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("A", style = AppTheme.type.monoSmall, color = colors.brand)
+                    Text("A", style = AppTheme.type.monoSmall, color = colors.accentInk)
                 }
             }
             Text(
@@ -346,7 +346,7 @@ private fun SupportBubble(
             Text(
                 "Go to $bookingsLabel",
                 style = AppTheme.type.footnote,
-                color = colors.brand,
+                color = colors.accentInk,
                 modifier = Modifier
                     .padding(top = space.xs, start = AppTheme.dimens.size.avatarSm)
                     .clickable(onClick = onOpenBookings)

@@ -179,7 +179,7 @@ fun WelcomeScreen(
                     Text(
                         "Terms",
                         style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.brand,
+                        color = colors.accentInk,
                         modifier = Modifier
                             .clickable(role = Role.Button) { legalDoc = LegalDoc.Terms }
                             .sizeIn(minHeight = AppTheme.dimens.size.controlMin)
@@ -189,7 +189,7 @@ fun WelcomeScreen(
                     Text(
                         "Privacy",
                         style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.brand,
+                        color = colors.accentInk,
                         modifier = Modifier
                             .clickable(role = Role.Button) { legalDoc = LegalDoc.Privacy }
                             .sizeIn(minHeight = AppTheme.dimens.size.controlMin)

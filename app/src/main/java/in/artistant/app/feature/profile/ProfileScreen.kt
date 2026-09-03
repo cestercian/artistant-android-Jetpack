@@ -124,7 +124,7 @@ fun ProfileScreen(
         when {
             state.isLoading && state.profile == null -> {
                 CircularProgressIndicator(
-                    color = colors.brand,
+                    color = colors.accentInk,
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
@@ -138,7 +138,7 @@ fun ProfileScreen(
                     Text(
                         "Retry",
                         style = AppTheme.type.callout.copy(fontWeight = FontWeight.Bold),
-                        color = colors.brand,
+                        color = colors.accentInk,
                         modifier = Modifier.clickable { viewModel.refresh() },
                     )
                 }
@@ -415,7 +415,7 @@ fun ProfileScreen(
                         CircularProgressIndicator(
                             Modifier.size(size.iconMd),
                             strokeWidth = size.stroke,
-                            color = colors.brand,
+                            color = colors.accentInk,
                         )
                     } else {
                         Text("Delete forever", color = colors.hot)
@@ -657,7 +657,7 @@ private fun SettingsRow(
             CircularProgressIndicator(
                 Modifier.size(AppTheme.dimens.size.iconMd),
                 strokeWidth = AppTheme.dimens.size.stroke,
-                color = AppTheme.colors.brand,
+                color = AppTheme.colors.accentInk,
             )
         } else if (navigates) {
             // Sized, not left at Material's 24dp default. A settings row is

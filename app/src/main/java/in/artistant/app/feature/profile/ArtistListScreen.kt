@@ -72,7 +72,7 @@ fun ArtistListScreen(
         when {
             state.isLoading && state.rows.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
             }
             state.error != null && state.rows.isEmpty() -> {

@@ -27,7 +27,7 @@ fun EditorialHeadline(
     val colors = AppTheme.colors
     val text = buildAnnotatedString {
         withStyle(SpanStyle(color = colors.ink)) { append(lead) }
-        withStyle(SpanStyle(color = colors.brand, fontStyle = FontStyle.Italic)) { append(accent) }
+        withStyle(SpanStyle(color = colors.accentInk, fontStyle = FontStyle.Italic)) { append(accent) }
         withStyle(SpanStyle(color = colors.ink)) { append(tail) }
     }
     Text(text = text, style = style, modifier = modifier)

@@ -206,9 +206,11 @@ private fun ArtistCoverBackground(artist: Artist) {
  *    the accent throws away the one channel that separates Elite from Rising,
  *    so the badge could only ever say "here is a number".
  *
- * The fill is the page background at 70% rather than an opaque swatch: it sits
- * on artwork, and a solid chip reads as a sticker stuck onto the photo where a
- * scrim reads as part of it.
+ * The fill is a dark scrim rather than an opaque swatch: it sits on artwork, and
+ * a solid chip reads as a sticker stuck onto the photo where a scrim reads as
+ * part of it. It used to be the PAGE background at 70%, which was the same
+ * near-black by coincidence — and became a 70% off-white disc the moment the
+ * page turned light, taking its own tier dot's contrast with it.
  */
 @Composable
 private fun ScoreCapsule(score: Int, gigs: Int) {
@@ -219,7 +221,7 @@ private fun ScoreCapsule(score: Int, gigs: Int) {
     Row(
         modifier = Modifier
             .clip(CircleShape)
-            .background(colors.bg.copy(alpha = 0.7f))
+            .background(colors.glassScrim)
             .border(dimens.size.hairline, colors.glassLine, CircleShape)
             .padding(horizontal = dimens.space.sm, vertical = dimens.space.xs),
         horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),

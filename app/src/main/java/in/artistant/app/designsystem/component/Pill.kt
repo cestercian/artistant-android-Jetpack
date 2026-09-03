@@ -29,15 +29,21 @@ enum class PillTone { Neutral, Brand, BrandSolid, Good, Warm, Hot }
 fun Pill(text: String, modifier: Modifier = Modifier, tone: PillTone = PillTone.Neutral) {
     val colors = AppTheme.colors
     val (bg, fg) = when (tone) {
-        PillTone.Neutral -> colors.bgSoft to colors.ink2
-        PillTone.Brand -> colors.brandSoft to colors.brand
-        PillTone.BrandSolid -> colors.brand to colors.brandInk
+        PillTone.Neutral -> colors.surface2 to colors.ink2
+        // Lime wash with lime TEXT was legible on near-black and is not on
+        // near-white — `#d6f84b` on `#f5fbda` is about 1.2:1. The wash keeps the
+        // accent hue; the label drops to `accentDeep`, which is the same hue at a
+        // weight you can read, and is what the design draws inside its own
+        // accent-tinted pills (screens 04 and 19).
+        PillTone.Brand -> colors.brandSoft to colors.accentDeep
+        PillTone.BrandSolid -> colors.accent to colors.onAccent
         // The status trio has no `*Soft` token of its own, so the wash is derived
         // from the status colour rather than hand-mixed — retune `good`/`warm`/
-        // `hot` and the fills follow.
-        PillTone.Good -> colors.good.copy(alpha = 0.10f) to colors.good
-        PillTone.Warm -> colors.warm.copy(alpha = 0.10f) to colors.warm
-        PillTone.Hot -> colors.hot.copy(alpha = 0.10f) to colors.hot
+        // `hot` and the fills follow. On a light page a 10% wash is faint, which
+        // is correct: the label carries the state, the fill only groups it.
+        PillTone.Good -> colors.good.copy(alpha = 0.12f) to colors.good
+        PillTone.Warm -> colors.warm.copy(alpha = 0.12f) to colors.warm
+        PillTone.Hot -> colors.hot.copy(alpha = 0.12f) to colors.hot
     }
     Text(
         text = text,

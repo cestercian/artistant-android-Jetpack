@@ -127,7 +127,7 @@ private fun LineupLane(
                         maxLines = 1,
                         textAlign = if (align == Alignment.Start) TextAlign.Start else TextAlign.End,
                     )
-                    Text(act.genre, style = AppTheme.type.monoSmall, color = colors.brand.copy(alpha = 0.6f))
+                    Text(act.genre, style = AppTheme.type.monoSmall, color = colors.accentInk.copy(alpha = 0.6f))
                 }
             }
         }

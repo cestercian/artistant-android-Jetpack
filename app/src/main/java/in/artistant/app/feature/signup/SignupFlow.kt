@@ -183,7 +183,7 @@ fun SignupFlow(
                 Text(
                     "Retry",
                     style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
-                    color = AppTheme.colors.brand,
+                    color = AppTheme.colors.accentInk,
                     modifier = Modifier
                         .clickable { onRetryHydration() }
                         .semantics { testTag = "signup.hydrate.retry"; contentDescription = "Retry loading your profile" },

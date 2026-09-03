@@ -150,7 +150,7 @@ fun BookingDetailScreen(
     when {
         state.isLoading && booking == null -> {
             Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+                CircularProgressIndicator(color = colors.accentInk)
             }
         }
         booking == null -> {
@@ -384,17 +384,22 @@ private fun Hero(
             // its own disagreed with the others; this one is shared with the
             // bookings list and the artist drill-down.
             Pill(booking.status.label, tone = bookingStatusTone(booking.status))
+            // NOT on media: this block sits in the bottom band where the cover
+            // has already faded to `bg`. That fade ends on a token, so it
+            // followed the palette into daylight — and white text followed it
+            // into invisibility. Page ink is correct here; the back control
+            // above still takes white, because it floats on the photo itself.
             Text(
                 counterparty,
                 style = AppTheme.type.profileHeroName,
-                color = Color.White,
+                color = colors.ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 heroWhereLine(booking),
                 style = AppTheme.type.callout,
-                color = colors.inkOnMedia,
+                color = colors.ink2,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -645,7 +650,7 @@ private fun Dock(
         ) {
             Text("ARTIST FEE", style = AppTheme.type.caption, color = colors.ink3)
             Spacer(Modifier.weight(1f))
-            Text(formatInr(booking.fee), style = AppTheme.type.monoDock, color = colors.brand)
+            Text(formatInr(booking.fee), style = AppTheme.type.monoDock, color = colors.accentInk)
         }
 
         primary.forEach { action ->

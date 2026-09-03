@@ -113,7 +113,7 @@ fun WizardScreen(
                 // A blank form that fills in a frame later reads as data loss;
                 // hold the spinner until the draft has been consulted.
                 state.isRestoring -> CircularProgressIndicator(
-                    color = colors.brand,
+                    color = colors.accentInk,
                     modifier = Modifier.align(Alignment.Center),
                 )
                 state.step == WizardStep.Done -> WizardDoneScreen(
@@ -270,7 +270,7 @@ private fun SaveAndExitDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = onConfirm, modifier = Modifier.semantics { testTag = "wizard.confirmExit" }) {
-                Text("Save & exit", style = AppTheme.type.footnote, color = colors.brand)
+                Text("Save & exit", style = AppTheme.type.footnote, color = colors.accentInk)
             }
         },
         dismissButton = {

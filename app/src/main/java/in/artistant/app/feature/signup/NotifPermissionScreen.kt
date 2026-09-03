@@ -63,7 +63,7 @@ fun NotifPermissionScreen(
         Spacer(Modifier.height(space.xxl))
         Spacer(Modifier.weight(1f))
 
-        Icon(Icons.Outlined.Notifications, contentDescription = null, tint = colors.brand, modifier = Modifier.size(44.dp))
+        Icon(Icons.Outlined.Notifications, contentDescription = null, tint = colors.accentInk, modifier = Modifier.size(44.dp))
         Spacer(Modifier.height(space.xl))
         Text("Stay in the loop.", style = AppTheme.type.displayTitle, color = colors.ink, textAlign = TextAlign.Center)
         Spacer(Modifier.height(space.lg))

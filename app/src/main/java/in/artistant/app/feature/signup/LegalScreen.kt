@@ -93,7 +93,7 @@ fun LegalScreen(doc: LegalDoc, onClose: () -> Unit, modifier: Modifier = Modifie
             Text(
                 "View online at ${doc.url.removePrefix("https://").substringBefore('/')}",
                 style = AppTheme.type.caption,
-                color = colors.brand,
+                color = colors.accentInk,
                 modifier = Modifier.clickable { linkError = openLegalDoc(context, doc.url) },
             )
             linkError?.let {

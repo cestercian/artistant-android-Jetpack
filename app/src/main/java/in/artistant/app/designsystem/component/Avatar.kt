@@ -51,7 +51,11 @@ fun Avatar(
         ) {
             Text(
                 initials,
-                color = colors.ink,
+                // The disc is a saturated hash gradient at v=0.40–0.55 — dark,
+                // whatever the palette around it does. So the monogram takes the
+                // dark-surface ink, not `ink`, which followed the page into
+                // daylight and left the initials unreadable on their own circle.
+                color = colors.onDark,
                 // Dp → Sp through the density, NOT `size.value.sp`. That form
                 // hands a dp magnitude to the sp scale, so the glyph tracked the
                 // user's font-scale setting while the disc around it stayed a

@@ -126,7 +126,7 @@ fun DiscoverScreen(
         when {
             state.isLoading && state.hero.isEmpty() && state.loadError == null -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AppTheme.colors.brand)
+                    CircularProgressIndicator(color = AppTheme.colors.accentInk)
                 }
             }
             state.loadError != null && state.hero.isEmpty() -> {
@@ -563,16 +563,20 @@ private fun HeroMasthead(
             .padding(top = space.xs),
         verticalAlignment = Alignment.Top,
     ) {
+        // ON MEDIA — this masthead is drawn over the hero pager, not over the
+        // page. So it keeps the dark-surface pair: white body, full-strength
+        // lime accent. `ink`/`accentInk` are tuned for `page` and would both
+        // vanish into a cover photo.
         Text(
             text = buildAnnotatedString {
                 append("Tonight in\n")
                 withStyle(
-                    SpanStyle(color = colors.brand, fontStyle = FontStyle.Italic),
+                    SpanStyle(color = colors.accent, fontStyle = FontStyle.Italic),
                 ) { append(place) }
                 append(".")
             },
             style = AppTheme.type.masthead,
-            color = colors.ink,
+            color = colors.onDark,
             modifier = Modifier.weight(1f),
         )
         MastheadAvatar(initial = avatarInitial, size = hero.avatarSize)

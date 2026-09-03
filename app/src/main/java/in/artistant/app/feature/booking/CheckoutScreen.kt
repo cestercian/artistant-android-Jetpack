@@ -306,7 +306,7 @@ private fun FeeRow(feeInr: Int) {
         Text(
             formatInr(feeInr),
             style = AppTheme.type.monoHero,
-            color = colors.brand,
+            color = colors.accentInk,
             maxLines = 1,
         )
     }
@@ -358,7 +358,7 @@ private fun NarratedWait(copy: CheckoutWaitCopy) {
         verticalArrangement = Arrangement.spacedBy(space.xl, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator(color = colors.brand)
+        CircularProgressIndicator(color = colors.accentInk)
         Column(
             verticalArrangement = Arrangement.spacedBy(space.sm),
             horizontalAlignment = Alignment.CenterHorizontally,

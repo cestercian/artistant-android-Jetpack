@@ -97,7 +97,7 @@ fun ArtistGigsScreen(
         when {
             state.isLoading && state.items.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
             }
             state.error != null && state.items.isEmpty() -> {
@@ -195,7 +195,7 @@ fun ArtistGigsScreen(
                                     Text(
                                         "Show all",
                                         style = AppTheme.type.footnote,
-                                        color = colors.brand,
+                                        color = colors.accentInk,
                                         modifier = Modifier
                                             .heightIn(min = AppTheme.dimens.size.rowMin)
                                             .clickable(role = Role.Button) { selectedDay = null }

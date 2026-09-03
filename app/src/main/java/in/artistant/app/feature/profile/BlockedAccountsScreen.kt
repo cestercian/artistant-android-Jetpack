@@ -75,7 +75,7 @@ fun BlockedAccountsScreen(
         when (state.status) {
             BlockedAccountsStatus.Loading ->
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
 
             // The list could not be read. Deliberately worded as an absence of
@@ -247,7 +247,7 @@ private fun BlockedAccountRowUi(
         Text(
             "Unblock",
             style = AppTheme.type.callout,
-            color = colors.brand,
+            color = colors.accentInk,
             modifier = Modifier
                 // A word is not a button, so nothing gives it a touch target for
                 // free: the word keeps its size and the tap node around it is

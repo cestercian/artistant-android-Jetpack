@@ -123,8 +123,8 @@ fun SignupAuthScreen(
                     horizontalArrangement = Arrangement.spacedBy(space.sm),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    Icon(Icons.Filled.Autorenew, contentDescription = null, tint = colors.brand, modifier = Modifier.size(AppTheme.dimens.size.iconMd))
-                    Text(authNotice, style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold), color = colors.brand)
+                    Icon(Icons.Filled.Autorenew, contentDescription = null, tint = colors.accentInk, modifier = Modifier.size(AppTheme.dimens.size.iconMd))
+                    Text(authNotice, style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold), color = colors.accentInk)
                 }
             }
 
@@ -161,7 +161,7 @@ fun SignupAuthScreen(
                     )
                 }
                 if (state.isAuthenticating) {
-                    CircularProgressIndicator(color = colors.brand, modifier = Modifier.align(Alignment.Center))
+                    CircularProgressIndicator(color = colors.accentInk, modifier = Modifier.align(Alignment.Center))
                 }
             }
         }
@@ -201,7 +201,13 @@ private fun AuthButton(
     val dimens = AppTheme.dimens
     val shape = RoundedCornerShape(dimens.radii.buttonLg)
     val interaction = remember { MutableInteractionSource() }
-    val fg = if (solid) Color.Black else colors.ink
+    // Both providers are ink on light now. The dark design gave the primary one a
+    // WHITE fill and the secondary a translucent card with a white 18% rim —
+    // which on a `#fafaf6` page is a white button on off-white behind an
+    // invisible border, i.e. two controls you cannot find. Screen 12 draws both
+    // as outlined rows instead; [solid] survives as the weight difference
+    // between them rather than as a colour inversion.
+    val fg = colors.ink
 
     Box(
         modifier = Modifier
@@ -209,7 +215,8 @@ private fun AuthButton(
             .height(dimens.size.ctaTall)
             .pressScale(interaction)
             .clip(shape)
-            .then(if (solid) Modifier.background(Color.White) else Modifier.background(colors.bgCard.copy(alpha = 0.6f)).border(dimens.size.hairline, Color.White.copy(alpha = 0.18f), shape))
+            .background(if (solid) colors.surface2 else colors.surface)
+            .border(dimens.size.hairline, colors.hairline, shape)
             .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick)
             .semantics(mergeDescendants = true) { this.testTag = testTag; contentDescription = title },
         contentAlignment = Alignment.Center,
