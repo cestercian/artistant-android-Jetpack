@@ -6,9 +6,9 @@ ksp = "2.1.0-1.0.29"                 # KSP version must track the Kotlin version
 hilt = "2.54"
 # AndroidX
 coreKtx = "1.15.0"
-lifecycle = "2.8.7"
+lifecycle = "2.9.4"                   # Compose 1.10 pulls 2.9.4 transitively; declared to match
 activityCompose = "1.9.3"
-composeBom = "2024.12.01"
+composeBom = "2025.12.01"          # Compose 1.10 / Material3 1.4 — newest that builds on AGP 8.9 + compileSdk 36 (1.12 needs AGP 9.1 + SDK 37)
 navigation = "2.8.5"
 datastore = "1.1.1"
 hiltNavigationCompose = "1.2.0"
