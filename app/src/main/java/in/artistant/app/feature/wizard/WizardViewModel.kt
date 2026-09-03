@@ -112,6 +112,12 @@ data class WizardUiState(
 
 sealed interface WizardEvent {
     data object Finished : WizardEvent
+
+    /** The profile went live — every write landed. */
+    data object Published : WizardEvent
+
+    /** Publish failed; the Preview step is showing `publishError`. */
+    data object PublishFailed : WizardEvent
 }
 
 @HiltViewModel
@@ -672,6 +678,7 @@ class WizardViewModel @Inject constructor(
                         pendingSamples = emptyList(),
                     )
                 }
+                _events.send(WizardEvent.Published)
             } catch (e: CancellationException) {
                 // Structured concurrency: never swallow. A CancellationException
                 // is an Exception, so without this arm clearing the wizard
@@ -688,7 +695,13 @@ class WizardViewModel @Inject constructor(
         }
     }
 
-    private fun failPublish(message: String) = _state.update {
-        it.copy(isPublishing = false, publishPhase = WizardPublishPhase.Idle, publishError = message)
+    private fun failPublish(message: String) {
+        _state.update {
+            it.copy(isPublishing = false, publishPhase = WizardPublishPhase.Idle, publishError = message)
+        }
+        // An event, not a read off `publishError`: two consecutive failures with
+        // the same message leave that field unchanged, and the second attempt is
+        // the one the artist most needs acknowledged.
+        viewModelScope.launch { _events.send(WizardEvent.PublishFailed) }
     }
 }

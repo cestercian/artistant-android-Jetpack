@@ -12,13 +12,27 @@ import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.data.repository.ReportsRepository
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
+
+/**
+ * One-shot side effects. Today: a send that didn't land.
+ *
+ * iOS watches a derived `failedCount` and buzzes when it rises. We fire from the
+ * write itself, which says the same thing more directly and also covers the case
+ * a count can't: a RETRY that fails again leaves the count exactly where it was.
+ */
+sealed interface ChatEvent {
+    /** A message flipped to `Failed` — first attempt or retry. */
+    data object SendFailed : ChatEvent
+}
 
 data class ChatUiState(
     val thread: Thread? = null,
@@ -116,6 +130,9 @@ class ChatViewModel @Inject constructor(
     private val threadId: String = checkNotNull(savedStateHandle["threadId"])
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    private val _events = Channel<ChatEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
     private var subscription: MessagesSubscription? = null
     /** Bumped on each subscribe attempt so a superseded join is discarded. */
@@ -351,6 +368,9 @@ class ChatViewModel @Inject constructor(
                         error = e.message,
                     )
                 }
+                // The bubble may well be off-screen by now — the buzz is how the
+                // user learns the send failed without scrolling back to find it.
+                _events.send(ChatEvent.SendFailed)
             }
     }
 

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.SolidColor
 import `in`.artistant.app.designsystem.component.ButtonVariant
 import `in`.artistant.app.designsystem.component.dockSurface
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -43,9 +44,16 @@ fun HelpFeedbackSheet(
     val space = AppTheme.dimens.space
     var body by remember { mutableStateOf("") }
     var isBug by remember { mutableStateOf(false) }
+    val haptics = rememberHaptics()
 
     LaunchedEffect(statusOk, status) {
-        if (statusOk && status != null) body = ""
+        if (statusOk && status != null) {
+            // iOS buzzes on the tap; we buzz on the answer, because we have one.
+            // `status` is cleared to null before each submit, so a second send
+            // with identical copy still changes the key and still buzzes.
+            haptics.success()
+            body = ""
+        }
     }
 
     // Hosted in a hand-rolled scrim rather than a Material `ModalBottomSheet`,

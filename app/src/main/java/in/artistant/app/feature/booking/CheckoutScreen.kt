@@ -42,6 +42,7 @@ import `in`.artistant.app.designsystem.component.InlineBanner
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.RevealOnAppear
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -67,6 +68,16 @@ fun CheckoutScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
+    val haptics = rememberHaptics()
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                CheckoutEvent.Sent -> haptics.success()
+                CheckoutEvent.Failed -> haptics.error()
+            }
+        }
+    }
 
     LaunchedEffect(state.confirmedBookingId) {
         state.confirmedBookingId?.let { id ->

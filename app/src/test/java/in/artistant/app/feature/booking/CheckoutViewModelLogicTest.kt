@@ -10,6 +10,7 @@ import `in`.artistant.app.feature.paywall.EntitlementStore
 import `in`.artistant.app.testsupport.artist
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -199,6 +200,67 @@ class CheckoutViewModelLogicTest {
         assertNotNull(s.draft)
         // The collect throws before create is reached, so nothing was written.
         assertTrue(bookings.listForClient().isEmpty())
+    }
+
+    /**
+     * The outcome buzzes.
+     *
+     * `Sent` is emitted after the WRITE, not after the payment seam — the
+     * reference build celebrated on the seam's return and buzzed success at
+     * clients whose booking row never landed.
+     */
+    @Test
+    fun aLandedRequestEmitsSent_andEmitsItOnlyOnce() = runTest {
+        val vm = vm(storeWithDraft())
+        val events = mutableListOf<CheckoutEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
+        advanceUntilIdle()
+
+        vm.sendRequest()
+        advanceUntilIdle()
+
+        assertEquals(listOf(CheckoutEvent.Sent), events)
+    }
+
+    /**
+     * Why the failure is an event rather than a read off `lastCreateErrorMessage`:
+     * that field is a durable fact the banner keeps showing until a send
+     * succeeds, so two failures with the SAME message never change it. An effect
+     * keyed on it would go quiet on the retry.
+     */
+    @Test
+    fun everyFailedSendEmitsFailed_evenWhenTheMessageIsIdentical() = runTest {
+        val bookings = FakeBookingsRepository().apply { failCreate = true }
+        val vm = vm(storeWithDraft(), bookings = bookings)
+        val events = mutableListOf<CheckoutEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
+        advanceUntilIdle()
+
+        vm.sendRequest()
+        advanceUntilIdle()
+        val firstMessage = vm.state.value.lastCreateErrorMessage
+
+        vm.sendRequest()
+        advanceUntilIdle()
+
+        assertEquals(firstMessage, vm.state.value.lastCreateErrorMessage)
+        assertEquals(listOf(CheckoutEvent.Failed, CheckoutEvent.Failed), events)
+    }
+
+    @Test
+    fun aFailedPaymentCollectEmitsFailed_notSent() = runTest {
+        val vm = vm(
+            storeWithDraft(),
+            payments = MockPaymentsService().apply { failCollect = true },
+        )
+        val events = mutableListOf<CheckoutEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
+        advanceUntilIdle()
+
+        vm.sendRequest()
+        advanceUntilIdle()
+
+        assertEquals(listOf(CheckoutEvent.Failed), events)
     }
 
     @Test

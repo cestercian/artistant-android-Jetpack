@@ -24,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -61,6 +63,18 @@ fun GigRequestDetailScreen(
     val space = AppTheme.dimens.space
     val request = state.request
     var confirmingDecline by remember { mutableStateOf(false) }
+    val haptics = rememberHaptics()
+
+    // Accept is the only outcome the artist gets a buzz for, and it is the
+    // server's answer, not the tap. Decline buzzes at the confirm below —
+    // there is nothing to celebrate on its way back.
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                GigRequestDetailEvent.Accepted -> haptics.success()
+            }
+        }
+    }
 
     when {
         state.isLoading && request == null -> {
@@ -195,6 +209,11 @@ fun GigRequestDetailScreen(
             text = { Text("The client is notified and this request closes.") },
             confirmButton = {
                 TextButton(onClick = {
+                    // Warning, not error: declining is a deliberate, legitimate
+                    // action with a consequence for the client — the buzz marks
+                    // its weight, it is not a failure. Fired here rather than on
+                    // the result because the decision is the moment that matters.
+                    haptics.warning()
                     confirmingDecline = false
                     viewModel.decline()
                 }) {

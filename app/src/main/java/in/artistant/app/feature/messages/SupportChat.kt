@@ -34,6 +34,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -246,6 +247,14 @@ fun SupportChatSheet(
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
     val listState = rememberLazyListState()
+    val haptics = rememberHaptics()
+
+    // iOS buzzes success as it appends the receipt; here the receipt is only
+    // honest once the write landed, and `NoteSent` is the step it lands on — a
+    // failed send stays in `Composing`, so a failure can't buzz success.
+    LaunchedEffect(state.step) {
+        if (state.step == SupportStep.NoteSent) haptics.success()
+    }
 
     // Follow the newest turn. The transcript is short and entirely
     // machine-driven, so there is no reader-scrolled-away case to protect.

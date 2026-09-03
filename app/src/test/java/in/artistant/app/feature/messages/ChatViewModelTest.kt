@@ -16,6 +16,8 @@ import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -559,6 +561,44 @@ class ChatViewModelTest {
         model.retryFailedMessage(failedId)
 
         assertNull(model.state.value.error)
+    }
+
+    /**
+     * The send-failure buzz.
+     *
+     * It comes off an EVENT rather than off a derived failed-count for a reason a
+     * count can't cover: a retry that fails again leaves the count exactly where
+     * it was, so a count-watcher goes silent on the second attempt — the one the
+     * user most needs told about. Two failures, two events.
+     */
+    @Test
+    fun everyFailedSendEmitsItsOwnFailureEvent() = runTest {
+        val repo = ScriptedMessages().apply { failSend = true }
+        val model = vm(repo)
+        val events = mutableListOf<ChatEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.events.collect { events += it } }
+
+        model.send("Meet at 8?")
+        advanceUntilIdle()
+        assertEquals(listOf(ChatEvent.SendFailed), events)
+
+        val failedId = model.state.value.messages.single().id
+        model.retryFailedMessage(failedId)
+        advanceUntilIdle()
+        assertEquals(listOf(ChatEvent.SendFailed, ChatEvent.SendFailed), events)
+    }
+
+    @Test
+    fun aSendThatLandsEmitsNothing() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo)
+        val events = mutableListOf<ChatEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { model.events.collect { events += it } }
+
+        model.send("Meet at 8?")
+        advanceUntilIdle()
+
+        assertTrue(events.isEmpty())
     }
 
     @Test
