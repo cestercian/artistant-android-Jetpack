@@ -65,12 +65,18 @@ fun WelcomeScreen(
     var legalDoc by remember { mutableStateOf<LegalDoc?>(null) }
 
     Box(modifier = modifier.fillMaxSize().background(colors.bg)) {
-        // Abstract two-tone radial hero — violet accent top-left, brand lime top-right. Held to
-        // the top band; it sits behind the content column, so it can never push it. A real
-        // height, not `heightIn(max =)`: an empty Box measures to the minimum it is given, which
-        // in a fillMaxSize Box is zero, and both washes then paint into nothing. Drawn in
-        // `drawBehind` so the centres and radii are placed against the MEASURED size — as fixed
-        // pixel constants they landed somewhere different on every density.
+        // Abstract two-tone radial hero, held to the top band; it sits behind the content
+        // column, so it can never push it. A real height, not `heightIn(max =)`: an empty
+        // Box measures to the minimum it is given, which in a fillMaxSize Box is zero, and
+        // both washes then paint into nothing. Drawn in `drawBehind` so the centres and radii
+        // are placed against the MEASURED size — as fixed pixel constants they landed
+        // somewhere different on every density.
+        //
+        // The alphas were 0.35 / 0.18, tuned for lime and violet glowing out of near-black.
+        // On `page` the same numbers are a lime fog over the whole top half of the first
+        // screen anyone sees — the accent stops being a signal and becomes the background.
+        // Dropped to a tint that warms the corner and nothing more; screen 118 draws this
+        // page as plain off-white, so this is already the generous reading of it.
         Box(
             Modifier
                 .fillMaxWidth()
@@ -78,14 +84,14 @@ fun WelcomeScreen(
                 .drawBehind {
                     drawRect(
                         Brush.radialGradient(
-                            colors = listOf(colors.accent.copy(alpha = 0.35f), Color.Transparent),
+                            colors = listOf(colors.accent.copy(alpha = 0.10f), Color.Transparent),
                             center = Offset(size.width * 0.3f, size.height * 0.2f),
                             radius = size.width * 0.7f,
                         ),
                     )
                     drawRect(
                         Brush.radialGradient(
-                            colors = listOf(colors.brand.copy(alpha = 0.18f), Color.Transparent),
+                            colors = listOf(colors.brand.copy(alpha = 0.06f), Color.Transparent),
                             center = Offset(size.width * 0.85f, size.height * 0.3f),
                             radius = size.width * 0.6f,
                         ),
