@@ -7,10 +7,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -25,9 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import `in`.artistant.app.designsystem.component.FloatingTabAction
-import `in`.artistant.app.designsystem.component.FloatingTabBar
-import `in`.artistant.app.designsystem.component.FloatingTabItem
+import `in`.artistant.app.designsystem.component.LightTabAction
+import `in`.artistant.app.designsystem.component.LightTabBar
+import `in`.artistant.app.designsystem.component.LightTabItem
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavType
@@ -59,25 +60,37 @@ import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
 /**
- * Client navigation: four peer destinations in the floating pill, plus Search.
+ * Client navigation: five top-level routes, four of which are glyphs in the bar.
  *
- * Search is intentionally NOT one of the four. It renders as the detached circle
- * beside the pill because it is an action on the catalogue rather than a place
- * you go — the same reason Discover no longer carries an inline search field.
- * It stays in this enum only so the deep-link router and `showBottomBar` can
- * still treat it as a top-level route.
+ * The light design draws Home · Search · [+] · Messages · Profile (screens 02
+ * and 19). Search moved INTO the bar — the dark design hung it off the side as a
+ * detached circle, and the new bar's middle slot belongs to an action instead.
+ *
+ * **Bookings is the one that came out.** It keeps its route, its push deep link
+ * and its bar — a notification about a booking still lands on it, and the bar
+ * still draws while it is open — it simply is not one of the four glyphs. The
+ * design's own screens disagree here (10 and 26 put a calendar in the fourth
+ * slot, 02 and 19 put Messages and Profile there); the two that agree with each
+ * other win, and Bookings stays reachable from Profile and from every booking
+ * card.
  */
 private enum class ClientTab(val route: String, val label: String, val icon: ImageVector) {
-    Discover("discover", "Discover", Icons.Filled.Explore),
-    Bookings("bookings", "Bookings", Icons.Filled.CalendarMonth),
-    Messages("messages", "Messages", Icons.Filled.Chat),
-    Profile("profile", "Profile", Icons.Filled.Person),
+    Discover("discover", "Discover", Icons.Filled.Home),
     Search("search", "Search", Icons.Filled.Search),
+    Messages("messages", "Messages", Icons.Filled.ChatBubbleOutline),
+    Profile("profile", "Profile", Icons.Filled.PersonOutline),
+    Bookings("bookings", "Bookings", Icons.Filled.CalendarMonth),
 }
 
-/** The four that live inside the pill, in bar order. */
-private val PILL_TABS = listOf(
-    ClientTab.Discover, ClientTab.Bookings, ClientTab.Messages, ClientTab.Profile,
+/**
+ * The four glyphs, in bar order — two, the action circle, then two.
+ *
+ * Bookings is last in the enum precisely because it is absent here; keeping the
+ * two lists in the same order otherwise means a reader can see the bar's layout
+ * without cross-referencing.
+ */
+private val BAR_TABS = listOf(
+    ClientTab.Discover, ClientTab.Search, ClientTab.Messages, ClientTab.Profile,
 )
 
 private const val ARTIST_PROFILE_ROUTE = "artist/{artistId}"
@@ -138,23 +151,27 @@ fun ClientTabsScaffold() {
     val tabRoutes = remember { ClientTab.entries.map { it.route }.toSet() }
 
     Scaffold(
-        // Transparent so the ambient wash below shows through. The wash paints
-        // the background colour itself, so nothing is lost.
-        containerColor = Color.Transparent,
-        modifier = Modifier.ambientBackdrop(),
+        // The page ground. The dark design painted a role-tinted radial wash
+        // behind every destination and left this transparent; the light design
+        // has no wash — one flat warm off-white, with the accent appearing once
+        // per screen wherever that screen decides.
+        containerColor = AppTheme.colors.page,
         bottomBar = {
             if (!showBottomBar) return@Scaffold
-            FloatingTabBar(
+            LightTabBar(
                 items = remember {
-                    PILL_TABS.map { FloatingTabItem(it.route, it.label, it.icon) }
+                    BAR_TABS.map { LightTabItem(it.route, it.label, it.icon) }
                 },
                 selectedRoute = selectedTabRoute,
                 onSelect = { route -> navigateToTab(nav, route) },
-                trailing = FloatingTabAction(
-                    route = ClientTab.Search.route,
-                    label = ClientTab.Search.label,
-                    icon = ClientTab.Search.icon,
-                    selected = selectedTabRoute == ClientTab.Search.route,
+                // The raised circle is the client's primary verb: find someone to
+                // book. It opens Search rather than a composer, because there is
+                // nothing to compose until an artist is picked — the funnel
+                // starts on a profile. A dedicated "new booking" flow is a
+                // section-PR decision, not a P1 invention.
+                action = LightTabAction(
+                    label = "Find an artist",
+                    icon = Icons.Filled.Add,
                     onClick = { navigateToTab(nav, ClientTab.Search.route) },
                 ),
             )

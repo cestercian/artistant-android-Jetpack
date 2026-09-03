@@ -16,7 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.InfoOutline
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -105,7 +105,7 @@ fun Banner(
         BannerTone.Promotion -> colors.onAccent
     }
     val glyph = icon ?: when (tone) {
-        BannerTone.Info, BannerTone.Promotion -> Icons.Filled.InfoOutline
+        BannerTone.Info, BannerTone.Promotion -> Icons.Outlined.Info
         BannerTone.Attention -> Icons.Filled.WarningAmber
         BannerTone.Failure -> Icons.Filled.ErrorOutline
     }
