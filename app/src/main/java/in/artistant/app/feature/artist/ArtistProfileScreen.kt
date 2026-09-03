@@ -40,6 +40,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.GalleryPhoto
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
@@ -72,6 +76,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.domain.artist.PackagePricing
 import `in`.artistant.app.domain.artist.ServiceTags
+import `in`.artistant.app.domain.artist.spotifyEmbedUrl
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.domain.score.tierColor
@@ -181,8 +186,13 @@ fun ArtistProfileScreen(
                                     onAction = viewModel::refresh,
                                 )
                             }
-                            if (artist.bio.isNotBlank()) {
-                                AboutBlock(bio = artist.bio)
+                            // The strip is part of About, so About renders for a
+                            // bio-less artist who has photos — an artist who
+                            // skipped the wizard's bio step still has work to
+                            // show, and iOS keeps the section (and its header)
+                            // standing on an empty bio for the same reason.
+                            if (artist.bio.isNotBlank() || artist.gallery.isNotEmpty()) {
+                                AboutBlock(bio = artist.bio, gallery = artist.gallery)
                             }
                             if (artist.serviceTags.isNotEmpty()) {
                                 ServicesBlock(tags = artist.serviceTags)
@@ -194,8 +204,9 @@ fun ArtistProfileScreen(
                             // question a client has before "what does it cost",
                             // and this page previously had no answer to it at all
                             // — the samples were fetched and then never rendered.
-                            if (artist.samples.isNotEmpty()) {
-                                SoundBlock(samples = artist.samples)
+                            val spotifyEmbed = spotifyEmbedUrl(artist.spotifyArtistUrl)
+                            if (artist.samples.isNotEmpty() || spotifyEmbed != null) {
+                                SoundBlock(samples = artist.samples, spotifyEmbed = spotifyEmbed)
                             }
                             BookingBlock(
                                 artist = artist,
@@ -648,11 +659,19 @@ private fun StatCell(
 }
 
 @Composable
-private fun AboutBlock(bio: String) {
+private fun AboutBlock(bio: String, gallery: List<GalleryPhoto>) {
     val colors = AppTheme.colors
     Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.lg)) {
         Text("About", style = AppTheme.type.displaySmall, color = colors.ink)
-        Text(bio, style = AppTheme.type.body, color = colors.ink2)
+        if (bio.isNotBlank()) {
+            Text(bio, style = AppTheme.type.body, color = colors.ink2)
+        }
+        // Under the bio, inside the page's own gutter — the strip scrolls within
+        // the text column rather than bleeding to the screen edge, which is
+        // where iOS puts it too.
+        if (gallery.isNotEmpty()) {
+            GalleryStrip(gallery)
+        }
     }
 }
 
@@ -705,27 +724,58 @@ private fun ServicesBlock(tags: List<String>) {
  * One player for the block, not one per row: the handle holds a single ExoPlayer,
  * so starting a second clip replaces the first rather than layering two. Leaving
  * the screen disposes it and the audio stops with the page.
+ *
+ * Samples and Spotify BOTH render when the artist has both, where iOS shows the
+ * embed *instead of* the sample rows. That `else if` is a fact about iOS, not
+ * about the product: its rows are read-only placeholders (PR #60 pulled their
+ * playback), so falling back to them behind a working player costs nothing
+ * there. Here the rows play, and hiding an artist's own uploaded clips because
+ * they also pasted a Spotify link would be dropping the better recording of the
+ * two — theirs, of the act being booked, rather than a studio cut.
  */
 @Composable
-private fun SoundBlock(samples: List<Sample>) {
+private fun SoundBlock(samples: List<Sample>, spotifyEmbed: String?) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
-    val player = rememberSamplePlayer(samples)
-    val playback by player.playback
+    var spotifyExpanded by rememberSaveable { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
         Text("Listen", style = AppTheme.type.displaySmall, color = colors.ink)
         Column {
             HRule()
-            samples.forEach { sample ->
-                SampleRow(
-                    sample = sample,
-                    playback = playback,
-                    onTap = { player.onTap(sample) },
+            // Behind an `if`, so a Spotify-only artist does not cost an
+            // ExoPlayer, an audio-focus request and a lifecycle observer for a
+            // list with nothing in it.
+            if (samples.isNotEmpty()) {
+                SampleRows(samples)
+            }
+            if (spotifyEmbed != null) {
+                SpotifyDisclosure(
+                    embedUrl = spotifyEmbed,
+                    expanded = spotifyExpanded,
+                    onToggle = { spotifyExpanded = !spotifyExpanded },
                 )
                 HRule()
             }
         }
+    }
+}
+
+/**
+ * The playable rows, and the one player they share. Split out so the player's
+ * whole lifetime is the lifetime of a non-empty sample list.
+ */
+@Composable
+private fun SampleRows(samples: List<Sample>) {
+    val player = rememberSamplePlayer(samples)
+    val playback by player.playback
+    samples.forEach { sample ->
+        SampleRow(
+            sample = sample,
+            playback = playback,
+            onTap = { player.onTap(sample) },
+        )
+        HRule()
     }
 }
 

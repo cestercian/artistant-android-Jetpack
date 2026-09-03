@@ -53,7 +53,7 @@ class ArtistHeadlinePriceTest {
             packages = packages,
             tech = emptyList(),
             samples = emptyList(),
-            covers = emptyList(),
+            photos = emptyList(),
         ).single()
 
     /**
@@ -143,7 +143,7 @@ class ArtistHeadlinePriceTest {
                 dbPackage("q0", "Duo", 80_000, "60 min", artistId = other),
             tech = emptyList(),
             samples = emptyList(),
-            covers = emptyList(),
+            photos = emptyList(),
         )
 
         assertEquals(22_000, stitched.first { it.id == ARTIST }.price)

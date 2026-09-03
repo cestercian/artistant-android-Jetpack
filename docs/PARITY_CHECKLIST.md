@@ -43,7 +43,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | done | Query + facets + sort + filter sheet badge |
 | `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | done | Accordion + histogram + 0073 dims |
 | `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | done | Debounce + pagination + filter/histogram |
-| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | Hero/bio/packages/reviews/dock + saved heart + score breakdown sheet |
+| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | Hero/bio/packages/reviews/dock + saved heart + score breakdown sheet; About gallery strip + Sound Spotify embed (#18). Hero pager (PROF-10) still open |
 | `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | Self metrics + history; Home → Score |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | Client real-world rows from profile chip |
 | `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | done | Profile stats destination |
@@ -217,7 +217,6 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 
 - Brand font TTFs in `res/font/` — polish, not a product blocker
 - Operator Google/Apple dashboard config + `google-services.json` / FCM server path
-- ExoPlayer sample / Spotify embed playback
 - Artist profile PROF-* Airbnb extras (hero pager, review search/sort)
 
 ---
