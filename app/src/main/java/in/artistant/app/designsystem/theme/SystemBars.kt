@@ -1,10 +1,10 @@
 package `in`.artistant.app.designsystem.theme
 
 import android.graphics.Color as AndroidColor
-import android.graphics.drawable.ColorDrawable
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import `in`.artistant.app.R
 
 /**
  * The one place the app talks to the window, and the one place outside the token
@@ -43,11 +43,11 @@ fun ComponentActivity.applyLightSystemBars() {
             darkScrim = LEGACY_NAV_SCRIM,
         ),
     )
-    window.setBackgroundDrawable(ColorDrawable(PAGE_ARGB))
+    // By resource id, not by a literal: `@color/page` is already the one place
+    // the launch-window colours live, and a second copy of #fafaf6 here is a
+    // copy that can drift.
+    window.setBackgroundDrawableResource(R.color.page)
 }
-
-/** `AppColors.page` (#fafaf6) as a platform colour int. */
-private const val PAGE_ARGB = 0xFFFAFAF6.toInt()
 
 /**
  * 45% black. Used only on API 26, the one supported level with no light-nav-bar

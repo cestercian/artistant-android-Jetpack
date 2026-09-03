@@ -9,46 +9,29 @@ Roles: **C** = client-side, **A** = artist-side, **S** = shared.
 
 ---
 
-## 1. Design system tokens (the `Theme/` port)
+## 1. Design system tokens
 
-### Colors (`designsystem/theme/Color.kt`) — dark-only, warm-black ladder
-| Token | Hex | Token | Hex |
-|---|---|---|---|
-| `bg` | `#0A0A0A` | `ink` | `#F5F5F5` |
-| `bgElev` | `#141414` | `ink2` | `#A8A8A8` |
-| `bgCard` | `#1A1A1A` | `ink3` | `#6E6E6E` |
-| `bgSoft` | `#222222` | `ink4` | `#4F5366` |
-| `line` | `#2A2A2A` | `hot` | `#FF5A5F` |
-| `lineSoft` | `#1F1F1F` | `warm` | `#FFB454` |
-| | | `good` | `#5BE074` |
-
-**Role-reactive accent** (`brand`/`brandInk`/`brandSoft` resolve from `role`):
-- **client → lime** `brand #C8FF00`, `brandInk #0A0A0A`, `brandSoft #1D2309`
-- **artist → violet** `brand #7C5CFF`, `brandInk #FFFFFF`, `brandSoft #1C1733`
-- Fixed: `accent #7C5CFF`, `accentSoft #1C1733`, `accentInk #C9BFFF`
-- Tier→color: Elite=brand, Trusted=good, Rising=warm, New=ink3
-
-### Type (`designsystem/theme/Type.kt`) — Instrument Serif / Geist / Geist Mono
-`displayHero 40 serif` · `displayTitle 32 serif` · `displayMedium 28 serif` ·
-`displaySub 24 serif` · `displaySmall 22 serif` · `title 24 bold` ·
-`headline 18 semibold` · `body 16` · `callout 15 medium` · `footnote 13 medium` ·
-`caption 12 semibold` (small-caps labels) · `monoLarge 24 bold` ·
-`monoMedium 16 semibold` · `monoSmall 12 medium` · `scoreRing 22 bold mono`.
-Signature: `editorialHeadline(lead, accent, tail)` = serif with one **italic
-brand-color** word → Compose `AnnotatedString`. Bind sizes so system font-scale
-applies (`relativeTo:` → Compose respects `fontScale` by default).
-
-### Spacing/size (`designsystem/theme/Dimens.kt`)
-`Space` = 4/8/12/16/24/32 (xs…xxl). `Radii` = 8/12/18/24/32. `Size`: icons
-10/12/16/20/28; button/input min 48, row min 44; avatars 32/48/64/96; rings
-44/64/76/120; hero heights 460/360/280. `AspectRatio`: portrait 4:5, editorial
-3:4, landscape 16:9, square 1:1, stripWide 21:9. `FlowRow` for chip wrapping.
-
-### Visual rules (locked)
-Hairlines (`line`/`lineSoft`), **no card chrome**, mono numerals, editorial serif
-headlines, **accent = signal (one per screen), not decoration**. Dark-only. Glass
-docks/composers approximate iOS `.ultraThinMaterial` with translucent Material 3
-surfaces (+ optional `RenderEffect` blur, API 31+).
+> **Superseded — Sep 2026.** The dark, dual-accent language this section
+> described was replaced by **"Artistant iOS Light"**: light surfaces, one lime
+> accent for both roles, Plus Jakarta Sans + JetBrains Mono, no editorial serif.
+>
+> **`docs/REDESIGN_2026-09.md` is the token sheet.** §2 has the palette, the
+> type ramp and the geometry as measured off the design; §4 has the old→new
+> mapping for every `AppColors` name that survived. Read it before touching a
+> screen — the table that used to live here is now wrong in every row, so it has
+> been removed rather than left to be copied out of by mistake.
+>
+> What has NOT changed: the token files are still the only place a hex, a dp or
+> an sp may be written (`designsystem/theme/Color.kt`, `Type.kt`, `Dimens.kt`),
+> screens still read them through `AppTheme.colors / type / dimens`, and the
+> over-media chrome (`glass*`, `inkOnMedia*`, `ArtistGradient`) is deliberately
+> untouched by the redesign because photos are still photos.
+>
+> The v2 component library that implements the new language lives in
+> `designsystem/component/` — `PrimaryButton`, `SecondaryButton`, `IconCircle`,
+> `SearchBar`, `Chip`, `SectionHeader`, `Tile`, `HeroCard`, `ListRow`, `Banner`,
+> `StatusPill`, `EmptyState`, `Skeleton`, `Toast`, `LightTabBar`, `ScreenHeader`,
+> `BackHeader`, `SheetScaffold`, `AppTextField`, `OtpField`.
 
 ---
 
