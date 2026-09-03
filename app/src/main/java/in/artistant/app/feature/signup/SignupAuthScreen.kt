@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -200,7 +199,7 @@ private fun AuthButton(
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(dimens.radii.buttonLg)
     val interaction = remember { MutableInteractionSource() }
     val fg = if (solid) Color.Black else colors.ink
 

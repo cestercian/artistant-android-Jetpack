@@ -20,6 +20,23 @@ data class Radii(
     val lg: Dp = 18.dp,
     val xl: Dp = 24.dp,
     val xxl: Dp = 32.dp,
+    /**
+     * The signup flow's button radius, and the one radius on the ramp named
+     * after a control rather than a step.
+     *
+     * Deliberately off the sm…xxl ladder — it sits between [md] (12) and [lg]
+     * (18) and there is nothing to snap it to. That is not an accident of this
+     * port: iOS carries the identical value under the identical name
+     * (`Radii.buttonLg`), with a comment saying it is off-ramp and that
+     * reconciling it would restyle every CTA in the app, which is a decision for
+     * the design owner rather than a drive-by. Same reasoning holds here, so the
+     * number gets a name instead of a ramp seat.
+     *
+     * Every signup CTA takes it — the auth step's three provider buttons and the
+     * profile step's outlined lime Continue — which is what makes it a token and
+     * not a literal worth leaving alone.
+     */
+    val buttonLg: Dp = 16.dp,
 )
 
 /** Icon/control/avatar/ring/hero sizes (SCREEN_INVENTORY §1). */

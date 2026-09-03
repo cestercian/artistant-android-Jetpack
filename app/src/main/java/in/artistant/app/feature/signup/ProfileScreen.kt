@@ -97,7 +97,11 @@ fun ProfileScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
-                    Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).border(1.dp, colors.line, RoundedCornerShape(15.dp)),
+                    // A circle, spelled as one. It used to be a 30dp box under a
+                    // `RoundedCornerShape(15.dp)` — the same shape by arithmetic,
+                    // but one that silently stops being a circle the day the box
+                    // is resized. iOS draws `Circle().stroke(…)` here.
+                    Modifier.size(30.dp).clip(CircleShape).border(dimens.size.hairline, colors.line, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     // A chevron, not a cross. The control goes BACK a signup step —
@@ -182,7 +186,7 @@ fun ProfileScreen(
                         )
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.ink3, modifier = Modifier.size(AppTheme.dimens.size.iconMd))
                     }
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(if (state.city.isEmpty()) colors.line else colors.brand.copy(alpha = 0.4f)))
+                    Box(Modifier.fillMaxWidth().height(dimens.size.hairline).background(if (state.city.isEmpty()) colors.line else colors.brand.copy(alpha = 0.4f)))
                     DropdownMenu(expanded = cityOpen, onDismissRequest = { cityOpen = false }) {
                         cities.forEach { c ->
                             DropdownMenuItem(
@@ -214,8 +218,8 @@ fun ProfileScreen(
             modifier = Modifier
                 .fillMaxWidth().navigationBarsPadding().imePadding()
                 .padding(horizontal = space.xl).padding(bottom = space.xxl).height(54.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .border(1.5.dp, if (disabled) colors.line else colors.brand, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(dimens.radii.buttonLg))
+                .border(dimens.size.strokeEmphasis, if (disabled) colors.line else colors.brand, RoundedCornerShape(dimens.radii.buttonLg))
                 .clickable(enabled = !disabled, onClick = onContinue)
                 .semantics { testTag = "profile.continue" },
             contentAlignment = Alignment.Center,
@@ -233,15 +237,16 @@ fun ProfileScreen(
 @Composable
 private fun HandleIndicator(status: HandleStatus) {
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     when (status) {
         HandleStatus.Empty -> Unit
         HandleStatus.Invalid -> Text("3–24 · a–z 0–9 _", style = AppTheme.type.caption, color = colors.warm)
-        HandleStatus.Checking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            CircularProgressIndicator(color = colors.ink3, strokeWidth = 1.5.dp, modifier = Modifier.size(12.dp))
+        HandleStatus.Checking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
+            CircularProgressIndicator(color = colors.ink3, strokeWidth = dimens.size.strokeEmphasis, modifier = Modifier.size(dimens.size.iconSm))
             Text("Checking…", style = AppTheme.type.monoSmall, color = colors.ink3)
         }
-        HandleStatus.Available -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brand, modifier = Modifier.size(AppTheme.dimens.size.iconSm))
+        HandleStatus.Available -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
+            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brand, modifier = Modifier.size(dimens.size.iconSm))
             Text("free", style = AppTheme.type.monoSmall, color = colors.brand)
         }
         HandleStatus.Taken -> Text("Taken", style = AppTheme.type.caption, color = colors.hot)
