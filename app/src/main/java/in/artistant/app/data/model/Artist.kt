@@ -1,6 +1,7 @@
 package `in`.artistant.app.data.model
 
 import androidx.compose.ui.graphics.Color
+import `in`.artistant.app.data.repository.ArtistMediaAspect
 
 /**
  * Domain artist — port of iOS `Models/Artist.swift`. Tile-level projections from
@@ -46,6 +47,23 @@ data class Artist(
     /** Public CDN URL for position-0 photo, or null → gradient fallback. */
     val coverUrl: String? = null,
     /**
+     * The artist's OTHER `artist_media` photos — everything the cover is not, in
+     * the order the artist put them in.
+     *
+     * Separate from [coverUrl] rather than a list the cover is the head of,
+     * because the two are read by different surfaces for different reasons: every
+     * tile in the app wants the one cover, and only the profile's About strip
+     * wants the rest. Folding them together would make every tile carry five
+     * photos it will never draw, and would make "which one is the cover" a
+     * convention each caller has to re-derive.
+     *
+     * Empty for a tile projection — Discover and Search resolve a cover and
+     * nothing else — so an empty strip means "not loaded yet" exactly as often as
+     * it means "this artist has one photo". The strip renders nothing either way,
+     * which is the one case where those two are allowed to look the same.
+     */
+    val gallery: List<GalleryPhoto> = emptyList(),
+    /**
      * Which palette [gradient] was resolved from.
      *
      * Carried alongside the resolved colours rather than instead of them: every
@@ -87,6 +105,27 @@ data class Artist(
 data class ArtistPrompt(
     val question: String,
     val answer: String,
+)
+
+/**
+ * One photo in an artist's gallery strip.
+ *
+ * Carries a resolved [url] rather than the storage path it came from, the same
+ * way [Artist.coverUrl] does: building the bucket address is the repository's
+ * job, and a screen holding a path would have to know which bucket it belongs to
+ * to draw it. A row whose path cannot be resolved never becomes a
+ * [GalleryPhoto] — a tile with no address is a grey box that never fills in.
+ *
+ * [aspect] is `artist_media.aspect`, reused from the repository that reads the
+ * column rather than re-spelled here: it is the wire vocabulary of one column,
+ * and two enums over one column is two chances to disagree with the server. The
+ * strip sizes each tile from it so a portrait shot stays vertical instead of
+ * being cropped square — which is the whole reason the column exists.
+ */
+data class GalleryPhoto(
+    val id: String,
+    val url: String,
+    val aspect: ArtistMediaAspect,
 )
 
 data class ArtistPackage(

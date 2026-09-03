@@ -3,7 +3,6 @@ package `in`.artistant.app.data.repository
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
 import `in`.artistant.app.data.model.Artist
@@ -180,7 +179,7 @@ class SupabaseSearchRepository @Inject constructor(
     private suspend fun resolveCovers(ids: List<String>): Map<String, String> {
         if (ids.isEmpty()) return emptyMap()
         val rows = client.from("artist_media")
-            .select(Columns.list("artist_id", "storage_path", "position")) {
+            .select(SupabaseArtistsRepository.ARTIST_PHOTO_COLUMNS) {
                 filter {
                     isIn("artist_id", ids)
                     eq("kind", "photo")
@@ -188,12 +187,14 @@ class SupabaseSearchRepository @Inject constructor(
                 order("artist_id", Order.ASCENDING)
                 order("position", Order.ASCENDING)
             }
-            .decodeList<DbArtistCover>()
+            .decodeList<DbArtistPhoto>()
         return rows.groupBy { it.artistId.lowercase() }
             .mapNotNull { (id, group) ->
-                val url = group.firstOrNull()?.let {
-                    SupabaseArtistsRepository.coverUrl(it.storagePath)
-                } ?: return@mapNotNull null
+                // Same cover rule as the profile stitch, from the same function:
+                // a tile and the page it opens showing different photos of the
+                // same artist is exactly the drift a shared split prevents.
+                val url = SupabaseArtistsRepository.artistPhotos(group).coverUrl
+                    ?: return@mapNotNull null
                 id to url
             }
             .toMap()

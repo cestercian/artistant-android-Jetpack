@@ -12,6 +12,8 @@ import android.graphics.Shader
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.withRotation
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.GalleryPhoto
+import `in`.artistant.app.data.repository.ArtistMediaAspect
 import timber.log.Timber
 import java.io.File
 import java.util.Random
@@ -132,9 +134,40 @@ internal object HarnessCoverArt {
         if (uris.isEmpty()) return roster
         return roster.mapIndexed { index, artist ->
             val url = uris.getOrNull(index)?.takeIf { index < roster.lastIndex }
-            if (url == null) artist else artist.copy(coverUrl = url)
+            when {
+                url == null -> artist
+                // The extras belong to nobody, so they can only be lent to ONE
+                // artist without putting the same photograph on two people's
+                // work — the same rule the EXTRA_GALLERY note above states, and
+                // the fixture artist leads the roster. The rest keep an empty
+                // strip, which is also the state a real one-photo artist is in.
+                index == 0 -> artist.copy(coverUrl = url, gallery = extraGallery())
+                else -> artist.copy(coverUrl = url)
+            }
         }
     }
+
+    /**
+     * The unassigned frames, as the gallery strip on a client-facing profile.
+     *
+     * Only the extras: the cover is `position 0` and the strip is everything
+     * after it, so seeding the cover here too would draw the hero photo a second
+     * time under the bio — which is precisely the duplicate the cover/gallery
+     * split exists to prevent, and a fixture that showed it would read as the
+     * bug rather than as the fix.
+     *
+     * Portrait, because that is what these are: [WIDTH]×[HEIGHT] is 4:5, which
+     * `ArtistMediaAspect.classify` buckets as portrait. Saying so exercises the
+     * strip's aspect-aware widths instead of leaving every tile square.
+     */
+    private fun extraGallery(): List<GalleryPhoto> =
+        uris.drop(rosterCount).mapIndexed { index, uri ->
+            GalleryPhoto(
+                id = "harness-gallery-$index",
+                url = uri,
+                aspect = ArtistMediaAspect.portrait,
+            )
+        }
 
     /**
      * A media gallery for the nth roster artist: their own cover first — the
