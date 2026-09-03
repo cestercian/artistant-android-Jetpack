@@ -107,7 +107,7 @@ fun PaywallScreen(
                     Text(
                         if (isArtist) "listed" else "booking",
                         style = AppTheme.type.displaySub.copy(fontStyle = FontStyle.Italic),
-                        color = colors.brand,
+                        color = colors.accentInk,
                     )
                     Text(".", style = AppTheme.type.displaySub, color = colors.ink)
                 }
@@ -141,7 +141,7 @@ fun PaywallScreen(
                         horizontalArrangement = Arrangement.spacedBy(space.md),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brand)
+                        Icon(Icons.Filled.Check, contentDescription = null, tint = colors.accentInk)
                         Text(perk, style = AppTheme.type.body, color = colors.ink)
                     }
                 }

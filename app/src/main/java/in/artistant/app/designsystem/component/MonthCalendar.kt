@@ -236,7 +236,7 @@ private fun MonthMenu(monthName: String, onSelectMonth: (Int) -> Unit) {
                             Icon(
                                 Icons.Filled.Check,
                                 contentDescription = null,
-                                tint = colors.brand,
+                                tint = colors.accentInk,
                                 modifier = Modifier.size(dimens.size.iconMd),
                             )
                         }

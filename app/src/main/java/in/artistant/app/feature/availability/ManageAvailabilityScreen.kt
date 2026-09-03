@@ -82,7 +82,7 @@ fun ManageAvailabilityScreen(
 
         when {
             state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+                CircularProgressIndicator(color = colors.accentInk)
             }
             else -> {
                 // The weight moves OUT to the wrapper: it is the wrapper that is
@@ -208,7 +208,7 @@ fun ManageAvailabilityScreen(
                         }
                         if (state.saved) {
                             Spacer(Modifier.height(space.md))
-                            Text("Saved.", style = AppTheme.type.footnote, color = colors.brand)
+                            Text("Saved.", style = AppTheme.type.footnote, color = colors.accentInk)
                         }
                         Spacer(Modifier.height(AppTheme.dimens.size.listTailroom))
                     }

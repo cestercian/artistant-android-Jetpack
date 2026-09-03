@@ -74,7 +74,7 @@ fun BookingScreen(
     when {
         state.isLoading && state.artist == null -> {
             Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+                CircularProgressIndicator(color = colors.accentInk)
             }
         }
         state.artist == null -> {
@@ -489,7 +489,7 @@ private fun SummarySection(fee: Int) {
         HRule()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Artist fee", style = AppTheme.type.callout, color = colors.ink2)
-            Text(formatInr(fee), style = AppTheme.type.monoMedium, color = colors.brand)
+            Text(formatInr(fee), style = AppTheme.type.monoMedium, color = colors.accentInk)
         }
     }
 }

@@ -164,7 +164,7 @@ fun RequestQuoteScreen(
         ) {
             if (state.isSubmitting) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
             } else {
                 PrimaryButton(text = "Send request", onClick = viewModel::submit, fullWidth = true)

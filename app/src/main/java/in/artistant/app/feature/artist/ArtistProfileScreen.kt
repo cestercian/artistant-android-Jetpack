@@ -122,7 +122,7 @@ fun ArtistProfileScreen(
     when {
         state.isLoading && state.artist == null -> {
             Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+                CircularProgressIndicator(color = colors.accentInk)
             }
         }
         state.artist == null -> {
@@ -425,14 +425,18 @@ private fun Hero(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(space.xs)) {
+                    // NOT on media, despite sitting inside the hero: this block
+                    // is in the bottom band where the cover has faded to `bg`.
+                    // That fade terminates on a token, so it followed the
+                    // palette into daylight and took white text with it.
                     Text(
                         artist.name,
                         style = AppTheme.type.profileHeroName,
-                        color = Color.White,
+                        color = colors.ink,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(artist.genre, style = AppTheme.type.callout, color = colors.inkOnMedia)
+                    Text(artist.genre, style = AppTheme.type.callout, color = colors.ink2)
                 }
                 // The score trails the name so it reads as PART of the identity
                 // ("Test Artist — 82 Trusted") rather than a stat exiled to a
@@ -463,8 +467,8 @@ private fun MediaChip(text: String, icon: ImageVector? = null) {
     Row(
         Modifier
             .clip(CircleShape)
-            .background(colors.chipOnMedia)
-            .border(dimens.size.hairline, colors.chipOnMediaLine, CircleShape)
+            .background(colors.surface2)
+            .border(dimens.size.hairline, colors.hairline, CircleShape)
             .padding(horizontal = dimens.space.md, vertical = dimens.space.xs),
         horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
         verticalAlignment = Alignment.CenterVertically,
@@ -652,7 +656,7 @@ private fun StatCell(
                 Icon(
                     Icons.Filled.Star,
                     contentDescription = null,
-                    tint = colors.brand,
+                    tint = colors.accentInk,
                     modifier = Modifier.size(dimens.size.iconSm),
                 )
             }
@@ -962,11 +966,11 @@ private fun RequestQuoteRow(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Custom date or budget?", style = AppTheme.type.footnote, color = colors.ink3)
-        Text("Request a quote", style = AppTheme.type.footnote, color = colors.brand)
+        Text("Request a quote", style = AppTheme.type.footnote, color = colors.accentInk)
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
-            tint = colors.brand,
+            tint = colors.accentInk,
             modifier = Modifier.size(AppTheme.dimens.size.iconMd),
         )
     }
@@ -1013,7 +1017,7 @@ private fun ReviewsBlock(reviews: List<Review>, failed: Boolean, onRetry: () -> 
                     Text(
                         "★".repeat(review.rating.coerceIn(0, 5)),
                         style = AppTheme.type.caption,
-                        color = colors.brand,
+                        color = colors.accentInk,
                     )
                 }
                 if (review.org.isNotBlank()) {

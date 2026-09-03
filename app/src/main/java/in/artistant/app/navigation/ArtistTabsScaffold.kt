@@ -5,10 +5,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.WorkOutline
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,9 +27,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import `in`.artistant.app.designsystem.component.FloatingTabBar
-import `in`.artistant.app.designsystem.component.FloatingTabItem
-import `in`.artistant.app.designsystem.component.ambientRoleWash
+import `in`.artistant.app.designsystem.component.LightTabAction
+import `in`.artistant.app.designsystem.component.LightTabBar
+import `in`.artistant.app.designsystem.component.LightTabItem
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
@@ -47,12 +48,20 @@ import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.wizard.WizardScreen
 
-// Artist bottom nav: Home · Gigs · Messages · EPK.
+/**
+ * Artist bottom nav: Studio · Gigs · [+] · Messages · Profile (screen 09).
+ *
+ * The fourth glyph is a person and its label is "Profile", but its route is
+ * still `epk` — and that is not a mismatch. The press kit IS the artist's own
+ * profile: it is the page they edit about themselves, and their account
+ * settings already hang off the avatar in its title bar. Renaming the route
+ * would break the push deep link for nothing.
+ */
 private enum class ArtistTab(val route: String, val label: String, val icon: ImageVector) {
-    Home("home", "Home", Icons.Filled.Dashboard),
-    Gigs("gigs", "Gigs", Icons.Filled.WorkOutline),
-    Messages("messages", "Messages", Icons.AutoMirrored.Filled.Chat),
-    Epk("epk", "EPK", Icons.Filled.LibraryMusic),
+    Home("home", "Studio", Icons.Filled.Home),
+    Gigs("gigs", "Gigs", Icons.Filled.CalendarMonth),
+    Messages("messages", "Messages", Icons.Filled.ChatBubbleOutline),
+    Epk("epk", "Profile", Icons.Filled.PersonOutline),
 }
 
 @Composable
@@ -103,20 +112,26 @@ fun ArtistTabsScaffold() {
     val tabRoutes = remember { ArtistTab.entries.map { it.route }.toSet() }
 
     Scaffold(
-        // Transparent so the ambient wash below shows through; the wash paints
-        // the background color itself.
-        containerColor = Color.Transparent,
-        modifier = Modifier.ambientBackdrop(),
+        // See [ClientTabsScaffold] — the light design has no ambient wash, just
+        // the flat page ground.
+        containerColor = AppTheme.colors.page,
         bottomBar = {
             if (!showBottomBar) return@Scaffold
-            // No trailing action on the artist side — the artist has no catalogue
-            // to search, so the pill takes the full width on its own.
-            FloatingTabBar(
+            LightTabBar(
                 items = remember {
-                    ArtistTab.entries.map { FloatingTabItem(it.route, it.label, it.icon) }
+                    ArtistTab.entries.map { LightTabItem(it.route, it.label, it.icon) }
                 },
                 selectedRoute = selectedTabRoute,
                 onSelect = { route -> navigateToTab(nav, route) },
+                // Screen 09 draws a play glyph in the artist's action circle.
+                // It goes to the availability editor: the artist-side verb that
+                // actually changes what the market can see is "open a date", and
+                // that editor already exists. Not a new flow — a shortcut to one.
+                action = LightTabAction(
+                    label = "Manage availability",
+                    icon = Icons.Filled.PlayArrow,
+                    onClick = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                ),
             )
         },
     ) { inner ->
@@ -270,30 +285,16 @@ internal fun navigateToTab(nav: androidx.navigation.NavController, route: String
 /**
  * The standard inset pane for a destination.
  *
- * The tab bar floats now, so the `NavHost` itself is full-bleed and each
- * destination opts into the scaffold insets instead of inheriting them. Screens
- * that want the chrome to overlap them (Discover) simply skip this wrapper —
- * which is the whole reason the padding moved down a level.
+ * The `NavHost` is full-bleed and each destination opts into the scaffold insets
+ * instead of inheriting them. Screens that want the chrome to overlap them
+ * (Discover, the artist profile) simply skip this wrapper — which is the whole
+ * reason the padding moved down a level.
  *
- * [inner] carries the status-bar inset on top and, on a tab route, the floating
- * bar's full footprint on the bottom, so a screen wrapped here reserves exactly
- * the space the bar occupies.
+ * [inner] carries the status-bar inset on top and, on a tab route, the tab bar's
+ * full height on the bottom, so a screen wrapped here reserves exactly the space
+ * the bar occupies.
  */
 @Composable
 internal fun TabPane(inner: PaddingValues, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().padding(inner)) { content() }
-}
-
-/**
- * Role-tinted atmosphere painted behind every destination in a scaffold.
- *
- * Screens that paint their own opaque `colors.bg` (most of them today) sit on
- * top of this and are unaffected; drop that fill from a screen, and it inherits
- * the wash. Kept at the scaffold level so the glow is continuous across a tab
- * switch rather than restarting per screen.
- */
-@Composable
-internal fun Modifier.ambientBackdrop(): Modifier {
-    val colors = AppTheme.colors
-    return this.ambientRoleWash(brand = colors.brand, background = colors.bg)
 }

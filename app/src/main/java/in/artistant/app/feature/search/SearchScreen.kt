@@ -180,7 +180,7 @@ fun SearchScreen(
             }
             state.isLoading && state.results.isEmpty() -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
             }
             state.loadError != null && state.results.isEmpty() -> {
@@ -245,7 +245,7 @@ fun SearchScreen(
                         if (state.isLoadingMore) {
                             item {
                                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = colors.brand)
+                                    CircularProgressIndicator(color = colors.accentInk)
                                 }
                             }
                         }
@@ -459,7 +459,7 @@ private fun ResultsHeader(
                 Text(
                     text = "Clear filters",
                     style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-                    color = colors.brand,
+                    color = colors.accentInk,
                     modifier = Modifier
                         .clip(CircleShape)
                         .clickable(onClick = onClearFilters)
@@ -556,7 +556,7 @@ private fun SortMenu(sort: SearchSort, onSort: (SearchSort) -> Unit) {
                             Icon(
                                 Icons.Filled.Check,
                                 contentDescription = null,
-                                tint = colors.brand,
+                                tint = colors.accentInk,
                                 modifier = Modifier.size(dimens.size.iconMd),
                             )
                         }

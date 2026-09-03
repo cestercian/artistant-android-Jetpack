@@ -370,7 +370,7 @@ fun EpkBanner(
             Text(
                 actionLabel,
                 style = AppTheme.type.footnote,
-                color = colors.brand,
+                color = colors.accentInk,
                 modifier = Modifier
                     .heightIn(min = AppTheme.dimens.size.rowMin)
                     .clickable(onClick = onAction)

@@ -197,7 +197,7 @@ fun EpkScreen(
         when {
             state.isLoading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
             }
             // Not published yet. The wizard is the correct destination HERE and
@@ -636,7 +636,9 @@ private fun MediaChip(text: String) {
         horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, style = AppTheme.type.caption, color = colors.ink2)
+        // ON MEDIA — this chip rides the cover's dark scrim, so it takes the
+        // over-media ink rather than the page ladder, which is now dark.
+        Text(text, style = AppTheme.type.caption, color = colors.inkOnMedia)
     }
 }
 
@@ -1701,7 +1703,7 @@ private fun LinksSection(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Text("Edit", style = AppTheme.type.footnote, color = colors.brand)
+                        Text("Edit", style = AppTheme.type.footnote, color = colors.accentInk)
                     }
                     HRule()
                 }
@@ -1813,7 +1815,7 @@ private fun ShareLinkSection(handle: String, modifier: Modifier = Modifier) {
                     Text(
                         if (copied) "COPIED" else "COPY",
                         style = AppTheme.type.monoMicro,
-                        color = colors.brand,
+                        color = colors.accentInk,
                         modifier = Modifier
                             // A 9sp word is a 30dp target; the label keeps its size
                             // and the tap node grows to the floor around it.

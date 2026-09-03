@@ -1,12 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Dark, no action bar. Compose draws the UI; this only styles the
-         pre-Compose launch window (status bar + background). Parent is the
-         framework dark theme (no dependency on the material XML theme lib —
-         we use Compose Material3, which ships no XML themes). -->
+    <!-- The LAUNCH window, and only that. Compose draws the app itself; this
+         styles the frames between `startActivity` and the first composition.
+
+         Deliberately dark while the app is light-only: screen 01 of the
+         Sep-2026 design is "the one dark room" — the splash is black so opening
+         the app reads as house lights going down, and everything after it is
+         daylight. `MainActivity.applyLightSystemBars()` performs that flip on
+         the first Compose frame (transparent bars with dark icons, window
+         background `page`), so this theme's values are never seen once the tree
+         is up.
+
+         Parent is the framework dark theme, not a Material XML theme: the app
+         uses Compose Material3, which ships no XML themes. -->
     <style name="Theme.Artistant" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/splash_bg</item>
+        <item name="android:navigationBarColor">@color/splash_bg</item>
+        <item name="android:windowBackground">@color/splash_bg</item>
     </style>
 </resources>

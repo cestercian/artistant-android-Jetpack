@@ -126,7 +126,7 @@ fun ArtistHomeScreen(
         when {
             !state.hasLoaded && state.error == null -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.brand)
+                    CircularProgressIndicator(color = colors.accentInk)
                 }
             }
             !state.hasLoaded -> {
@@ -294,7 +294,7 @@ private fun Greeting(
             Text(
                 buildAnnotatedString {
                     append("Hey, ")
-                    withStyle(SpanStyle(color = colors.brand, fontStyle = FontStyle.Italic)) {
+                    withStyle(SpanStyle(color = colors.accentInk, fontStyle = FontStyle.Italic)) {
                         append(name)
                     }
                     append(".")
@@ -808,11 +808,11 @@ private fun AvailabilityStrip(state: ArtistHomeUiState, onManage: () -> Unit) {
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("MANAGE", style = AppTheme.type.monoMicro, color = colors.brand)
+                Text("MANAGE", style = AppTheme.type.monoMicro, color = colors.accentInk)
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
-                    tint = colors.brand,
+                    tint = colors.accentInk,
                     modifier = Modifier.size(AppTheme.dimens.size.iconSm),
                 )
             }

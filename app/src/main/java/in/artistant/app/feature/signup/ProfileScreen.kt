@@ -134,7 +134,7 @@ fun ProfileScreen(
             Text(
                 text = buildAnnotatedString {
                     withStyle(SpanStyle(color = colors.ink)) { append("A few words,\nthen we're ") }
-                    withStyle(SpanStyle(color = colors.brand, fontStyle = FontStyle.Italic)) { append("in") }
+                    withStyle(SpanStyle(color = colors.accentInk, fontStyle = FontStyle.Italic)) { append("in") }
                     withStyle(SpanStyle(color = colors.ink)) { append(".") }
                 },
                 style = AppTheme.type.signupDisplay,
@@ -191,7 +191,7 @@ fun ProfileScreen(
                         cities.forEach { c ->
                             DropdownMenuItem(
                                 text = { Text(c, color = colors.ink) },
-                                trailingIcon = { if (state.city == c) Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brand) },
+                                trailingIcon = { if (state.city == c) Icon(Icons.Filled.Check, contentDescription = null, tint = colors.accentInk) },
                                 onClick = { onCityChange(c); cityOpen = false },
                             )
                         }
@@ -246,8 +246,8 @@ private fun HandleIndicator(status: HandleStatus) {
             Text("Checking…", style = AppTheme.type.monoSmall, color = colors.ink3)
         }
         HandleStatus.Available -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
-            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brand, modifier = Modifier.size(dimens.size.iconSm))
-            Text("free", style = AppTheme.type.monoSmall, color = colors.brand)
+            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.accentInk, modifier = Modifier.size(dimens.size.iconSm))
+            Text("free", style = AppTheme.type.monoSmall, color = colors.accentInk)
         }
         HandleStatus.Taken -> Text("Taken", style = AppTheme.type.caption, color = colors.hot)
         HandleStatus.Error -> Text("Couldn't check", style = AppTheme.type.caption, color = colors.warm)

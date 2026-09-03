@@ -79,7 +79,7 @@ fun GigRequestDetailScreen(
     when {
         state.isLoading && request == null -> {
             Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+                CircularProgressIndicator(color = colors.accentInk)
             }
         }
         request == null -> {
@@ -258,7 +258,7 @@ private fun OfferBlock(request: StoredRequest) {
             HRule()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Your counter", style = AppTheme.type.footnote, color = colors.ink2)
-                Text(formatInr(counter), style = AppTheme.type.monoMedium, color = colors.brand)
+                Text(formatInr(counter), style = AppTheme.type.monoMedium, color = colors.accentInk)
             }
         }
         if (request.status != GigRequestStatus.Open) {

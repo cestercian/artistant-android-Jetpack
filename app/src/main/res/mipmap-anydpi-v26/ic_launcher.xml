@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive launcher icon: AppColors.darkest ground, the lime "A" mark on top.
+     The background layer is a flat full-bleed colour on purpose — the launcher's
+     own mask is what makes it a rounded square (or a circle, or a squircle), and
+     insetting a pre-rounded shape here would leave transparent corners under any
+     mask that is not the one we guessed. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

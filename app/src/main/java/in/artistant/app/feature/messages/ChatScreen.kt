@@ -149,7 +149,7 @@ fun ChatScreen(
                 state.isLoading && state.messages.isEmpty() -> Box(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator(color = colors.brand) }
+                ) { CircularProgressIndicator(color = colors.accentInk) }
 
                 state.error != null && state.messages.isEmpty() -> EmptyState(
                     title = "Couldn't load this conversation",
@@ -337,7 +337,7 @@ private fun ThreadContextStrip(context: ThreadContext, onOpenBooking: (String) -
         }
         Spacer(Modifier.weight(1f))
         context.fee?.let {
-            Text(formatInr(it), style = AppTheme.type.monoSmall, color = colors.brand)
+            Text(formatInr(it), style = AppTheme.type.monoSmall, color = colors.accentInk)
         }
     }
     HRule()
@@ -779,7 +779,7 @@ private fun ComposerStack(
                 Text(
                     "RETRY",
                     style = AppTheme.type.caption,
-                    color = colors.brand,
+                    color = colors.accentInk,
                     modifier = Modifier
                         .clip(CircleShape)
                         .clickable(onClick = onRetryRefresh)

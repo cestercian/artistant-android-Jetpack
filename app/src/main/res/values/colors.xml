@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Launch/splash background = Color.bg (#0A0A0A). Compose owns the rest. -->
-    <color name="bg">#0A0A0A</color>
-    <color name="ic_launcher_background">#0A0A0A</color>
-    <color name="brand_lime">#C8FF00</color>
+    <!-- The pre-Compose launch window only. Screen 01 of the Sep-2026 design is
+         "the one dark room": the splash stays black so the app opens like a
+         house light going down, and everything after it is daylight. Compose
+         flips the window to `page` on its first frame (see SystemBars.kt). -->
+    <color name="splash_bg">#0F100C</color>
+    <!-- AppColors.page — the light canvas every Compose frame sits on. -->
+    <color name="page">#FAFAF6</color>
+    <!-- Adaptive launcher icon: AppColors.darkest ground, AppColors.accent mark. -->
+    <color name="ic_launcher_background">#0F100C</color>
+    <color name="brand_lime">#D6F84B</color>
 </resources>

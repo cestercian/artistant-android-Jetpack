@@ -1,7 +1,7 @@
 package `in`.artistant.app.designsystem.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ProvidableCompositionLocal
@@ -18,14 +18,20 @@ val LocalDimens: ProvidableCompositionLocal<Dimens> =
     staticCompositionLocalOf { Dimens() }
 
 /**
- * Single theme wrapper. Dark-only. [role] drives the role-reactive brand accent
- * (client lime / artist violet) — a single-role session recomposes the tree on
- * change, which is cheap and correct. We also feed a Material3 dark scheme so
- * stray Material components (ripples, text-field defaults) look right, and
- * [BrandTypography] so the type they default to is Geist rather than Roboto —
- * `MaterialTheme` publishes `typography.bodyLarge` as the ambient text style, so
- * without it every style-less `Text()` and every self-typing Material component
- * would sit in the system font next to the brand ramp.
+ * Single theme wrapper. Light-only, one accent.
+ *
+ * [role] is still taken because navigation and the paywall branch on it, but it
+ * no longer changes a colour — `withRole` is identity since the Sep-2026
+ * redesign retired the client-lime / artist-violet split (REDESIGN_2026-09 §2).
+ *
+ * The Material3 scheme fed alongside is `lightColorScheme` now, and every role
+ * it publishes is mapped: "stray Material components" reach for more than six of
+ * them, and anything left unmapped keeps M3's BASELINE PURPLE. A `ModalBottomSheet`
+ * takes its container from `surfaceContainerLow` and its drag handle from
+ * `onSurfaceVariant`, which is how every sheet in the app once drew a lavender
+ * handle over a purple-tinted pane. [BrandTypography] rides along so the type
+ * those components default to is Plus Jakarta Sans rather than Roboto —
+ * `MaterialTheme` publishes `typography.bodyLarge` as the ambient text style.
  */
 @Composable
 fun ArtistantTheme(
@@ -33,30 +39,43 @@ fun ArtistantTheme(
     content: @Composable () -> Unit,
 ) {
     val colors = AppColors().withRole(role)
-    val material = darkColorScheme(
-        primary = colors.brand,
-        onPrimary = colors.brandInk,
-        background = colors.bg,
+    val material = lightColorScheme(
+        primary = colors.accent,
+        onPrimary = colors.onAccent,
+        // `primaryContainer` is what an M3 `FilledTonalButton`, an assist chip and
+        // a date-picker selection reach for. Left at the default it is a lavender
+        // that belongs to no screen in this app.
+        primaryContainer = colors.brandSoft,
+        onPrimaryContainer = colors.accentDeep,
+        secondary = colors.accentInk,
+        onSecondary = colors.onDark,
+        secondaryContainer = colors.surface2,
+        onSecondaryContainer = colors.ink,
+        tertiary = colors.warm,
+        onTertiary = colors.onDark,
+        tertiaryContainer = colors.warmSoft,
+        onTertiaryContainer = colors.ink,
+        background = colors.page,
         onBackground = colors.ink,
-        surface = colors.bgCard,
+        surface = colors.surface,
         onSurface = colors.ink,
-        // The rest of the surface/outline/error family, because "stray Material
-        // components" reach for more than six roles and everything left unmapped
-        // keeps M3's BASELINE PURPLE. Two of them were on screen: a
-        // `ModalBottomSheet` takes its container from `surfaceContainerLow` and
-        // its drag handle from `onSurfaceVariant`, so every sheet in the app drew
-        // a lavender handle over a purple-tinted pane.
-        surfaceVariant = colors.bgSoft,
+        surfaceVariant = colors.surface2,
         onSurfaceVariant = colors.ink2,
-        surfaceContainerLowest = colors.bg,
-        surfaceContainerLow = colors.bgElev,
-        surfaceContainer = colors.bgElev,
-        surfaceContainerHigh = colors.bgCard,
-        surfaceContainerHighest = colors.bgSoft,
-        outline = colors.line,
+        surfaceTint = colors.accent,
+        inverseSurface = colors.dark,
+        inverseOnSurface = colors.onDark,
+        inversePrimary = colors.accent,
+        surfaceContainerLowest = colors.surface,
+        surfaceContainerLow = colors.page,
+        surfaceContainer = colors.surface3,
+        surfaceContainerHigh = colors.surface2,
+        surfaceContainerHighest = colors.placeholder,
+        outline = colors.hairline,
         outlineVariant = colors.lineSoft,
-        error = colors.hot,
-        onError = colors.bg,
+        error = colors.danger,
+        onError = colors.onDark,
+        errorContainer = colors.dangerSoft,
+        onErrorContainer = colors.danger,
         scrim = Color.Black,
     )
     // Resolved here, at the single root every surface sits under, so no screen

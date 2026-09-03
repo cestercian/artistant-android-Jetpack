@@ -311,7 +311,7 @@ private fun GigCard(context: ThreadContext, onBookingClick: (String) -> Unit) {
                 Text(
                     "${formatInr(it)} artist fee",
                     style = AppTheme.type.footnote,
-                    color = colors.brand,
+                    color = colors.accentInk,
                 )
             }
         }
@@ -597,7 +597,7 @@ private fun SheetHeader(title: String, onDone: () -> Unit) {
             Text(
                 "Done",
                 style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold),
-                color = colors.brand,
+                color = colors.accentInk,
             )
         }
     }

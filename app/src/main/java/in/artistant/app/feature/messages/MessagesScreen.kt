@@ -596,7 +596,7 @@ private fun ThreadRow(
             Text(
                 "Review request",
                 style = AppTheme.type.footnote,
-                color = colors.brand,
+                color = colors.accentInk,
                 modifier = Modifier
                     .padding(start = space.lg + thumbColumn + space.md, bottom = space.md)
                     .clip(CircleShape)
@@ -819,7 +819,7 @@ private fun SupportSegment(onOpen: () -> Unit) {
                     .background(colors.brandSoft),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("A", style = AppTheme.type.monoMedium, color = colors.brand)
+                Text("A", style = AppTheme.type.monoMedium, color = colors.accentInk)
             }
             Column(Modifier.weight(1f)) {
                 Text("Artistant Support", style = AppTheme.type.headline, color = colors.ink)

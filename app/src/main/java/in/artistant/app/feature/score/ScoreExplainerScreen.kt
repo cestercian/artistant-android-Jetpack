@@ -140,7 +140,7 @@ fun ScoreExplainerScreen(
         }
         when {
             state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.brand)
+                CircularProgressIndicator(color = colors.accentInk)
             }
             state.error != null -> Column(
                 Modifier.fillMaxSize().padding(space.xl),
@@ -273,7 +273,7 @@ private fun MetricBar(name: String, weight: Int, value: Int) {
                 .fillMaxWidth()
                 .height(AppTheme.dimens.dashboard.meterHeight)
                 .clip(CircleShape),
-            color = colors.brand,
+            color = colors.accentInk,
             trackColor = colors.bgSoft,
         )
     }
