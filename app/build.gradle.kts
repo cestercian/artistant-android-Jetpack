@@ -31,7 +31,23 @@ val keystoreFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystoreFile.exists()) keystoreFile.inputStream().use { load(it) }
 }
-val hasReleaseKeystore = !keystoreProps.getProperty("RELEASE_STORE_FILE").isNullOrBlank()
+val releaseSigningKeys = listOf(
+    "RELEASE_STORE_FILE", "RELEASE_STORE_PASSWORD", "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD",
+)
+val presentSigningKeys = releaseSigningKeys.filter { !keystoreProps.getProperty(it).isNullOrBlank() }
+// All four or none: a half-filled file must fail here, with the missing names,
+// not later inside the signing task with a null password.
+if (presentSigningKeys.isNotEmpty() && presentSigningKeys.size != releaseSigningKeys.size) {
+    throw GradleException(
+        "keystore.properties is incomplete — missing ${releaseSigningKeys - presentSigningKeys.toSet()}",
+    )
+}
+val hasReleaseKeystore = presentSigningKeys.size == releaseSigningKeys.size
+if (hasReleaseKeystore && !rootProject.file(keystoreProps.getProperty("RELEASE_STORE_FILE")).exists()) {
+    throw GradleException(
+        "RELEASE_STORE_FILE '${keystoreProps.getProperty("RELEASE_STORE_FILE")}' does not exist",
+    )
+}
 
 android {
     namespace = "in.artistant.app"
@@ -94,8 +110,9 @@ android {
 
     buildTypes {
         release {
-            // Upload key when keystore.properties exists, else the debug key (see above).
-            signingConfig = signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")
+            // Upload key when keystore.properties exists. Without it the build type is
+            // UNSIGNED here; dev/staging pick up the debug-key fallback per variant below.
+            signingConfig = if (hasReleaseKeystore) signingConfigs.getByName("release") else null
             // R8 on — shrink + obfuscate + resource-strip. Keep rules for the
             // serialization/nav surfaces R8 could otherwise break live in
             // proguard-rules.pro (a green assemble proves the static pass; the release
@@ -122,6 +139,20 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+// The debug-key fallback is for phones, not the store. A prodRelease built without
+// the upload keystore stays UNSIGNED (exactly what it was before the fallback
+// existed) rather than debug-signed: a debug-signed build on the production
+// application id would make the first real, upload-key-signed update
+// uninstallable on that device (INSTALL_FAILED_UPDATE_INCOMPATIBLE) until the app
+// — and its data — is removed. dev/staging keep the fallback.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        if (!hasReleaseKeystore && variant.flavorName != "prod") {
+            variant.signingConfig.setConfig(android.signingConfigs.getByName("debug"))
+        }
     }
 }
 

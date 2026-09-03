@@ -99,11 +99,17 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ## 3. Signing
 
 Wired in `app/build.gradle.kts`. The `release` build type reads a gitignored
-`keystore.properties` at the repo root; when that file is absent it signs with the
-Android **debug key** instead, so `assembleDevRelease` always yields an installable
-APK. The fallback exists so the real R8 + AOT build can be walked on a phone — the
-`debug` build type is a different, measurably slower app (no R8, no baseline
-profiles, debug composer) and must not be used to judge performance or jank.
+`keystore.properties` at the repo root (all four keys, or the build fails with the
+missing names). When the file is absent, **dev and staging** release builds sign
+with the Android **debug key** instead, so `assembleDevRelease` always yields an
+installable APK. The fallback exists so the real R8 + AOT build can be walked on a
+phone — the `debug` build type is a different, measurably slower app (no R8, no
+baseline profiles, debug composer) and must not be used to judge performance.
+
+**`prod` never takes the fallback**: `assembleProdRelease` / `bundleProdRelease`
+without the keystore produce an *unsigned* artifact (`-unsigned.apk`), as they
+always did. A debug-signed build on the production application id would block the
+first real update on that device.
 
 **Device testing — no keystore needed:**
 ```bash
