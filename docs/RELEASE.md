@@ -111,6 +111,13 @@ profiles, debug composer) and must not be used to judge performance or jank.
 adb install -r app/build/outputs/apk/dev/release/app-dev-release.apk
 ```
 
+> All flavors share the `in.artistant.app` application id, and Android refuses
+> to update an installed app with one signed by a different certificate
+> (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). If the phone already carries a
+> Play/upload-key-signed build, `adb uninstall in.artistant.app` first — that
+> wipes the app's local data (DataStore, drafts). A debug-build-type install is
+> signed with the same debug key and updates in place.
+
 **Play upload (operator, once):**
 
 1. Create an **upload keystore**:
