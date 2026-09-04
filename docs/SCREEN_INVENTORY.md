@@ -170,35 +170,68 @@ the iOS repo.
 
 ## 4. Screens — Artist wizard (`feature/wizard/`, all **A**)
 
-One `WizardViewModel` (the 585-line `ArtistOnboardingStore` port): `flowOrder`
-= identity→location→pricing→tech→availability→cover→socials→bio→samples→preview→done,
-per-step validation, pending-media handoff to `UploadQueue`. Reached when
-artist & !setupComplete. Shared `WizardScaffold` chrome (serif title, subtitle,
-back, primary CTA) + a segment progress bar. `AnimatedContent` on `step`
-(`.easeInOut(0.2)`).
+**Redesigned Sep 2026** against "Artistant iOS Light" screens 37, 38, 24, 39,
+40, 41, 42, 43, 44, 45, 46 and 72 — see `docs/REDESIGN_2026-09.md`.
 
-**WizardScaffold + steps** — each step is a screen; CTA→`advance()`, gated by
-validation:
-- **Identity** — stage name, @handle (live availability, mono, border by status),
-  category grid (`FlowRow` chips), genre. Auto-focus.
-- **Location** — base city (required) + event types (`FlowRow` capsules).
-- **Pricing** — editable tiers (`LazyColumn` over mutable list): name/duration/₹
-  price/popular; trash/add. Price≥1000 to pass.
-- **Tech** — tech-rider multi-select `FlowRow` chips (presets).
-- **Availability** — days-open + start-times capsule grids.
-- **Cover** — video>photo>gradient. **Photo Picker** + **CameraX** (permission
-  gate) + `VideoTrimmer` (Media3, ≤10s) + `WizardMediaCache` staging + gallery
-  strip + gradient `LazyVerticalGrid`. *Lifecycle:* `LaunchedEffect` ensures artist
-  row + loads remote media. Uploads deferred to publish.
-- **Socials** — paste Spotify/Instagram/YouTube (`FlowRow` over platform enum).
-- **Bio** — ≤200-char multiline field, live counter (warm/hot near cap). Skip/Continue.
-- **Samples** — ≤6 audio via **SAF** `OpenDocument` sheet + `WizardMediaCache`,
-  per-row title + duration + trash. Skip/Continue.
-- **Preview + Publish** — `runPublish()`: upsert artist row (`setup_complete=true`),
-  parallel packages+tech write, flip `published=true`, delete stale cover, enqueue
-  pending media to WorkManager, →done. Progress overlay.
-- **Done** — 3 concentric brand circles + spring checkmark, "You're live.", "Open
-  dashboard" → `setupComplete=true` (routes to ArtistTabs).
+One `WizardViewModel` (the `ArtistOnboardingStore` port): `flowOrder` =
+identity→location→pricing→tech→availability→cover→socials→bio→samples→preview→done,
+per-step validation, pending-media handoff to `UploadQueue`, and a debounced
+draft (`WizardDraftStore`) that restores across process death. Reached when
+artist & !setupComplete.
+
+**Chrome** (`WizardScreen`, `WizardScaffold`) — a back circle, a ten-cell
+progress track and a "03 / 10" counter across the top; the step's own
+`LazyColumn` under a plain 26/700 question; one pinned CTA on an opaque bar with
+a hairline over it. Filled segments mean FINISHED, not reached, and the counter
+and the Save & exit sheet repeat that same arithmetic. `AnimatedContent` on
+`step`, fade only. The design's flow has eleven steps; ours has ten, and the
+total is derived from `WizardFlowOrder` rather than typed.
+
+**Save & exit (design 72)** — a `ModalBottomSheet` over `SheetScaffold`, not an
+AlertDialog. It states how many steps are banked and that staged media is on
+disk rather than in memory, then signs out keeping the draft. Reachable from
+every step: it is the leading circle on step one (where there is nothing to go
+back to) and a second close beside the counter after that.
+
+**Steps** — each is a screen; CTA→`next()`, gated by `wizardCanAdvance`:
+- **Identity (37)** — stage name, @handle (live availability, tick / cross,
+  public address under the field), category chips, genre. The category's seeded
+  pricing band is stated here, on the step that picks it. Genre stays a text
+  field: the design draws chips, but `artists.genre` is free text with no
+  vocabulary to constrain it to.
+- **Location (38)** — base city (required, published), travel radius, event
+  types. The last two are held in the draft only — there is no radius column and
+  no `event_types` writer in this client — and the step's banner says so.
+- **Pricing (24)** — editable tiers over `LazyColumn`: name / duration / ₹ fee /
+  "most booked", and under a hairline the ALL-IN the host pays, derived through
+  `BookingMath` so the wizard and the checkout cannot disagree. The design's
+  market-rate line is replaced by the band we seeded, because there is no market
+  aggregate on this backend.
+- **Tech (39)** — the seven presets as checkable rows, anything typed as chips.
+  No rider PDF slot: `tech_rider` stores text rows.
+- **Availability (40)** — a seven-letter day strip plus start-time chips,
+  compressed into the one badge a search row has space for and shown while still
+  editable (`availabilityBadge`). No "notice you need" — no column for it.
+- **Cover (41)** — a 3:4 slot, a Camera / Library pair, and the gradient that
+  stands in when there is no photo. A denied camera permission routes to the
+  system settings page rather than leaving a dead button. Photo only.
+- **Socials (42)** — paste fields for Instagram / Spotify / YouTube. The design
+  prefers OAuth; there is none on this backend, so the banner says plainly that
+  the links are not verified.
+- **Bio (43)** — ≤200-char multiline field, live counter (warm then danger near
+  the cap) and `bioGuidance` saying what good looks like at that length, plus
+  the service-tag picker (published via `updateServiceTags`).
+- **Samples (44)** — ≤6 audio via **SAF** `OpenDocument` + `WizardMediaCache`,
+  per-row title and duration. Upload state is READ off `UploadQueue` — queued /
+  uploading / failed with a retry — because the queue is the only thing that
+  survives a kill and knows.
+- **Preview (45)** — centred back header; the cover, the identity line and seven
+  rows, each stating its value with an inline Edit that jumps back to the owning
+  step. `publish()`: upsert artist row, parallel packages + rider + service
+  tags, flip `published`, enqueue pending media, →done.
+- **Done (46)** — accent check, "You're live.", the copyable public address, and
+  the New-tier expectation off `ScoreBands`. "Open my dashboard" →
+  `setupComplete=true` (routes to ArtistTabs).
 
 ---
 
@@ -418,26 +451,53 @@ on `UploadQueue.batchCompleted`. *Deps:* EPKStore, UploadQueue.
 
 ## 7. Screens — Shared / cross-role
 
-**MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *ViewModel:*
-`MessagesViewModel` (`MessageStore` port). *Compose:* `LazyColumn` thread rows→
-`Chat(id)`: `Avatar` 44, role-resolved counterpart name, BOOKING pill, timeAgo,
-2-line preview (verbatim body — **no** redaction), unread dot. *APIs:* `listThreadsForUser`. *State:*
-threads (badge = Σ unread). *Lifecycle:* two-stage hydrate (artists, then names);
-`pendingThreadId` deep link; pull-to-refresh; skeleton/empty/error. *Deps:*
-SessionManager, RoleStore, BookingStore, ArtistsRepository.
+**MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *Design:* 19
+(loaded) / 110 (empty). *ViewModel:* `MessagesViewModel` (`MessageStore` port).
+*Compose:* `ScreenHeader` + archive `IconCircle` (dot when non-empty), v2
+`SearchBar`, v2 `Chip` rail with live counts, the **permanent Artistant Support
+row** (dark disc + lime "A", every segment and every state), then `LazyColumn`
+thread rows→`Chat(id)`: `Avatar` 48, role-resolved counterpart name, star marker,
+timeAgo, **deal state** (a live `gig_requests` quote renders "QUOTE ₹48,000 ·
+holds till Fri" in place of the preview; lapsed says so) and an accent unread
+count badge. Swipe archives. *APIs:* `listThreadsForUser`, `fetchMany`,
+`listForClient`/`listForArtist`. *State:* threads; `activeThreads` (archived
+excluded) is the ONLY source of every count. *Lifecycle:* two-stage hydrate
+(artists, then names); `pendingThreadId` deep link; pull-to-refresh;
+skeleton/empty/error. *Deps:* SessionManager, RoleStore, BookingStore,
+ArtistsRepository, RequestsRepository.
 
-**ChatScreen** (S, `Chat`) → `feature/messages/`. *ViewModel:* `ChatViewModel`.
-*Compose:* `LazyColumn` (reverse) with `rememberLazyListState` auto-scroll to
-bottom on new message; bubbles system(centered)/me(brand)/other(card), **Airbnb
-trust banner** (not redaction), failed-send retry chip + haptic; **composer**
-multiline field + send,
-glass floating bar (`Scaffold` bottomBar). *APIs:* `MessagesRepository`
-(listMessages explicit columns, send, **realtime** `subscribeMessages`,
-markThreadRead, findOrCreateThread). *Lifecycle:* `LaunchedEffect(threadId,userId)`
-= ensure/refresh/resolve-name/markRead/**subscribe realtime** (gated), foreground
-reconnect (`lifecycle`/scenePhase), teardown on dispose + generation bump. *Nav:*
-client's toolbar avatar→`ArtistProfile`. *Deps:* SessionManager, RoleStore,
-BookingStore.
+**ChatScreen** (S, `Chat`) → `feature/messages/`. *Design:* 08 / 70 / 88.
+*ViewModel:* `ChatViewModel`. *Compose:* header = back circle + avatar + name over
+the gig line + "Details"; **Airbnb trust banner** (not redaction) as a `surface3`
+card; centred status capsule at the head of the transcript, tapping through to
+the booking; `LazyColumn` with day rules, sender captions, asymmetric bubbles and
+**three message states** — sent, "Read by …", and failed drawn in `surface`
+behind a danger rim with a tappable "Not sent · Tap to retry"; **quote card**
+(QUOTE / COUNTER OFFER / AGREED, amount, terms, validity) with Accept + Counter
+on the seat whose move it is; `ComposerBar` = `AppTextField` + an always-present
+send disc. Accepting takes the screen as a three-phase `SendingNarration` (70) and
+routes to `match_confirmed/{bookingId}`. *APIs:* `MessagesRepository` (listMessages
+explicit columns, send, **realtime** `subscribeMessages`, markThreadRead,
+findOrCreateThread), `RequestsRepository` (accept/counter). *Lifecycle:*
+`ResumeEffect` → refresh + re-subscribe (gated), teardown on dispose + generation
+bump. *Nav:* details sheet participant → `ArtistProfile`. *Deps:* SessionManager,
+RoleStore, BookingStore, ReadReceiptsPreference.
+
+**ArchivedScreen** (S, `archived`, both roles) → `feature/messages/`. *Design:* 60
+/ 111. *ViewModel:* `MessagesViewModel`. *Compose:* left-aligned `BackHeader` with
+the count, rows with a labelled Unarchive, and the badge rule printed on the
+screen. Empty state teaches the gesture. Archiving is a DataStore flag —
+`threads` has no archived column.
+
+**SafetyCentreScreen** (S, `safety_centre`, both roles) → `feature/messages/`.
+*Design:* 131. One dark hero card, three numbered rules, and a `ListRow` per
+remedy (report a conversation, blocked accounts). No emergency-numbers row: no
+per-city data exists.
+
+**SupportScreen** (S, `support`, both roles) → `feature/messages/`. *Design:* 34.
+*ViewModel:* `SupportChatViewModel` over the pure `SupportScript`. Two opening
+bubbles (what it is, then what it wants), outlined option cards with detail lines,
+one real deep link into the bookings tab, and a typed note → `app_feedback`.
 
 **PaywallScreen** (S, sheet) → `feature/paywall/`. *ViewModel:* uses
 `EntitlementStore`. *Compose:* close-x, role hero + editorial headline, perks,

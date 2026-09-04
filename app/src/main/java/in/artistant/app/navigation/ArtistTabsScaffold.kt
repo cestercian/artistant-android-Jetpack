@@ -36,14 +36,18 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
+import `in`.artistant.app.feature.artisthome.EarningsScreen
 import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.epk.EpkScreen
 import `in`.artistant.app.feature.booking.CounterOfferScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
@@ -144,7 +148,7 @@ fun ArtistTabsScaffold() {
                 // actually changes what the market can see is "open a date", and
                 // that editor already exists. Not a new flow — a shortcut to one.
                 action = LightTabAction(
-                    label = "Manage availability",
+                    label = "Availability",
                     icon = Icons.Filled.PlayArrow,
                     onClick = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
                 ),
@@ -171,6 +175,12 @@ fun ArtistTabsScaffold() {
                         // to change what days are offered; it previously had no
                         // route, so the editor was reachable only from Profile.
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        // "Manage" beside the 14-day strip and the standing pill
+                        // both open the CALENDAR (screen 22), not the weekday
+                        // editor: the artist tapping a strip of dates is asking
+                        // what is spoken for, and the editor hangs off that.
+                        onOpenAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        onOpenEarnings = { nav.navigate(ArtistNavRoutes.EARNINGS) },
                         onSubscribe = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                     )
                 }
@@ -195,7 +205,13 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
-                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                    BlockedAccountsScreen(
+                        onBack = { nav.popBackStack() },
+                        // "Block is not report" needs somewhere to go, and a
+                        // report is filed inside a conversation — so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                    )
                 }
             }
             // Section SH — design screens 63 / 64 / 123, the same three screens
@@ -267,6 +283,14 @@ fun ArtistTabsScaffold() {
                     ManageAvailabilityScreen(onBack = { nav.popBackStack() })
                 }
             }
+            composable(ArtistNavRoutes.EARNINGS) {
+                TabPane(inner) {
+                    EarningsScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    )
+                }
+            }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
                 TabPane(inner) {
                     ScoreExplainerScreen(
@@ -308,12 +332,40 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
-                        // The inbox's inline accelerator and Support's one deep
-                        // link both land in the artist's own funnel — which this
-                        // role calls Gigs, not Bookings.
+                        // The inbox's inline accelerator lands in the artist's
+                        // own funnel — which this role calls Gigs, not Bookings.
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ArtistTab.Gigs.route) },
+                        onOpenArchive = { nav.navigate(ArtistNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
+                        // Support's one real deep link lands in the artist's own
+                        // funnel, which this role calls Gigs.
                         bookingsLabel = ArtistTab.Gigs.label,
+                        onOpenBookings = { navigateToTab(nav, ArtistTab.Gigs.route) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }
@@ -348,6 +400,7 @@ fun ArtistTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -371,14 +424,17 @@ fun ArtistTabsScaffold() {
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
             ) {
                 TabPane(inner) {
-                    GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                    GigRequestDetailScreen(
+                        onBack = { nav.popBackStack() },
+                        onCounter = { id -> nav.navigate(ArtistNavRoutes.counterOffer(id)) },
+                    )
                 }
             }
             // Screen 61. Its own destination rather than a sheet inside the gig
             // detail, because it is a page in the design with its own header and
-            // its own dock. The gig detail's inline counter sheet stays until the
-            // artist-studio section is rewritten; both go through the same
-            // `RequestsRepository.counter`, so they cannot disagree.
+            // its own dock — and, since the artist-studio section landed, the
+            // ONLY way to counter: the detail's inline dialog is gone (BC
+            // follow-up 3).
             composable(
                 route = ArtistNavRoutes.COUNTER_OFFER,
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),

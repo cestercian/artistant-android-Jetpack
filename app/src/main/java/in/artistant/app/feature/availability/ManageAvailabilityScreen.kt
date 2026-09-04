@@ -37,6 +37,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.MonthCalendarHeader
+import `in`.artistant.app.designsystem.component.MonthDayGrid
+import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
@@ -93,18 +96,95 @@ fun ManageAvailabilityScreen(
                     Column(
                         Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = space.xl),
+                            .verticalScroll(rememberScrollState()),
                     ) {
-                        Text("Availability", style = AppTheme.type.displaySub, color = colors.ink)
+                        // The gutter moved off this column and onto the blocks
+                        // inside it, because the shared calendar components pad
+                        // themselves — nesting them in a padded column inset the
+                        // grid twice and squeezed seven tiles into 310dp.
+                        Column(Modifier.padding(horizontal = space.xl)) {
+                            Text("Availability", style = AppTheme.type.displaySub, color = colors.ink)
+                            Spacer(Modifier.height(space.sm))
+                            Text(
+                                "When you're open to play. Clients see this on your profile and in search.",
+                                style = AppTheme.type.footnote,
+                                color = colors.ink2,
+                            )
+                        }
+                        Spacer(Modifier.height(space.lg))
+
+                        // The month comes first: the artist opens this screen to
+                        // find out what is already spoken for, and the chips
+                        // below are how they change what it draws.
+                        //
+                        // The grid is the shared `MonthDayGrid` the Bookings and
+                        // Gigs lists already draw — same tiles, same rings, same
+                        // adjacent-month fill. It gained one optional parameter
+                        // for this screen (`closedDays`); a second month grid
+                        // that disagreed with the first about what a booked day
+                        // looks like would be worse than either.
+                        MonthCalendarHeader(
+                            monthLabel = monthLabelFromEpoch(state.month.firstDayEpochMs),
+                            onPrevMonth = { viewModel.stepMonth(-1) },
+                            onNextMonth = { viewModel.stepMonth(1) },
+                            onSelectMonth = viewModel::showMonthOfYear,
+                        )
+                        if (state.bookingsUnavailable) {
+                            Text(
+                                "Couldn't load your booked nights, so nothing below is " +
+                                    "marked as taken. Check a date in Gigs before you agree to it.",
+                                style = AppTheme.type.caption,
+                                color = colors.danger,
+                                modifier = Modifier.padding(horizontal = space.lg),
+                            )
+                            Spacer(Modifier.height(space.sm))
+                        }
+                        MonthDayGrid(
+                            year = state.month.year,
+                            month = state.month.month,
+                            busyDays = busyDaysIn(
+                                state.bookedDates,
+                                state.month.year,
+                                state.month.month,
+                            ),
+                            // Named `unavailableDays` by the shared component,
+                            // which landed the same parameter from the bookings
+                            // side while this branch was open.
+                            unavailableDays = closedDaysIn(
+                                state.month.year,
+                                state.month.month,
+                                state.days,
+                            ),
+                            // Nothing to select: this calendar is inventory, not
+                            // a filter. Tapping a night here would promise a day
+                            // detail the screen does not have.
+                            selectedDay = null,
+                            onDayClick = {},
+                        )
                         Spacer(Modifier.height(space.sm))
                         Text(
-                            "When you're open to play. Clients see this on your profile and in search.",
-                            style = AppTheme.type.footnote,
-                            color = colors.ink2,
+                            text = if (state.bookingsUnavailable) {
+                                "You play ${state.days.size} " +
+                                    "day${if (state.days.size == 1) "" else "s"} a week."
+                            } else {
+                                monthSummary(
+                                    bookedInMonth = busyDaysIn(
+                                        state.bookedDates,
+                                        state.month.year,
+                                        state.month.month,
+                                    ).size,
+                                    openWeekdays = state.days.size,
+                                )
+                            },
+                            style = AppTheme.type.caption,
+                            color = colors.ink4,
+                            // Aligned to the grid above it, which pads itself by
+                            // `lg` — not to the prose, which pads by `xl`.
+                            modifier = Modifier.padding(horizontal = space.lg),
                         )
                         Spacer(Modifier.height(space.lg))
 
+                        Column(Modifier.padding(horizontal = space.xl)) {
                         Text("HOW CLIENTS SEE YOU", style = AppTheme.type.caption, color = colors.ink3)
                         Spacer(Modifier.height(space.sm))
                         Row(
@@ -211,6 +291,7 @@ fun ManageAvailabilityScreen(
                             Text("Saved.", style = AppTheme.type.footnote, color = colors.accentInk)
                         }
                         Spacer(Modifier.height(AppTheme.dimens.size.listTailroom))
+                        }
                     }
                 }
 

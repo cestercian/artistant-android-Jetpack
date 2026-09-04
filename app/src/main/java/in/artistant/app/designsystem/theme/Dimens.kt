@@ -302,6 +302,51 @@ data class Components(
     /** Air between a toast and whatever chrome is under it. */
     val toastGap: Dp = 22.dp,
 
+    // ── Artist studio (design section AS: screens 09 / 85 / 86 / 22 / 133) ──
+    /**
+     * Internal padding of a HERO block — the studio's accent money card, the
+     * availability calendar's card. One step above [cardPad]: these blocks carry
+     * a 38sp figure or a seven-column grid, and at the card padding they read as
+     * cramped against their own corner radius.
+     */
+    val heroPad: Dp = 20.dp,
+    /**
+     * Internal padding of a CONTENT card — a request row, a gig row, a stat
+     * cell. Deliberately not [Space.lg] (16): the design measures 15 on every
+     * one of them, and the difference shows when two sit side by side under a
+     * 20dp page gutter.
+     */
+    val cardPad: Dp = 15.dp,
+    /**
+     * The avatar on a LIST row — a request card, a gig-request header.
+     *
+     * Between [Size.avatarSm] (32, a chat row) and [Size.avatarMd] (48, a
+     * profile). The design uses it wherever a monogram identifies the other
+     * party inside a card rather than inside a line of text.
+     */
+    val rowAvatar: Dp = 40.dp,
+    /**
+     * The mono time column down the left of a gig row (design screen 36).
+     *
+     * Fixed rather than intrinsic so every row's act name starts on the same
+     * vertical: "8:00 PM" and "11:30 AM" are different widths, and a ragged left
+     * edge is what makes a day's schedule read as a list rather than as a table.
+     */
+    val gigTimeColumn: Dp = 62.dp,
+    /** A header status pill ("● Taking gigs") — its own padding, not a chip's. */
+    val pillPadH: Dp = 13.dp,
+    val pillPadV: Dp = 8.dp,
+    /**
+     * One cell of the dashboard's 14-day availability strip.
+     *
+     * Height only: the fourteen cells share the width equally, so a fixed width
+     * would either overflow a narrow phone or leave a gap on a wide one.
+     */
+    val stripCellH: Dp = 44.dp,
+    /** The earnings chart's drawing box (screen 133) and its bars' top radius. */
+    val barChart: Dp = 78.dp,
+    val barRadius: Dp = 3.dp,
+
     // ── Section BN ────────────────────────────────────────────────────────
     /**
      * The picture band on a confirmed booking's card (screen 10).

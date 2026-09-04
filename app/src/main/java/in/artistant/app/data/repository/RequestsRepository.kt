@@ -5,6 +5,7 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import `in`.artistant.app.common.util.SupabaseISO8601
 import `in`.artistant.app.data.model.GigRequest
 import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
@@ -203,7 +204,9 @@ private data class DbGigRequestWithClient(
     val venue: String? = null,
     @SerialName("crowd_size") val crowdSize: Int? = null,
     val status: String = "open",
+    @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("client_name") val clientName: String? = null,
     val client: ClientEmbed? = null,
 ) {
@@ -233,6 +236,21 @@ private data class DbGigRequestWithClient(
                 amount = proposedAmountInr,
                 packageLabel = "Custom",
                 timeAgo = relativeTimeAgo(createdAt),
+                venue = venue?.trim()?.takeIf { it.isNotEmpty() },
+                crowdSize = crowdSize,
+                updatedAgo = relativeTimeAgo(updatedAt),
+                artistId = artistId.lowercase(),
+                // Already on the row and already decoded; it was simply dropped
+                // here. Both halves of the pair are what lets a CONVERSATION
+                // find the quote that belongs to it — see [ThreadQuote.pick].
+                clientId = clientId.lowercase(),
+                // Canonical parser, not the lenient ladder below it: `expires_at`
+                // is a deadline the UI states in words ("holds till Fri"), so a
+                // misread is a lie about how long an offer stands. Null when it
+                // will not parse, and every caller drops the line rather than
+                // guessing.
+                expiresAtEpochMs = expiresAt
+                    ?.let { SupabaseISO8601.parse(it)?.toEpochMilli() },
             ),
             status = GigRequestStatus.fromDb(status),
             counterAmount = counterAmountInr,
@@ -300,6 +318,17 @@ class FakeRequestsRepository(
                 message = message.orEmpty(),
                 date = dateLabel,
                 amount = proposedAmountInr,
+                venue = venue?.trim()?.takeIf { it.isNotEmpty() },
+                crowdSize = crowdSize,
+                // Carried through, like the real seam: a fake that drops the
+                // fields the chat matches a quote on would make the chat's own
+                // tests pass against a repository that answers nothing.
+                //
+                // `clientId` is left empty on purpose — the fake has no session
+                // and inventing one would let a test match a pair the server
+                // never would. A caller that needs the pair seeds the row.
+                artistId = artistId.lowercase(),
+                expiresAtEpochMs = expiresAtEpochMs,
             ),
             status = GigRequestStatus.Open,
         )
