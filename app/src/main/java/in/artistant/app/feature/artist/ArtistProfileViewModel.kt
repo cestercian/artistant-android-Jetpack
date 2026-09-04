@@ -131,7 +131,7 @@ class ArtistProfileViewModel @Inject constructor(
         // Resolved once, in the constructor: an artist's own id does not change
         // while the page is open, and a signed-out reader is simply not self.
         ArtistProfileUiState(
-            isSelf = viewer.currentUserId()?.lowercase() == artistId.lowercase(),
+            isSelf = ArtistProfileFacts.isSelfProfile(viewer.currentUserId(), artistId),
         ),
     )
     val state: StateFlow<ArtistProfileUiState> = _state.asStateFlow()

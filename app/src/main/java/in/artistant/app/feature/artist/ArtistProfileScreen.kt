@@ -66,7 +66,6 @@ import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.model.GalleryPhoto
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.model.Sample
-import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
@@ -204,11 +203,7 @@ fun ArtistProfileScreen(
         // "Queued", never "received" — the insert soft-fails into a local log and
         // the reader is owed the difference (screen 56's note).
         ToastHost(
-            message = when (state.reportOutcome) {
-                ReportOutcome.Sent -> "Report sent to Artistant."
-                ReportOutcome.Queued -> "Report queued on this device."
-                null -> null
-            },
+            message = ArtistProfileFacts.reportToast(state.reportOutcome),
             onDismiss = viewModel::dismissReportToast,
             icon = Icons.Filled.Flag,
         )

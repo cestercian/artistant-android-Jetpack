@@ -182,6 +182,13 @@ internal fun ReportArtistSheet(
         dragHandle = null,
         containerColor = colors.surface,
     ) {
+        // The scroll goes on the sheet's DIRECT child, which is the only node
+        // here with a bounded height: `ModalBottomSheet` constrains its content
+        // to the display, and a `verticalScroll` deeper inside a wrap-content
+        // Column measures its children with infinite height instead — the list
+        // then grows past the sheet and is clipped rather than scrolled, which
+        // is exactly what happens to this form at a large font scale.
+        Column(Modifier.verticalScroll(rememberScrollState())) {
         SheetScaffold {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = space.md),
@@ -208,7 +215,7 @@ internal fun ReportArtistSheet(
                 color = colors.ink2,
             )
             Spacer(Modifier.height(space.md))
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column {
                 ArtistReportReasons.forEachIndexed { index, option ->
                     ReasonRow(
                         label = option,
@@ -245,6 +252,7 @@ internal fun ReportArtistSheet(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
         }
     }
 }

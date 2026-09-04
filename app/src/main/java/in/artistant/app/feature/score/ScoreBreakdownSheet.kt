@@ -84,6 +84,11 @@ fun ScoreBreakdownSheet(
         dragHandle = null,
         containerColor = colors.surface,
     ) {
+        // The scroll rides the sheet's DIRECT child: `ModalBottomSheet` bounds
+        // that node to the display, while a `verticalScroll` deeper inside a
+        // wrap-content Column measures with infinite height and grows past the
+        // sheet instead of scrolling inside it.
+        Column(Modifier.verticalScroll(rememberScrollState())) {
         SheetScaffold {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = space.lg),
@@ -135,10 +140,7 @@ fun ScoreBreakdownSheet(
             }
             Spacer(Modifier.height(space.lg))
 
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(space.md),
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
                 if (breakdownFailed) {
                     Banner(
                         title = "Couldn't itemise this score",
@@ -234,6 +236,7 @@ fun ScoreBreakdownSheet(
                     )
                 }
             }
+        }
         }
     }
 }
