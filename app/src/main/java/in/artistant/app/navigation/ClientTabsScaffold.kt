@@ -59,6 +59,9 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ArtistListKind
 import `in`.artistant.app.feature.profile.ArtistListScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
+import `in`.artistant.app.feature.signup.LegalDoc
+import `in`.artistant.app.feature.signup.LegalScreen
+import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
@@ -225,6 +228,7 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     ProfileScreen(
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
+                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
                         onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
                         onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
                     )
@@ -233,6 +237,32 @@ fun ClientTabsScaffold() {
             composable(ClientNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
                     BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
+            // because neither is role-specific. Reached from the account settings
+            // list's "Privacy" row above; the legal viewer is also reachable from the
+            // signup flow's welcome and sign-in screens.
+            composable(ClientNavRoutes.PRIVACY) {
+                TabPane(inner) {
+                    PrivacyScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenLegal = { doc -> nav.navigate(ClientNavRoutes.legal(doc.name)) },
+                    )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.LEGAL,
+                arguments = listOf(navArgument("doc") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    // An unknown or missing argument opens the terms rather than
+                    // failing: the viewer is segmented, so the wrong opening tab costs
+                    // one tap and a crash costs the screen.
+                    val doc = LegalDoc.entries
+                        .firstOrNull { it.name == entry.arguments?.getString("doc") }
+                        ?: LegalDoc.Terms
+                    LegalScreen(doc = doc, onClose = { nav.popBackStack() })
                 }
             }
             composable(

@@ -11,11 +11,13 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.handleDeeplinks
 import io.github.jan.supabase.auth.providers.Apple
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import `in`.artistant.app.BuildConfig
@@ -58,7 +60,7 @@ class SessionManager @Inject constructor(
     private val pushService: PushService,
     private val savedStore: SavedStore,
     private val uploadQueue: UploadQueue,
-) {
+) : AuthGateway {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
     private val scope = CoroutineScope(SupervisorJob())
@@ -73,7 +75,7 @@ class SessionManager @Inject constructor(
      * refresh (source=Refresh) — that must not re-trigger the advance.
      */
     private val _signInGeneration = MutableStateFlow(0)
-    val signInGeneration: StateFlow<Int> = _signInGeneration
+    override val signInGeneration: StateFlow<Int> = _signInGeneration
 
     /**
      * One-shot error channel for a FAILED OAuth deep-link completion (closes #12).
@@ -81,10 +83,10 @@ class SessionManager @Inject constructor(
      * OUTSIDE any ViewModel try/catch. Auth UI observes this and calls [consumeDeepLinkError].
      */
     private val _deepLinkError = MutableStateFlow<String?>(null)
-    val deepLinkError: StateFlow<String?> = _deepLinkError
+    override val deepLinkError: StateFlow<String?> = _deepLinkError
 
     /** The auth UI calls this once it has shown [deepLinkError], so it never re-surfaces. */
-    fun consumeDeepLinkError() { _deepLinkError.value = null }
+    override fun consumeDeepLinkError() { _deepLinkError.value = null }
 
     /**
      * Sign-in state as a Flow (the iOS `isSignedIn` @Published analogue). Maps the raw
@@ -134,7 +136,7 @@ class SessionManager @Inject constructor(
      * Supabase). Requires [BuildConfig.GOOGLE_WEB_CLIENT_ID] — a REPLACE placeholder makes
      * this a no-op with a clear log until the operator drops the real web-client id.
      */
-    suspend fun signInWithGoogle(activityContext: Context) {
+    override suspend fun signInWithGoogle(activityContext: Context) {
         val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
         if (webClientId == "REPLACE") {
             // TODO(on-device): needs GOOGLE_WEB_CLIENT_ID in secrets.properties + the SHA-1 of
@@ -186,7 +188,7 @@ class SessionManager @Inject constructor(
      * the Supabase dashboard + the Android callback registered. `signInWith(Apple)` launches
      * the browser and returns; the session lands via the deep link, not this call's return.
      */
-    suspend fun signInWithApple() {
+    override suspend fun signInWithApple() {
         // TODO(on-device): register the Apple provider + `in.artistant.app://login-callback`
         // redirect in the Supabase dashboard. The external browser opens here; the session
         // completes in handleDeepLink() on return, which is where completedSignIn() fires.
@@ -196,11 +198,80 @@ class SessionManager @Inject constructor(
         client.auth.signInWith(Apple)
     }
 
+    // MARK: - One-time code (the primary path)
+
+    /**
+     * Text a six-digit code to [phoneE164] (design screen 12 → 119).
+     *
+     * Phone is the identity in India, which is why the redesign makes this the first control on
+     * the sign-in screen and the password path a fallback. The dev Supabase project has an SMS
+     * provider configured, so this is a real send, not a stub.
+     *
+     * [createUser] is the caller's, not this method's. On the SIGNUP entrance it is true and
+     * the one call is both "sign up" and "sign in" — a number that has never been seen becomes
+     * an account, a number that has signs in — which is what lets screen 12 have a single
+     * button under a single field.
+     *
+     * On the LOGIN entrance it is false, and that is a consent rule rather than a preference.
+     * "I already have an account" sits on the welcome screen ABOVE the terms tick and is
+     * deliberately not gated on it (someone who already agreed should not have to agree again
+     * to get back in). With `createUser = true` behind it, a number that had NEVER signed up
+     * created an account through that door — an account whose owner was never shown the terms.
+     * With false, GoTrue refuses the send for an unknown user and the screen offers to start
+     * the signup walk, which collects the tick.
+     *
+     * Throws on a send failure (no SMS provider, a rejected number, no network, or — on login —
+     * no such user); the caller shows it inline and the code screen is never reached.
+     */
+    override suspend fun sendPhoneOtp(phoneE164: String, createUser: Boolean) {
+        client.auth.signInWith(OTP) {
+            phone = phoneE164
+            this.createUser = createUser
+        }
+    }
+
+    /**
+     * Exchange a texted code for a session. Bumps the generation on success, exactly like the
+     * password and Google paths, so the router advances a returning user whose uuid has not
+     * changed (see [completedSignIn]).
+     */
+    override suspend fun verifyPhoneOtp(phoneE164: String, token: String) {
+        client.auth.verifyPhoneOtp(type = OtpType.Phone.SMS, phone = phoneE164, token = token)
+        completedSignIn()
+    }
+
+    /**
+     * The same one-time-code flow over email.
+     *
+     * Offered because the design's sign-in screen has an "Or use email" field beside the phone
+     * one, and because App Review needs a path that does not require an Indian SIM. Whether it
+     * WORKS is a project setting we cannot read from here: GoTrue only mails a code when the
+     * project has SMTP configured, and on a project without it this call throws. That failure
+     * surfaces inline on the sign-in screen with the password path beside it, rather than
+     * being swallowed into a code screen for a mail that is never coming.
+     */
+    override suspend fun sendEmailOtp(email: String, createUser: Boolean) {
+        client.auth.signInWith(OTP) {
+            this.email = normalizeEmail(email)
+            this.createUser = createUser
+        }
+    }
+
+    /** Exchange an emailed code for a session. */
+    override suspend fun verifyEmailOtp(email: String, token: String) {
+        client.auth.verifyEmailOtp(
+            type = OtpType.Email.EMAIL,
+            email = normalizeEmail(email),
+            token = token,
+        )
+        completedSignIn()
+    }
+
     // MARK: - Email / password
 
     /** Email + password sign-in. On success the session lands in sessionStatus; we bump the
      *  generation so a returning-same-user re-auth still advances the router. */
-    suspend fun signInWithEmail(email: String, password: String) {
+    override suspend fun signInWithEmail(email: String, password: String) {
         client.auth.signInWith(Email) {
             this.email = normalizeEmail(email)
             this.password = password
@@ -212,11 +283,12 @@ class SessionManager @Inject constructor(
      * Email + password sign-up. Returns [EmailAuthOutcome]:
      * - [EmailAuthOutcome.SignedIn] when the project has confirmation OFF (signUpWith returns
      *   a user AND a session is now active) — advance immediately, like sign-in.
+     * - [EmailAuthOutcome.AlreadyRegistered] when the address is taken.
      * - [EmailAuthOutcome.ConfirmationRequired] when confirmation is ON (no session yet).
      * `fullName` is stored as `full_name` user metadata for downstream denormalization.
      */
-    suspend fun signUpWithEmail(email: String, password: String, fullName: String?): EmailAuthOutcome {
-        client.auth.signUpWith(Email) {
+    override suspend fun signUpWithEmail(email: String, password: String, fullName: String?): EmailAuthOutcome {
+        val user = client.auth.signUpWith(Email) {
             this.email = normalizeEmail(email)
             this.password = password
             fullName?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -225,12 +297,34 @@ class SessionManager @Inject constructor(
         }
         // supabase-kt drops the session into sessionStatus when confirmation is OFF; when it's
         // ON there's no session. Distinguish on the live session rather than the return value.
-        return if (client.auth.currentSessionOrNull() != null) {
+        if (client.auth.currentSessionOrNull() != null) {
             completedSignIn()
-            EmailAuthOutcome.SignedIn
+            return EmailAuthOutcome.SignedIn
+        }
+        // An EMPTY identities array is GoTrue's anti-enumeration answer for "that address
+        // already has a confirmed account": with confirmations ON it does not error, it returns
+        // an obfuscated user and mails nothing. Without this branch the screen told a user who
+        // had merely mistyped their own password to go and check an inbox for a message that
+        // was never sent. It is the documented signal, and it is the only one there is.
+        return if (user?.identities?.isEmpty() == true) {
+            EmailAuthOutcome.AlreadyRegistered
         } else {
             EmailAuthOutcome.ConfirmationRequired
         }
+    }
+
+    /**
+     * Mail a password-reset link (design screen 28's "Forgot password?").
+     *
+     * Real, not decorative: GoTrue sends the mail when the project has SMTP configured, and
+     * throws when it does not — which the screen reports where the link was tapped. No
+     * redirect URL is passed, so the link lands on the project's configured Site URL (the web
+     * client's reset page) rather than on a deep link this app has no screen for. The password
+     * this app collects is a fallback path for App Review and for anyone without a platform
+     * account; the recovery for it living on the web is the honest shape of that.
+     */
+    override suspend fun sendPasswordReset(email: String) {
+        client.auth.resetPasswordForEmail(normalizeEmail(email))
     }
 
     // MARK: - Sign out
@@ -352,6 +446,9 @@ internal fun fragmentParam(fragment: String?, key: String): String? =
 sealed interface EmailAuthOutcome {
     data object SignedIn : EmailAuthOutcome
     data object ConfirmationRequired : EmailAuthOutcome
+
+    /** The address already has an account, so the password offered was simply the wrong one. */
+    data object AlreadyRegistered : EmailAuthOutcome
 }
 
 /** A user-facing auth failure the UI surfaces inline. */
