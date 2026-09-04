@@ -205,6 +205,19 @@ class SignupViewModel @Inject constructor(
     fun startLogin() = _state.update { it.copy(mode = SignupMode.Login, step = SignupStep.Auth) }
 
     /**
+     * "No account for this number — create one?" — the offer a login-mode send makes when
+     * GoTrue reports the address has never been here.
+     *
+     * It lands on `.Welcome`, not on `.Role` the way [startSignup] does, and that is the whole
+     * point of it: the terms tick lives on the welcome screen, the login door is deliberately
+     * not gated on it, and an account created from this offer must still be one whose owner
+     * was shown the terms. Sending them one screen further back costs a tap and buys the
+     * consent the signup path is built to collect.
+     */
+    fun switchToSignup() =
+        _state.update { it.copy(mode = SignupMode.Signup, step = SignupStep.Welcome) }
+
+    /**
      * A code was texted (or emailed) — show the six boxes.
      *
      * Called by the auth screen only after [in.artistant.app.ui.auth.AuthViewModel.sendCode]

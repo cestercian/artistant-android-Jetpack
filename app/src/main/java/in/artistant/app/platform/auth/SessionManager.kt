@@ -60,7 +60,7 @@ class SessionManager @Inject constructor(
     private val pushService: PushService,
     private val savedStore: SavedStore,
     private val uploadQueue: UploadQueue,
-) {
+) : AuthGateway {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
     private val scope = CoroutineScope(SupervisorJob())
@@ -75,7 +75,7 @@ class SessionManager @Inject constructor(
      * refresh (source=Refresh) — that must not re-trigger the advance.
      */
     private val _signInGeneration = MutableStateFlow(0)
-    val signInGeneration: StateFlow<Int> = _signInGeneration
+    override val signInGeneration: StateFlow<Int> = _signInGeneration
 
     /**
      * One-shot error channel for a FAILED OAuth deep-link completion (closes #12).
@@ -83,10 +83,10 @@ class SessionManager @Inject constructor(
      * OUTSIDE any ViewModel try/catch. Auth UI observes this and calls [consumeDeepLinkError].
      */
     private val _deepLinkError = MutableStateFlow<String?>(null)
-    val deepLinkError: StateFlow<String?> = _deepLinkError
+    override val deepLinkError: StateFlow<String?> = _deepLinkError
 
     /** The auth UI calls this once it has shown [deepLinkError], so it never re-surfaces. */
-    fun consumeDeepLinkError() { _deepLinkError.value = null }
+    override fun consumeDeepLinkError() { _deepLinkError.value = null }
 
     /**
      * Sign-in state as a Flow (the iOS `isSignedIn` @Published analogue). Maps the raw
@@ -136,7 +136,7 @@ class SessionManager @Inject constructor(
      * Supabase). Requires [BuildConfig.GOOGLE_WEB_CLIENT_ID] — a REPLACE placeholder makes
      * this a no-op with a clear log until the operator drops the real web-client id.
      */
-    suspend fun signInWithGoogle(activityContext: Context) {
+    override suspend fun signInWithGoogle(activityContext: Context) {
         val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
         if (webClientId == "REPLACE") {
             // TODO(on-device): needs GOOGLE_WEB_CLIENT_ID in secrets.properties + the SHA-1 of
@@ -188,7 +188,7 @@ class SessionManager @Inject constructor(
      * the Supabase dashboard + the Android callback registered. `signInWith(Apple)` launches
      * the browser and returns; the session lands via the deep link, not this call's return.
      */
-    suspend fun signInWithApple() {
+    override suspend fun signInWithApple() {
         // TODO(on-device): register the Apple provider + `in.artistant.app://login-callback`
         // redirect in the Supabase dashboard. The external browser opens here; the session
         // completes in handleDeepLink() on return, which is where completedSignIn() fires.
@@ -207,19 +207,26 @@ class SessionManager @Inject constructor(
      * the sign-in screen and the password path a fallback. The dev Supabase project has an SMS
      * provider configured, so this is a real send, not a stub.
      *
-     * `createUser = true` on purpose: this one call is BOTH "sign up" and "sign in". A number
-     * that has never been seen becomes an account; a number that has signs in. The alternative
-     * — a false here plus a separate sign-up call — would make a first-time user tap "Send
-     * code", get "user not found", and have to work out which of two buttons they were supposed
-     * to press, for a screen whose entire premise is that there is only one.
+     * [createUser] is the caller's, not this method's. On the SIGNUP entrance it is true and
+     * the one call is both "sign up" and "sign in" — a number that has never been seen becomes
+     * an account, a number that has signs in — which is what lets screen 12 have a single
+     * button under a single field.
      *
-     * Throws on a send failure (no SMS provider, a rejected number, no network); the caller
-     * shows it inline and the code screen is never reached.
+     * On the LOGIN entrance it is false, and that is a consent rule rather than a preference.
+     * "I already have an account" sits on the welcome screen ABOVE the terms tick and is
+     * deliberately not gated on it (someone who already agreed should not have to agree again
+     * to get back in). With `createUser = true` behind it, a number that had NEVER signed up
+     * created an account through that door — an account whose owner was never shown the terms.
+     * With false, GoTrue refuses the send for an unknown user and the screen offers to start
+     * the signup walk, which collects the tick.
+     *
+     * Throws on a send failure (no SMS provider, a rejected number, no network, or — on login —
+     * no such user); the caller shows it inline and the code screen is never reached.
      */
-    suspend fun sendPhoneOtp(phoneE164: String) {
+    override suspend fun sendPhoneOtp(phoneE164: String, createUser: Boolean) {
         client.auth.signInWith(OTP) {
             phone = phoneE164
-            createUser = true
+            this.createUser = createUser
         }
     }
 
@@ -228,7 +235,7 @@ class SessionManager @Inject constructor(
      * password and Google paths, so the router advances a returning user whose uuid has not
      * changed (see [completedSignIn]).
      */
-    suspend fun verifyPhoneOtp(phoneE164: String, token: String) {
+    override suspend fun verifyPhoneOtp(phoneE164: String, token: String) {
         client.auth.verifyPhoneOtp(type = OtpType.Phone.SMS, phone = phoneE164, token = token)
         completedSignIn()
     }
@@ -243,15 +250,15 @@ class SessionManager @Inject constructor(
      * surfaces inline on the sign-in screen with the password path beside it, rather than
      * being swallowed into a code screen for a mail that is never coming.
      */
-    suspend fun sendEmailOtp(email: String) {
+    override suspend fun sendEmailOtp(email: String, createUser: Boolean) {
         client.auth.signInWith(OTP) {
             this.email = normalizeEmail(email)
-            createUser = true
+            this.createUser = createUser
         }
     }
 
     /** Exchange an emailed code for a session. */
-    suspend fun verifyEmailOtp(email: String, token: String) {
+    override suspend fun verifyEmailOtp(email: String, token: String) {
         client.auth.verifyEmailOtp(
             type = OtpType.Email.EMAIL,
             email = normalizeEmail(email),
@@ -264,7 +271,7 @@ class SessionManager @Inject constructor(
 
     /** Email + password sign-in. On success the session lands in sessionStatus; we bump the
      *  generation so a returning-same-user re-auth still advances the router. */
-    suspend fun signInWithEmail(email: String, password: String) {
+    override suspend fun signInWithEmail(email: String, password: String) {
         client.auth.signInWith(Email) {
             this.email = normalizeEmail(email)
             this.password = password
@@ -276,11 +283,12 @@ class SessionManager @Inject constructor(
      * Email + password sign-up. Returns [EmailAuthOutcome]:
      * - [EmailAuthOutcome.SignedIn] when the project has confirmation OFF (signUpWith returns
      *   a user AND a session is now active) — advance immediately, like sign-in.
+     * - [EmailAuthOutcome.AlreadyRegistered] when the address is taken.
      * - [EmailAuthOutcome.ConfirmationRequired] when confirmation is ON (no session yet).
      * `fullName` is stored as `full_name` user metadata for downstream denormalization.
      */
-    suspend fun signUpWithEmail(email: String, password: String, fullName: String?): EmailAuthOutcome {
-        client.auth.signUpWith(Email) {
+    override suspend fun signUpWithEmail(email: String, password: String, fullName: String?): EmailAuthOutcome {
+        val user = client.auth.signUpWith(Email) {
             this.email = normalizeEmail(email)
             this.password = password
             fullName?.trim()?.takeIf { it.isNotEmpty() }?.let {
@@ -289,9 +297,17 @@ class SessionManager @Inject constructor(
         }
         // supabase-kt drops the session into sessionStatus when confirmation is OFF; when it's
         // ON there's no session. Distinguish on the live session rather than the return value.
-        return if (client.auth.currentSessionOrNull() != null) {
+        if (client.auth.currentSessionOrNull() != null) {
             completedSignIn()
-            EmailAuthOutcome.SignedIn
+            return EmailAuthOutcome.SignedIn
+        }
+        // An EMPTY identities array is GoTrue's anti-enumeration answer for "that address
+        // already has a confirmed account": with confirmations ON it does not error, it returns
+        // an obfuscated user and mails nothing. Without this branch the screen told a user who
+        // had merely mistyped their own password to go and check an inbox for a message that
+        // was never sent. It is the documented signal, and it is the only one there is.
+        return if (user?.identities?.isEmpty() == true) {
+            EmailAuthOutcome.AlreadyRegistered
         } else {
             EmailAuthOutcome.ConfirmationRequired
         }
@@ -307,7 +323,7 @@ class SessionManager @Inject constructor(
      * this app collects is a fallback path for App Review and for anyone without a platform
      * account; the recovery for it living on the web is the honest shape of that.
      */
-    suspend fun sendPasswordReset(email: String) {
+    override suspend fun sendPasswordReset(email: String) {
         client.auth.resetPasswordForEmail(normalizeEmail(email))
     }
 
@@ -430,6 +446,9 @@ internal fun fragmentParam(fragment: String?, key: String): String? =
 sealed interface EmailAuthOutcome {
     data object SignedIn : EmailAuthOutcome
     data object ConfirmationRequired : EmailAuthOutcome
+
+    /** The address already has an account, so the password offered was simply the wrong one. */
+    data object AlreadyRegistered : EmailAuthOutcome
 }
 
 /** A user-facing auth failure the UI surfaces inline. */

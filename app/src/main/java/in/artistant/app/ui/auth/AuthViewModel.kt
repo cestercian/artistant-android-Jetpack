@@ -11,7 +11,7 @@ import `in`.artistant.app.platform.auth.AuthException
 import `in`.artistant.app.platform.auth.EmailAuthOutcome
 import `in`.artistant.app.feature.signup.OtpResend
 import `in`.artistant.app.feature.signup.PhoneRules
-import `in`.artistant.app.platform.auth.SessionManager
+import `in`.artistant.app.platform.auth.AuthGateway
 import io.github.jan.supabase.exceptions.HttpRequestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -52,6 +52,14 @@ data class AuthUiState(
     val isVerifying: Boolean = false,
     /** A wrong or expired code, shown under the boxes and reddening them. */
     val codeError: String? = null,
+    /**
+     * A LOGIN-mode send GoTrue refused because the address has no account — which is what
+     * `createUser = false` is for. Not an error: the address is fine, it simply has never been
+     * here, so the screen offers the signup walk rather than a red banner nobody can act on.
+     * The channel is carried because the sentence names what was typed ("this number" /
+     * "this email"), and the two fields sit one above the other.
+     */
+    val noAccountFor: OtpChannel? = null,
 ) {
     /** The phone number in the form GoTrue takes, or "" when what is typed is not one. */
     val phoneE164: String get() = PhoneRules.toE164(phone)
@@ -69,13 +77,13 @@ data class AuthUiState(
 }
 
 /**
- * Runs the [SessionManager] sign-in calls with spinner + inline-error plumbing. On success
+ * Runs the [AuthGateway] sign-in calls with spinner + inline-error plumbing. On success
  * the session lands in sessionStatus and [RootViewModel] advances the gate — this VM only
  * owns the transient auth-entry UI, not routing.
  */
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    private val session: SessionManager,
+    private val session: AuthGateway,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AuthUiState())
@@ -118,10 +126,12 @@ class AuthViewModel @Inject constructor(
     private var countdownJob: Job? = null
 
     fun setPhone(raw: String) = _state.update {
-        it.copy(phone = PhoneRules.national(raw), error = null)
+        it.copy(phone = PhoneRules.national(raw), error = null, noAccountFor = null)
     }
 
-    fun setEmail(raw: String) = _state.update { it.copy(email = raw, error = null) }
+    fun setEmail(raw: String) = _state.update {
+        it.copy(email = raw, error = null, noAccountFor = null)
+    }
 
     fun setCode(raw: String) = _state.update {
         it.copy(code = raw.filter(Char::isDigit).take(OtpResend.CODE_LENGTH), codeError = null)
@@ -135,8 +145,13 @@ class AuthViewModel @Inject constructor(
      * addition. [onSent] is what moves the flow to the code step, and it fires only on a
      * successful send — a send that throws leaves the user on the sign-in screen looking at
      * the reason, instead of on a code screen waiting for a message that is not coming.
+     *
+     * @param createUser false on the LOGIN entrance, so an unknown address cannot become an
+     *   account through a door that never showed anyone the terms. GoTrue answers that refusal
+     *   with `otp_disabled`, which becomes [AuthUiState.noAccountFor] and an offer to sign up
+     *   properly — not an error, because nothing went wrong.
      */
-    fun sendCode(onSent: () -> Unit = {}) {
+    fun sendCode(createUser: Boolean = true, onSent: () -> Unit = {}) {
         val s = _state.value
         if (s.isSendingCode) return
         val usePhone = PhoneRules.isValid(s.phone)
@@ -144,16 +159,23 @@ class AuthViewModel @Inject constructor(
             _state.update { it.copy(error = "Enter a mobile number or an email.") }
             return
         }
+        val channel = if (usePhone) OtpChannel.Sms else OtpChannel.Email
         val destination = if (usePhone) s.phoneE164 else s.email.trim()
-        _state.update { it.copy(isSendingCode = true, error = null, codeError = null) }
+        _state.update {
+            it.copy(isSendingCode = true, error = null, codeError = null, noAccountFor = null)
+        }
         viewModelScope.launch {
             try {
-                if (usePhone) session.sendPhoneOtp(destination) else session.sendEmailOtp(destination)
+                if (usePhone) {
+                    session.sendPhoneOtp(destination, createUser)
+                } else {
+                    session.sendEmailOtp(destination, createUser)
+                }
                 _state.update {
                     it.copy(
                         isSendingCode = false,
                         codeDestination = destination,
-                        codeChannel = if (usePhone) OtpChannel.Sms else OtpChannel.Email,
+                        codeChannel = channel,
                         sendCount = it.sendCount + 1,
                         // A resend does not invalidate what is already typed, but a FIRST
                         // send does: whatever is in the boxes belongs to a previous attempt.
@@ -162,11 +184,38 @@ class AuthViewModel @Inject constructor(
                 }
                 startResendCountdown()
                 onSent()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
-                errorFor(e, ::friendlyOtp)?.let { msg -> _state.update { it.copy(error = msg) } }
+                if (!createUser && isNoSuchUser(e)) {
+                    // The one refusal that is not a failure. Same GoTrue string as "signups are
+                    // paused", which is why it is only read this way when we ASKED for
+                    // createUser = false — in signup mode the identical message means the
+                    // opposite thing and keeps its own wording.
+                    _state.update { it.copy(noAccountFor = channel) }
+                } else {
+                    errorFor(e, ::friendlyOtp)?.let { msg -> _state.update { it.copy(error = msg) } }
+                }
                 _state.update { it.copy(isSendingCode = false) }
             }
         }
+    }
+
+    /**
+     * GoTrue's answer to a `create_user = false` send for an address it has never seen.
+     *
+     * It reports it as `otp_disabled` / "Signups not allowed for otp" — the sign-up refusal,
+     * not a "no such user", because telling an anonymous caller which numbers have accounts is
+     * exactly the enumeration oracle it declines to be. Only the login path asks the question,
+     * so only the login path reads the answer this way.
+     */
+    private fun isNoSuchUser(e: Throwable): Boolean {
+        val raw = (e.message ?: "").lowercase()
+        return "otp_disabled" in raw ||
+            "signups not allowed" in raw ||
+            "signup is disabled" in raw ||
+            "signups are disabled" in raw ||
+            "user not found" in raw
     }
 
     /** Exchange the typed code for a session. The gate advances the flow from there. */
@@ -207,13 +256,19 @@ class AuthViewModel @Inject constructor(
     }
 
     /**
-     * Drop everything the code path is holding — the number, the code, the countdown.
+     * Drop everything the code path is holding — the destination, the digits, the send count,
+     * the countdown.
      *
-     * Called when the user leaves the code screen for good ("Change number", the escape to
-     * the password form). Without it a later send would inherit a spent [AuthUiState.sendCount]
-     * and offer the escape hatch before the first message had a chance to arrive.
+     * Called on every way OUT of the code screen: the header's "Change number", the system back
+     * gesture, and the escape to the password form. This ViewModel is Activity-scoped (the auth
+     * screens sit outside any NavHost), so nothing else ever drops it — back only moved
+     * `SignupStep`, and the next number the user typed inherited a spent [sendCount]. The
+     * consequences were all visible: the first send for the NEW number counted as a resend, so
+     * the screen offered "use email instead" before a single message had had a chance to
+     * arrive, the cooldown was still running from the previous number, and the six boxes still
+     * held the digits typed for it.
      */
-    fun resetCodeAttempt() {
+    fun clearOtp() {
         countdownJob?.cancel()
         _state.update {
             it.copy(
@@ -224,6 +279,7 @@ class AuthViewModel @Inject constructor(
                 sendCount = 0,
                 isSendingCode = false,
                 isVerifying = false,
+                noAccountFor = null,
             )
         }
     }
@@ -269,56 +325,99 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    /** Email sign-in. Client-validates first, then defers to GoTrue. */
-    fun signInWithEmail(email: String, password: String) {
+    /**
+     * Screen 28's one button, doing what the banner above it promises.
+     *
+     * "Already have an account with this email? We'll sign you in instead of creating a second
+     * one" is the design's own copy, and for a while it was simply untrue: the sheet called
+     * the sign-UP gateway unconditionally, so a returning user with a confirmed account could
+     * not
+     * get in with their own password — the screen either told them the address was already
+     * registered or (with confirmations on) sent them to look for a mail GoTrue never sent.
+     *
+     * So the password is offered to sign-IN first, and only a genuine "those credentials don't
+     * match anything" turns into a sign-UP. Everything else — an unconfirmed address, a rate
+     * limit, no network — stops there and is said, because falling through to a sign-up would
+     * answer a temporary problem by making a second account.
+     *
+     * The ambiguity is GoTrue's and cannot be resolved from here: `invalid_credentials` means
+     * BOTH "no such user" and "wrong password", deliberately, so that an anonymous caller
+     * cannot use this screen to discover who has an account. That is why the sign-up fallback
+     * has to handle coming back with "that address is taken" — see [createAccount] — which is
+     * the shape a mistyped password takes on the second call.
+     */
+    fun submitEmailAuth(email: String, password: String, fullName: String?) {
         beginEmailAttempt()
         if (!EmailRules.isValid(email)) {
             _state.update { it.copy(error = "Enter a valid email.") }
             return
         }
-        // parity: iOS gates submit on passwordValid (>=6) for BOTH modes (EmailAuthView) —
-        // sign-in must guard too so we don't fire a doomed request GoTrue would reject anyway.
+        // The SIGN-IN floor, not screen 28's stricter new-account rule: an account made before
+        // that rule existed still has to be able to get in. The 8-character line is enforced
+        // below, on the branch that actually creates something.
         if (!PasswordRules.isValid(password)) {
-            _state.update { it.copy(error = "Password must be at least 6 characters.") }
+            _state.update {
+                it.copy(error = "Password must be at least ${PasswordRules.MIN_LENGTH} characters.")
+            }
             return
         }
         _state.update { it.copy(isAuthenticating = true, error = null) }
         viewModelScope.launch {
             try {
                 session.signInWithEmail(email, password)
-            } catch (e: Throwable) {
-                errorFor(e, ::friendly)?.let { msg -> _state.update { it.copy(error = msg) } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (signInFailed: Throwable) {
+                when {
+                    !isUnknownCredentials(signInFailed) || isNetworkError(signInFailed) ->
+                        errorFor(signInFailed, ::friendly)?.let { msg ->
+                            _state.update { it.copy(error = msg) }
+                        }
+                    // Nothing matched those credentials, so this may be a new account — but
+                    // screen 28 says a new one needs eight characters, and a rule the tick
+                    // draws is a rule the button honours.
+                    !PasswordRules.isValidForNewAccount(password) ->
+                        _state.update {
+                            it.copy(
+                                error = "Wrong password — or, if you're new here, pick one " +
+                                    "with at least ${PasswordRules.NEW_ACCOUNT_MIN_LENGTH} characters.",
+                            )
+                        }
+                    else -> createAccount(email, password, fullName)
+                }
             } finally {
                 _state.update { it.copy(isAuthenticating = false) }
             }
         }
     }
 
-    /** Email sign-up. On confirmation-required, flips [AuthUiState.confirmationRequired]. */
-    fun signUpWithEmail(email: String, password: String, fullName: String?) {
-        beginEmailAttempt()
-        if (!EmailRules.isValid(email)) {
-            _state.update { it.copy(error = "Enter a valid email.") }
-            return
-        }
-        if (!PasswordRules.isValid(password)) {
-            _state.update { it.copy(error = "Password must be at least 6 characters.") }
-            return
-        }
-        _state.update { it.copy(isAuthenticating = true, error = null) }
-        viewModelScope.launch {
-            try {
-                when (session.signUpWithEmail(email, password, fullName)) {
-                    EmailAuthOutcome.SignedIn -> Unit // RootViewModel advances the gate
-                    EmailAuthOutcome.ConfirmationRequired ->
-                        _state.update { it.copy(confirmationRequired = true) }
-                }
-            } catch (e: Throwable) {
+    /** The sign-up half of [submitEmailAuth]. Only reached when nothing matched the password. */
+    private suspend fun createAccount(email: String, password: String, fullName: String?) {
+        try {
+            when (session.signUpWithEmail(email, password, fullName)) {
+                EmailAuthOutcome.SignedIn -> Unit // RootViewModel advances the gate
+                EmailAuthOutcome.ConfirmationRequired ->
+                    _state.update { it.copy(confirmationRequired = true) }
+                // The address is taken, and we have just proved the password does not open it.
+                EmailAuthOutcome.AlreadyRegistered ->
+                    _state.update { it.copy(error = WRONG_PASSWORD) }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            // Same fact by the other route: with confirmations OFF, GoTrue says it out loud.
+            if ("already registered" in (e.message ?: "").lowercase()) {
+                _state.update { it.copy(error = WRONG_PASSWORD) }
+            } else {
                 errorFor(e, ::friendly)?.let { msg -> _state.update { it.copy(error = msg) } }
-            } finally {
-                _state.update { it.copy(isAuthenticating = false) }
             }
         }
+    }
+
+    /** GoTrue's one answer for both "no such user" and "wrong password" (it will not say which). */
+    private fun isUnknownCredentials(e: Throwable): Boolean {
+        val raw = (e.message ?: "").lowercase()
+        return "invalid login" in raw || "invalid credentials" in raw || "user not found" in raw
     }
 
     /**
@@ -389,6 +488,15 @@ class AuthViewModel @Inject constructor(
         }
     }
 }
+
+/**
+ * Said when the address exists and the password did not open it.
+ *
+ * Deliberately NOT "that email already has an account — sign in instead": the user has just
+ * tried to sign in, on the only screen that offers it, so an instruction to do the thing they
+ * did is a dead end. Both halves are named because GoTrue will not say which one was wrong.
+ */
+internal const val WRONG_PASSWORD = "Wrong email or password."
 
 /** Shown for any connectivity failure so the user never sees a raw Ktor timeout string. */
 internal const val NETWORK_ERROR_MESSAGE = "Couldn't reach the server. Check your connection and try again."

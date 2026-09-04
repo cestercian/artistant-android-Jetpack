@@ -48,6 +48,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.ui.auth.AuthUiState
 import `in`.artistant.app.ui.auth.AuthViewModel
+import `in`.artistant.app.ui.auth.OtpChannel
 
 /**
  * Screen 12 — **OTP first, password never**.
@@ -63,8 +64,11 @@ import `in`.artistant.app.ui.auth.AuthViewModel
  * ADDRESS for the same code, not a second kind of sign-in. Which one gets used is decided by
  * which one holds something valid (phone wins), so the button never has to ask.
  *
- * @param mode only changes the headline. Everything else about signing in is identical for a
- *   new account and a returning one — that is the point of a one-tap code.
+ * @param mode changes the headline, and one thing that is not cosmetic: on LOGIN the code is
+ *   sent with `createUser = false`, so this door cannot mint an account behind the welcome
+ *   screen's un-ticked consent box.
+ * @param onStartSignup where "create one?" goes when a login-mode send finds no account —
+ *   the signup walk, which starts at the tick.
  */
 @Composable
 fun SignupAuthScreen(
@@ -72,6 +76,7 @@ fun SignupAuthScreen(
     authNotice: String?,
     onCodeSent: () -> Unit,
     onOpenEmailSignUp: () -> Unit,
+    onStartSignup: () -> Unit,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     onOpenLegal: (LegalDoc) -> Unit = {},
@@ -84,10 +89,15 @@ fun SignupAuthScreen(
         authNotice = authNotice,
         onPhoneChange = viewModel::setPhone,
         onEmailChange = viewModel::setEmail,
-        onSendCode = { viewModel.sendCode(onCodeSent) },
+        // Login sends with createUser = false. "I already have an account" is one tap on the
+        // welcome screen and is deliberately NOT gated on the terms tick beside it — so with
+        // account creation behind it, an unknown number made an account whose owner had agreed
+        // to nothing. Refused instead, and the refusal becomes an offer to sign up properly.
+        onSendCode = { viewModel.sendCode(createUser = mode != SignupMode.Login, onSent = onCodeSent) },
         onApple = viewModel::signInWithApple,
         onGoogle = viewModel::signInWithGoogle,
         onOpenEmailSignUp = onOpenEmailSignUp,
+        onStartSignup = onStartSignup,
         onOpenLegal = onOpenLegal,
         onBack = onBack,
         modifier = modifier,
@@ -106,6 +116,7 @@ private fun SignupAuthContent(
     onApple: () -> Unit,
     onGoogle: (android.content.Context) -> Unit,
     onOpenEmailSignUp: () -> Unit,
+    onStartSignup: () -> Unit,
     onOpenLegal: (LegalDoc) -> Unit,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -205,6 +216,25 @@ private fun SignupAuthContent(
                 title = message,
                 tone = BannerTone.Failure,
                 modifier = Modifier.semantics { testTag = "auth.error" },
+            )
+        }
+
+        // The login-only outcome that is not a failure: the address is fine, it has simply
+        // never been here. `Note`, not `Failure`, because nothing broke — and it carries the
+        // way forward rather than describing the dead end, since the signup walk is where the
+        // terms tick lives and this door does not collect one.
+        state.noAccountFor?.let { channel ->
+            Spacer(Modifier.height(space.md))
+            Banner(
+                title = if (channel == OtpChannel.Sms) {
+                    "No account for this number — create one?"
+                } else {
+                    "No account for this email — create one?"
+                },
+                tone = BannerTone.Note,
+                actionLabel = "Create one",
+                onAction = onStartSignup,
+                modifier = Modifier.semantics { testTag = "auth.noAccount" },
             )
         }
 
@@ -359,6 +389,7 @@ private fun SignInPreview() {
             onApple = {},
             onGoogle = {},
             onOpenEmailSignUp = {},
+            onStartSignup = {},
             onOpenLegal = {},
             onBack = {},
         )

@@ -38,6 +38,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.data.model.EmailRules
+import `in`.artistant.app.data.model.PasswordRules
 import `in`.artistant.app.designsystem.component.AppTextField
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
@@ -56,10 +57,16 @@ import `in`.artistant.app.ui.auth.AuthViewModel
  * footer points back the other way ("Or go back for Apple and Google").
  *
  * The password rule shown is **eight** characters, not GoTrue's six. The design draws eight
- * with a tick beside it, and a rule you state and then do not enforce is worse than no rule:
- * the tick would go green on a password the screen had just called too short. So the tick and
- * the button agree, and both are stricter than the server — which is always allowed, and never
- * the reverse.
+ * with a tick beside it, and a rule you state and then do not enforce is worse than no rule —
+ * so a NEW account is held to eight, enforced in
+ * [in.artistant.app.ui.auth.AuthViewModel.submitEmailAuth] on the branch that actually creates
+ * one. Sign-IN keeps GoTrue's six: an account made before this screen existed may well hold a
+ * six-character password, and a rule invented afterwards must not lock its owner out. Hence
+ * the tick and the button counting differently, which the tick's own caption says out loud.
+ *
+ * **One button, two acts.** The banner promises "we'll sign you in instead of creating a second
+ * one", so submit offers the password to sign-IN first and only creates an account when nothing
+ * matched it. The screen never asks the user to work out which of the two they are doing.
  */
 @Composable
 fun EmailSignUpScreen(
@@ -71,7 +78,7 @@ fun EmailSignUpScreen(
     EmailSignUpContent(
         state = state,
         onCancel = onCancel,
-        onSubmit = { email, password, name -> viewModel.signUpWithEmail(email, password, name) },
+        onSubmit = { email, password, name -> viewModel.submitEmailAuth(email, password, name) },
         onForgotPassword = viewModel::sendPasswordReset,
         modifier = modifier,
     )
@@ -95,8 +102,13 @@ private fun EmailSignUpContent(
     var password by rememberSaveable { mutableStateOf("") }
     var revealed by remember { mutableStateOf(false) }
 
-    val longEnough = password.length >= MIN_PASSWORD_LENGTH
-    val canSubmit = !state.isAuthenticating && EmailRules.isValid(email) && longEnough
+    // Two different lengths, on purpose. The TICK draws screen 28's new-account rule (eight);
+    // the BUTTON opens on GoTrue's floor (six), because this one control also signs in and an
+    // account made before that rule existed still holds a six-character password. Gating submit
+    // on eight is what locked those users out of their own account — the rule was never theirs.
+    val longEnough = PasswordRules.isValidForNewAccount(password)
+    val canSubmit = !state.isAuthenticating && EmailRules.isValid(email) &&
+        PasswordRules.isValid(password)
     val submit = { keyboard?.hide(); onSubmit(email, password, name.ifBlank { null }) }
 
     SignupScaffold(
@@ -116,7 +128,9 @@ private fun EmailSignUpContent(
         },
         footer = {
             PrimaryButton(
-                text = if (state.isAuthenticating) "Creating…" else "Create account",
+                // "Checking…", not "Creating…": the first thing this button does is offer the
+                // password to sign-IN, and it only creates anything if nothing answered.
+                text = if (state.isAuthenticating) "Checking…" else "Create account",
                 onClick = submit,
                 fullWidth = true,
                 enabled = canSubmit,
@@ -210,7 +224,7 @@ private fun EmailSignUpContent(
                 }
             }
             Text(
-                "At least $MIN_PASSWORD_LENGTH characters",
+                "At least ${PasswordRules.NEW_ACCOUNT_MIN_LENGTH} characters for a new account",
                 style = AppTheme.type.caption,
                 color = if (longEnough) colors.ink2 else colors.ink4,
             )
@@ -252,15 +266,6 @@ private fun EmailSignUpContent(
         Spacer(Modifier.height(space.lg))
     }
 }
-
-/**
- * The rule the screen states, and therefore the rule it enforces.
- *
- * `PasswordRules.MIN_LENGTH` is six, which is GoTrue's floor and what the sign-IN guard uses —
- * an existing account may well have a six-character password and must still be able to get in.
- * A NEW one does not have that constraint, so this screen can hold the line the design draws.
- */
-private const val MIN_PASSWORD_LENGTH = 8
 
 @Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 900)
 @Composable

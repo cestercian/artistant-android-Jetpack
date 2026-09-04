@@ -56,12 +56,15 @@ fun EnterCodeScreen(
         onCodeChange = viewModel::setCode,
         onVerify = viewModel::verifyCode,
         onResend = { viewModel.sendCode() },
+        // Both of these leave the code screen for good, so both drop the attempt. The system
+        // back gesture never comes through here at all — it is handled by [SignupFlow], which
+        // clears it there for the same reason.
         onChangeNumber = {
-            viewModel.resetCodeAttempt()
+            viewModel.clearOtp()
             onChangeNumber()
         },
         onUseEmailInstead = {
-            viewModel.resetCodeAttempt()
+            viewModel.clearOtp()
             onUseEmailInstead()
         },
         modifier = modifier,

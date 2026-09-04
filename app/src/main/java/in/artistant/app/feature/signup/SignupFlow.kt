@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.motionTween
+import `in`.artistant.app.ui.auth.AuthViewModel
 
 /**
  * The signup container (iOS `SignupFlowView`): switches on `step` with a crossfade and routes
@@ -62,6 +63,17 @@ fun SignupFlow(
     val haptic = LocalHapticFeedback.current
     var legalDoc by remember { mutableStateOf<LegalDoc?>(null) }
 
+    // The auth VM is Activity-scoped (these screens sit outside any NavHost), so the flow has
+    // to reach it to drop an abandoned one-time-code attempt. `back()` alone only moved
+    // SignupStep: the destination, the typed digits, the send count and the running cooldown
+    // all survived, so the FIRST send for the next number was treated as a resend — offering
+    // "use email instead" before a single message had had a chance to arrive.
+    val auth: AuthViewModel = hiltViewModel()
+    val leaveStep: () -> Unit = {
+        if (state.step == SignupStep.Code) auth.clearOtp()
+        viewModel.back()
+    }
+
     // Seed the flow at the gate's entry step once. resumeAt is idempotent, so a recomposition or
     // a gate re-render (NotSignedIn → Onboarding) won't clobber the user's in-flow progress.
     LaunchedEffect(startStep, startMode) { viewModel.resumeAt(startStep, startMode) }
@@ -93,7 +105,7 @@ fun SignupFlow(
     BackHandler(
         enabled = !state.emailSignUp && state.canGoBack && state.step in BACKABLE_STEPS,
     ) {
-        viewModel.back()
+        leaveStep()
     }
 
     Box(modifier = modifier.fillMaxSize().background(AppTheme.colors.surface)) {
@@ -138,10 +150,14 @@ fun SignupFlow(
                     authNotice = state.authNotice,
                     onCodeSent = viewModel::goToCode,
                     onOpenEmailSignUp = viewModel::openEmailSignUp,
+                    onStartSignup = viewModel::switchToSignup,
                     onBack = if (state.canGoBack) viewModel::back else null,
                     onOpenLegal = { legalDoc = it },
                 )
 
+                // EnterCodeScreen clears the attempt itself on both of these — it is the
+                // screen that knows they are exits. `leaveStep` is here for the system back
+                // gesture, which never reaches a callback at all.
                 key == SignupStep.Code.name -> EnterCodeScreen(
                     onChangeNumber = viewModel::back,
                     onUseEmailInstead = viewModel::openEmailSignUp,
