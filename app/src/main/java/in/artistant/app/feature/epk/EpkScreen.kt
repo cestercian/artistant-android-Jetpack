@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.exclude
@@ -20,7 +22,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -522,11 +523,23 @@ private fun PressKitBody(
         if (hasCover) {
             item(key = "gallery") {
                 Column(gutter, verticalArrangement = Arrangement.spacedBy(dimens.space.md)) {
-                    SectionHeader(
-                        "Gallery",
-                        actionLabel = plural(state.photos.size, "photo"),
-                        onAction = { onOpenPane(EpkPane.Gallery) },
-                    )
+                    // The count is META, not an action — the design draws it as
+                    // quiet grey text on the section's baseline (23 / 76). A
+                    // `SectionHeader` action would tint it `accentInk` and spend
+                    // the screen's one accent on a number nobody taps; the strip
+                    // under it is the tap target.
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        SectionHeader("Gallery", modifier = Modifier.weight(1f))
+                        Text(
+                            plural(state.photos.size, "photo"),
+                            style = AppTheme.type.caption,
+                            color = colors.ink4,
+                        )
+                    }
                     EpkGalleryStrip(
                         photos = state.photos,
                         uploading = state.uploadingPhoto,
@@ -537,22 +550,31 @@ private fun PressKitBody(
                 }
             }
         }
-        item(key = "sectionsHeader") {
+        // ONE item, not one per row. The filled list is a hairline-separated
+        // stack whose pitch IS the row height (23), and a lazy item per row would
+        // insert the column's 16dp arrangement gap between every pair — turning a
+        // contiguous list into six floating cards with rules under them. Six rows
+        // is nothing to virtualise anyway.
+        item(key = "sections") {
             Column(gutter) {
-                if (!bare) SectionHeader("Sections")
-            }
-        }
-        items(rows, key = { "section-${it.key}" }) { row ->
-            val open = { openSection(row.key, onOpenPane, onOpenSheet) }
-            Column(gutter) {
-                if (bare) {
-                    EpkInvitationRow(row, onClick = open)
-                } else {
-                    EpkSectionListRow(
-                        row = row,
-                        onClick = open,
-                        showHairline = row.key != rows.last().key,
-                    )
+                if (!bare) {
+                    SectionHeader("Sections", modifier = Modifier.padding(bottom = dimens.space.xs))
+                }
+                rows.forEach { row ->
+                    val open = { openSection(row.key, onOpenPane, onOpenSheet) }
+                    if (bare) {
+                        EpkInvitationRow(
+                            row = row,
+                            onClick = open,
+                            modifier = Modifier.padding(bottom = dimens.space.sm),
+                        )
+                    } else {
+                        EpkSectionListRow(
+                            row = row,
+                            onClick = open,
+                            showHairline = row.key != rows.last().key,
+                        )
+                    }
                 }
             }
         }

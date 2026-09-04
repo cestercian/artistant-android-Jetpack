@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -260,6 +261,11 @@ fun EpkCoverBlock(
             radius = dimens.radii.card,
             onClick = onOpen,
         ) {
+            // The label is drawn BEHIND the photo, not instead of it. That is the
+            // design's own placeholder ("Cover photo — 16:9") and it has to be
+            // there for the two moments the image is not: while it loads, and
+            // when it fails. An empty grey band says nothing about either.
+            SlotLabel("Cover photo — 16:9")
             AsyncImage(
                 model = coverUrl,
                 contentDescription = "Your cover photo",
@@ -268,6 +274,21 @@ fun EpkCoverBlock(
             )
         }
     }
+}
+
+/** What an image slot says while it has no image. See [EpkCoverBlock]. */
+@Composable
+private fun BoxScope.SlotLabel(text: String) {
+    Text(
+        text,
+        style = AppTheme.type.caption,
+        color = AppTheme.colors.ink4,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .align(Alignment.Center)
+            .padding(horizontal = AppTheme.dimens.space.sm),
+    )
 }
 
 /**
@@ -310,6 +331,7 @@ fun EpkGalleryStrip(
                 .height(dimens.pressKit.galleryCell)
             when {
                 photo != null -> MediaSlot(cell, radius = dimens.radii.md, onClick = onOpen) {
+                    SlotLabel("Photo")
                     AsyncImage(
                         model = photo.publicUrl,
                         contentDescription = "Gallery photo ${index + 1}",

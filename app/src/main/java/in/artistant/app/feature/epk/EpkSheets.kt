@@ -108,7 +108,12 @@ fun EpkSheetHeader(
             .heightIn(min = dimens.size.rowMin),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(dimens.hero.avatarSize), contentAlignment = Alignment.CenterStart) {
+        // Both edges reserve the SAME width — the leading word's, not the
+        // trailing disc's — for the reason `BackHeader` mirrors its back circle:
+        // a title centred in the remainder after an asymmetric pair reads as
+        // almost-centred. `avatarLg` is what "Cancel" needs at 13.5sp; sizing the
+        // slot to the disc instead clipped it to "Canc".
+        Box(Modifier.width(dimens.size.avatarLg), contentAlignment = Alignment.CenterStart) {
             if (leadingLabel != null && onLeading != null) {
                 Text(
                     leadingLabel,
@@ -133,7 +138,7 @@ fun EpkSheetHeader(
                 .weight(1f)
                 .padding(horizontal = dimens.space.sm),
         )
-        Box(Modifier.width(dimens.hero.avatarSize), contentAlignment = Alignment.CenterEnd) {
+        Box(Modifier.width(dimens.size.avatarLg), contentAlignment = Alignment.CenterEnd) {
             IconCircle(
                 icon = Icons.Filled.Close,
                 contentDescription = "Close",
