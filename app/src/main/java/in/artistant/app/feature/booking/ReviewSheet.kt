@@ -406,6 +406,6 @@ private fun ratingWord(rating: Int): String = when (rating) {
  */
 fun reviewSubtitleFor(booking: Booking, category: String?): String {
     val played = "played ${bareDate(booking.date)}"
-    val head = category?.trim()?.takeIf { it.isNotEmpty() } ?: bookingReference(booking.id)
+    val head = category?.trim()?.takeIf { it.isNotEmpty() } ?: bookingTitle(booking.id)
     return "$head · $played"
 }

@@ -34,6 +34,21 @@ object ClientNavRoutes {
      */
     const val BOOKABILITY = "bookability/{artistId}"
 
+    /**
+     * Screen 94 — the landing for a match reached by NEGOTIATION rather than
+     * through checkout. Messaging navigates here when an in-thread quote is
+     * accepted; [CONFIRMED] stays the funnel's own page, and the two say
+     * different things because they are reached from different places.
+     */
+    const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
+
+    /**
+     * Screen 132 — the booking record. Reachable from Confirmed today and, once
+     * the bookings section is rewritten, from Booking detail: it takes the same
+     * booking id both would hand it.
+     */
+    const val INVOICE = "invoice/{bookingId}"
+
     fun bookingCompose(artistId: String) = "booking/$artistId"
     fun chat(threadId: String) = "chat/$threadId"
     fun confirmed(bookingId: String) = "confirmed/$bookingId"
@@ -42,6 +57,8 @@ object ClientNavRoutes {
     fun artistList(kind: String) = "artist_list/$kind"
     fun artistReviews(artistId: String) = "artist_reviews/$artistId"
     fun bookability(artistId: String) = "bookability/$artistId"
+    fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
+    fun invoice(bookingId: String) = "invoice/$bookingId"
     const val PAYWALL = "paywall"
 
     /**
@@ -86,8 +103,18 @@ object ArtistNavRoutes {
     const val GIG_REQUEST = "gig_request/{requestId}"
     const val CHAT = "chat/{threadId}"
 
+    /**
+     * Screen 61 — the counter offer, on the artist graph and only there.
+     *
+     * `gig_requests` has exactly one UPDATE policy (`gig_requests_update_artist`,
+     * mig 0002), so the artist is the only party the server lets counter. A
+     * client-side route would be a form RLS refuses at submit.
+     */
+    const val COUNTER_OFFER = "counter_offer/{requestId}"
+
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun gigRequest(requestId: String) = "gig_request/$requestId"
+    fun counterOffer(requestId: String) = "counter_offer/$requestId"
     fun chat(threadId: String) = "chat/$threadId"
     const val PROFILE = "profile"
     const val PAYWALL = "paywall"

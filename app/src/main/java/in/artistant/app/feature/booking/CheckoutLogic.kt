@@ -22,15 +22,46 @@ data class CheckoutReviewRow(val label: String, val value: String)
  * whether the screen lost it. Venue says "Not set" and directions say "None"
  * because those are the two states the booking form actually allows: both are
  * optional there, and neither blocks the send.
+ *
+ * **Date and time are not rows.** The light design (screen 06) puts them in the
+ * act header — "Sat 12 Oct · 8:00 pm · Indiranagar", under the artist's name —
+ * because they are what the client is asking the artist for rather than a detail
+ * of the ask. Listing them here as well printed the same two facts twice on one
+ * short page. See [checkoutActMeta], which is where they went.
  */
 fun checkoutReviewRows(draft: BookingDraft): List<CheckoutReviewRow> = listOf(
     CheckoutReviewRow("Package", draft.packageName.trim().ifEmpty { "Custom" }),
-    CheckoutReviewRow("Date", draft.date),
-    CheckoutReviewRow("Time", draft.time),
     CheckoutReviewRow("Venue", draft.venue.trim().ifEmpty { "Not set" }),
     CheckoutReviewRow("Guests", draft.guests.toString()),
     CheckoutReviewRow("Directions", draft.venueNotes.trim().ifEmpty { "None" }),
 )
+
+/**
+ * The two meta lines under the artist's name on the confirm card: what they are
+ * playing, and when and where.
+ *
+ * Blank parts are dropped rather than joined, so a draft with no venue reads
+ * "Sat 12 Oct · 8:00 pm" instead of trailing a separator into nothing. A line
+ * with nothing in it at all is dropped entirely — the card renders one line, not
+ * an empty second one.
+ */
+fun checkoutActMeta(draft: BookingDraft): List<String> {
+    val name = draft.packageName.trim()
+    val duration = draft.packageDuration.trim()
+    val tier = when {
+        name.isEmpty() -> duration
+        // A tier whose name already CARRIES its duration ("Full band · 90 min")
+        // must not become "Full band · 90 min · 90 min". The funnel snapshots
+        // both fields off the same package and they overlap more often than not.
+        duration.isEmpty() || name.contains(duration, ignoreCase = true) -> name
+        else -> "$name · $duration"
+    }
+    val whenWhere = listOf(draft.date, draft.time, draft.venue)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString(" · ")
+    return listOf(tier, whenWhere).filter { it.isNotEmpty() }
+}
 
 /**
  * May the client send this request?

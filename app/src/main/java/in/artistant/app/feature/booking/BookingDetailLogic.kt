@@ -472,13 +472,19 @@ fun variantFor(status: BookingStatus): BookingDetailVariant = when (status) {
 }
 
 /**
- * "Booking #4f2a…9c1b" — the header's title on every variant.
+ * "Booking #AR-4F2A11" — the header's title on every variant.
  *
- * The design writes "Booking #AR-40712"; ours are UUIDs, and inventing a short
- * human reference would mean minting an identifier the server has never heard
- * of and that support cannot look up. The elided UUID is the real one.
+ * The reference itself is `InvoiceLogic.bookingReference`, which Book & confirm
+ * landed while this section was being written. BN had assumed no such thing
+ * could exist — `bookings` has no reference column, and minting one client-side
+ * sounded like inventing an identifier support could not look up. Theirs is
+ * better, and the assumption was wrong: it is the leading hex of the row's own
+ * UUID, so it is deterministic, readable over the phone, and resolvable back by
+ * a prefix match. This wrapper only adds the word, and drops it for a blank id
+ * rather than printing "Booking #" with nothing after it.
  */
-fun bookingReference(id: String): String = "Booking #${truncatedBookingId(id)}"
+fun bookingTitle(id: String): String =
+    bookingReference(id).takeIf { it.isNotBlank() }?.let { "Booking #$it" } ?: "Booking"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The night, and the wait

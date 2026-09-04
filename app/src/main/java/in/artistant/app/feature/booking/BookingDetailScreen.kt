@@ -344,7 +344,7 @@ private fun BookingDetailBody(
             verticalArrangement = Arrangement.spacedBy(dimens.space.lg),
         ) {
             DetailHeader(
-                title = bookingReference(booking.id),
+                title = bookingTitle(booking.id),
                 subtitle = headerStatusLine(booking, variant, nowMs),
                 onBack = onBack,
                 trailing = if (variant == BookingDetailVariant.Confirmed) {

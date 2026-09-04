@@ -369,13 +369,21 @@ class BookingDetailLogicTest {
     }
 
     @Test
-    fun theHeaderQuotesTheRealBookingId() {
-        // Not a minted "AR-40712": support can only look up what the server
-        // actually stored.
+    fun theHeaderQuotesTheSharedBookingReference() {
+        // The same reference the invoice and the confirmed screen print, derived
+        // from the row's own UUID — one booking reads identically wherever it
+        // appears, and support can resolve it by prefix.
         assertEquals(
-            "Booking #4f2a…66bb",
-            bookingReference("4f2a1111-2222-3333-4444-5555556666bb"),
+            "Booking #AR-4F2A11",
+            bookingTitle("4f2a1111-2222-3333-4444-5555556666bb"),
         )
+    }
+
+    @Test
+    fun anIdWithNoReferenceInItDropsTheHash() {
+        // "Booking #" with nothing after it reads as a rendering fault.
+        assertEquals("Booking", bookingTitle(""))
+        assertEquals("Booking", bookingTitle("----"))
     }
 
     // --- the night, and the wait ---------------------------------------------
