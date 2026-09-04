@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.wizard
 
 import `in`.artistant.app.data.model.HandleRules
 import `in`.artistant.app.data.model.SearchCatalog
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.domain.booking.BookingMath
 import `in`.artistant.app.data.repository.WizardProfileDraft
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
@@ -788,6 +789,43 @@ fun sortedWeekdays(days: Set<String>): List<String> = WizardWeekdays.filter { it
  * social row at all by testing for null.
  */
 fun nullIfBlank(value: String?): String? = value?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * The array a publish should send to `artists.service_tags`, or null for "send
+ * nothing".
+ *
+ * The column is WHOLE-SET: what goes replaces what is stored. The wizard is
+ * re-enterable — a dropped `setup_complete` write, an artist pushed back through
+ * the gate — and `service_tags` has a second writer in the press-kit editor, so
+ * an artist can reach Publish with services already on their row. Sending the
+ * picker's list on top of a set this session never read is how a wizard re-entry
+ * silently un-publishes them, and the same slugs back Discover's services
+ * filter, so the artist stops being findable by what they actually do.
+ *
+ * @param picked what the picker holds.
+ * @param published the row's current array, or null when it could not be read.
+ * @param seeded whether [picked] STARTED as a copy of the published array. When
+ *   it did, an unticked chip is a real untick and the list stands as written.
+ *   When it did not, the picker opened empty and every tick is an ADDITION to a
+ *   set nobody has seen, so the only honest write is the union — and with
+ *   nothing to union against, no write at all.
+ */
+fun wizardServiceTagsToPublish(
+    picked: List<String>,
+    published: List<String>?,
+    seeded: Boolean,
+): List<String>? = when {
+    // Nothing to say. Never an empty whole-set write: on a re-entry that is a
+    // deletion the artist did not ask for, and on a first run it is a no-op with
+    // a round trip attached.
+    picked.isEmpty() -> null
+    seeded -> ServiceTags.normalize(picked)
+    published == null -> null
+    // Union, published first: the artist's stored order survives and the cap
+    // falls on the tail, so an over-cap row written elsewhere loses the ticks
+    // made here rather than the claims already on the profile.
+    else -> ServiceTags.normalize(published + picked)
+}
 
 /** Maps wizard UI state to the repository publish payload (the test seam). */
 fun buildWizardProfileDraft(state: WizardUiState, artistId: String): WizardProfileDraft =

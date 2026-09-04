@@ -64,6 +64,18 @@ data class WizardUiState(
     /** `artists.service_tags` slugs. Published, via `updateServiceTags`. */
     val serviceTags: List<String> = emptyList(),
     /**
+     * Whether [serviceTags] STARTED as a copy of the published column rather
+     * than as an empty list.
+     *
+     * `updateServiceTags` is whole-set — what it sends replaces what is stored —
+     * and the wizard is re-enterable, so an artist can arrive here with services
+     * already published from the press-kit editor or another client. Without
+     * this flag the picker's list is a guess at that column, and publishing it
+     * deletes every tag the wizard never showed. With it, an untick is an untick
+     * and the list can be sent as it stands. See [wizardServiceTagsToPublish].
+     */
+    val serviceTagsHydrated: Boolean = false,
+    /**
      * Pricing tiers as editor rows, not domain packages. Prices are Strings for
      * the same reason the EPK editor keeps them that way: a live text field has
      * a "cleared, not yet retyped" state that an Int cannot represent, and
@@ -194,6 +206,13 @@ class WizardViewModel @Inject constructor(
      * signup name/handle/city — so it fills the blanks the draft left rather
      * than overwriting what the artist typed last session. Both are best-effort:
      * a failed read must leave an empty but usable form, never a blocked one.
+     *
+     * The `artists` row is read for one reason: `service_tags` is a whole-set
+     * column with an existing writer (the press-kit editor's chip group, which
+     * reaches it through this same [ArtistsRepository.fetchArtist] path), so the
+     * picker has to open on what is published or publishing it deletes the rest.
+     * Concurrent with the profile read because they answer different questions
+     * and the wizard is behind a spinner until both land.
      */
     private suspend fun restore() {
         val ownerId = session.currentUserId?.lowercase()
@@ -202,7 +221,18 @@ class WizardViewModel @Inject constructor(
         val read = ownerId?.let { runCatching { draftStore.read(it) }.getOrNull() }
             ?: WizardDraftRead.Unclaimable
         val draft = (read as? WizardDraftRead.Mine)?.draft
-        val profile = runCatching { users.fetchSelfProfile() }.getOrNull()
+        val (profile, publishedTags) = coroutineScope {
+            val profileRead = async { runCatching { users.fetchSelfProfile() }.getOrNull() }
+            // Success carrying null — no row yet — is the ordinary first-run
+            // answer and still counts as "read": there is nothing to preserve.
+            // Only a THROWN read leaves the published set unknown.
+            val tagsRead = async {
+                ownerId?.let {
+                    runCatching { artists.fetchArtist(it)?.serviceTags.orEmpty() }.getOrNull()
+                }
+            }
+            profileRead.await() to tagsRead.await()
+        }
 
         // Staged media is resolved off the main thread: this stats one file per
         // reference, and the sweep below lists a directory.
@@ -236,6 +266,13 @@ class WizardViewModel @Inject constructor(
                 packageRows = restored.packageRows.ifEmpty {
                     if (restored.category.isBlank()) emptyList() else starterPackageRows(restored.category)
                 },
+                // Seeded like the fields above rather than merged: a draft that
+                // carries tags is one this artist already edited, and re-adding
+                // a tag they unticked last session would undo a real decision.
+                serviceTags = restored.serviceTags.ifEmpty {
+                    ServiceTags.normalizeForDisplay(publishedTags.orEmpty())
+                },
+                serviceTagsHydrated = publishedTags != null,
                 isRestoring = false,
             )
             seeded.copy(handleStatus = wizardHandleSyncStatus(seeded.handle))
@@ -712,11 +749,7 @@ class WizardViewModel @Inject constructor(
                     // "the artist skipped the bio step" and "the artist cleared
                     // their services" the same write. The dedicated setter is
                     // owner-guarded and whole-set, which is what this needs.
-                    val tags = async {
-                        if (snap.serviceTags.isNotEmpty()) {
-                            artists.updateServiceTags(userId, snap.serviceTags)
-                        }
-                    }
+                    val tags = async { publishServiceTags(userId, snap) }
                     pkgs.await()
                     tech.await()
                     tags.await()
@@ -768,6 +801,36 @@ class WizardViewModel @Inject constructor(
                 failPublish(e.message ?: "Couldn't publish. Try again.")
             }
         }
+    }
+
+    /**
+     * Write `artists.service_tags`, or decline to.
+     *
+     * The column is whole-set, so this is only ever safe from a set we have
+     * seen. [WizardUiState.serviceTagsHydrated] says the picker opened on the
+     * published array, which makes the local list a true edit of it. Without it
+     * the picker opened empty, every tick is an ADDITION to a set nobody read,
+     * and the row is re-read here for one more chance to merge rather than
+     * replace — the upsert two steps up leaves `service_tags` alone, so what
+     * comes back is still the artist's own array. If that read fails too,
+     * nothing is written: losing this session's ticks is recoverable from the
+     * press-kit editor, and deleting published services is not.
+     */
+    private suspend fun publishServiceTags(userId: String, snap: WizardUiState) {
+        if (snap.serviceTags.isEmpty()) return
+        // Re-read only in the case that needs it — a hydrated picker already
+        // knows what it is replacing.
+        val published = if (snap.serviceTagsHydrated) {
+            null
+        } else {
+            runCatching { artists.fetchArtist(userId)?.serviceTags.orEmpty() }.getOrNull()
+        }
+        val tags = wizardServiceTagsToPublish(
+            picked = snap.serviceTags,
+            published = published,
+            seeded = snap.serviceTagsHydrated,
+        ) ?: return
+        artists.updateServiceTags(userId, tags)
     }
 
     private fun failPublish(message: String) {
