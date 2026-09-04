@@ -40,7 +40,6 @@ import androidx.core.net.toUri
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.IconCircle
-import `in`.artistant.app.designsystem.component.hairlineTop
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.designsystem.theme.motion

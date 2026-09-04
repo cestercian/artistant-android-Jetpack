@@ -173,7 +173,6 @@ private fun SignupAuthContent(
             label = "Or use email",
             hint = "you@studio.in",
             enabled = !busy,
-            error = state.error,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.None,
                 keyboardType = KeyboardType.Email,
@@ -191,6 +190,18 @@ private fun SignupAuthContent(
             enabled = state.canSendCode && !busy,
             modifier = Modifier.semantics { testTag = "auth.sendCode" },
         )
+
+        // Under the ACTION, not under a field. A failed send can come from either channel and
+        // from neither field's contents — no SMS provider, a rate limit, no network — so
+        // pinning it to the email input would point at the wrong thing about half the time.
+        state.error?.let { message ->
+            Spacer(Modifier.height(space.md))
+            Banner(
+                title = message,
+                tone = BannerTone.Failure,
+                modifier = Modifier.semantics { testTag = "auth.error" },
+            )
+        }
 
         Spacer(Modifier.height(space.xl))
         OrRule()
