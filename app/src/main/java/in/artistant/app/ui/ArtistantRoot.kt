@@ -2,6 +2,7 @@ package `in`.artistant.app.ui
 
 import io.github.jan.supabase.auth.status.SessionStatus
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.domain.auth.authAdvanceKey
 
 /**
  * Auth gate — the ArtistantRoot / iOS `authGatedContent` analogue. Three tiers, decided
@@ -63,3 +64,45 @@ fun gateForSessionStatus(status: SessionStatus, current: RootGate): RootGate? = 
     // RefreshFailure and anything supabase-kt adds later: still hydrating, never signed out.
     else -> if (current == RootGate.NotSignedIn) RootGate.Loading else current
 }
+
+/**
+ * What one observed session status does to the routing pass: which `(uuid, generation)` key
+ * we hold afterwards, and whether that status has to START a pass.
+ *
+ * @property key the key to remember as "the one we have routed for", or null for "we are not
+ *   routed for anyone".
+ * @property route true when [RootViewModel] must launch a routing pass for [key].
+ */
+data class RoutingStep(val key: String?, val route: Boolean)
+
+/**
+ * Fold a session status into the routing key ([RoutingStep]). Pure half of the collector in
+ * [RootViewModel]; [lastRoutedKey] is the key it is currently holding.
+ *
+ * Two rules, and the second one is a fix:
+ *
+ *  - An authenticated session routes **once** per `(uuid, generation)`. Supabase-kt re-emits
+ *    [SessionStatus.Authenticated] on every background token refresh, and the generation only
+ *    moves on a real sign-in, so without this the profile would be re-fetched on a timer.
+ *  - **Every other status forgets the key**, so the next authenticated emission routes again
+ *    even though nothing about the user changed. [SessionStatus.RefreshFailure] deliberately
+ *    does NOT cancel an in-flight pass or clear the profile (a refresh that could not reach
+ *    the server is a blip, not a sign-out — see [gateForSessionStatus]), and that is exactly
+ *    what made keeping the key wrong: the pass running through the outage fetches, fails all
+ *    three attempts, and settles a complete account on [RootGate.Onboarding] with a Retry
+ *    banner. When the network comes back supabase-kt re-emits Authenticated for the same uuid
+ *    at the same generation — the key we were still holding — so the collector skipped it and
+ *    the user stayed on onboarding until they tapped Retry or relaunched. Forgetting costs one
+ *    idempotent re-fetch on recovery; holding costs the session's routing.
+ *    [SessionStatus.Initializing] is the same shape (it parks the gate on
+ *    [RootGate.Loading], so a skipped re-route would hold the splash), and an unknown future
+ *    status gets the safe half of the trade.
+ */
+fun routingStep(status: SessionStatus, generation: Int, lastRoutedKey: String?): RoutingStep =
+    when (status) {
+        is SessionStatus.Authenticated -> {
+            val key = authAdvanceKey(status.session.user?.id?.lowercase(), generation)
+            RoutingStep(key = key, route = key != lastRoutedKey)
+        }
+        else -> RoutingStep(key = null, route = false)
+    }
