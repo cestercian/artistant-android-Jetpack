@@ -22,6 +22,22 @@ object ClientNavRoutes {
     const val REQUEST_QUOTE = "request_quote/{artistId}"
     const val ARTIST_LIST = "artist_list/{kind}"
 
+    /** The archive (design 60 / 111) — reachable from the inbox header. */
+    const val ARCHIVED = "archived"
+
+    /**
+     * Trust & safety (design 131).
+     *
+     * Three ways in from this section, all inside the surfaces where the
+     * question comes up: the chat's thread-details sheet, the report form's
+     * footer, and the archive (the inbox's overflow). Account settings adds a
+     * fourth and belongs to the profile section.
+     */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** The scripted support assistant (design 34) — the inbox's permanent row. */
+    const val SUPPORT = "support"
+
     /** Every review for one artist, with search and lenses (design screen 102). */
     const val ARTIST_REVIEWS = "artist_reviews/{artistId}"
 
@@ -36,9 +52,19 @@ object ClientNavRoutes {
 
     /**
      * Screen 94 — the landing for a match reached by NEGOTIATION rather than
-     * through checkout. Messaging navigates here when an in-thread quote is
-     * accepted; [CONFIRMED] stays the funnel's own page, and the two say
+     * through checkout. [CONFIRMED] stays the funnel's own page, and the two say
      * different things because they are reached from different places.
+     *
+     * **Not reached from the chat**, despite the design's story. Accepting an
+     * in-thread quote is a `gig_requests` status PATCH; the only server reaction
+     * (mig 0047, rewritten by 0076) opens the bookingless thread the quote is
+     * already in, and that migration deliberately creates NO booking because the
+     * client has to consent to the final amount. RLS agrees —
+     * `bookings_insert_client` gates inserts on `auth.uid() = client_id` and the
+     * seat that accepts an `open` quote is the artist — so there is no id to open
+     * this with. The chat's accept ends at the frozen quote card, which says so.
+     * See [ChatEvent.QuoteAccepted]. This becomes reachable from messaging the
+     * day the backend grows a consented request→booking path.
      */
     const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
 
@@ -55,6 +81,7 @@ object ClientNavRoutes {
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
     fun artistList(kind: String) = "artist_list/$kind"
+
     fun artistReviews(artistId: String) = "artist_reviews/$artistId"
     fun bookability(artistId: String) = "bookability/$artistId"
     fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
@@ -68,6 +95,16 @@ object ClientNavRoutes {
      * identical way back.
      */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /**
+     * Bookings → the month calendar (design screen 78).
+     *
+     * Its own destination rather than a block on the Bookings tab: the design
+     * makes it a screen because it is the shared component's documentation, and
+     * the artist's Gigs tab will push the identical literal in its own graph for
+     * the same reason [BLOCKED_ACCOUNTS] is spelled twice.
+     */
+    const val MONTH_CALENDAR = "month_calendar"
 
     /**
      * Account settings → privacy (design screen 62) and the legal viewer
@@ -97,13 +134,6 @@ object ClientNavRoutes {
     const val DATA_EXPORT = "data_export"
     const val DELETE_ACCOUNT = "delete_account"
 
-    /**
-     * The trust & safety centre (design 131), owned by `feature/messages` on the messaging
-     * branch. The account list links to it, so the literal has to exist here — it is defined
-     * on whichever branch lands first and reconciled on merge; both spell it the same.
-     */
-    const val SAFETY_CENTRE = "safety_centre"
-
     /** [doc] is a [in.artistant.app.feature.signup.LegalDoc] name — the viewer's
      *  opening segment, not a lock: it is segmented, so the other document is one
      *  tap away whichever one you arrive on. */
@@ -132,6 +162,9 @@ object ArtistNavRoutes {
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"
     const val MANAGE_AVAILABILITY = "manage_availability"
+
+    /** Agreed fees, design screen 133. Pushed from the studio's money card. */
+    const val EARNINGS = "earnings"
     const val SCORE_EXPLAINER = "score_explainer"
 
     /**
@@ -146,6 +179,15 @@ object ArtistNavRoutes {
     /** See [ClientNavRoutes.BLOCKED_ACCOUNTS] — same screen, artist graph. */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
 
+    /** See [ClientNavRoutes.ARCHIVED]. */
+    const val ARCHIVED = "archived"
+
+    /** See [ClientNavRoutes.SAFETY_CENTRE]. */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** See [ClientNavRoutes.SUPPORT]. */
+    const val SUPPORT = "support"
+
     /** See [ClientNavRoutes.PRIVACY] / [ClientNavRoutes.LEGAL] — same screens, artist graph. */
     const val PRIVACY = "privacy"
     const val LEGAL = "legal/{doc}"
@@ -158,7 +200,6 @@ object ArtistNavRoutes {
     const val DEVICES = "devices"
     const val DATA_EXPORT = "data_export"
     const val DELETE_ACCOUNT = "delete_account"
-    const val SAFETY_CENTRE = "safety_centre"
 
     fun legal(doc: String) = "legal/$doc"
 }

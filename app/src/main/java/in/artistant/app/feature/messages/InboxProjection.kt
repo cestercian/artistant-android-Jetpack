@@ -45,6 +45,16 @@ data class ThreadListItem(
      * artist model's Compose types and the projection stays JVM-testable.
      */
     val coverUrl: String? = null,
+    /**
+     * The offer standing in this conversation, if any (design 19 — "threads
+     * carry deal state").
+     *
+     * It is what turns the inbox from a contact list into a pipeline: the row
+     * shows the amount and when it lapses instead of the last thing somebody
+     * typed. Null for every thread with no live or accepted `gig_requests` row,
+     * which is most of them.
+     */
+    val quote: ThreadQuote? = null,
     val starred: Boolean = false,
     val archived: Boolean = false,
     /**

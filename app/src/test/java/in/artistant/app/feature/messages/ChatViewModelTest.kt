@@ -2,13 +2,20 @@ package `in`.artistant.app.feature.messages
 
 import androidx.lifecycle.SavedStateHandle
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.GigRequest
+import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
+import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeReportsRepository
+import `in`.artistant.app.data.repository.FakeRequestsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
+import `in`.artistant.app.data.repository.PendingReport
+import `in`.artistant.app.data.repository.ReportOutcome
+import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
@@ -137,7 +144,16 @@ class ChatViewModelTest {
             markedRead++
             readSeats += viewerIsArtist
         }
-        override suspend fun markThreadReadReceipt(threadId: String) = Unit
+        /**
+         * How many times the `mark_thread_read` RPC was called — the BROADCAST,
+         * as distinct from [markedRead] above, which is the viewer's own badge.
+         * The read-receipt preference gates exactly one of the two.
+         */
+        var receiptWrites: Int = 0
+
+        override suspend fun markThreadReadReceipt(threadId: String) {
+            receiptWrites++
+        }
         override suspend fun counterpartLastRead(threadId: String): Long? = counterpartRead
 
         /** Every mute value the ViewModel asked the server to write, in order. */
@@ -166,16 +182,51 @@ class ChatViewModelTest {
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
+        requests: FakeRequestsRepository = FakeRequestsRepository(),
+        reports: ReportsRepository = FakeReportsRepository(),
+        readReceipts: ReadReceiptsPreference = ReadReceiptsPreference { true },
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
         artistsRepository = artists,
         bookingsRepository = bookings,
-        reports = FakeReportsRepository(),
+        reports = reports,
+        requests = requests,
         flagsStore = flags,
         blockedUsers = blockedUsers,
+        readReceipts = readReceipts,
         viewer = { viewerId },
     )
+
+    /**
+     * A reports seam that can be held OPEN.
+     *
+     * `FakeReportsRepository` answers instantly, which is the one shape that
+     * cannot reproduce a double tap: the window a second tap lands in is exactly
+     * the round trip. [gate] holds the write there until the test releases it.
+     */
+    private class GatedReports(
+        var outcome: ReportOutcome = ReportOutcome.Sent,
+    ) : ReportsRepository {
+        val gate = CompletableDeferred<Unit>()
+        val conversation = mutableListOf<Triple<String, String, String?>>()
+
+        override suspend fun reportConversation(
+            threadId: String,
+            reason: String,
+            details: String?,
+        ): ReportOutcome {
+            conversation += Triple(threadId, reason, details)
+            gate.await()
+            return outcome
+        }
+
+        override suspend fun reportArtist(
+            artistId: String,
+            reason: String,
+            details: String?,
+        ): ReportOutcome = outcome
+    }
 
     private fun serverMessage(id: String, body: String, at: Long = 5_000L, mine: Boolean = true) =
         Message(
@@ -238,6 +289,135 @@ class ChatViewModelTest {
         vm(repo)
 
         assertEquals(0, repo.markedRead)
+    }
+
+    // --- read receipts (Privacy → "Show when I've read messages", design 62) ---
+    //
+    // Two writes leave this screen when a thread is read and they mean opposite
+    // things: `markThreadRead` zeroes the VIEWER's own badge, and
+    // `markThreadReadReceipt` (the `mark_thread_read` RPC) writes the row the
+    // COUNTERPARTY reads. Only the second is a broadcast, so only the second is
+    // gated — and getting that backwards in either direction is a real bug:
+    // gating the badge strands someone on an unread count they have read, and
+    // not gating the RPC tells the other side something the switch promised it
+    // wouldn't.
+
+    @Test
+    fun receiptsOnBroadcastsTheReadOnOpen() = runTest {
+        val repo = ScriptedMessages()
+
+        vm(repo, readReceipts = { true })
+
+        assertTrue(repo.receiptWrites > 0)
+    }
+
+    @Test
+    fun receiptsOffNeverCallsMarkThreadReadOnOpen() = runTest {
+        val repo = ScriptedMessages()
+
+        vm(repo, readReceipts = { false })
+
+        assertEquals(0, repo.receiptWrites)
+    }
+
+    /**
+     * The viewer's own badge is NOT the broadcast.
+     *
+     * Turning receipts off must still clear the unread counter, or the person who
+     * asked for privacy is punished with a badge that never goes away for
+     * conversations they have read.
+     */
+    @Test
+    fun receiptsOffStillClearsTheViewersOwnUnreadCount() = runTest {
+        val repo = ScriptedMessages()
+
+        vm(repo, readReceipts = { false })
+
+        assertTrue(repo.markedRead > 0)
+        assertEquals(listOf(false), repo.readSeats)
+    }
+
+    /**
+     * Every path through the choke point, not just the first.
+     *
+     * `markReadBestEffort` is reached on open, on an inbound realtime message,
+     * and on a send that lands. A gate applied at only one of them would leak the
+     * receipt the moment the conversation actually moved — which is exactly when
+     * it matters.
+     */
+    @Test
+    fun receiptsOffAlsoStaysQuietOnInboundAndOnSend() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo, readReceipts = { false })
+
+        repo.emit(serverMessage("in-1", "Hello?", at = 6_000L, mine = false))
+        model.send("On my way")
+        advanceUntilIdle()
+
+        assertEquals(0, repo.receiptWrites)
+    }
+
+    /**
+     * A preference that cannot be READ fails closed — and takes nothing else
+     * down with it.
+     *
+     * Two separate failures, and they want opposite answers.
+     *
+     * `enabled()` goes to DataStore, which throws on a corrupt or unreadable
+     * file. Unwrapped, that throw escaped `markReadBestEffort` and killed
+     * everything after it — the "mark as unread" flag was never retired and the
+     * counterparty's receipt was never re-read, so a broken preference file
+     * quietly disabled two unrelated behaviours. Everything outside the gate has
+     * to survive.
+     *
+     * The gate itself is the opposite call. An absent key means enabled, but an
+     * unreadable store means UNKNOWN, and among the people whose preference
+     * cannot be read are the ones who turned it off — so the one
+     * counterparty-visible write does not happen. Broadcasting an opted-out
+     * user's read status cannot be taken back; a missing "Read by …" caption
+     * costs nothing that the next successful read does not fix.
+     */
+    @Test
+    fun anUnreadablePreferenceStaysQuietButStillClearsTheFlags() = runTest {
+        val repo = ScriptedMessages()
+        val flags = FakeThreadFlagsStore(ThreadFlags(markedUnread = setOf(threadId)))
+
+        val model = vm(
+            repo,
+            flags = flags,
+            readReceipts = { error("datastore: unreadable preferences file") },
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            "unknown is not consent: the broadcast must not go out",
+            0,
+            repo.receiptWrites,
+        )
+        assertTrue("the viewer's own badge must still clear", repo.markedRead > 0)
+        assertTrue(
+            "the explicit mark-as-unread must still be retired",
+            flags.flags.first().markedUnread.isEmpty(),
+        )
+        assertEquals(
+            "the counterparty's receipt must still be re-read",
+            9_000L,
+            model.state.value.counterpartLastReadAt,
+        )
+    }
+
+    /** The same three paths, with the switch on, do broadcast. */
+    @Test
+    fun receiptsOnBroadcastsOnInboundAndOnSendToo() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo, readReceipts = { true })
+        val afterOpen = repo.receiptWrites
+
+        repo.emit(serverMessage("in-1", "Hello?", at = 6_000L, mine = false))
+        model.send("On my way")
+        advanceUntilIdle()
+
+        assertTrue(repo.receiptWrites > afterOpen)
     }
 
     // --- title: the counterpart, from the viewer's seat ----------------------
@@ -775,8 +955,10 @@ class ChatViewModelTest {
             artistsRepository = FakeArtistsRepository(),
             bookingsRepository = StubBookings(),
             reports = reports,
+            requests = FakeRequestsRepository(),
             flagsStore = FakeThreadFlagsStore(),
             blockedUsers = FakeBlockedUsersStore(),
+            readReceipts = { true },
             viewer = { CLIENT_ID },
         )
 
@@ -951,12 +1133,132 @@ class ChatViewModelTest {
         assertTrue(flags.flags.first().markedUnread.isEmpty())
     }
 
+    // --- the in-thread quote (design 08) -------------------------------------
+
+    private fun openQuote(id: String = "q-1", amount: Int = 48_000, clientId: String = CLIENT_ID) =
+        StoredRequest(
+            raw = GigRequest(
+                id = id,
+                client = "Rhea",
+                message = "",
+                date = "Sat 12 Oct",
+                amount = amount,
+                artistId = ARTIST_ID,
+                clientId = clientId,
+                expiresAtEpochMs = 4_102_444_800_000L,
+            ),
+            status = GigRequestStatus.Open,
+        )
+
+    /** The inquiry thread the gig-request loop actually lives in (mig 0047/0076). */
+    private fun inquiryThread() = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID)
+
+    @Test
+    fun theChatShowsTheQuoteStandingBetweenThisPair() = runTest {
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(openQuote())),
+        )
+        advanceUntilIdle()
+
+        assertEquals(48_000, model.state.value.quote?.amountInr)
+        assertTrue("open is the artist's to answer", model.state.value.quote!!.actionable)
+    }
+
+    /** The thread is about its booking; the quote loop lives in the bookingless one. */
+    @Test
+    fun aThreadWithABookingBehindItShowsNoQuoteCard() = runTest {
+        val model = vm(
+            ScriptedMessages(
+                thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID, bookingId = "b-1"),
+            ),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(openQuote())),
+        )
+        advanceUntilIdle()
+
+        assertNull(model.state.value.quote)
+    }
+
+    /** Two live rows between one pair and nothing that says which: no card, no buttons. */
+    @Test
+    fun twoLiveQuotesBetweenThePairShowNoCard() = runTest {
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(openQuote("q-1"), openQuote("q-2", 12_000))),
+        )
+        advanceUntilIdle()
+
+        assertNull(model.state.value.quote)
+    }
+
+    /**
+     * Accepting completes, and completing means the card becomes the record.
+     *
+     * There is nowhere else for it to go: `accept` is a status PATCH, and its
+     * only server reaction (mig 0047, rewritten by 0076) is to open the
+     * bookingless thread it is already in — that migration deliberately creates
+     * no booking, and `bookings_insert_client` would refuse one from the artist
+     * seat anyway. So the assertions are the whole outcome: the row is accepted,
+     * the card is frozen and un-actionable, the narration has ended, and the
+     * event carries no id because there is no destination.
+     */
+    @Test
+    fun acceptingAQuoteFreezesTheCardAndEndsThere() = runTest {
+        val requests = FakeRequestsRepository(listOf(openQuote()))
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = requests,
+        )
+        advanceUntilIdle()
+        val events = mutableListOf<ChatEvent>()
+        val collector = launch { model.events.collect { events += it } }
+
+        model.acceptQuote()
+        advanceUntilIdle()
+
+        assertEquals(GigRequestStatus.Accepted, requests.listForArtist().single().status)
+        val quote = model.state.value.quote
+        assertTrue("the card is the record now", quote!!.frozen)
+        assertFalse("a record has no buttons", quote.actionable)
+        assertEquals(QuoteAction.Idle, model.state.value.quoteAction)
+        assertEquals(listOf(ChatEvent.QuoteAccepted), events)
+        collector.cancel()
+    }
+
+    /**
+     * A write that didn't land must not leave a card claiming it did — and it
+     * must not leave the narration running over a screen with no way out.
+     */
+    @Test
+    fun anAcceptThatFailsSaysSoAndLeavesTheQuoteOpen() = runTest {
+        val requests = FakeRequestsRepository(listOf(openQuote()))
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = requests,
+        )
+        advanceUntilIdle()
+        // Fails only the WRITE: the card has already loaded off the read above.
+        requests.signedIn = false
+
+        model.acceptQuote()
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.quoteAction is QuoteAction.Failed)
+        assertFalse("nothing was agreed, so nothing is frozen", model.state.value.quote!!.frozen)
+        assertTrue("and it is still the viewer's to answer", model.state.value.quote!!.actionable)
+    }
+
     // --- report --------------------------------------------------------------
 
     /**
-     * The repository soft-fails to an on-device log rather than throwing, so this
-     * surface cannot tell delivered from queued — it records that the report was
-     * filed and the copy is worded to be true either way.
+     * The repository soft-fails to an on-device log rather than throwing, and it
+     * SAYS which of the three things happened — see the outcome tests below,
+     * which are what stop this surface claiming a delivery it did not get.
      */
     @Test
     fun reportingFlipsToTheReceiptState() = runTest {
@@ -967,26 +1269,173 @@ class ChatViewModelTest {
             artistsRepository = FakeArtistsRepository(),
             bookingsRepository = StubBookings(),
             reports = reports,
+            requests = FakeRequestsRepository(),
             flagsStore = FakeThreadFlagsStore(),
             blockedUsers = FakeBlockedUsersStore(),
+            readReceipts = { true },
             viewer = { CLIENT_ID },
         )
 
         model.reportConversation("Scam or spam")
 
-        assertTrue(model.state.value.reportSubmitted)
+        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertNull(model.state.value.failedReport)
         assertEquals("Scam or spam", reports.conversation.single().second)
     }
 
-    /** Closing the sheet resets the receipt so the next open starts on the actions. */
+    /**
+     * A report that only reached THIS DEVICE is not a report the safety team has.
+     *
+     * `Queued` still lands in `reportOutcome` — it is not a failure and the copy
+     * must not call it one — but it is a different receipt and, on screen, a
+     * different sentence. The failure this pins is the one where all three
+     * outcomes flipped one boolean and printed "the report is with our safety
+     * team" over every one of them.
+     */
     @Test
-    fun dismissingDetailsResetsTheReportReceipt() = runTest {
+    fun aQueuedReportIsAReceiptButNotAFailureAndNotADelivery() = runTest {
+        val reports = FakeReportsRepository(outcome = ReportOutcome.Queued)
+        val model = vm(ScriptedMessages(), reports = reports)
+
+        model.reportConversation("Spam or a scam")
+        advanceUntilIdle()
+
+        assertEquals(ReportOutcome.Queued, model.state.value.reportOutcome)
+        assertNull("queued is not lost", model.state.value.failedReport)
+    }
+
+    /**
+     * A report nothing is holding is not a receipt at all.
+     *
+     * Neither the insert nor the on-device log kept it, so there is nothing to
+     * confirm — and the reader's own words have to come back with the retry,
+     * because asking someone to write out a second time what upset them enough
+     * to report is its own small harm.
+     */
+    @Test
+    fun aFailedReportBecomesDurableStateCarryingTheReadersOwnWords() = runTest {
+        val reports = FakeReportsRepository(outcome = ReportOutcome.Failed)
+        val model = vm(ScriptedMessages(), reports = reports)
+
+        model.reportConversation("Pressuring or aggressive messages", "he keeps calling")
+        advanceUntilIdle()
+
+        assertNull("nothing landed, so nothing may be confirmed", model.state.value.reportOutcome)
+        assertEquals(
+            PendingReport("Pressuring or aggressive messages", "he keeps calling"),
+            model.state.value.failedReport,
+        )
+    }
+
+    /** Retry re-files what they already wrote, and a retry that lands clears the failure. */
+    @Test
+    fun retryingALostReportRefilesItAndClearsTheFailureWhenItLands() = runTest {
+        val reports = FakeReportsRepository(outcome = ReportOutcome.Failed)
+        val model = vm(ScriptedMessages(), reports = reports)
+        model.reportConversation("Spam or a scam", "link in every message")
+        advanceUntilIdle()
+
+        reports.outcome = ReportOutcome.Sent
+        model.retryReport()
+        advanceUntilIdle()
+
+        assertEquals(2, reports.conversation.size)
+        assertEquals(
+            "the retry must carry the same words, not an empty form",
+            Triple(threadId, "Spam or a scam", "link in every message"),
+            reports.conversation.last(),
+        )
+        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertNull(model.state.value.failedReport)
+    }
+
+    /**
+     * Two taps on Submit file ONE report.
+     *
+     * The form does not close on submit — it stays up and becomes a receipt only
+     * when the outcome lands — so the CTA is live for the whole round trip, and
+     * the second tap used to file the same row again. Duplicates are not a
+     * cosmetic problem: they are two rows in `public.reports` about one person
+     * for one thing, which the moderation team reads as a pattern.
+     */
+    @Test
+    fun aDoubleTapOnSubmitFilesTheReportOnce() = runTest {
+        val reports = GatedReports()
+        val model = vm(ScriptedMessages(), reports = reports)
+
+        model.reportConversation("Spam or a scam", "same link twice")
+        advanceUntilIdle()
+        assertTrue(
+            "the form has to lock itself while the write is out",
+            model.state.value.isSubmittingReport,
+        )
+
+        model.reportConversation("Spam or a scam", "same link twice")
+        advanceUntilIdle()
+
+        assertEquals("the second tap must not reach the seam", 1, reports.conversation.size)
+
+        reports.gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, reports.conversation.size)
+        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertFalse(
+            "and the form unlocks when the answer lands",
+            model.state.value.isSubmittingReport,
+        )
+    }
+
+    /** The retry button is the same door: it must not open a second write either. */
+    @Test
+    fun retryCannotStartASecondReportWhileOneIsInFlight() = runTest {
+        val reports = GatedReports(outcome = ReportOutcome.Failed)
+        val model = vm(ScriptedMessages(), reports = reports)
+        model.reportConversation("Pressuring or aggressive messages")
+        advanceUntilIdle()
+
+        model.retryReport()
+        advanceUntilIdle()
+
+        assertEquals(1, reports.conversation.size)
+
+        reports.gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertNotNull(model.state.value.failedReport)
+        assertFalse(model.state.value.isSubmittingReport)
+    }
+
+    /**
+     * Closing the sheet clears the RECEIPT but never the failure.
+     *
+     * A receipt is a momentary fact and the next open should start on the
+     * actions. "Your safety report was lost" is a state: it goes away when it is
+     * fixed or explicitly discarded, not because a sheet was dismissed.
+     */
+    @Test
+    fun dismissingDetailsResetsTheReceiptButKeepsALostReport() = runTest {
         val model = vm(ScriptedMessages())
         model.reportConversation("Offensive")
+        advanceUntilIdle()
 
         model.dismissDetails()
 
-        assertFalse(model.state.value.reportSubmitted)
+        assertNull(model.state.value.reportOutcome)
+
+        val lost = FakeReportsRepository(outcome = ReportOutcome.Failed)
+        val second = vm(ScriptedMessages(), reports = lost)
+        second.reportConversation("Offensive")
+        advanceUntilIdle()
+
+        second.dismissDetails()
+
+        assertNotNull(
+            "a lost report must survive the sheet closing",
+            second.state.value.failedReport,
+        )
+        second.discardFailedReport()
+        assertNull("and only an explicit discard clears it", second.state.value.failedReport)
     }
 
     // --- foreground resync ---------------------------------------------------

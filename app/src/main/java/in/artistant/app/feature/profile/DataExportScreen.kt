@@ -154,8 +154,8 @@ class DataExportViewModel @Inject constructor(
 @Composable
 fun DataExportScreen(
     onBack: () -> Unit,
-    /** @see AccountScreen.onSafetyCentre — Support lives there, and the button hides without it. */
-    onContactSupport: (() -> Unit)?,
+    /** The scripted support assistant (design 34) — a failed export is what it is for. */
+    onContactSupport: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: DataExportViewModel = hiltViewModel(),
 ) {
@@ -198,7 +198,7 @@ private fun DataExportContent(
     onRequest: () -> Unit,
     onShare: () -> Unit,
     onStopWaiting: () -> Unit,
-    onContactSupport: (() -> Unit)?,
+    onContactSupport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
@@ -245,13 +245,11 @@ private fun DataExportContent(
                         fullWidth = true,
                         modifier = Modifier.semantics { testTag = "export.retry" },
                     )
-                    if (onContactSupport != null) {
-                        SecondaryButton(
-                            text = "Contact Support",
-                            onClick = onContactSupport,
-                            fullWidth = true,
-                        )
-                    }
+                    SecondaryButton(
+                        text = "Contact Support",
+                        onClick = onContactSupport,
+                        fullWidth = true,
+                    )
                 }
             }
         },

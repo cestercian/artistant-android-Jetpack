@@ -52,10 +52,14 @@ import `in`.artistant.app.feature.booking.InvoiceScreen
 import `in`.artistant.app.feature.booking.MatchConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
+import `in`.artistant.app.feature.bookings.MonthCalendarScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ArtistListKind
@@ -233,6 +237,20 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     BookingsScreen(
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // The empty state's only action, and the nudge's: both
+                        // send the client where the fact they are missing lives.
+                        onFindArtist = { navigateToTab(nav, ClientTab.Search.route) },
+                        onEditProfile = { navigateToTab(nav, ClientTab.Profile.route) },
+                        onOpenCalendar = { nav.navigate(ClientNavRoutes.MONTH_CALENDAR) },
+                        onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.MONTH_CALENDAR) {
+                TabPane(inner) {
+                    MonthCalendarScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                     )
                 }
             }
@@ -241,8 +259,37 @@ fun ClientTabsScaffold() {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ClientTab.Bookings.route) },
+                        onOpenArchive = { nav.navigate(ClientNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
                         bookingsLabel = ClientTab.Bookings.label,
+                        onOpenBookings = { navigateToTab(nav, ClientTab.Bookings.route) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        // Reporting happens inside a conversation, so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ClientTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }
@@ -256,7 +303,7 @@ fun ClientTabsScaffold() {
                         onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
                         onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
                         onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
-                        onSafetyCentre = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        onSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                         // The role write lands on the server, but the root gate only re-reads
                         // the profile when the SESSION changes — which a role switch is not.
                         // `RootViewModel` is resolved from the activity's store here (this
@@ -273,7 +320,7 @@ fun ClientTabsScaffold() {
                         onBack = { nav.popBackStack() },
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                         onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
-                        onSafetyCentre = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        onSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                         onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
                         onLanguage = { nav.navigate(ClientNavRoutes.LANGUAGE) },
                         onAccessibility = { nav.navigate(ClientNavRoutes.ACCESSIBILITY) },
@@ -300,9 +347,9 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     DataExportScreen(
                         onBack = { nav.popBackStack() },
-                        // Support lives inside the safety centre; a failed export is exactly
-                        // the case its "contact us" path exists for.
-                        onContactSupport = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        // The scripted support assistant, not the safety centre: a failed
+                        // export is a support question, and 34 is the screen that takes one.
+                        onContactSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
                     )
                 }
             }
@@ -310,7 +357,7 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
-                        onContactSupport = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        onContactSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
                         // Nothing to navigate TO: the account is gone, so the cleared session
                         // propagates to the root gate and replaces this whole graph with the
                         // signup flow. Popping the stack here would only race that.
@@ -320,7 +367,13 @@ fun ClientTabsScaffold() {
             }
             composable(ClientNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
-                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                    BlockedAccountsScreen(
+                        onBack = { nav.popBackStack() },
+                        // "Block is not report" needs somewhere to go, and a
+                        // report is filed inside a conversation — so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ClientTab.Messages.route) },
+                    )
                 }
             }
             // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
@@ -473,6 +526,7 @@ fun ClientTabsScaffold() {
                         // Only the client seat has a counterparty with a public
                         // profile, so only this scaffold wires the participant row.
                         onArtistClick = { id -> nav.navigate("artist/$id") },
+                        onOpenSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -596,6 +650,11 @@ fun ClientTabsScaffold() {
                         isArtistViewer = false,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                        // "Book again" off a cancelled booking starts where a
+                        // booking always starts — the artist's profile.
+                        onBookAgain = { artistId -> nav.navigate("artist/$artistId") },
+                        // Support lives inside the inbox on both roles.
+                        onOpenSupport = { navigateToTab(nav, ClientTab.Messages.route) },
                     )
                 }
             }

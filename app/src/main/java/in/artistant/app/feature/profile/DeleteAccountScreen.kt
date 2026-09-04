@@ -223,8 +223,8 @@ class DeleteAccountViewModel @Inject constructor(
 @Composable
 fun DeleteAccountScreen(
     onBack: () -> Unit,
-    /** @see AccountScreen.onSafetyCentre — Support lives there, and the off-ramp hides without it. */
-    onContactSupport: (() -> Unit)?,
+    /** The scripted support assistant (design 34) — stage 1's off-ramp. */
+    onContactSupport: () -> Unit,
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: DeleteAccountViewModel = hiltViewModel(),
@@ -255,7 +255,7 @@ private fun DeleteAccountContent(
     onConfirmationChange: (String) -> Unit,
     onDelete: () -> Unit,
     onKeep: () -> Unit,
-    onContactSupport: (() -> Unit)?,
+    onContactSupport: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -293,7 +293,7 @@ private fun DeleteReasonStage(
     onBack: () -> Unit,
     onPick: (DeleteReason) -> Unit,
     onContinue: () -> Unit,
-    onContactSupport: (() -> Unit)?,
+    onContactSupport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val dimens = AppTheme.dimens
@@ -309,14 +309,12 @@ private fun DeleteReasonStage(
                 fullWidth = true,
                 modifier = Modifier.semantics { testTag = "delete.continue" },
             )
-            if (onContactSupport != null) {
-                PrimaryButton(
-                    text = "Talk to Support instead",
-                    onClick = onContactSupport,
-                    fullWidth = true,
-                    modifier = Modifier.semantics { testTag = "delete.support" },
-                )
-            }
+            PrimaryButton(
+                text = "Talk to Support instead",
+                onClick = onContactSupport,
+                fullWidth = true,
+                modifier = Modifier.semantics { testTag = "delete.support" },
+            )
         },
     ) {
         AccountGap()

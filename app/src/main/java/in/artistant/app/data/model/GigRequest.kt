@@ -74,6 +74,66 @@ data class GigRequest(
     val amount: Int,
     val packageLabel: String = "Custom",
     val timeAgo: String = "",
+    /**
+     * Where the gig is, verbatim from `gig_requests.venue` — nullable because
+     * the column is, and the client's Request-quote form leaves it blank more
+     * often than not.
+     *
+     * Already read by the repository's `select("*")`; it was decoded and then
+     * dropped on the floor until the Sep-2026 redesign, whose request detail
+     * (screen 35) prints Date / Venue / Guests as the proposal's three facts.
+     * Surfacing a column the query already returns is not a new network path.
+     */
+    val venue: String? = null,
+    /** Headcount from `gig_requests.crowd_size`; null when the host didn't say. */
+    val crowdSize: Int? = null,
+    /**
+     * "2 hours ago" for the moment the row last CHANGED, as opposed to
+     * [timeAgo], which is when it was sent.
+     *
+     * The two are the same string until someone acts on the request, and then
+     * they are the whole difference between "Sent 15 minutes ago" (screen 35)
+     * and "You countered 2 hours ago" (screen 107). Empty when `updated_at`
+     * could not be read or parsed — the header then falls back to the sent time.
+     */
+    val updatedAgo: String = "",
+    /**
+     * The artist the quote is with, lowercased.
+     *
+     * Carried so a surface that starts from a CONVERSATION can find the quote
+     * belonging to it: `threads` has no `request_id`, and the only thing a
+     * thread and a gig request share is the pair of people in them. The chat
+     * matches on this (design 08 — "quotes are objects, not text").
+     *
+     * Empty only for a row minted locally by a fake; the server column is NOT
+     * NULL.
+     */
+    val artistId: String = "",
+    /**
+     * Who the quote is with on the OTHER side (`gig_requests.client_id`),
+     * lowercased.
+     *
+     * The artist half of the pair is not enough to name a conversation, and on
+     * the artist's own seat it is not a filter at all: `listForArtist()` returns
+     * every client's requests and `artist_id` is the viewer's own id on all of
+     * them. Matching on it alone made one client's quote appear on another
+     * client's thread. Both halves together are the pair, which — with
+     * `threads`' bookingless-per-pair uniqueness — is what identifies the
+     * conversation a request belongs to. See [ThreadQuote.pick].
+     *
+     * Empty only for a row minted locally by a fake; the server column is NOT
+     * NULL.
+     */
+    val clientId: String = "",
+    /**
+     * When the offer lapses (`gig_requests.expires_at`), or null if it could not
+     * be parsed.
+     *
+     * The one fact that turns a number into an offer — the inbox preview says
+     * "holds till Fri" and the in-thread card "Valid until Fri 6 pm" (screens 19
+     * and 08), and neither line may be drawn without this.
+     */
+    val expiresAtEpochMs: Long? = null,
 )
 
 data class StoredRequest(

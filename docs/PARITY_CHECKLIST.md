@@ -71,17 +71,23 @@ Android file now mirrors.
 | — (new) | `feature/booking/InvoiceScreen.kt` + `InvoiceLogic.kt` | **redesigned (BC)** | Screen 132, route `invoice/{bookingId}`. "A record, not a tax invoice": fee, Artistant's ₹0, total = fee; persisted platform fee and GST are never printed as charges. Shares text, not a PDF |
 | `Screens/GigRequestDetailView.swift` (counter sheet) | `feature/booking/CounterOfferScreen.kt` | **redesigned (BC)** | Screen 61, route `counter_offer/{requestId}` on the ARTIST graph — `gig_requests_update_artist` (mig 0002) is the only UPDATE policy, so a client-side counter is blocked on the backend. The gigs screen keeps its inline sheet until AS is rewritten |
 | `Screens/RequestQuoteView.swift` | `feature/booking/RequestQuoteScreen.kt` | **redesigned (BC)** | Screen 17 "the brief, prefilled". Occasion chips + date/start pickers + guests/venue/budget + 500-char note; occasion and start time have no column and travel in the message (`quoteBriefMessage`). Budget is one amount, not the design's range |
-| `Screens/BookingDetailView.swift` | `feature/booking/BookingDetailScreen.kt` | done | Message / Accept-Decline / Getting there / calendar / review |
-| `Screens/BookingsView.swift` | `feature/bookings/BookingsScreen.kt` | done | Client calendar list |
-| `Screens/ReviewSheet.swift` | `feature/booking/ReviewSheet.kt` | done | Minimal insert sheet |
+| `Screens/BookingDetailView.swift` | `feature/booking/BookingDetailScreen.kt` | **redesigned (BN)** | Five variants behind one route — confirmed (18), awaiting (95), cancelled (83), disputed (96), read-only (97) — plus not-found (84) and the two-stage cancel flow (117 → 52). Run of show is built only from `start_datetime`/`end_datetime`/`venue_notes`; the design's invented load-in and the disputed screen's event history have no schema behind them and are stated as unavailable |
+| `Screens/BookingsView.swift` | `feature/bookings/BookingsScreen.kt` | **redesigned (BN)** | Screens 10 / 89 / 122. Upcoming ⁄ Past, three affordances (confirmed card · awaiting row · review row), dismissible name nudge over the empty state, and an offline list rendered from a DataStore snapshot of the night's essentials |
+| `Screens/ReviewSheet.swift` | `feature/booking/ReviewSheet.kt` | **redesigned (BN)** | Screens 20 / 98. Stars + a word, four tags onto the real `reviews.categories` keys, optional prose. A missing artist name degrades to the booking reference and never blocks the review. No "post publicly" switch — `reviews` has no visibility column |
+| — (design 78) | `feature/bookings/MonthCalendarScreen.kt` | **new (BN)** | The shared calendar as its own destination (`month_calendar`), off the Bookings header. Renders `MonthCalendarCard` + the selected day's schedule |
 
 ## Screens — Messages (M4)
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | done | Server inbox + All/Bookings/Inquiries filters + push deep link; rows resync on resume (iOS uses an all-threads Realtime sub for the same job) |
-| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | done | Realtime + optimistic send/retry; system rows + trust banner + details/report |
-| `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | done | Gig summary + report reasons → `reports` |
+| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | done | **Redesign 19/110.** Server inbox + All/Bookings/Inquiries/Support chips + push deep link; rows resync on resume (iOS uses an all-threads Realtime sub for the same job). Rows carry DEAL STATE — a live `gig_requests` quote replaces the preview with amount + expiry. Permanent Artistant Support row in every state |
+| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | done | **Redesign 08/70/88.** Realtime + optimistic send/retry; three message states (sent / read / failed-with-retry); trust banner; quote-as-object with Accept/Counter → `match_confirmed/{bookingId}`; accept narrated in three phases |
+| `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | done | **Redesign 33.** Booking card (status/date/venue/fee/score) or the inquiry banner; archive/mute/mark-unread/star/block rows; report opens the picker |
+| — (iOS files reports from the thread sheet) | `feature/messages/ReportConversationSheet.kt` | done | **Redesign 73.** Reason → optional note → Submit, same shape as report-artist. `ConversationReportReasons`; the note reaches `reports.details` |
+| — (no iOS equivalent) | `feature/messages/ArchivedScreen.kt` | done | **Redesign 60/111.** Archive is a route, not a sheet. Device-local flag (`threads` has no archived column); the badge rule is printed on the screen and pinned by a test |
+| — (no iOS equivalent) | `feature/messages/SafetyCentreScreen.kt` | done | **Redesign 131.** Three rules + one-tap remedies. The design's "Emergency help · local numbers by city" row is NOT drawn — no per-city data exists |
+| `Screens/SupportView.swift` (n/a) | `feature/messages/SupportChat.kt` | done | **Redesign 34.** Scripted on-device branch tree that says it is one; full screen, option cards, hand-off to the bookings tab; typed notes → `app_feedback` |
+| — (0087 has no iOS screen) | `feature/profile/BlockedAccountsScreen.kt` | done | **Redesign 127.** Copy states what a v1 block actually does (client-side filtering); the design's stronger claim is deliberately not shipped. "Block ≠ report" carries a live link to the inbox |
 
 ## Screens — Artist home / gigs (M3/M5)
 
@@ -95,23 +101,23 @@ Android file now mirrors.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | done | Publish: upsert + packages/tech RPCs + published; gallery/SAF + UploadQueue |
-| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardScreen.kt` (Identity) | done | Inline form in host |
-| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardScreen.kt` (Location) | done | |
-| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardScreen.kt` (Pricing) | done | `replace_packages` on publish |
-| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | done | `replace_tech_rider` on publish |
-| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | done | |
-| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | done | Gallery + TakePicture camera + gradient |
+| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | done | **Redesigned Sep 2026 (design 72).** Back circle + progress track + "03 / 10" counter; Save & exit is a sheet stating what survives, reachable from every step. Publish: upsert + packages/tech RPCs + service tags + published; gallery/SAF + UploadQueue |
+| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardFormSteps.kt` (Identity) | done | **Redesigned Sep 2026 (design 37).** AppTextField + Chip; public address under the handle; the category's seeded pricing band stated on the step that picks it. Genre stays a free-text field — the design draws chips, the column has no vocabulary |
+| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardFormSteps.kt` (Location) | done | **Redesigned Sep 2026 (design 38).** Base city + travel radius + event types. Radius and event types are draft-only (no radius column; no `event_types` writer in this client) and the step says so |
+| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardFormSteps.kt` (Pricing) | done | **Redesigned Sep 2026 (design 24).** Fee in, all-in out — the host's total per tier through `BookingMath`. No market-rate line: there is no such aggregate. `replace_packages` on publish |
+| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardFormSteps.kt` (Tech) | done | **Redesigned Sep 2026 (design 39).** Presets as checkable rows, custom lines as chips. No rider PDF — `tech_rider` stores text rows. `replace_tech_rider` on publish |
+| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardFormSteps.kt` (Availability) | done | **Redesigned Sep 2026 (design 40).** Day strip + start-time chips compressed to one badge, shown while still editable. No "notice you need" — no column for it |
+| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Cover) | done | **Redesigned Sep 2026 (design 41).** Camera / Library pair; a denied permission routes to the system settings page. Photo only — no video cover path |
 | `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder |
 | `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistoryScreen.kt` | done | **Redesigned Sep 2026 (design 51)** — a pushed screen, not a sheet. Per-*recomputation* deltas: `score_history` stores no reason column, so no per-event cause is invented. Route `score_history` |
 | `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
-| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardScreen.kt` (Socials) | done | |
-| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardScreen.kt` (Bio) | done | |
-| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | done | SAF + UploadQueue after go-live |
-| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | done | |
-| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | done | |
+| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Socials) | done | **Redesigned Sep 2026 (design 42).** Paste fields, not OAuth — no link endpoint on this backend — and the banner says the links are not verified |
+| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Bio) | done | **Redesigned Sep 2026 (design 43).** Live counter plus what-good-looks-like guidance at four lengths; service tags published via `updateServiceTags` |
+| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Samples) | done | **Redesigned Sep 2026 (design 44).** Upload state read off `UploadQueue` — queued / uploading / failed with a retry — rather than a bar driven locally. SAF + UploadQueue after go-live |
+| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardPublishSteps.kt` (Preview) | done | **Redesigned Sep 2026 (design 45).** Centred back header; seven rows, each stating its value with an Edit that jumps back to the owning step |
+| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardPublishSteps.kt` (Done) | done | **Redesigned Sep 2026 (design 46).** Ends on the public address (copyable) and sets the New-tier expectation off `ScoreBands` |
 | `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder + wizard CTA |
 
 ## Screens — Profile / Settings / Paywall (M6/M7)
@@ -234,6 +240,8 @@ Android file now mirrors.
 | `Components/Haptic.swift` | `designsystem/Haptics.kt` | done | 7 verbs + `rememberHaptics()`. Fired at 24 of iOS's 26 non-signup sites. `ReportArtistSheet` closed its two on the Sep-2026 AP redesign (reason tap = selection, submit = warning — not success: the app must not congratulate anyone for filing a complaint). The 2 remaining gaps have no Android surface: per-category review dots, and the thread report picker, which files on the reason tap so there is no separate select moment |
 | Theme tokens | `designsystem/theme/*` | **redesigned** | **Sep 2026 — the dark, dual-accent language is retired.** `docs/REDESIGN_2026-09.md` is the token sheet (§2 palette/type/geometry, §4 old→new mapping). Light surfaces, ONE lime accent for both roles (`withRole` is identity), Plus Jakarta Sans + JetBrains Mono in `res/font/`; the editorial serif is gone and `SerifFamily` is a deprecated alias of the sans. Old `AppType`/`AppColors` names survive as aliases so inherited screens compile — the eleven P2 section PRs retire them. Over-media chrome (`glass*`, `inkOnMedia*`, `ArtistGradient`) is deliberately unchanged: photos are still photos |
 | Component library v2 | `designsystem/component/*` | done (P1) | `PrimaryButton`, `SecondaryButton`, `IconCircle`, `SearchBar`/`SearchBarButton`, `Chip`/`ChipRail`, `SectionHeader`/`EyebrowLabel`, `Tile`/`MediaSlot`, `HeroCard`, `ListRow`, `Banner` (absorbs `InlineBanner`), `StatusPill`, `EmptyState`, `Skeleton*`, `Toast`/`ToastHost`, `LightTabBar`, `ScreenHeader`, `BackHeader`, `SheetScaffold`, `AppTextField`, `OtpField`. Each has a `@Preview`; none is wired into a screen yet — that is P2's job |
+| Month calendar | `designsystem/component/MonthCalendar.kt` | **redesigned (BN)** | Design 78 documents all five day states and this implements them: `MonthDayFill` (Booked · Unavailable · Open · Selected) plus today's ring, with `monthDayFill` as the pure precedence rule. Adds `MonthCalendarCard`, `MonthCalendarLegend` and `DayEventRow`. `MonthDayGrid` keeps its signature for Gigs and gains one optional `unavailableDays` |
+| Section BN primitives | `designsystem/component/{DetailHeader,EventTimeline,BottomActionBar,AccentNote}.kt` | **new (BN)** | Left-aligned record header (18/78/83/84/95/96/97/117), the light design's 11dp-dot timeline, the pinned bottom bar (not `dockSurface` — no rounded corners on the page's own edge), and the lime-washed aside six BN screens share |
 | Global chrome | `designsystem/component/LightTabBar.kt` | done (P1, +AC) | Replaces the floating blurred pill. Opaque, hairline top, four glyphs + a raised accent action circle. Client: Home · Search · [+] · Messages · Profile. Artist: Studio · Gigs · [+] · Messages · Profile. `FloatingTabBar` and `AmbientRoleWash` are deleted. Sep 2026 (AC): an opt-in `showLabels` draws the glyph names for Accessibility's "Always show labels"; off by default |
 
 ---

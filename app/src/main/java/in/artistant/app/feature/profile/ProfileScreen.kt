@@ -81,8 +81,8 @@ fun ProfileScreen(
     onArtistList: (ArtistListKind) -> Unit,
     onNotifications: () -> Unit,
     onPrivacy: () -> Unit,
-    /** @see AccountScreen.onSafetyCentre — nullable for the same reason; the row is omitted. */
-    onSafetyCentre: (() -> Unit)?,
+    /** @see AccountScreen.onSafetyCentre — the same row, reached from the profile. */
+    onSafetyCentre: () -> Unit,
     /**
      * Re-run the root gate after a role switch. Without it the write lands and the app stays
      * in the client scaffold until the next cold start — see [ProfileViewModel.switchToArtistMode].
@@ -115,7 +115,7 @@ private fun ProfileContent(
     onArtistList: (ArtistListKind) -> Unit,
     onNotifications: () -> Unit,
     onPrivacy: () -> Unit,
-    onSafetyCentre: (() -> Unit)?,
+    onSafetyCentre: () -> Unit,
     onSwitchToArtist: () -> Unit,
     onRetry: () -> Unit,
     onDismissMessage: () -> Unit,
@@ -208,9 +208,7 @@ private fun ProfileContent(
             onClick = { onArtistList(ArtistListKind.Saved) },
         )
         ListRow(title = "Notifications", onClick = onNotifications)
-        if (onSafetyCentre != null) {
-            ListRow(title = "Help and safety", onClick = onSafetyCentre)
-        }
+        ListRow(title = "Help and safety", onClick = onSafetyCentre)
         ListRow(title = "Legal and privacy", onClick = onPrivacy, showHairline = false)
 
         // Tap-to-dismiss, the same affordance every other action failure in this package

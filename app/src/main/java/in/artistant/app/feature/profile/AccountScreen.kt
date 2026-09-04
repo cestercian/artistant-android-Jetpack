@@ -71,13 +71,12 @@ fun AccountScreen(
     /**
      * The trust & safety centre (design 131), which `feature/messages` owns.
      *
-     * Nullable, and the row is omitted when it is null — a settings row that pushes nothing is
-     * the "failing silently on tap" the redesign's notes keep ruling out, and the destination
-     * genuinely does not exist on every branch this screen compiles against. The hosts resolve
-     * it from the live graph, so the row appears the moment the screen is registered and
-     * nothing here has to change on merge. Same pattern `PrivacyScreen` uses for its export row.
+     * Was nullable while this section compiled against a graph that had no such destination —
+     * a settings row that pushes nothing is the "failing silently on tap" the redesign's notes
+     * keep ruling out, so the row was omitted rather than dead. `redesign/messaging-safety`
+     * registered the screen on both graphs, so the seam is closed and the row is unconditional.
      */
-    onSafetyCentre: (() -> Unit)?,
+    onSafetyCentre: () -> Unit,
     onNotifications: () -> Unit,
     onLanguage: () -> Unit,
     onAccessibility: () -> Unit,
@@ -198,7 +197,7 @@ private fun AccountContent(
     onBack: () -> Unit,
     onBlockedAccounts: () -> Unit,
     onPrivacy: () -> Unit,
-    onSafetyCentre: (() -> Unit)?,
+    onSafetyCentre: () -> Unit,
     onNotifications: () -> Unit,
     onLanguage: () -> Unit,
     onAccessibility: () -> Unit,
@@ -306,9 +305,7 @@ private fun AccountContent(
         // Next to Privacy because it answers the same question — who can reach me, and what
         // happens when someone shouldn't — and above the destructive pair so the way back from
         // a block is a row people scroll past rather than hunt for.
-        if (onSafetyCentre != null) {
-            ListRow(title = "Trust & safety", onClick = onSafetyCentre)
-        }
+        ListRow(title = "Trust & safety", onClick = onSafetyCentre)
         ListRow(title = "Blocked accounts", onClick = onBlockedAccounts)
         ListRow(title = "Help centre", onClick = onHelp)
         // No chevron on either: they are terminal actions that raise a confirmation or a flow

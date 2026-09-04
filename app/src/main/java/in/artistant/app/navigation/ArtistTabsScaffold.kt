@@ -36,14 +36,18 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
+import `in`.artistant.app.feature.artisthome.EarningsScreen
 import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.epk.EpkScreen
 import `in`.artistant.app.feature.booking.CounterOfferScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
@@ -148,7 +152,7 @@ fun ArtistTabsScaffold() {
                 // that editor already exists. Not a new flow — a shortcut to one.
                 showLabels = a11ySettings.alwaysShowLabels,
                 action = LightTabAction(
-                    label = "Manage availability",
+                    label = "Availability",
                     icon = Icons.Filled.PlayArrow,
                     onClick = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
                 ),
@@ -175,6 +179,12 @@ fun ArtistTabsScaffold() {
                         // to change what days are offered; it previously had no
                         // route, so the editor was reachable only from Profile.
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        // "Manage" beside the 14-day strip and the standing pill
+                        // both open the CALENDAR (screen 22), not the weekday
+                        // editor: the artist tapping a strip of dates is asking
+                        // what is spoken for, and the editor hangs off that.
+                        onOpenAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        onOpenEarnings = { nav.navigate(ArtistNavRoutes.EARNINGS) },
                         onSubscribe = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                     )
                 }
@@ -196,7 +206,7 @@ fun ArtistTabsScaffold() {
                         onBack = { nav.popBackStack() },
                         onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                         onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
-                        onSafetyCentre = rememberRouteIfRegistered(nav, ArtistNavRoutes.SAFETY_CENTRE),
+                        onSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                         onNotifications = { nav.navigate(ArtistNavRoutes.NOTIFICATIONS) },
                         onLanguage = { nav.navigate(ArtistNavRoutes.LANGUAGE) },
                         onAccessibility = { nav.navigate(ArtistNavRoutes.ACCESSIBILITY) },
@@ -224,7 +234,7 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     DataExportScreen(
                         onBack = { nav.popBackStack() },
-                        onContactSupport = rememberRouteIfRegistered(nav, ArtistNavRoutes.SAFETY_CENTRE),
+                        onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
                     )
                 }
             }
@@ -232,7 +242,7 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
-                        onContactSupport = rememberRouteIfRegistered(nav, ArtistNavRoutes.SAFETY_CENTRE),
+                        onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
                         // Nothing to navigate TO: the account is gone, so the cleared session
                         // propagates to the root gate and replaces this whole graph.
                         onFinished = {},
@@ -241,7 +251,13 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
-                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                    BlockedAccountsScreen(
+                        onBack = { nav.popBackStack() },
+                        // "Block is not report" needs somewhere to go, and a
+                        // report is filed inside a conversation — so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                    )
                 }
             }
             // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
@@ -273,6 +289,14 @@ fun ArtistTabsScaffold() {
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {
                 TabPane(inner) {
                     ManageAvailabilityScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            composable(ArtistNavRoutes.EARNINGS) {
+                TabPane(inner) {
+                    EarningsScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    )
                 }
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
@@ -316,12 +340,40 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
-                        // The inbox's inline accelerator and Support's one deep
-                        // link both land in the artist's own funnel — which this
-                        // role calls Gigs, not Bookings.
+                        // The inbox's inline accelerator lands in the artist's
+                        // own funnel — which this role calls Gigs, not Bookings.
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ArtistTab.Gigs.route) },
+                        onOpenArchive = { nav.navigate(ArtistNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
+                        // Support's one real deep link lands in the artist's own
+                        // funnel, which this role calls Gigs.
                         bookingsLabel = ArtistTab.Gigs.label,
+                        onOpenBookings = { navigateToTab(nav, ArtistTab.Gigs.route) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }
@@ -355,6 +407,7 @@ fun ArtistTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -367,6 +420,9 @@ fun ArtistTabsScaffold() {
                         isArtistViewer = true,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
+                        // Support lives inside the inbox on both roles — the
+                        // disputed page's only live action leads there.
+                        onOpenSupport = { navigateToTab(nav, ArtistTab.Messages.route) },
                     )
                 }
             }
@@ -375,14 +431,17 @@ fun ArtistTabsScaffold() {
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
             ) {
                 TabPane(inner) {
-                    GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                    GigRequestDetailScreen(
+                        onBack = { nav.popBackStack() },
+                        onCounter = { id -> nav.navigate(ArtistNavRoutes.counterOffer(id)) },
+                    )
                 }
             }
             // Screen 61. Its own destination rather than a sheet inside the gig
             // detail, because it is a page in the design with its own header and
-            // its own dock. The gig detail's inline counter sheet stays until the
-            // artist-studio section is rewritten; both go through the same
-            // `RequestsRepository.counter`, so they cannot disagree.
+            // its own dock — and, since the artist-studio section landed, the
+            // ONLY way to counter: the detail's inline dialog is gone (BC
+            // follow-up 3).
             composable(
                 route = ArtistNavRoutes.COUNTER_OFFER,
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
@@ -399,32 +458,6 @@ fun ArtistTabsScaffold() {
             }
         }
     }
-}
-
-/**
- * A navigate-to-[route] lambda, or null when nothing in this graph answers to that route.
- *
- * Exists for exactly one situation, and it is a real one: the account settings list links to
- * the trust & safety centre (design 131), which lives in `feature/messages` and lands on its
- * own branch. `NavController.navigate` THROWS on an unregistered route, so a hard-coded link
- * would crash the moment the two branches were out of step — and a lambda that quietly does
- * nothing would be the "failing silently on tap" the redesign's notes rule out. Returning null
- * lets the caller omit the control entirely, so the row is absent while the screen is absent
- * and appears the instant it is registered, with no code change on either side.
- *
- * Not a general escape hatch. Every other route in these graphs is registered in the same file
- * that navigates to it, and should be linked directly.
- */
-@Composable
-internal fun rememberRouteIfRegistered(
-    nav: androidx.navigation.NavController,
-    route: String,
-): (() -> Unit)? = remember(nav, route) {
-    // `graph` throws if the controller has no graph yet; every call site is inside a
-    // destination, so it always does. Guarded anyway — a null here costs a hidden row, and a
-    // throw costs the screen.
-    val registered = runCatching { nav.graph.findNode(route) != null }.getOrDefault(false)
-    if (registered) ({ nav.navigate(route) }) else null
 }
 
 /**
