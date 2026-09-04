@@ -147,7 +147,10 @@ fun ManageAvailabilityScreen(
                                 state.month.year,
                                 state.month.month,
                             ),
-                            closedDays = closedDaysIn(
+                            // Named `unavailableDays` by the shared component,
+                            // which landed the same parameter from the bookings
+                            // side while this branch was open.
+                            unavailableDays = closedDaysIn(
                                 state.month.year,
                                 state.month.month,
                                 state.days,

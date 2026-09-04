@@ -21,13 +21,55 @@ class CheckoutLogicTest {
     fun reviewRows_showTheWholeRequest_inTheOrderItWasDecided() {
         val rows = checkoutReviewRows(bookingDraft())
 
+        // Date and time are NOT rows — the light design puts them in the act
+        // header (see checkoutActMeta), and listing them here as well printed the
+        // same two facts twice on one short page.
         assertEquals(
-            listOf("Package", "Date", "Time", "Venue", "Guests", "Directions"),
+            listOf("Package", "Venue", "Guests", "Directions"),
             rows.map { it.label },
         )
         assertEquals("Evening set", rows.first { it.label == "Package" }.value)
         assertEquals("Rooftop", rows.first { it.label == "Venue" }.value)
         assertEquals("80", rows.first { it.label == "Guests" }.value)
+    }
+
+    // --- the act header's meta lines ----------------------------------------
+
+    @Test
+    fun actMeta_readsTierThenWhenAndWhere() {
+        assertEquals(
+            listOf("Evening set · 2h", "Sat, May 16, 2026 · 8:30 PM · Rooftop"),
+            checkoutActMeta(bookingDraft()),
+        )
+    }
+
+    @Test
+    fun actMeta_doesNotRepeatADurationTheTierNameAlreadyCarries() {
+        // The funnel snapshots `packageName` and `packageDuration` off the same
+        // package, and artists routinely name the tier after its length — so
+        // "Full band · 90 min" must not become "Full band · 90 min · 90 min".
+        val draft = bookingDraft().copy(packageName = "Full band · 90 min", packageDuration = "90 min")
+
+        assertEquals("Full band · 90 min", checkoutActMeta(draft).first())
+    }
+
+    @Test
+    fun actMeta_dropsTheBlanks_ratherThanTrailingSeparators() {
+        val draft = bookingDraft().copy(venue = "   ", packageDuration = "")
+
+        assertEquals(
+            listOf("Evening set", "Sat, May 16, 2026 · 8:30 PM"),
+            checkoutActMeta(draft),
+        )
+    }
+
+    @Test
+    fun actMeta_dropsALineWithNothingInItAtAll() {
+        // A card with an empty second line is a card with a gap in it. A draft
+        // that somehow carries no date, time or venue renders one line, not two.
+        val draft = bookingDraft().copy(date = "", time = "", venue = "")
+
+        assertEquals(listOf("Evening set · 2h"), checkoutActMeta(draft))
     }
 
     @Test

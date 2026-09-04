@@ -39,6 +39,7 @@ import `in`.artistant.app.feature.artisthome.EarningsScreen
 import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.epk.EpkScreen
+import `in`.artistant.app.feature.booking.CounterOfferScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
 import `in`.artistant.app.feature.messages.ChatScreen
@@ -326,6 +327,9 @@ fun ArtistTabsScaffold() {
                         isArtistViewer = true,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
+                        // Support lives inside the inbox on both roles — the
+                        // disputed page's only live action leads there.
+                        onOpenSupport = { navigateToTab(nav, ArtistTab.Messages.route) },
                     )
                 }
             }
@@ -335,6 +339,25 @@ fun ArtistTabsScaffold() {
             ) {
                 TabPane(inner) {
                     GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            // Screen 61. Its own destination rather than a sheet inside the gig
+            // detail, because it is a page in the design with its own header and
+            // its own dock. The gig detail's inline counter sheet stays until the
+            // artist-studio section is rewritten; both go through the same
+            // `RequestsRepository.counter`, so they cannot disagree.
+            composable(
+                route = ArtistNavRoutes.COUNTER_OFFER,
+                arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
+            ) {
+                TabPane(inner) {
+                    CounterOfferScreen(
+                        onDismiss = { nav.popBackStack() },
+                        // A sent counter takes the request out of the
+                        // Accept/Decline state, so the detail underneath is
+                        // stale — popping back to it re-reads on resume.
+                        onSent = { nav.popBackStack() },
+                    )
                 }
             }
         }

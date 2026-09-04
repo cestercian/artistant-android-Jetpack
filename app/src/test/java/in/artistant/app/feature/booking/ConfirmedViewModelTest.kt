@@ -12,6 +12,7 @@ import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import java.io.IOException
@@ -42,7 +43,9 @@ class ConfirmedViewModelTest {
         val s = vm(FakeBookingsRepository(listOf(booking()))).state.value
 
         assertEquals("Nova Beats", s.artistName)
-        assertEquals("Sat, May 16, 2026", s.date)
+        // The whole row is held now, not a date string: screen 07 renders the
+        // terms card off it (when / set / where / agreed fee).
+        assertEquals("Sat, May 16, 2026", s.booking?.date)
         assertEquals(BookingStatus.PendingConfirm, s.status)
     }
 
@@ -60,7 +63,7 @@ class ConfirmedViewModelTest {
         val s = vm(FakeBookingsRepository(emptyList())).state.value
 
         assertEquals("", s.artistName)
-        assertEquals("", s.date)
+        assertNull(s.booking)
         assertEquals(BookingStatus.PendingConfirm, s.status)
     }
 
@@ -85,7 +88,7 @@ class ConfirmedViewModelTest {
 
         assertEquals("the failing read has to actually run", 1, bookings.fetchCalls)
         assertEquals("", s.artistName)
-        assertEquals("", s.date)
+        assertNull(s.booking)
         assertEquals(BookingStatus.PendingConfirm, s.status)
     }
 

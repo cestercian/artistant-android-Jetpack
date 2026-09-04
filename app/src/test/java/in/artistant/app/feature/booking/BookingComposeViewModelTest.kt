@@ -70,8 +70,11 @@ class BookingComposeViewModelTest {
         assertEquals(1, s.packageIndex) // "Evening set" is the popular tier
         assertTrue(s.canContinue)
         assertFalse(s.isLoading)
-        assertTrue(s.dateChips.isNotEmpty())
-        assertEquals(s.dateChips.first { it.available }.label, s.selectedDateLabel)
+        // The grid opens on a month with something in it, ringing its first open
+        // day — not on an empty month the host has to step out of.
+        assertTrue(s.selectableDays.isNotEmpty())
+        assertEquals(s.selectableDays.min(), s.selectedDay)
+        assertTrue(s.selectedDateLabel.isNotBlank())
         assertEquals("8:30 PM", s.selectedTime)
     }
 
@@ -187,28 +190,68 @@ class BookingComposeViewModelTest {
     }
 
     @Test
-    fun selectDate_ignoresChipsTheArtistMarkedUnavailable() = runTest {
-        // Only Saturdays are available, so at least one chip in the 14-day window is not.
+    fun selectDay_ignoresDaysTheArtistHasClosed() = runTest {
+        // Only Saturdays are open, so most of the month is not — and a closed day
+        // has to be refused by the MODEL, not merely greyed by the one composable
+        // that happens to draw it.
         val model = vm(
             FakeArtistsRepository(listOf(artist(daysAvailable = listOf("Sat")))),
         )
         val before = model.state.value.selectedDateLabel
-        val blocked = model.state.value.dateChips.first { !it.available }
+        val closed = (1..28).first { it !in model.state.value.selectableDays }
 
-        model.selectDate(blocked)
+        model.selectDay(closed)
 
         assertEquals(before, model.state.value.selectedDateLabel)
     }
 
     @Test
-    fun selectDate_acceptsAnAvailableChip() = runTest {
+    fun selectDay_acceptsAnOpenDay() = runTest {
         val model = vm(seededArtists())
-        val open = model.state.value.dateChips.last { it.available }
+        val open = model.state.value.selectableDays.max()
 
-        model.selectDate(open)
+        model.selectDay(open)
 
-        assertEquals(open.label, model.state.value.selectedDateLabel)
-        assertEquals(open.epochMs, model.state.value.selectedDateEpochMs)
+        assertEquals(open, model.state.value.selectedDay)
+        assertTrue(model.state.value.selectedDateLabel.isNotBlank())
+        assertTrue(model.state.value.selectedDateEpochMs > 0L)
+    }
+
+    @Test
+    fun stepMonth_movesTheGridWithoutMovingThePick() = runTest {
+        // A host checking whether the artist is freer next month has not thereby
+        // cancelled the date they already chose — the ring simply stops matching
+        // until they step back.
+        val model = vm(seededArtists())
+        val pickedLabel = model.state.value.selectedDateLabel
+        val pickedEpoch = model.state.value.selectedDateEpochMs
+
+        model.stepMonth(1)
+
+        assertNull(model.state.value.selectedDay)
+        assertEquals(pickedLabel, model.state.value.selectedDateLabel)
+        assertEquals(pickedEpoch, model.state.value.selectedDateEpochMs)
+
+        model.stepMonth(-1)
+
+        assertNotNull(model.state.value.selectedDay)
+    }
+
+    @Test
+    fun stepMonth_willNotWalkIntoThePast() = runTest {
+        // There is nothing to book behind the current month, and a picker with no
+        // floor walks back to 2019 one tap at a time. Over-stepped deliberately:
+        // the grid may legitimately OPEN on a later month (an artist with nothing
+        // free until November), so the floor is asserted by walking into it
+        // rather than by assuming where the first step starts.
+        val model = vm(seededArtists())
+        model.stepMonth(1)
+        repeat(4) { model.stepMonth(-1) }
+
+        val now = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Kolkata"))
+        assertEquals(now.get(java.util.Calendar.YEAR), model.state.value.visibleYear)
+        assertEquals(now.get(java.util.Calendar.MONTH), model.state.value.visibleMonth)
+        assertFalse(model.state.value.canStepBack)
     }
 
     @Test
@@ -250,11 +293,12 @@ class BookingComposeViewModelTest {
     fun artistWithNoPublishedSlots_fallsBackToTheDefaultTimeGrid() = runTest {
         val model = vm(FakeArtistsRepository(listOf(artist(timeSlots = emptyList()))))
 
-        // Asserted on a day that cannot be today. Today's grid is now trimmed to
-        // the slots the clock hasn't passed, so a suite run after 6pm would see a
-        // short list through no fault of the fallback. Clock behaviour itself is
-        // pinned deterministically in BookingSlotsTest.
-        model.selectDate(model.state.value.dateChips[1])
+        // Asserted on a day that cannot be today — next month's first open day.
+        // Today's grid is trimmed to the slots the clock hasn't passed, so a suite
+        // run after 6pm would see a short list through no fault of the fallback.
+        // Clock behaviour itself is pinned deterministically in BookingSlotsTest.
+        model.stepMonth(1)
+        model.selectDay(model.state.value.selectableDays.min())
 
         assertEquals(DefaultTimeSlots, model.state.value.timeSlots)
         assertTrue(model.state.value.selectedTime in DefaultTimeSlots)
@@ -263,12 +307,12 @@ class BookingComposeViewModelTest {
     /**
      * The past-slot regression, at the ViewModel seam.
      *
-     * `upcomingDateChips` starts at today and `resolveTimeSlots` returned the
-     * artist's whole list regardless of the hour, so opening the funnel at 23:10
-     * preselected "8:30 PM" and Continue snapshotted a draft for a show that had
-     * already ended. Both halves are asserted without touching the clock: the day
-     * the screen opens on must be one the strip calls available, and the time it
-     * preselects must be one of the times it is actually offering.
+     * The grid starts at today and `resolveTimeSlots` returned the artist's whole
+     * list regardless of the hour, so opening the funnel at 23:10 preselected
+     * "8:30 PM" and Continue snapshotted a draft for a show that had already
+     * ended. Both halves are asserted without touching the clock: the day the
+     * screen opens on must be one the grid calls open, and the time it preselects
+     * must be one of the times it is actually offering.
      */
     @Test
     fun refresh_opensOnABookableDayWithATimeItIsStillOffering() = runTest {
@@ -276,18 +320,20 @@ class BookingComposeViewModelTest {
 
         val s = model.state.value
 
-        assertEquals(s.dateChips.first { it.available }.epochMs, s.selectedDateEpochMs)
+        assertNotNull(s.selectedDay)
+        assertTrue(s.selectedDay in s.selectableDays)
         assertTrue(s.timeSlots.isNotEmpty())
         assertTrue(s.selectedTime in s.timeSlots)
     }
 
     @Test
-    fun selectDate_movingOffTodayRestoresTheArtistsWholeGrid() = runTest {
+    fun selectDay_movingOffTodayRestoresTheArtistsWholeGrid() = runTest {
         // Only today hides passed slots, so a later day has to come back with the
         // full published list — a trimmed grid must not follow the user forward.
         val model = vm(FakeArtistsRepository(listOf(artist(timeSlots = DefaultTimeSlots))))
 
-        model.selectDate(model.state.value.dateChips[7])
+        model.stepMonth(1)
+        model.selectDay(model.state.value.selectableDays.min())
 
         assertEquals(DefaultTimeSlots, model.state.value.timeSlots)
         assertTrue(model.state.value.selectedTime in DefaultTimeSlots)
