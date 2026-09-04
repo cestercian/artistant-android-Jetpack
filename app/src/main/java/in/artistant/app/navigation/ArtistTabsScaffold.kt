@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -52,6 +53,10 @@ import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.score.ScoreHistoryScreen
+import `in`.artistant.app.feature.system.ActivityScreen
+import `in`.artistant.app.feature.system.FeedbackScreen
+import `in`.artistant.app.feature.system.HelpCentreScreen
+import `in`.artistant.app.feature.system.ToastViewModel
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -80,6 +85,11 @@ fun ArtistTabsScaffold() {
     val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
     val pendingGig by tabRouter.pendingGigRequestId.collectAsStateWithLifecycle()
     val pendingTab by tabRouter.pendingArtistTab.collectAsStateWithLifecycle()
+
+    // Section SH. The host lives above the NavHost (ArtistantNavHost); this is
+    // the handle a destination raises a toast with. There is no rating prompt on
+    // this graph — it fires on a review the CLIENT leaves.
+    val toasts: ToastViewModel = hiltViewModel()
 
     // One-shot, for both reasons spelled out on [ClientTabsScaffold] and
     // [TabRouter]: a recreation must not re-apply a stale tab and pop the restored
@@ -186,6 +196,38 @@ fun ArtistTabsScaffold() {
             composable(ArtistNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
                     BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            // Section SH — design screens 63 / 64 / 123, the same three screens
+            // the client graph registers. See [SystemRoutes].
+            composable(ArtistNavRoutes.HELP_CENTRE) {
+                TabPane(inner) {
+                    HelpCentreScreen(
+                        role = AppRole.Artist,
+                        onBack = { nav.popBackStack() },
+                        // Account settings, where the name lives. A pushed
+                        // destination on this graph rather than a tab, so it
+                        // stacks like every other push.
+                        onFixProfile = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.FEEDBACK) {
+                TabPane(inner) {
+                    FeedbackScreen(
+                        onClose = { nav.popBackStack() },
+                        onToast = toasts::show,
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.ACTIVITY) {
+                TabPane(inner) {
+                    ActivityScreen(
+                        role = AppRole.Artist,
+                        onOpenBooking = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onOpenThread = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        onOpenGigRequest = { id -> nav.navigate(ArtistNavRoutes.gigRequest(id)) },
+                    )
                 }
             }
             // Design screens 62 / 31 / 114 (section GS). Registered on both graphs

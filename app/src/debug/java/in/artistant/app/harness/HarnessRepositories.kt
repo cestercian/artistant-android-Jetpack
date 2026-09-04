@@ -39,6 +39,11 @@ import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.data.repository.SearchRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.BuildConfig
+import `in`.artistant.app.feature.system.SystemStatus
+import `in`.artistant.app.feature.system.SystemStatusSource
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -223,6 +228,58 @@ object HarnessRepositories {
     val account: AccountRepository? get() = if (on) accountImpl else null
     val reports: ReportsRepository? get() = if (on) reportsImpl else null
     val block: BlockRepository? get() = if (on) blockImpl else null
+
+    /**
+     * The system gate's source, when a gate flag was passed.
+     *
+     * NOT keyed on [HarnessState.useFakes] like everything else in this file:
+     * screens 120 and 121 replace the whole app before the auth gate runs, so
+     * `-e uitest "force-update"` on its own has to work without also asking for
+     * a signed-in fixture session. Null when neither flag is set, which is every
+     * other launch.
+     */
+    val systemStatus: SystemStatusSource?
+        get() {
+            val flags = HarnessState.flags
+            if (!flags.active) return null
+            val status = when {
+                flags.forceUpdate -> SystemStatus.UpdateRequired(
+                    installed = BuildConfig.VERSION_NAME,
+                    // A fixture minimum, derived from the installed version so it
+                    // is visibly one release ahead rather than a number somebody
+                    // has to look up. There is no server to ask.
+                    minimum = nextMinorAfter(BuildConfig.VERSION_NAME),
+                )
+
+                flags.serviceOutage -> SystemStatus.Outage(
+                    impact = "Bookings and messages affected",
+                    // No start time: nothing on the device knows when an outage
+                    // began, and the screen omits the line rather than inventing
+                    // one (see SystemStatus.Outage).
+                    startedLabel = null,
+                )
+
+                else -> return null
+            }
+            return object : SystemStatusSource {
+                override val status: Flow<SystemStatus> = flowOf(status)
+
+                /** "Check again" against a flag can only find the same flag. */
+                override suspend fun refresh() = Unit
+            }
+        }
+
+    /**
+     * "0.1.0" → "0.2.0". Anything unparseable falls back to appending a marker,
+     * so a version scheme this does not understand still renders something
+     * truthful-looking rather than crashing a debug gate.
+     */
+    private fun nextMinorAfter(version: String): String {
+        val parts = version.split('.')
+        val major = parts.getOrNull(0)?.toIntOrNull()
+        val minor = parts.getOrNull(1)?.toIntOrNull()
+        return if (major != null && minor != null) "$major.${minor + 1}.0" else "$version+1"
+    }
 
     // --- Client path: Discover / search / profile / saved / messages -----------------------
 

@@ -11,7 +11,13 @@ import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
 import `in`.artistant.app.MainActivity
 import `in`.artistant.app.R
+import `in`.artistant.app.feature.system.ActivityEntry
+import `in`.artistant.app.feature.system.ActivityLog
 import `in`.artistant.app.platform.permissions.isNotificationPermissionGranted
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -22,6 +28,19 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class ArtistantMessagingService : FirebaseMessagingService() {
     @Inject lateinit var pushService: PushService
+
+    /** Design 123 — the device's own record of what arrived. */
+    @Inject lateinit var activityLog: ActivityLog
+
+    /**
+     * Survives this callback, deliberately.
+     *
+     * `onMessageReceived` returns as soon as the notification is posted, and the
+     * log write is a DataStore edit that must not be cancelled with it —
+     * `SupervisorJob` so one failed write cannot take the scope down for the
+     * life of the process.
+     */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
         Timber.d("FCM onNewToken")
@@ -50,6 +69,14 @@ class ArtistantMessagingService : FirebaseMessagingService() {
         val data = message.data
         if (data.isEmpty()) return
         val plan = pushNotificationPlan(data) ?: return
+
+        // Recorded on RECEIPT, before the permission check and before anything
+        // can go wrong with posting — which is the whole point of design screen
+        // 123. A notification that was never shown (permission revoked) or never
+        // tapped is exactly the one the user comes to Activity looking for, so
+        // the log is written from here rather than from the tap.
+        logActivity(plan, data)
+
         // Without the runtime grant (API 33+) `notify` is a silent no-op; checking says
         // so in the log instead of leaving a dropped notification looking like a
         // delivery failure.
@@ -58,6 +85,39 @@ class ArtistantMessagingService : FirebaseMessagingService() {
             return
         }
         NotificationManagerCompat.from(this).notify(plan.notificationId, build(plan, data))
+    }
+
+    /**
+     * Append this push to the device's activity log.
+     *
+     * Fire-and-forget on an IO scope owned by the service: `onMessageReceived`
+     * runs on FCM's own worker thread with a limited window, and a DataStore
+     * write is not something to hold it open for. [ActivityLog.record] swallows
+     * its own failures — a log that cannot be written must never cost the user
+     * the notification.
+     *
+     * The id combines the plan's collapse key with the arrival time, so a second
+     * message in the same conversation REPLACES the notification (that is the
+     * plan's job) while still adding its own row here (that is this one's).
+     */
+    private fun logActivity(plan: PushNotificationPlan, data: Map<String, String>) {
+        val receivedAt = System.currentTimeMillis()
+        scope.launch {
+            activityLog.record(
+                ActivityEntry(
+                    id = "${plan.notificationId}:$receivedAt",
+                    event = data["artistant_event"]?.trim()?.takeIf { it.isNotEmpty() },
+                    // Titled the way the notification is titled, so the row and
+                    // the banner say the same thing.
+                    title = plan.title ?: getString(R.string.app_name),
+                    body = plan.body,
+                    receivedAtMs = receivedAt,
+                    bookingId = data["artistant_booking_id"]?.trim()?.takeIf { it.isNotEmpty() },
+                    threadId = data["artistant_thread_id"]?.trim()?.takeIf { it.isNotEmpty() },
+                    requestId = data["artistant_request_id"]?.trim()?.takeIf { it.isNotEmpty() },
+                ),
+            )
+        }
     }
 
     private fun build(plan: PushNotificationPlan, data: Map<String, String>): Notification {

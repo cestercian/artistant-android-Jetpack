@@ -40,6 +40,8 @@ import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.system.LiveSystemStatusSource
+import `in`.artistant.app.feature.system.SystemStatusSource
 import `in`.artistant.app.platform.push.DeviceTokenRepository
 import `in`.artistant.app.platform.push.SupabaseDeviceTokenRepository
 
@@ -121,4 +123,17 @@ abstract class RepositoryModule {
     /** Dormant mock payments — real Razorpay is a later one-line swap. */
     @Binds
     abstract fun bindPayments(impl: MockPaymentsService): PaymentsService
+
+    /**
+     * The update-required / service-outage gate's source (design 120 / 121).
+     *
+     * Bound per VARIANT rather than in `feature/system`'s own module for the
+     * same reason every repository above is: the debug harness has to be able to
+     * replace it (`force-update`, `service-outage`), and Hilt cannot override a
+     * binding in a normal build. Here it is always the live one, which reports
+     * `Normal` forever — see [in.artistant.app.feature.system.SystemStatusSource]
+     * for why the backend cannot answer this question yet.
+     */
+    @Binds
+    abstract fun bindSystemStatus(impl: LiveSystemStatusSource): SystemStatusSource
 }

@@ -65,6 +65,13 @@ import `in`.artistant.app.designsystem.theme.motion
  * @param message the line to show, or null for nothing at all.
  * @param onDismiss called when the display window elapses, so the caller can
  *   clear its own state. Without it the toast would show once and stick.
+ * @param key identity of the CURRENT message, when the caller has one.
+ *
+ * The display timer is keyed on this rather than on [message], because two
+ * toasts carrying the same string are two toasts: keyed on the text, the second
+ * one restarts nothing and is dismissed early by the first one's already-running
+ * delay. Callers with no identity to hand leave it null and get the old
+ * behaviour, where the text IS the key.
  */
 @Composable
 fun BoxScope.ToastHost(
@@ -73,6 +80,7 @@ fun BoxScope.ToastHost(
     modifier: Modifier = Modifier,
     icon: ImageVector = Icons.Filled.Check,
     bottomPadding: Dp = AppTheme.dimens.component.toastGap,
+    key: Any? = null,
 ) {
     // Latched so the text does not blank out mid-exit: the caller clears
     // `message` to start the dismissal, and the capsule needs something to keep
@@ -80,7 +88,7 @@ fun BoxScope.ToastHost(
     var shown by remember { mutableStateOf(message) }
     if (message != null) shown = message
 
-    LaunchedEffect(message) {
+    LaunchedEffect(key ?: message) {
         if (message == null) return@LaunchedEffect
         kotlinx.coroutines.delay(TOAST_MILLIS)
         onDismiss()

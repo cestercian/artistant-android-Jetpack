@@ -40,6 +40,8 @@ import `in`.artistant.app.data.repository.SupabaseTechRiderRepository
 import `in`.artistant.app.data.repository.SupabaseUsersRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.system.LiveSystemStatusSource
+import `in`.artistant.app.feature.system.SystemStatusSource
 import `in`.artistant.app.harness.HarnessRepositories
 import `in`.artistant.app.platform.push.DeviceTokenRepository
 import `in`.artistant.app.platform.push.SupabaseDeviceTokenRepository
@@ -167,4 +169,19 @@ object RepositoryModule {
     @Provides
     @Singleton
     fun providePayments(impl: MockPaymentsService): PaymentsService = impl
+
+    /**
+     * The update-required / service-outage gate's source (design 120 / 121).
+     *
+     * The one seam here that is not a repository, and it is here for the same
+     * reason they are: `app_settings` is RLS default-deny with the
+     * `app_setting()` grant revoked (migs 0016 / 0037), so there is no
+     * client-readable minimum version and no status row. Both screens would be
+     * unreachable on any build without a harness hook, which is what
+     * `force-update` and `service-outage` are.
+     */
+    @Provides
+    @Singleton
+    fun provideSystemStatus(real: LiveSystemStatusSource): SystemStatusSource =
+        HarnessRepositories.systemStatus ?: real
 }
