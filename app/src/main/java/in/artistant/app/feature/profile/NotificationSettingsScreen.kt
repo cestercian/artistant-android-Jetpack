@@ -155,7 +155,7 @@ private fun NotificationSettingsContent(
         AccountGap()
         when (state.systemPermissionGranted) {
             true -> AccentNote(
-                text = "System permission is on. These control what we send inside that.",
+                text = "System permission is on. These decide what this phone raises inside it.",
                 modifier = Modifier.semantics { testTag = "notifications.permissionOn" },
             )
             false -> Banner(
@@ -197,7 +197,9 @@ private fun NotificationSettingsContent(
         )
         SwitchRow(
             title = "Load-in reminder",
-            subtitle = "Three hours before",
+            // Named honestly: nothing sends this yet, so the switch is a preference waiting for
+            // a trigger rather than a control over one. See `pushCategoryFor`.
+            subtitle = "Three hours before — not sent yet",
             checked = settings.loadInReminder,
             onCheckedChange = { onToggle(NotificationToggle.LoadInReminder, it) },
             showHairline = false,
@@ -208,14 +210,14 @@ private fun NotificationSettingsContent(
         Spacer(Modifier.height(dimens.space.sm))
         SwitchRow(
             title = "New acts in your city",
-            subtitle = "Weekly at most",
+            subtitle = "Weekly at most — nothing sends this yet",
             checked = settings.newActs,
             onCheckedChange = { onToggle(NotificationToggle.NewActs, it) },
             modifier = Modifier.semantics { testTag = "notifications.newActs" },
         )
         SwitchRow(
             title = "Tips and offers",
-            subtitle = "Product news and promotions",
+            subtitle = "Product news and promotions — nothing sends this yet",
             checked = settings.tipsAndOffers,
             onCheckedChange = { onToggle(NotificationToggle.TipsAndOffers, it) },
             modifier = Modifier.semantics { testTag = "notifications.tips" },
@@ -233,7 +235,7 @@ private fun NotificationSettingsContent(
         Spacer(Modifier.height(dimens.space.sm))
         SwitchRow(
             title = "10:00 pm – 8:00 am",
-            subtitle = "Urgent booking changes still come through",
+            subtitle = "Arrives silently — booking confirmations still make a sound",
             checked = settings.quietHours,
             onCheckedChange = { onToggle(NotificationToggle.QuietHours, it) },
             showHairline = false,
@@ -242,10 +244,14 @@ private fun NotificationSettingsContent(
 
         AccountGap(2)
         Text(
-            "Marketing is off by default and stays off unless you turn it on — the signup " +
-                "opt-in is separate from permission. These choices live on this device: " +
-                "Artistant has no server-side notification setting, so they don't follow you " +
-                "to another phone.",
+            "A switch that's off means this phone doesn't show that notification at all — it " +
+                "isn't quietened, it's dropped. During quiet hours everything else still " +
+                "arrives, on a silent channel, so it's waiting in the morning. Marketing is " +
+                "off by default and stays off unless you turn it on — the signup opt-in is " +
+                "separate from permission. These choices live on this device: Artistant has " +
+                "no server-side notification setting, so they don't follow you to another " +
+                "phone. Three rows say \"nothing sends this yet\": those are waiting on the " +
+                "server, not on you.",
             style = AppTheme.type.caption,
             color = colors.ink4,
             modifier = Modifier.fillMaxWidth(),

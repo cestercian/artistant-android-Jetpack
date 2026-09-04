@@ -12,7 +12,12 @@ import dagger.hilt.android.AndroidEntryPoint
 import `in`.artistant.app.MainActivity
 import `in`.artistant.app.R
 import `in`.artistant.app.platform.permissions.isNotificationPermissionGranted
+import `in`.artistant.app.platform.preferences.NotificationPreferences
+import `in`.artistant.app.platform.preferences.NotificationSettings
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import timber.log.Timber
+import java.time.LocalTime
 import javax.inject.Inject
 
 /**
@@ -22,6 +27,14 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class ArtistantMessagingService : FirebaseMessagingService() {
     @Inject lateinit var pushService: PushService
+
+    /**
+     * Screen 124's eight switches, read here because here is the only place they can do
+     * anything. The screen persists them to DataStore and says out loud that they decide what
+     * THIS device raises — until this service read them that sentence was false, and three of
+     * the rows (booking updates, review reminders, quiet hours) governed nothing at all.
+     */
+    @Inject lateinit var notificationPrefs: NotificationPreferences
 
     override fun onNewToken(token: String) {
         Timber.d("FCM onNewToken")
@@ -45,6 +58,11 @@ class ArtistantMessagingService : FirebaseMessagingService() {
      * `MainActivity.handlePushIntent` routes it when (and only when) the notification
      * is tapped — the same seam iOS uses, where `willPresent` presents and
      * `didReceive` routes.
+     *
+     * **And what it shows is the user's call.** [pushDeliveryFor] applies screen 124's
+     * switches to the arriving event: a category the user turned off never becomes a
+     * notification, and during quiet hours everything but an urgent booking change goes to
+     * the silent twin of its channel.
      */
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
@@ -57,11 +75,42 @@ class ArtistantMessagingService : FirebaseMessagingService() {
             Timber.i("Push arrived but POST_NOTIFICATIONS isn't granted — nothing shown")
             return
         }
-        NotificationManagerCompat.from(this).notify(plan.notificationId, build(plan, data))
+        val event = data["artistant_event"]
+        val delivery = pushDeliveryFor(event, currentSettings(), LocalTime.now().hour)
+        if (delivery == PushDelivery.Drop) {
+            Timber.i("Push '%s' dropped — its category is switched off on this device", event)
+            return
+        }
+        val channelId = when (delivery) {
+            PushDelivery.Silent -> NotificationChannels.quietTwinOf(plan.channelId)
+            else -> plan.channelId
+        }
+        NotificationManagerCompat.from(this).notify(plan.notificationId, build(plan, channelId, data))
     }
 
-    private fun build(plan: PushNotificationPlan, data: Map<String, String>): Notification {
-        val builder = NotificationCompat.Builder(this, plan.channelId)
+    /**
+     * The switches, read synchronously — `onMessageReceived` is not a suspend function and the
+     * notification has to be posted inside the window FCM gives this callback, so there is
+     * nowhere to hand the decision off to.
+     *
+     * A DataStore read that throws (IOException on an unreadable preferences file) falls back to
+     * the DEFAULTS rather than to a drop: the defaults are what the screen shows for a user who
+     * has never touched it, and losing somebody's booking confirmation because a preferences
+     * file was corrupt is a far worse failure than making a sound they had asked us not to.
+     */
+    private fun currentSettings(): NotificationSettings =
+        runCatching { runBlocking { notificationPrefs.all.first() } }
+            .getOrElse {
+                Timber.w(it, "Couldn't read notification preferences — using defaults")
+                NotificationSettings()
+            }
+
+    private fun build(
+        plan: PushNotificationPlan,
+        channelId: String,
+        data: Map<String, String>,
+    ): Notification {
+        val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_notification)
             // The launcher mark's lime, from the same resource the adaptive icon uses —
             // this tints the small icon in the expanded row, so it is the one place the
