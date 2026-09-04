@@ -147,6 +147,9 @@ object ArtistNavRoutes {
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"
     const val MANAGE_AVAILABILITY = "manage_availability"
+
+    /** Agreed fees, design screen 133. Pushed from the studio's money card. */
+    const val EARNINGS = "earnings"
     const val SCORE_EXPLAINER = "score_explainer"
 
     /**

@@ -206,6 +206,7 @@ private data class DbGigRequestWithClient(
     val status: String = "open",
     @SerialName("expires_at") val expiresAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("client_name") val clientName: String? = null,
     val client: ClientEmbed? = null,
 ) {
@@ -235,6 +236,9 @@ private data class DbGigRequestWithClient(
                 amount = proposedAmountInr,
                 packageLabel = "Custom",
                 timeAgo = relativeTimeAgo(createdAt),
+                venue = venue?.trim()?.takeIf { it.isNotEmpty() },
+                crowdSize = crowdSize,
+                updatedAgo = relativeTimeAgo(updatedAt),
                 artistId = artistId.lowercase(),
                 // Already on the row and already decoded; it was simply dropped
                 // here. Both halves of the pair are what lets a CONVERSATION
@@ -314,6 +318,8 @@ class FakeRequestsRepository(
                 message = message.orEmpty(),
                 date = dateLabel,
                 amount = proposedAmountInr,
+                venue = venue?.trim()?.takeIf { it.isNotEmpty() },
+                crowdSize = crowdSize,
                 // Carried through, like the real seam: a fake that drops the
                 // fields the chat matches a quote on would make the chat's own
                 // tests pass against a repository that answers nothing.
