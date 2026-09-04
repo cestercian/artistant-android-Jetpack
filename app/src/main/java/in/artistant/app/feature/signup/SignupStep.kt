@@ -61,6 +61,35 @@ private fun retiredSteps(signedIn: Boolean): Set<SignupStep> =
     if (signedIn) setOf(SignupStep.Welcome, SignupStep.Auth, SignupStep.Code) else emptySet()
 
 /**
+ * The step an entry into the flow actually lands on — the pledge first, when it is still owed.
+ *
+ * The community pledge (design screen 27) is **not a step of its own**: it is what `.Role`
+ * renders while the pledge flag is unset, and agreeing is what swaps that same step for the
+ * role picker. So any entry PAST `.Role` walks straight past a screen the design calls
+ * required — and `RootGate.Onboarding` did exactly that. A signed-in account with an
+ * incomplete `users` row resumes at `.Profile`, so the only user who ever met the pledge was
+ * one who walked the flow from `.Welcome`; everyone else finished onboarding without it, for
+ * good, since the profile save is the last thing that would have asked.
+ *
+ * Returns `.Role` when [step] sits after it in the mode's order and [communityAgreed] is
+ * false; otherwise [step] unchanged. `.Welcome` and `.Role` are at or before the pledge, so a
+ * fresh signup is untouched, and the login order carries no `.Role` at all — a returning user
+ * is not re-pledged.
+ *
+ * DERIVED, not remembered. The caller recomputes it when the flag flips, which is what moves
+ * the user on: agreeing re-seeds the flow at the step the gate originally asked for. It is
+ * also why a flag that arrives LATE is harmless — the pledge store is read asynchronously, so
+ * an already-agreed device can compute `.Role` for a frame, and the recompute corrects it
+ * rather than stranding that user on a role picker they were not meant to see.
+ */
+fun entryStep(step: SignupStep, mode: SignupMode, communityAgreed: Boolean): SignupStep {
+    if (communityAgreed) return step
+    val order = stepOrder(mode)
+    val pledge = order.indexOf(SignupStep.Role)
+    return if (pledge >= 0 && order.indexOf(step) > pledge) SignupStep.Role else step
+}
+
+/**
  * Next step in the mode's order, or the same step if already at the end (iOS `advance`).
  * With [signedIn] the retired pre-auth steps are skipped, so role → profile jumps straight over
  * `.Auth`/`.Code` and a bounce ONTO either resolves forward to the step that follows them.
