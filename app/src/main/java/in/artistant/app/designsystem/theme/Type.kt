@@ -352,6 +352,21 @@ data class AppType(
         fontFamily = MonoFamily, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
     ),
     /**
+     * A date in the dashboard's 14-day availability strip (screens 85 / 86).
+     *
+     * The smallest numeral in the app, and the design's own 10px: fourteen cells
+     * share one 350-wide row, so a cell is about 21 wide and a two-digit date has
+     * to fit inside that. It was drawn with [monoCount] — the 22sp account-page
+     * counter — which made "10" wider than its cell and wrapped every date from
+     * the 10th onwards onto two lines ("1" over "0"). Spelled out rather than
+     * aliased to [monoWeekday]: that one is the calendar's letter row and is
+     * SemiBold because letters at 10sp need the weight; these are digits inside a
+     * filled cell and take the design's plain 400.
+     */
+    val monoStripDay: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 10.sp, fontWeight = FontWeight.Normal,
+    ),
+    /**
      * @see monoLabel
      *
      * The dark ramp set this at 9sp. It grows to the design's 11sp eyebrow here
