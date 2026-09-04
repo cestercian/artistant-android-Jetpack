@@ -5,9 +5,11 @@ import `in`.artistant.app.common.util.formatInrShort
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.SearchCatalog
 import `in`.artistant.app.data.model.SearchFacets
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.format.TextStyle
+import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +103,34 @@ internal fun searchDateChipLabel(iso: String, flexDays: Int): String {
         iso
     }
     return if (flexDays > 0) "$base ±${flexDays}d" else base
+}
+
+/**
+ * The Date section's preset chips (screen 15).
+ *
+ * Presets rather than a calendar: `p_date` takes one day, the useful days are all
+ * within the next fortnight, and a full picker on top of a sheet is a second
+ * modal for a one-field decision. A picker can replace this without touching the
+ * ViewModel contract.
+ *
+ * **Every weekday shortcut goes through [TemporalAdjusters.nextOrSame].**
+ * `LocalDate.with(DayOfWeek.SATURDAY)` resolves within the CURRENT ISO week,
+ * which starts on Monday — so on a Sunday it hands back yesterday, and "This Sat"
+ * posted a `p_date` in the past that no artist can be free on. `nextOrSame` is
+ * the only form that means what the label says on all seven days.
+ *
+ * Pure and `internal` so the Sunday case can be pinned by a JVM test; the sheet
+ * passes the day in rather than reading the clock inside a composable.
+ */
+internal fun searchDatePresets(today: LocalDate): List<Pair<String?, String>> {
+    val saturday = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY))
+    return listOf(
+        null to "Any day",
+        today.toString() to "Today",
+        today.plusDays(1).toString() to "Tomorrow",
+        saturday.toString() to "This Sat",
+        saturday.plusWeeks(1).toString() to "Next Sat",
+    )
 }
 
 /** Which filter a summary chip stands for, and therefore what dropping it clears. */

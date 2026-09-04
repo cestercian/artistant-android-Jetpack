@@ -222,7 +222,13 @@ fun SearchFilterSheet(
                     }
                 }
 
-                SectionTitle("Budget, all-in", top = dimens.space.xl)
+                // NOT "Budget, all-in", which is the design's label. The
+                // number this slider bounds is `min_price` — the artist's own
+                // fee — and `BookingMath` adds 5% platform + 18% GST on top of
+                // it at checkout. Under an all-inclusive label the range would
+                // understate what a booking costs by ~24%, and the caption two
+                // lines down would contradict its own heading.
+                SectionTitle("Budget · artist fee", top = dimens.space.xl)
                 BudgetSection(state = state, onSetPrice = onSetPrice)
 
                 SectionTitle("Bookability", top = dimens.space.xl)
@@ -265,19 +271,7 @@ private fun ColumnScope.DateSection(
 ) {
     val dimens = AppTheme.dimens
     val today = remember { LocalDate.now() }
-    // Presets rather than a picker: `p_date` takes one day, the useful days are
-    // all within the next fortnight, and a full calendar sheet on top of a sheet
-    // is a second modal for a one-field decision. A picker can replace this
-    // without touching the ViewModel contract.
-    val presets = remember(today) {
-        listOf(
-            null to "Any day",
-            today.toString() to "Today",
-            today.plusDays(1).toString() to "Tomorrow",
-            today.with(java.time.DayOfWeek.SATURDAY).toString() to "This Sat",
-            today.plusWeeks(1).with(java.time.DayOfWeek.SATURDAY).toString() to "Next Sat",
-        )
-    }
+    val presets = remember(today) { searchDatePresets(today) }
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -379,9 +373,13 @@ private fun ColumnScope.BudgetSection(state: SearchUiState, onSetPrice: (Int, In
             inactiveTickColor = Color.Transparent,
         ),
     )
+    // The fee disclosure rides on BOTH branches. It is the sentence that makes
+    // the section heading true, so it cannot be the thing that drops out when
+    // the histogram happens to load.
     Text(
         text = if (hasBars) {
-            "Bars show real market prices for this search — the lit range is what you'd see."
+            "Bars show real market prices for this search — the lit range is what " +
+                "you'd see. The platform fee and GST are added at checkout."
         } else {
             "Quotes are the artist's own; the platform fee and GST are added at checkout."
         },

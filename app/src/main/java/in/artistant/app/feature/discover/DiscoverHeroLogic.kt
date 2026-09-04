@@ -79,26 +79,32 @@ object DiscoverHeroLogic {
         "Available ${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)} night"
 
     /**
-     * Does [artist] publish availability for [date]?
+     * Has [daysAvailable] itself said this artist works on [date]?
      *
-     * A second gate over the server's own `p_date` filter, and deliberately
-     * belt-and-braces: `SupabaseSearchRepository.executeSearch` retries WITHOUT
-     * the 0073 dimensions when the RPC signature is missing, so on an older
-     * server a date-filtered query silently returns an unfiltered page — and the
-     * rail would be captioned "Available Sat night" over artists who never said
-     * they were.
+     * The rail above these artists is captioned "Available Sat night", so every
+     * row under it is a claim — and this is the only evidence the app holds for
+     * one. `days_available` is the artist's own published week.
      *
-     * An artist who has published no weekdays at all passes: an empty
-     * `days_available` is an absence of information, not a statement of
-     * unavailability, and the app's rule everywhere else (`availabilityKicker`)
-     * is that we never claim availability *for* them — here the claim is the
-     * rail's, and dropping every artist who has not filled the field in would
-     * empty the rail on a young roster.
+     * **An empty list is NOT evidence, and does not pass.** This used to return
+     * true for it, on the reasoning that an absence of information is not a
+     * statement of unavailability — which is right about the ARTIST and wrong
+     * about the rail. The two are only equivalent while the server is doing the
+     * filtering, and `SupabaseSearchRepository.executeSearch` silently retries
+     * WITHOUT the 0073 dimensions when the RPC signature is missing (as do the
+     * Fake twins, whose default `search` overload drops `date` entirely). On that
+     * path the page is unfiltered, every artist with a blank week sails through
+     * this gate, and the rail asserts availability for people who never said
+     * anything. Requiring the artist's own word makes the caption true no matter
+     * which signature answered.
+     *
+     * The cost is that a roster where nobody publishes a week produces no
+     * availability rail at all — `applyRails` drops an empty one — which is the
+     * correct outcome: we have no evidence anyone is free, so we say nothing.
      */
-    fun publishesAvailability(daysAvailable: List<String>, date: LocalDate): Boolean {
-        if (daysAvailable.isEmpty()) return true
+    fun evidencesAvailability(daysAvailable: List<String>, date: LocalDate): Boolean {
+        if (daysAvailable.isEmpty()) return false
         val abbr = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)
-        return daysAvailable.any { it.equals(abbr, ignoreCase = true) }
+        return daysAvailable.any { it.trim().equals(abbr, ignoreCase = true) }
     }
 
     /** What the price cell says when there is no honest figure to quote. */

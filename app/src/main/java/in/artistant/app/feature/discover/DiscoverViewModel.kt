@@ -13,6 +13,8 @@ import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.feature.search.SearchSeed
 import `in`.artistant.app.feature.search.SearchSeedRequest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,6 +97,19 @@ class DiscoverViewModel @Inject constructor(
     private val _state = MutableStateFlow(DiscoverUiState())
     val state: StateFlow<DiscoverUiState> = _state.asStateFlow()
 
+    /**
+     * The rails load in flight, so a new one can retire it.
+     *
+     * Without this every category tap started a load that nobody stopped, and
+     * five concurrent RPCs do not finish in the order they were issued: the
+     * loser landing last wrote ITS artists into the current state, while the
+     * rail titles and "See all" seeds — which [applyRails] derives from
+     * `selectedCategory` — described the category the user had actually picked.
+     * A feed of DJs under headings about comedy, with no error and nothing to
+     * retry.
+     */
+    private var railsJob: Job? = null
+
     /** Saved-heart ids, straight off the shared optimistic store. */
     val savedIds: StateFlow<Set<String>> = savedStore.ids
 
@@ -164,14 +179,26 @@ class DiscoverViewModel @Inject constructor(
      */
     fun refresh() {
         loadIdentity()
-        viewModelScope.launch {
+        // Retire whatever is in the air BEFORE launching the replacement.
+        railsJob?.cancel()
+        railsJob = viewModelScope.launch {
             // The day is re-read here and nowhere else, so a session left open
             // overnight picks up the new date on the next pull instead of
             // captioning today's roster with yesterday.
             _state.update { it.copy(isLoading = true, loadError = null, today = LocalDate.now()) }
+            // The category this load speaks for. Cancellation alone is not
+            // enough: `viewModelScope` is Main.immediate and a coroutine already
+            // past its last suspension point runs to completion regardless, so
+            // the answer is stamped and checked on arrival as well.
+            val issuedFor = _state.value.selectedCategory
             try {
-                loadRails()
+                loadRails(issuedFor)
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
+                // A failure belonging to a category nobody is looking at any more
+                // must not blank the feed that replaced it.
+                if (_state.value.selectedCategory != issuedFor) return@launch
                 _state.update {
                     it.copy(isLoading = false, loadError = messageFor(t))
                 }
@@ -179,10 +206,8 @@ class DiscoverViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadRails() = coroutineScope {
-        val snapshot = _state.value
-        val category = snapshot.selectedCategory
-        val today = snapshot.today
+    private suspend fun loadRails(category: String?) = coroutineScope {
+        val today = _state.value.today
         val todayIso = today.toString()
         val scope = listOfNotNull(category)
 
@@ -231,7 +256,7 @@ class DiscoverViewModel @Inject constructor(
         // Cache every fetched artist so profile taps resolve via ensureFull.
         artistsRepository.cache(top + available + city + fresh + comedy)
 
-        _state.update { applyRails(it, top, available, city, fresh, comedy) }
+        _state.update { applyRails(it, category, top, available, city, fresh, comedy) }
     }
 
     companion object {
@@ -254,18 +279,25 @@ class DiscoverViewModel @Inject constructor(
          */
         internal fun applyRails(
             state: DiscoverUiState,
+            issuedFor: String?,
             top: List<Artist>,
             available: List<Artist>,
             city: List<Artist>,
             fresh: List<Artist>,
             comedy: List<Artist>,
         ): DiscoverUiState {
+            // A page fetched for a category the user has since left describes
+            // somebody else's feed. Dropping it here — rather than trusting the
+            // job cancellation alone — is what keeps the artists on screen and
+            // the headings above them talking about the same thing.
+            if (state.selectedCategory != issuedFor) return state
             val category = state.selectedCategory
             val today = state.today
-            // The server's own date filter is not trusted alone — see
-            // [DiscoverHeroLogic.publishesAvailability] for why.
+            // Only artists whose OWN published week names this day. The server's
+            // `p_date` is not evidence on its own — see
+            // [DiscoverHeroLogic.evidencesAvailability].
             val free = available.filter {
-                DiscoverHeroLogic.publishesAvailability(it.daysAvailable, today)
+                DiscoverHeroLogic.evidencesAvailability(it.daysAvailable, today)
             }
             val rails = listOfNotNull(
                 rail(

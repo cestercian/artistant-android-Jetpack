@@ -58,11 +58,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.Chip
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.IconCircle
-import `in`.artistant.app.designsystem.component.InlineBanner
 import `in`.artistant.app.designsystem.component.SearchBar
 import `in`.artistant.app.designsystem.component.SectionHeader
 import `in`.artistant.app.designsystem.component.SkeletonBlock
@@ -174,7 +174,7 @@ fun SearchScreen(
             // there are no artists in their city.
             state.loadError != null && state.results.isEmpty() -> {
                 Column(Modifier.fillMaxSize()) {
-                    InlineBanner(
+                    Banner(
                         title = "We couldn't reach search.",
                         detail = "This is a connection problem — it is not that no artists match.",
                         tone = BannerTone.Attention,
@@ -636,7 +636,7 @@ private fun ResultsList(
         // stopped paging with no explanation.
         state.loadError?.let { message ->
             item(key = "pageError") {
-                InlineBanner(
+                Banner(
                     title = "Couldn't load more",
                     detail = message,
                     tone = BannerTone.Failure,

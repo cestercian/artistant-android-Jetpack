@@ -157,6 +157,53 @@ class SearchLabelsTest {
         assertEquals(SearchEmptyActions("Clear search", null), searchNoResultsActions("sufi", 0))
     }
 
+    // ── date presets ─────────────────────────────────────────────────────────
+
+    /**
+     * The bug this pins: `LocalDate.with(DayOfWeek.SATURDAY)` resolves within the
+     * current ISO week, which starts on MONDAY. On a Sunday that is yesterday, so
+     * "This Sat" posted a `p_date` in the past — a date no artist can be free on
+     * and no booking can be made for. `nextOrSame` is the only form that means
+     * what the chip says on all seven days.
+     */
+    @Test
+    fun `this Sat is never in the past, Sunday included`() {
+        val sunday = java.time.LocalDate.of(2026, 10, 11)
+        assertEquals(java.time.DayOfWeek.SUNDAY, sunday.dayOfWeek)
+
+        val presets = searchDatePresets(sunday).toMap()
+        val thisSat = java.time.LocalDate.parse(presets.entries.first { it.value == "This Sat" }.key)
+        assertTrue("\"This Sat\" must not be yesterday", !thisSat.isBefore(sunday))
+        assertEquals(java.time.DayOfWeek.SATURDAY, thisSat.dayOfWeek)
+        assertEquals(java.time.LocalDate.of(2026, 10, 17), thisSat)
+    }
+
+    /** On the day itself, "This Sat" is today — nextOrSame, not next. */
+    @Test
+    fun `on a Saturday this Sat is today and next Sat is a week out`() {
+        val saturday = java.time.LocalDate.of(2026, 10, 10)
+        val presets = searchDatePresets(saturday).toMap().entries.associate { it.value to it.key }
+        assertEquals(saturday.toString(), presets["This Sat"])
+        assertEquals(saturday.plusWeeks(1).toString(), presets["Next Sat"])
+    }
+
+    /** Every weekday, every preset: a real date, never behind today. */
+    @Test
+    fun `no preset ever resolves to the past`() {
+        var day = java.time.LocalDate.of(2026, 10, 5)
+        repeat(7) {
+            searchDatePresets(day).forEach { (iso, label) ->
+                if (iso != null) {
+                    assertTrue(
+                        "$label on $day resolved to $iso",
+                        !java.time.LocalDate.parse(iso).isBefore(day),
+                    )
+                }
+            }
+            day = day.plusDays(1)
+        }
+    }
+
     // ── suggestions ──────────────────────────────────────────────────────────
 
     private val facets = SearchFacets(

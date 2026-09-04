@@ -104,30 +104,44 @@ class DiscoverHeroLogicTest {
         )
     }
 
-    // ── publishesAvailability ────────────────────────────────────────────────
+    // ── evidencesAvailability ────────────────────────────────────────────────
 
     @Test
     fun `an artist who published that weekday passes the second gate`() {
         assertTrue(
-            DiscoverHeroLogic.publishesAvailability(listOf("Fri", "Sat"), LocalDate.of(2026, 10, 10)),
+            DiscoverHeroLogic.evidencesAvailability(listOf("Fri", "Sat"), LocalDate.of(2026, 10, 10)),
         )
     }
 
     @Test
     fun `an artist who published other weekdays is dropped from the rail`() {
         assertFalse(
-            DiscoverHeroLogic.publishesAvailability(listOf("Mon", "Tue"), LocalDate.of(2026, 10, 10)),
+            DiscoverHeroLogic.evidencesAvailability(listOf("Mon", "Tue"), LocalDate.of(2026, 10, 10)),
         )
     }
 
     /**
-     * An empty `days_available` is an absence of information, not a statement of
-     * unavailability — dropping everyone who has not filled the field in would
-     * empty the rail on a young roster.
+     * Silence is not evidence.
+     *
+     * This returned true once, on the reasoning that an empty `days_available` is
+     * an absence of information rather than a statement of unavailability — right
+     * about the artist, wrong about the rail. The repository silently retries a
+     * date-filtered search WITHOUT the 0073 dimensions when the RPC signature is
+     * missing, and the Fake twins ignore the date entirely; on that path a blank
+     * week is exactly what an unfiltered page looks like, and passing it captions
+     * "Available Sat night" over people who never said anything.
      */
     @Test
-    fun `an artist who published nothing is not treated as unavailable`() {
-        assertTrue(DiscoverHeroLogic.publishesAvailability(emptyList(), LocalDate.of(2026, 10, 10)))
+    fun `an artist who published no week is not evidence of availability`() {
+        assertFalse(DiscoverHeroLogic.evidencesAvailability(emptyList(), LocalDate.of(2026, 10, 10)))
+    }
+
+    /** `days_available` arrives as free text from a shared backend. */
+    @Test
+    fun `a padded weekday still counts`() {
+        assertTrue(
+            DiscoverHeroLogic.evidencesAvailability(listOf(" sat "), LocalDate.of(2026, 10, 10)),
+        )
     }
 
     // ── hero badge and rating ────────────────────────────────────────────────

@@ -33,12 +33,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.Chip
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HeroCard
 import `in`.artistant.app.designsystem.component.IconCircle
-import `in`.artistant.app.designsystem.component.InlineBanner
 import `in`.artistant.app.designsystem.component.ScreenHeader
 import `in`.artistant.app.designsystem.component.SearchBarButton
 import `in`.artistant.app.designsystem.component.SectionHeader
@@ -207,7 +207,7 @@ fun DiscoverScreen(
                     // good load.
                     state.loadError?.let { message ->
                         item(key = "refreshError") {
-                            InlineBanner(
+                            Banner(
                                 title = "Couldn't refresh the roster",
                                 detail = message,
                                 tone = BannerTone.Failure,
