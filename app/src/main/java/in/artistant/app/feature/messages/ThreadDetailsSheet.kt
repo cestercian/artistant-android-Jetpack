@@ -36,8 +36,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.data.repository.PendingReport
+import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
@@ -81,7 +84,10 @@ fun ThreadDetailsSheet(
      * offering an action that would have to guess who to block.
      */
     canBlock: Boolean,
-    reportSubmitted: Boolean,
+    /** Non-null once a report reached the server or this device's log. */
+    reportOutcome: ReportOutcome?,
+    /** Non-null when a report is held NOWHERE — the sheet owes a retry, not a receipt. */
+    failedReport: PendingReport?,
     /**
      * The last mute/block toggle didn't land. Rendered above the rows, because
      * this sheet is where the tap happened and the row it belongs to has already
@@ -95,6 +101,10 @@ fun ThreadDetailsSheet(
     onToggleBlock: () -> Unit,
     onMarkUnread: () -> Unit,
     onReport: (reason: String, details: String?) -> Unit,
+    /** Re-file the report the reader already wrote. */
+    onRetryReport: () -> Unit,
+    /** Give up on a report nothing is holding. */
+    onDiscardReport: () -> Unit,
     /**
      * Trust & safety (design 131).
      *
@@ -132,7 +142,9 @@ fun ThreadDetailsSheet(
         SheetScaffold {
             SheetTitle(
                 title = when {
-                    reportSubmitted -> "Report received"
+                    failedReport != null -> "Report not sent"
+                    reportOutcome == ReportOutcome.Sent -> "Report received"
+                    reportOutcome == ReportOutcome.Queued -> "Report saved on this device"
                     reporting -> "Report conversation"
                     blocking -> "Block $counterpartName?"
                     else -> "Thread details"
@@ -146,7 +158,15 @@ fun ThreadDetailsSheet(
                     .semantics { testTag = "chat.detailsSheet" },
             ) {
                 when {
-                    reportSubmitted -> ReportReceipt(counterpartName)
+                    // Ordered so the worst outcome wins: a retry that fails
+                    // again must not be covered by the receipt of the attempt
+                    // before it.
+                    failedReport != null -> ReportFailure(
+                        onRetry = onRetryReport,
+                        onDiscard = onDiscardReport,
+                    )
+
+                    reportOutcome != null -> ReportReceipt(counterpartName, reportOutcome)
 
                     reporting -> ReportConversationSheet(
                         counterpartName = counterpartName,
@@ -575,14 +595,27 @@ private fun BlockConfirm(
  * distinguish delivered from queued, and must not claim to.
  */
 @Composable
-private fun ReportReceipt(counterpartName: String) {
+private fun ReportReceipt(counterpartName: String, outcome: ReportOutcome) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Column(
         Modifier.fillMaxWidth().semantics { testTag = "threadDetails.reportReceipt" },
     ) {
         Text(
-            "Thanks — the report is with our safety team.",
+            // Two different facts, and only one of them is a delivery. The
+            // insert soft-fails into a local log, and telling a reporter their
+            // report reached Artistant while it is sitting in DataStore is the
+            // overclaim this whole branch exists to stop.
+            when (outcome) {
+                ReportOutcome.Sent -> "Thanks — the report is with our safety team."
+                ReportOutcome.Queued ->
+                    "Saved on this device. It hasn't reached our safety team yet — " +
+                        "we'll send it the next time you're online."
+                // Unreachable: Failed rides `failedReport` and renders
+                // [ReportFailure]. Stated rather than defaulted, so a future
+                // outcome cannot silently inherit the delivery sentence.
+                ReportOutcome.Failed -> "This report isn't saved anywhere yet."
+            },
             style = AppTheme.type.body,
             color = colors.ink,
         )
@@ -592,6 +625,50 @@ private fun ReportReceipt(counterpartName: String) {
                 "inbox, block them from this sheet.",
             style = AppTheme.type.caption,
             color = colors.ink4,
+        )
+    }
+}
+
+/**
+ * A report nothing is holding.
+ *
+ * Not a receipt and not a toast. The insert failed and so did the on-device log,
+ * so the only true sentence is that the report does not exist — and that is a
+ * state with an action attached, not a message that fades. The reader's own
+ * words are kept behind [onRetry] so re-filing does not ask them to write, a
+ * second time, about something that already upset them enough to report.
+ *
+ * Discard is a deliberate second control rather than a timeout: the banner must
+ * not disappear on its own while what it says is still true.
+ */
+@Composable
+private fun ReportFailure(onRetry: () -> Unit, onDiscard: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(
+        Modifier.fillMaxWidth().semantics { testTag = "threadDetails.reportFailure" },
+    ) {
+        Banner(
+            title = "Your report wasn't sent",
+            detail = "It didn't reach our safety team, and this device couldn't hold on to " +
+                "it either. Nothing about this conversation has been reported yet.",
+            tone = BannerTone.Failure,
+            actionLabel = "Try again",
+            onAction = onRetry,
+            modifier = Modifier.semantics { testTag = "threadDetails.reportRetry" },
+        )
+        Spacer(Modifier.height(dimens.space.md))
+        Text(
+            "Discard this report",
+            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.ink3,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(CircleShape)
+                .clickable(onClick = onDiscard)
+                .padding(vertical = dimens.space.md)
+                .semantics { testTag = "threadDetails.reportDiscard" },
         )
     }
 }

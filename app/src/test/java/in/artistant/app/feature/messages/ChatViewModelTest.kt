@@ -13,6 +13,8 @@ import `in`.artistant.app.data.repository.FakeReportsRepository
 import `in`.artistant.app.data.repository.FakeRequestsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
+import `in`.artistant.app.data.repository.PendingReport
+import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
@@ -180,13 +182,14 @@ class ChatViewModelTest {
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
         requests: FakeRequestsRepository = FakeRequestsRepository(),
+        reports: FakeReportsRepository = FakeReportsRepository(),
         readReceipts: ReadReceiptsPreference = ReadReceiptsPreference { true },
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
         artistsRepository = artists,
         bookingsRepository = bookings,
-        reports = FakeReportsRepository(),
+        reports = reports,
         requests = requests,
         flagsStore = flags,
         blockedUsers = blockedUsers,
@@ -324,18 +327,27 @@ class ChatViewModelTest {
     }
 
     /**
-     * A preference that cannot be READ must not take the rest of the pass down
-     * with it.
+     * A preference that cannot be READ fails closed — and takes nothing else
+     * down with it.
+     *
+     * Two separate failures, and they want opposite answers.
      *
      * `enabled()` goes to DataStore, which throws on a corrupt or unreadable
      * file. Unwrapped, that throw escaped `markReadBestEffort` and killed
      * everything after it — the "mark as unread" flag was never retired and the
      * counterparty's receipt was never re-read, so a broken preference file
-     * quietly disabled two unrelated behaviours. The documented default is
-     * `true`: an unreadable opt-OUT is not consent to go quiet.
+     * quietly disabled two unrelated behaviours. Everything outside the gate has
+     * to survive.
+     *
+     * The gate itself is the opposite call. An absent key means enabled, but an
+     * unreadable store means UNKNOWN, and among the people whose preference
+     * cannot be read are the ones who turned it off — so the one
+     * counterparty-visible write does not happen. Broadcasting an opted-out
+     * user's read status cannot be taken back; a missing "Read by …" caption
+     * costs nothing that the next successful read does not fix.
      */
     @Test
-    fun anUnreadablePreferenceFallsBackToTheDefaultAndStillClearsTheFlags() = runTest {
+    fun anUnreadablePreferenceStaysQuietButStillClearsTheFlags() = runTest {
         val repo = ScriptedMessages()
         val flags = FakeThreadFlagsStore(ThreadFlags(markedUnread = setOf(threadId)))
 
@@ -346,7 +358,11 @@ class ChatViewModelTest {
         )
         advanceUntilIdle()
 
-        assertTrue("the default is opt-in, so the broadcast still happens", repo.receiptWrites > 0)
+        assertEquals(
+            "unknown is not consent: the broadcast must not go out",
+            0,
+            repo.receiptWrites,
+        )
         assertTrue("the viewer's own badge must still clear", repo.markedRead > 0)
         assertTrue(
             "the explicit mark-as-unread must still be retired",
@@ -1209,9 +1225,9 @@ class ChatViewModelTest {
     // --- report --------------------------------------------------------------
 
     /**
-     * The repository soft-fails to an on-device log rather than throwing, so this
-     * surface cannot tell delivered from queued — it records that the report was
-     * filed and the copy is worded to be true either way.
+     * The repository soft-fails to an on-device log rather than throwing, and it
+     * SAYS which of the three things happened — see the outcome tests below,
+     * which are what stop this surface claiming a delivery it did not get.
      */
     @Test
     fun reportingFlipsToTheReceiptState() = runTest {
@@ -1231,19 +1247,107 @@ class ChatViewModelTest {
 
         model.reportConversation("Scam or spam")
 
-        assertTrue(model.state.value.reportSubmitted)
+        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertNull(model.state.value.failedReport)
         assertEquals("Scam or spam", reports.conversation.single().second)
     }
 
-    /** Closing the sheet resets the receipt so the next open starts on the actions. */
+    /**
+     * A report that only reached THIS DEVICE is not a report the safety team has.
+     *
+     * `Queued` still lands in `reportOutcome` — it is not a failure and the copy
+     * must not call it one — but it is a different receipt and, on screen, a
+     * different sentence. The failure this pins is the one where all three
+     * outcomes flipped one boolean and printed "the report is with our safety
+     * team" over every one of them.
+     */
     @Test
-    fun dismissingDetailsResetsTheReportReceipt() = runTest {
+    fun aQueuedReportIsAReceiptButNotAFailureAndNotADelivery() = runTest {
+        val reports = FakeReportsRepository(outcome = ReportOutcome.Queued)
+        val model = vm(ScriptedMessages(), reports = reports)
+
+        model.reportConversation("Spam or a scam")
+        advanceUntilIdle()
+
+        assertEquals(ReportOutcome.Queued, model.state.value.reportOutcome)
+        assertNull("queued is not lost", model.state.value.failedReport)
+    }
+
+    /**
+     * A report nothing is holding is not a receipt at all.
+     *
+     * Neither the insert nor the on-device log kept it, so there is nothing to
+     * confirm — and the reader's own words have to come back with the retry,
+     * because asking someone to write out a second time what upset them enough
+     * to report is its own small harm.
+     */
+    @Test
+    fun aFailedReportBecomesDurableStateCarryingTheReadersOwnWords() = runTest {
+        val reports = FakeReportsRepository(outcome = ReportOutcome.Failed)
+        val model = vm(ScriptedMessages(), reports = reports)
+
+        model.reportConversation("Pressuring or aggressive messages", "he keeps calling")
+        advanceUntilIdle()
+
+        assertNull("nothing landed, so nothing may be confirmed", model.state.value.reportOutcome)
+        assertEquals(
+            PendingReport("Pressuring or aggressive messages", "he keeps calling"),
+            model.state.value.failedReport,
+        )
+    }
+
+    /** Retry re-files what they already wrote, and a retry that lands clears the failure. */
+    @Test
+    fun retryingALostReportRefilesItAndClearsTheFailureWhenItLands() = runTest {
+        val reports = FakeReportsRepository(outcome = ReportOutcome.Failed)
+        val model = vm(ScriptedMessages(), reports = reports)
+        model.reportConversation("Spam or a scam", "link in every message")
+        advanceUntilIdle()
+
+        reports.outcome = ReportOutcome.Sent
+        model.retryReport()
+        advanceUntilIdle()
+
+        assertEquals(2, reports.conversation.size)
+        assertEquals(
+            "the retry must carry the same words, not an empty form",
+            Triple(threadId, "Spam or a scam", "link in every message"),
+            reports.conversation.last(),
+        )
+        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertNull(model.state.value.failedReport)
+    }
+
+    /**
+     * Closing the sheet clears the RECEIPT but never the failure.
+     *
+     * A receipt is a momentary fact and the next open should start on the
+     * actions. "Your safety report was lost" is a state: it goes away when it is
+     * fixed or explicitly discarded, not because a sheet was dismissed.
+     */
+    @Test
+    fun dismissingDetailsResetsTheReceiptButKeepsALostReport() = runTest {
         val model = vm(ScriptedMessages())
         model.reportConversation("Offensive")
+        advanceUntilIdle()
 
         model.dismissDetails()
 
-        assertFalse(model.state.value.reportSubmitted)
+        assertNull(model.state.value.reportOutcome)
+
+        val lost = FakeReportsRepository(outcome = ReportOutcome.Failed)
+        val second = vm(ScriptedMessages(), reports = lost)
+        second.reportConversation("Offensive")
+        advanceUntilIdle()
+
+        second.dismissDetails()
+
+        assertNotNull(
+            "a lost report must survive the sheet closing",
+            second.state.value.failedReport,
+        )
+        second.discardFailedReport()
+        assertNull("and only an explicit discard clears it", second.state.value.failedReport)
     }
 
     // --- foreground resync ---------------------------------------------------

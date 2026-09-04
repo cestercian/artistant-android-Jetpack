@@ -88,22 +88,32 @@ data class ThreadQuote(
          *    `artist_id` is the viewer's own id on all of them, so one client's
          *    quote was rendering on another client's thread (and, through the
          *    same call in the inbox, on every artist row at once).
-         * 3. **Exactly one candidate, or none.** The bookingless thread is unique
-         *    per pair — `threads_unique_per_pair_booking` collapses every null
-         *    `booking_id` onto one sentinel key (0001, restated in 0076) — but
-         *    two live requests between the same pair are not, and nothing in
-         *    either row says which of them this conversation is. Two candidates
-         *    is not a reason to show the newer one; it is the definition of not
-         *    knowing. The card returns on its own as soon as the ambiguity does:
-         *    a request leaves the rendering set when it is declined, or when
-         *    `sweep_expired_gig_requests` (0090) expires it.
+         * 3. **Exactly one LIVE offer, or none — and only offers compete.** The
+         *    bookingless thread is unique per pair —
+         *    `threads_unique_per_pair_booking` collapses every null `booking_id`
+         *    onto one sentinel key (0001, restated in 0076) — but two live
+         *    requests between the same pair are not, and nothing in either row
+         *    says which of them this conversation is. Two live offers is not a
+         *    reason to show the newer one; it is the definition of not knowing,
+         *    and Accept would have moved the other row.
          *
-         * Statuses that are neither live nor a record — `declined`, `expired`,
-         * and the decode-only `unknown` — produce no card and do not count as
-         * candidates. A declined quote is not the state of this conversation, it
-         * is the end of a previous one, and `unknown` means this build cannot
-         * read the row at all, which is exactly when it must not draw buttons
-         * against it.
+         *    **`accepted` does not compete.** It is a record, not an offer: it
+         *    carries no buttons and no decision. Counting it as a candidate made
+         *    one old accepted deal permanently suppress every later quote
+         *    between the same two people — two matches, no card — and unlike a
+         *    live-vs-live tie that could never resolve, because an accepted row
+         *    stays accepted forever. So the offers are looked at first and the
+         *    record is only the fallback for when there is no offer standing.
+         *
+         *    A live tie DOES resolve on its own: a request leaves the running
+         *    when it is declined, or when `sweep_expired_gig_requests` (0090)
+         *    expires it.
+         *
+         * `declined`, `expired` and the decode-only `unknown` are neither offer
+         * nor record and produce no card at all. A declined quote is not the
+         * state of this conversation, it is the end of a previous one, and
+         * `unknown` means this build cannot read the row, which is exactly when
+         * it must not draw buttons against it.
          */
         fun pick(
             requests: List<StoredRequest>,
@@ -115,14 +125,24 @@ data class ThreadQuote(
             if (!thread.bookingId.isNullOrBlank()) return null
             val artistKey = thread.artistId.lowercase().takeIf { it.isNotBlank() } ?: return null
             val clientKey = thread.clientId.lowercase().takeIf { it.isNotBlank() } ?: return null
-            // `singleOrNull`, not `firstOrNull`: newest-first ordering answers
-            // "which is most recent", which is a different question from "which
-            // is this conversation's".
-            val match = requests.singleOrNull { stored ->
+            val pair = requests.filter { stored ->
                 stored.raw.artistId.equals(artistKey, ignoreCase = true) &&
-                    stored.raw.clientId.equals(clientKey, ignoreCase = true) &&
-                    stored.status.rendersInThread
-            } ?: return null
+                    stored.raw.clientId.equals(clientKey, ignoreCase = true)
+            }
+            // The offer on the table wins, and only offers compete with each
+            // other. `singleOrNull`, not `firstOrNull`: newest-first ordering
+            // answers "which is most recent", which is a different question from
+            // "which is this conversation's".
+            val live = pair.filter { it.status.isLiveOffer }
+            val match = if (live.isNotEmpty()) {
+                live.singleOrNull() ?: return null
+            } else {
+                // Nothing standing: the agreement is the record, if there is
+                // exactly one. Two past deals between one pair is the same
+                // not-knowing as two live ones — a record stating the wrong
+                // number is still a wrong number on a trust surface.
+                pair.singleOrNull { it.status == GigRequestStatus.Accepted } ?: return null
+            }
             return from(match, viewerIsArtist, nowMs)
         }
 
@@ -158,10 +178,16 @@ data class ThreadQuote(
                 else -> false
             }
 
-        /** Statuses a thread draws a card for at all. */
-        private val GigRequestStatus.rendersInThread: Boolean
-            get() = this == GigRequestStatus.Open ||
-                this == GigRequestStatus.Countered ||
-                this == GigRequestStatus.Accepted
+        /**
+         * Statuses that are an OFFER — something still on the table with a
+         * decision attached to it.
+         *
+         * Exactly the two [decidesNext] hands to a seat, and that is not a
+         * coincidence: an offer is a row somebody still has to answer.
+         * `accepted` is deliberately absent — it is a record, and records do not
+         * compete for the card (see [pick]).
+         */
+        private val GigRequestStatus.isLiveOffer: Boolean
+            get() = this == GigRequestStatus.Open || this == GigRequestStatus.Countered
     }
 }

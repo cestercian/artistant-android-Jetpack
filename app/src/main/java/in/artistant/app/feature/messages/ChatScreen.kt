@@ -60,6 +60,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
+import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.data.model.MessageKind
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.EmptyState
@@ -126,9 +127,19 @@ fun ChatScreen(
         }
     }
 
-    // The report receipt is the moment the reference build buzzes.
-    LaunchedEffect(state.reportSubmitted) {
-        if (state.reportSubmitted) haptics.success()
+    // One buzz per outcome, and only ONE of the three is a success.
+    //
+    // The success buzz used to fire after every report, including the two where
+    // nothing had reached the safety team — a physical confirmation of a
+    // delivery that had not happened. `Queued` gets no buzz at all rather than a
+    // quieter one: it is neither good news nor bad, and the words on the sheet
+    // are what carry it.
+    LaunchedEffect(state.reportOutcome, state.failedReport) {
+        when {
+            state.failedReport != null -> haptics.warning()
+            state.reportOutcome == ReportOutcome.Sent -> haptics.success()
+            else -> Unit
+        }
     }
 
     // Accepting takes over the whole screen (design 70): it is a decision with a
@@ -247,7 +258,8 @@ fun ChatScreen(
             muted = state.muted,
             blocked = state.blocked,
             canBlock = state.counterpartId != null,
-            reportSubmitted = state.reportSubmitted,
+            reportOutcome = state.reportOutcome,
+            failedReport = state.failedReport,
             // A mute/block that didn't land is reported HERE, on the sheet the
             // tap came from, rather than in the transcript's own error slot —
             // that one speaks for the conversation failing to load and offers to
@@ -280,6 +292,8 @@ fun ChatScreen(
                 viewModel.dismissDetails()
             },
             onReport = viewModel::reportConversation,
+            onRetryReport = viewModel::retryReport,
+            onDiscardReport = viewModel::discardFailedReport,
             onDismiss = viewModel::dismissDetails,
         )
     }

@@ -161,6 +161,67 @@ class ThreadQuoteTest {
     }
 
     /**
+     * A past deal must not bury the offer on the table.
+     *
+     * `accepted` is a record, not an offer — no buttons, no decision — so it
+     * does not compete for the card. Counting it as a candidate meant one old
+     * accepted request permanently suppressed every later quote between the same
+     * two people: two matches, no card, and unlike a live-vs-live tie it could
+     * never resolve, because an accepted row stays accepted forever. The new
+     * offer, which is the thing somebody has to answer, was invisible.
+     */
+    @Test
+    fun `an accepted record does not hide a later live offer`() {
+        val quote = ThreadQuote.pick(
+            requests = listOf(
+                request(id = "new ask"),
+                request(id = "last year's deal", status = GigRequestStatus.Accepted),
+            ),
+            thread = thread(),
+            viewerIsArtist = true,
+            nowMs = now,
+        )
+        assertEquals("new ask", quote?.requestId)
+        assertTrue("and it is answerable, which is the whole point", quote!!.actionable)
+    }
+
+    /** Same rule from the other live status: a counter outranks an old record too. */
+    @Test
+    fun `an accepted record does not hide a live counter offer`() {
+        val quote = ThreadQuote.pick(
+            requests = listOf(
+                request(id = "old", status = GigRequestStatus.Accepted),
+                request(id = "countered", counter = 40_000, status = GigRequestStatus.Countered),
+            ),
+            thread = thread(),
+            viewerIsArtist = false,
+            nowMs = now,
+        )
+        assertEquals("countered", quote?.requestId)
+        assertEquals(40_000, quote?.amountInr)
+    }
+
+    /**
+     * Records do not compete with offers, but they still compete with each
+     * other: two past deals and nothing says which one this conversation's card
+     * describes, and a record stating the wrong number is still a wrong number.
+     */
+    @Test
+    fun `two accepted records with no live offer draw no card`() {
+        assertNull(
+            ThreadQuote.pick(
+                requests = listOf(
+                    request(id = "deal 1", status = GigRequestStatus.Accepted),
+                    request(id = "deal 2", status = GigRequestStatus.Accepted),
+                ),
+                thread = thread(),
+                viewerIsArtist = false,
+                nowMs = now,
+            ),
+        )
+    }
+
+    /**
      * …and it comes back on its own. A second candidate that has left the
      * rendering set — declined here, expired by `sweep_expired_gig_requests`
      * (mig 0090) in practice — is not a candidate, so the remaining one is

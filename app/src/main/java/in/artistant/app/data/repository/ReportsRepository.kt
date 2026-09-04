@@ -64,6 +64,20 @@ enum class ReportOutcome {
 }
 
 /**
+ * A report the reader wrote that nothing is currently holding.
+ *
+ * Carried so a retry re-files exactly what they typed. Both report surfaces own
+ * a form whose own state is `rememberSaveable` and dies with the sheet, so
+ * without this the only recovery from [ReportOutcome.Failed] would be "write it
+ * again" — about something that already upset them enough to report.
+ *
+ * It lives beside [ReportOutcome] rather than in either feature because it is
+ * the other half of the same answer: the outcome says nothing holds the report,
+ * and this is the report nothing holds.
+ */
+data class PendingReport(val reason: String, val details: String?)
+
+/**
  * Why someone reports a CONVERSATION (design 73).
  *
  * A separate list from [ReportReasons] because the two surfaces are reporting

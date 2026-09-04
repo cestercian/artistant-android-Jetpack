@@ -37,9 +37,11 @@ import javax.inject.Singleton
  * off, which is the one moment they are watching for it to stop.
  *
  * **[enabled] may throw** — it reads DataStore, which raises on a corrupt or
- * unreadable file. The one caller wraps it and falls back to the same `true` an
- * absent key produces; see [ChatViewModel.markReadBestEffort], where an escaping
- * throw would also skip the unread-flag cleanup that follows it.
+ * unreadable file. The one caller wraps it and, on a throw, **does not
+ * broadcast**: an absent key means enabled, but an unreadable store means
+ * unknown, and among the people whose preference cannot be read are the ones who
+ * turned it off. See [ChatViewModel.markReadBestEffort], where the wrap also
+ * stops an escaping throw skipping the unread-flag cleanup that follows it.
  *
  * **One store, not two.** This used to read the DataStore key directly and agree
  * with `feature/signup/PrivacyPreferences` — screen 62's own switch — by

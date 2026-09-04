@@ -11,6 +11,8 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
+import `in`.artistant.app.data.repository.PendingReport
+import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import kotlinx.coroutines.channels.Channel
@@ -127,8 +129,28 @@ data class ChatUiState(
     val artistId: String? = null,
     val artistSubtitle: String = "",
     val artistScore: Int? = null,
-    /** True once the report has been filed for this conversation. */
-    val reportSubmitted: Boolean = false,
+    /**
+     * A report that reached SOMEWHERE — `public.reports` or this install's local
+     * log. Null until one has.
+     *
+     * The distinction is the whole point: the sheet used to flip one boolean
+     * after every call and print "the report is with our safety team" over all
+     * three outcomes, including the one where nothing had been stored at all.
+     * [ReportOutcome.Queued] is not a failure and the copy must not call it one,
+     * but it is not a delivery either. [ReportOutcome.Failed] never lands here —
+     * it is durable state with an action attached, so it rides [failedReport].
+     */
+    val reportOutcome: ReportOutcome? = null,
+    /**
+     * A report nothing is holding — the insert failed AND so did the local log.
+     *
+     * Keeps the reader's own reason and note so the retry doesn't ask them to
+     * write it twice, and deliberately SURVIVES closing the sheet: the receipt
+     * is a momentary fact, but "your safety report was lost" is a state, and it
+     * goes away when it is fixed or explicitly discarded, not when a sheet is
+     * dismissed.
+     */
+    val failedReport: PendingReport? = null,
     /**
      * The other person's user id, for blocking (mig 0087). Unlike [artistId] this
      * is populated on BOTH seats — an artist blocks a client just as a client
@@ -527,15 +549,28 @@ class ChatViewModel @Inject constructor(
         // can be flipped while this thread is open, which is exactly the moment
         // someone is watching for it to take effect.
         //
-        // Wrapped, and defaulting to the documented `true`. The read goes to
-        // DataStore, which throws on a corrupt or unreadable file — and an escape
-        // from HERE is expensive out of all proportion to the preference: it
-        // aborts the rest of this coroutine, so the "mark as unread" flag below
-        // is never retired and the receipt below that is never re-read. A
-        // preference that cannot be read is not a preference to go quiet on: the
-        // default is opt-IN, so the same value an absent key produces is the one
-        // a failed read produces.
-        if (runCatching { readReceipts.enabled() }.getOrDefault(true)) {
+        // Wrapped for two different reasons, and they resolve to opposite
+        // answers — which is why this is not one decision.
+        //
+        // It has to be wrapped at all because the read goes to DataStore, which
+        // throws on a corrupt or unreadable file, and an escape from HERE is
+        // expensive out of all proportion to the preference: it aborts the rest
+        // of this coroutine, so the "mark as unread" flag below is never retired
+        // and the receipt below that is never re-read. Everything outside this
+        // `if` therefore runs regardless of what the preference says or whether
+        // it can be read at all.
+        //
+        // It **fails closed** — `false`, not `true` — because this one call is
+        // the only thing here the COUNTERPARTY can see. An absent key means
+        // enabled (nobody has opted out yet; that default lives in
+        // `PrivacyPreferences` and is unchanged), but an unreadable store means
+        // we do not know, and the two must not collapse into the same answer:
+        // among the people whose preference we cannot read are the ones who
+        // turned it off. Broadcasting their read status is an unrecoverable
+        // privacy failure; not broadcasting costs the other side a "Read · 9:14
+        // am" caption until the store is readable again. Those are not the same
+        // size of mistake.
+        if (runCatching { readReceipts.enabled() }.getOrDefault(false)) {
             runCatching { messagesRepository.markThreadReadReceipt(threadId) }
         }
         // Opening the thread also retires an explicit "mark as unread" — the
@@ -651,7 +686,8 @@ class ChatViewModel @Inject constructor(
 
     /** Closing takes the sheet's own failure line with it — see [ChatUiState.actionError]. */
     fun dismissDetails() = _state.update {
-        it.copy(showDetails = false, reportSubmitted = false, actionError = null)
+        // `failedReport` deliberately survives: see [ChatUiState.failedReport].
+        it.copy(showDetails = false, reportOutcome = null, actionError = null)
     }
 
     fun dismissSafetyBanner() = viewModelScope.launch { flagsStore.dismissSafetyBanner(threadId) }
@@ -724,15 +760,52 @@ class ChatViewModel @Inject constructor(
     /**
      * File a report against this conversation.
      *
-     * `reportConversation` never throws — it soft-fails to an on-device log so a
-     * moderation outage can't block chat — which means this surface genuinely
-     * cannot tell delivered from queued. The confirmation copy is worded to be
-     * true either way rather than promising a delivery it can't confirm.
+     * `reportConversation` soft-fails rather than throwing — a moderation outage
+     * must not block a chat — but it SAYS which of the three things happened,
+     * and this used to throw that answer away and claim delivery for all of
+     * them. Telling someone their safety report is with the team when nothing
+     * anywhere is holding it is the worst sentence on this surface.
+     *
+     * So the three outcomes are three different states, exactly as the artist
+     * profile's report does it (screen 56):
+     *  - [ReportOutcome.Sent] — it reached `public.reports`. Receipt, success buzz.
+     *  - [ReportOutcome.Queued] — it is in this install's log and nowhere else.
+     *    Receipt, different words, and no success claim.
+     *  - [ReportOutcome.Failed] — nothing holds it. Not a receipt at all: a
+     *    failure with the reader's own words kept for a retry.
      */
-    fun reportConversation(reason: String, details: String? = null) = viewModelScope.launch {
-        runCatching { reports.reportConversation(threadId, reason, details) }
-        _state.update { it.copy(reportSubmitted = true) }
+    fun reportConversation(reason: String, details: String? = null) {
+        _state.update { it.copy(reportOutcome = null, failedReport = null) }
+        viewModelScope.launch {
+            val outcome = runCatching { reports.reportConversation(threadId, reason, details) }
+                // A throw is a contract violation (the interface promises not
+                // to), so it is the WORST of the three claims and not the middle
+                // one: we know nothing about where the report went.
+                .getOrDefault(ReportOutcome.Failed)
+            _state.update {
+                if (outcome == ReportOutcome.Failed) {
+                    it.copy(failedReport = PendingReport(reason, details), reportOutcome = null)
+                } else {
+                    it.copy(reportOutcome = outcome, failedReport = null)
+                }
+            }
+        }
     }
+
+    /** Re-file the report the reader already wrote, from the failure banner. */
+    fun retryReport() {
+        val pending = _state.value.failedReport ?: return
+        reportConversation(pending.reason, pending.details)
+    }
+
+    /**
+     * Give up on a lost report.
+     *
+     * A separate control from [retryReport] and never a timeout: the banner says
+     * nothing is holding the report, so it must not vanish on its own while that
+     * is still true.
+     */
+    fun discardFailedReport() = _state.update { it.copy(failedReport = null) }
 
     override fun onCleared() {
         subscribeGeneration += 1

@@ -7,6 +7,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.PendingReport
 import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.data.repository.ReviewsRepository
@@ -96,15 +97,6 @@ data class ArtistProfileUiState(
     val selectedPackageIndex: Int = 0,
     val isSaved: Boolean = false,
 )
-
-/**
- * A report the reader wrote that nothing is currently holding.
- *
- * Carried so the retry re-files exactly what they typed. The sheet's own state
- * is `rememberSaveable` and dies with the sheet, so without this the only
- * recovery would be "write it again".
- */
-data class PendingReport(val reason: String, val details: String?)
 
 /** The read failed in transport / RLS — we do not know what this artist offers. */
 internal const val PROFILE_LOAD_FAILED = "Couldn't load this profile."
