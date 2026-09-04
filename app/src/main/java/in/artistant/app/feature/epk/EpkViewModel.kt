@@ -1261,6 +1261,24 @@ class EpkViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The camera permission was refused — screen 65's "Take a photo" row.
+     *
+     * A refusal has to say something. After the second one Android stops showing
+     * the dialog at all, so without this the row is simply dead and looks
+     * identical to "Choose from library" beside it. A `saveError` rather than a
+     * toast because it is a state the artist has to fix in Settings, not a thing
+     * that happened and passed.
+     */
+    fun onCameraUnavailable() {
+        _state.update {
+            it.copy(
+                saveError = "Artistant can't open the camera without permission — " +
+                    "you can still choose a photo from your library.",
+            )
+        }
+    }
+
     fun deletePhoto(item: ArtistMediaItem) {
         val userId = session.currentUserId ?: return
         viewModelScope.launch {
