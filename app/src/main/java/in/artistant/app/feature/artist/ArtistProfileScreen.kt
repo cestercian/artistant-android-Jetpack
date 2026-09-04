@@ -421,14 +421,20 @@ private fun LoadedProfile(
                         Modifier.padding(top = space.md),
                         verticalArrangement = Arrangement.spacedBy(space.sm),
                     ) {
+                        val retrying = state.isSubmittingReport
                         Banner(
                             title = "Your report wasn't filed",
                             detail = "It didn't reach Artistant, and we couldn't " +
                                 "save it on this device either. Nothing is holding " +
                                 "it right now.",
                             tone = BannerTone.Failure,
-                            actionLabel = "Try again",
-                            onAction = onRetryReport,
+                            // The banner stays up for the whole round trip — it has
+                            // no outcome to render yet — so the action has to say it
+                            // is working and stop taking taps. Without that, a second
+                            // tap filed the same report a second time: two rows in
+                            // `public.reports` against one person for one incident.
+                            actionLabel = if (retrying) "Sending report…" else "Try again",
+                            onAction = onRetryReport.takeIf { !retrying },
                         )
                         Text(
                             "Discard this report",

@@ -109,6 +109,26 @@ class WizardMediaCache @Inject constructor(
         }
 
     /**
+     * Unlink a camera destination whose capture never happened.
+     *
+     * The cancel half of [adoptPhoto]'s `consumeSource`. `TakePicture` creates the
+     * destination before the camera opens, so a shutter the artist backs out of
+     * leaves a file behind exactly like a successful one does — and it leaves it
+     * for a resume sweep that only runs on the next visit, which a wizard the
+     * artist abandons never reaches.
+     *
+     * Same contract as `consumeSource`, for the same reason: the URI does not say
+     * whose file it is, so only the site that MINTED the destination may call this.
+     * Every other source is somebody else's photo held under a read grant.
+     *
+     * Best effort. A failure here costs one stale cache file, which is what this
+     * method exists to tidy in the first place.
+     */
+    fun discardCapture(uri: Uri) {
+        runCatching { context.contentResolver.delete(uri, null, null) }
+    }
+
+    /**
      * Copy a picked clip into the cache, rejecting what the bucket will not take.
      *
      * `artist-samples` accepts exactly [ACCEPTED_AUDIO_MIME_TYPES] and caps
