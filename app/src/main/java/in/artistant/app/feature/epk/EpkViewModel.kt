@@ -804,7 +804,7 @@ class EpkViewModel @Inject constructor(
     fun onServiceTagToggled(slug: String) {
         val current = _state.value
         if (!current.identityHydrated) return
-        val shown = shownServiceTags(current.serviceTags, current.artist?.serviceTags.orEmpty())
+        val shown = effectiveServiceTags(current)
         val next = ServiceTags.toggle(shown, slug)
         // At the cap, toggling ON is refused rather than silently truncated. Say
         // so — a chip that does not light up on tap reads as a broken control.
@@ -816,14 +816,20 @@ class EpkViewModel @Inject constructor(
         }
         val owner = current.artist?.id ?: return
         _state.update { it.copy(serviceTags = next, saveError = null) }
+        persistServiceTags(owner, next, note = "Services saved.")
+    }
+
+    /** What the chips currently show: the local edit if there is one, else the row. */
+    private fun effectiveServiceTags(state: EpkUiState): List<String> =
+        shownServiceTags(state.serviceTags, state.artist?.serviceTags.orEmpty())
+
+    /** Publish a service set and reconcile the cached row with the result. */
+    private fun persistServiceTags(owner: String, tags: List<String>, note: String) {
         viewModelScope.launch {
-            runCatching { artists.updateServiceTags(owner, next) }
+            runCatching { artists.updateServiceTags(owner, tags) }
                 .onSuccess {
                     _state.update {
-                        it.copy(
-                            statusNote = "Services saved.",
-                            artist = it.artist?.copy(serviceTags = next),
-                        )
+                        it.copy(statusNote = note, artist = it.artist?.copy(serviceTags = tags))
                     }
                 }
                 .onFailure {
@@ -834,6 +840,78 @@ class EpkViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    // ── Sheet edits are transactions ─────────────────────────────────────────
+
+    // The bio and personality sheets (design 67, 68) each carry a Cancel/Skip,
+    // and a Cancel that only closes the sheet is a lie on this screen: every
+    // field in them edits shared draft state that autosaves 1.2s later, and the
+    // service chips beside the bio wrote on the tap. Typing a new bio and
+    // tapping Cancel published the new bio. See [epkEditRevert].
+    private var editSnapshot: EpkEditSnapshot? = null
+
+    /** Open a sheet: remember what Cancel has to be able to restore. */
+    fun beginSheetEdit() {
+        val current = _state.value
+        editSnapshot = EpkEditSnapshot(
+            bio = current.bioDraft,
+            services = effectiveServiceTags(current),
+            prompts = current.promptDrafts,
+        )
+    }
+
+    /**
+     * Save: the edits stand, so the snapshot is dropped and everything owed goes
+     * out now rather than waiting out a debounce the artist has stopped watching.
+     */
+    fun commitSheetEdit() {
+        editSnapshot = null
+        flushPendingSaves()
+    }
+
+    /**
+     * Cancel / Skip: put the values back and undo whatever already left.
+     *
+     * [epkEditRevert] decides what changed and therefore what has to be written
+     * back; this applies it. Disarming comes first — nothing still waiting may
+     * fire the values being discarded — then the local restore, then the
+     * write-backs for the fields that differ.
+     */
+    fun cancelSheetEdit() {
+        val snap = editSnapshot ?: return
+        editSnapshot = null
+        val current = _state.value
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = current.bioDraft,
+            services = effectiveServiceTags(current),
+            prompts = current.promptDrafts,
+        )
+        if (revert.isEmpty) return
+
+        bioSaveJob?.cancel()
+        promptsSaveJob?.cancel()
+        armedSaves -= EpkSave.Bio
+        armedSaves -= EpkSave.Prompts
+
+        _state.update {
+            it.copy(
+                bioDraft = snap.bio,
+                promptDrafts = snap.prompts,
+                serviceTags = snap.services,
+                saveError = null,
+            )
+        }
+
+        revert.bio?.let { scheduleBioSave(immediate = true) }
+        revert.prompts?.let { schedulePromptsSave(immediate = true) }
+        // Service chips never had a debounce to cancel — they wrote on the tap —
+        // so undoing them is only ever the write-back.
+        val owner = current.artist?.id
+        if (revert.services != null && owner != null) {
+            persistServiceTags(owner, snap.services, note = "Changes discarded.")
         }
     }
 

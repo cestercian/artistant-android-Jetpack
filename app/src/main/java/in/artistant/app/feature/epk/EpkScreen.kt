@@ -245,6 +245,23 @@ fun EpkScreen(
     }
 
     // ── Sheets ───────────────────────────────────────────────────────────────
+
+    // The two editing sheets are transactions: opening one snapshots what Cancel
+    // has to restore. Keyed on the sheet so re-opening re-snapshots, and only for
+    // the two that can discard — the others (add cover, pick audio, stalled
+    // uploads) launch an action rather than editing draft state.
+    LaunchedEffect(sheet) {
+        if (sheet == EpkSheetKind.EditBio || sheet == EpkSheetKind.Personality) {
+            viewModel.beginSheetEdit()
+        }
+    }
+    // Cancel, Skip, the close disc and a swipe-down are the same gesture: leave
+    // without keeping this. Only the primary button commits.
+    val cancelSheet = {
+        viewModel.cancelSheetEdit()
+        sheet = null
+    }
+
     when (sheet) {
         null -> Unit
         EpkSheetKind.AddCover -> EpkModalSheet(onDismiss = { sheet = null }) {
@@ -261,7 +278,7 @@ fun EpkScreen(
                 onClose = { sheet = null },
             )
         }
-        EpkSheetKind.EditBio -> EpkModalSheet(onDismiss = { sheet = null }) {
+        EpkSheetKind.EditBio -> EpkModalSheet(onDismiss = { cancelSheet() }) {
             EditBioSheet(
                 bio = state.bioDraft,
                 services = shownServiceTags(state.serviceTags, state.artist?.serviceTags.orEmpty()),
@@ -271,24 +288,24 @@ fun EpkScreen(
                 // Save ends the debounce and closes; it is not a second write
                 // path. See the sheet's own KDoc.
                 onSave = {
-                    viewModel.flushPendingSaves()
+                    viewModel.commitSheetEdit()
                     sheet = null
                 },
-                onCancel = { sheet = null },
-                onClose = { sheet = null },
+                onCancel = { cancelSheet() },
+                onClose = { cancelSheet() },
             )
         }
-        EpkSheetKind.Personality -> EpkModalSheet(onDismiss = { sheet = null }) {
+        EpkSheetKind.Personality -> EpkModalSheet(onDismiss = { cancelSheet() }) {
             AddPersonalitySheet(
                 drafts = state.promptDrafts,
                 canEdit = state.identityHydrated,
                 onAnswer = viewModel::onPromptAnswerChanged,
                 onSave = {
-                    viewModel.flushPendingSaves()
+                    viewModel.commitSheetEdit()
                     sheet = null
                 },
-                onSkip = { sheet = null },
-                onClose = { sheet = null },
+                onSkip = { cancelSheet() },
+                onClose = { cancelSheet() },
             )
         }
         EpkSheetKind.AddAudio -> EpkModalSheet(onDismiss = { sheet = null }) {

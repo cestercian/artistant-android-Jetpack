@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.epk
 
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.platform.media.UploadQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -394,6 +395,127 @@ class EpkPressKitTest {
         assertFalse(linkIsSavable("Bandcamp", "banccamp"))
         assertNotNull(linkLabelProblem(" "))
         assertNull(linkLabelProblem("Bandcamp"))
+    }
+
+    // ── Cancel on a sheet whose every field autosaves ────────────────────────
+
+    private fun snapshot(
+        bio: String = "Original bio.",
+        services: List<String> = listOf("wedding"),
+        prompts: List<ArtistPrompt> = listOf(ArtistPrompt("Your dream venue?", "A rooftop.")),
+    ) = EpkEditSnapshot(bio = bio, services = services, prompts = prompts)
+
+    /**
+     * The bug Greptile found: Cancel dismissed the sheet and nothing else, so an
+     * edit that had already armed its debounced save went on to publish. The
+     * revert has to name the bio as something to put back AND write back.
+     */
+    @Test
+    fun cancellingAfterEditingTheBioRevertsIt() {
+        val snap = snapshot()
+
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = "A completely different bio the artist thought better of.",
+            services = snap.services,
+            prompts = snap.prompts,
+        )
+
+        assertEquals("Original bio.", revert.bio)
+        assertNull(revert.services)
+        assertNull(revert.prompts)
+        assertFalse(revert.isEmpty)
+    }
+
+    /** Cancel with nothing typed is a plain dismissal — no write of any kind. */
+    @Test
+    fun cancellingWithoutEditingWritesNothing() {
+        val snap = snapshot()
+
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = snap.bio,
+            services = snap.services,
+            prompts = snap.prompts,
+        )
+
+        assertTrue(revert.isEmpty)
+        assertNull(revert.bio)
+        assertNull(revert.services)
+        assertNull(revert.prompts)
+    }
+
+    /**
+     * Service chips never debounced — they wrote on the tap — so a cancelled
+     * chip is always already published and the write-back is the only thing that
+     * can undo it.
+     */
+    @Test
+    fun cancellingAfterTogglingAServiceChipWritesTheOldSetBack() {
+        val snap = snapshot(services = listOf("wedding"))
+
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = snap.bio,
+            services = listOf("wedding", "corporate"),
+            prompts = snap.prompts,
+        )
+
+        assertEquals(listOf("wedding"), revert.services)
+        assertNull(revert.bio)
+    }
+
+    /** Skip on design 68 discards the answers typed into it, not just the sheet. */
+    @Test
+    fun skippingAfterAnsweringAPromptRevertsTheDeck() {
+        val snap = snapshot(prompts = emptyList())
+
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = snap.bio,
+            services = snap.services,
+            prompts = listOf(ArtistPrompt("Your dream venue?", "Half-written thought")),
+        )
+
+        assertEquals(emptyList<ArtistPrompt>(), revert.prompts)
+        assertFalse(revert.isEmpty)
+    }
+
+    /** One Cancel can owe three write-backs; the bio sheet edits two of them. */
+    @Test
+    fun cancellingRevertsEveryFieldThatMoved() {
+        val snap = snapshot()
+
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = "New",
+            services = listOf("corporate"),
+            prompts = emptyList(),
+        )
+
+        assertEquals("Original bio.", revert.bio)
+        assertEquals(listOf("wedding"), revert.services)
+        assertEquals(snap.prompts, revert.prompts)
+    }
+
+    /**
+     * Reordering is not editing. `ArtistPrompts.upsert` rebuilds the list, so a
+     * revert keyed on identity rather than value would fire on every keystroke's
+     * no-op and write the same deck back on a Cancel that changed nothing.
+     */
+    @Test
+    fun anEqualDeckRebuiltInPlaceIsNotAChange() {
+        val prompts = listOf(ArtistPrompt("Your dream venue?", "A rooftop."))
+        val snap = snapshot(prompts = prompts)
+
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = snap.bio,
+            services = snap.services,
+            prompts = prompts.map { it.copy() },
+        )
+
+        assertTrue(revert.isEmpty)
     }
 
     private companion object {

@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.epk
 
 import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.ArtistPrompt
 import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ServiceTags
@@ -810,4 +811,57 @@ fun coverGradientPickToWrite(
     if (!hydrated) return null
     val clamped = ArtistGradient.clampIndex(requested)
     return clamped.takeIf { it != shownCoverGradient(pending, published) }
+}
+
+// ── Sheet edits are transactions ─────────────────────────────────────────────
+
+/**
+ * The values a sheet's Cancel puts back, captured the moment it opened.
+ *
+ * Design 67 and 68 each carry a Cancel/Skip, and on a screen whose every field
+ * autosaves that word has to mean something. Held by value so the sheet's own
+ * state can be edited freely while it is open.
+ */
+data class EpkEditSnapshot(
+    val bio: String,
+    val services: List<String>,
+    val prompts: List<ArtistPrompt>,
+)
+
+/**
+ * What Cancel has to undo — a non-null field is one that changed and must be
+ * both restored locally and written back.
+ *
+ * The write-back is the half that is easy to miss. Disarming the pending saves
+ * covers the edit that has not gone out yet, but the debounce is 1.2s and a
+ * sheet stays open far longer than that, so by the time Cancel is tapped the
+ * write has usually already happened; the service chips beside the bio never
+ * debounced at all and wrote on the tap. Restoring only local state would leave
+ * the artist reading their old bio while their public profile served the new one.
+ *
+ * Every difference is written back, including when nothing had escaped yet.
+ * That costs one redundant PATCH on a rarely-pressed button, and it is the only
+ * rule without a wrong branch: consulting the armed-save set instead answers
+ * "nothing escaped" for the ordinary sequence of type, pause past the debounce,
+ * type again — which sends one value and arms another.
+ */
+fun epkEditRevert(
+    snapshot: EpkEditSnapshot,
+    bio: String,
+    services: List<String>,
+    prompts: List<ArtistPrompt>,
+): EpkEditRevert = EpkEditRevert(
+    bio = snapshot.bio.takeIf { bio != snapshot.bio },
+    services = snapshot.services.takeIf { services != snapshot.services },
+    prompts = snapshot.prompts.takeIf { prompts != snapshot.prompts },
+)
+
+/** @see epkEditRevert */
+data class EpkEditRevert(
+    val bio: String?,
+    val services: List<String>?,
+    val prompts: List<ArtistPrompt>?,
+) {
+    /** Nothing was touched — Cancel is then only a dismissal. */
+    val isEmpty: Boolean get() = bio == null && services == null && prompts == null
 }
