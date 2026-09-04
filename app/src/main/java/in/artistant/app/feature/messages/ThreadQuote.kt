@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.messages
 
 import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
+import `in`.artistant.app.data.model.Thread
 
 /**
  * The offer standing in a conversation — design 08, "quotes are objects, not text".
@@ -11,14 +12,8 @@ import `in`.artistant.app.data.model.StoredRequest
  * argued about, whereas this one has an id, a status, an expiry, and two buttons
  * that change the row rather than the chat.
  *
- * **How a thread finds its quote.** `threads` carries `client_id`, `artist_id`
- * and `booking_id` — there is no `request_id`, and adding one is a schema change
- * this redesign does not get to make. What a thread and a request DO share is the
- * pair of people in them, so the match is on the artist: the viewer's own request
- * list (RLS already restricts it to their side) filtered to this thread's artist,
- * newest first. That is exact for the app's actual shape — a client negotiates one
- * live quote with an artist at a time — and it degrades to "no card" rather than
- * to a wrong card if it ever stops being.
+ * **How a thread finds its quote** — see [Companion.pick], which is where the
+ * whole question lives.
  *
  * Pure, so the seat rules below can be pinned in a JVM test.
  */
@@ -64,24 +59,60 @@ data class ThreadQuote(
         /**
          * The quote a thread is about, or null.
          *
+         * **There is no `request_id` on `threads` and no `thread_id` on
+         * `gig_requests`** — checked against the canonical migrations, and adding
+         * one is a schema change this redesign does not get to make. So the key
+         * has to be built out of what the two rows genuinely share, and it is
+         * built to say "I don't know" rather than to guess:
+         *
+         * 1. **A thread with a `booking_id` draws no card.** That conversation is
+         *    about its booking, and its state is the status capsule at the head
+         *    of the transcript. The gig-request loop lives somewhere else
+         *    entirely: migration 0047/0076's trigger opens a BOOKINGLESS thread
+         *    when an artist accepts a request, and deliberately creates no
+         *    booking. Matching a request into a booking thread was the actual
+         *    bug — two people who have a confirmed booking and a separate open
+         *    quote saw the quote's Accept button on the booking's conversation.
+         * 2. **Otherwise both halves of the pair must match** — `artist_id` AND
+         *    `client_id`. The artist half alone is not a filter on the artist's
+         *    own seat: `listForArtist()` returns every client's requests and
+         *    `artist_id` is the viewer's own id on all of them, so one client's
+         *    quote was rendering on another client's thread (and, through the
+         *    same call in the inbox, on every artist row at once).
+         * 3. **Exactly one candidate, or none.** The bookingless thread is unique
+         *    per pair — `threads_unique_per_pair_booking` collapses every null
+         *    `booking_id` onto one sentinel key (0001, restated in 0076) — but
+         *    two live requests between the same pair are not, and nothing in
+         *    either row says which of them this conversation is. Two candidates
+         *    is not a reason to show the newer one; it is the definition of not
+         *    knowing. The card returns on its own as soon as the ambiguity does:
+         *    a request leaves the rendering set when it is declined, or when
+         *    `sweep_expired_gig_requests` (0090) expires it.
+         *
          * Statuses that are neither live nor a record — `declined`, `expired`,
-         * and the decode-only `unknown` — produce no card. A declined quote is
-         * not the state of this conversation, it is the end of a previous one,
-         * and `unknown` means this build cannot read the row at all, which is
-         * exactly when it must not draw buttons against it.
+         * and the decode-only `unknown` — produce no card and do not count as
+         * candidates. A declined quote is not the state of this conversation, it
+         * is the end of a previous one, and `unknown` means this build cannot
+         * read the row at all, which is exactly when it must not draw buttons
+         * against it.
          */
         fun pick(
             requests: List<StoredRequest>,
-            artistId: String?,
+            thread: Thread?,
             viewerIsArtist: Boolean,
             nowMs: Long,
         ): ThreadQuote? {
-            val key = artistId?.lowercase()?.takeIf { it.isNotBlank() } ?: return null
-            // The repositories order by `created_at` descending, so the first
-            // match is the newest — no timestamp is needed on the model to say
-            // which of two live quotes is the current one.
-            val match = requests.firstOrNull { stored ->
-                stored.raw.artistId.equals(key, ignoreCase = true) && stored.status.rendersInThread
+            if (thread == null) return null
+            if (!thread.bookingId.isNullOrBlank()) return null
+            val artistKey = thread.artistId.lowercase().takeIf { it.isNotBlank() } ?: return null
+            val clientKey = thread.clientId.lowercase().takeIf { it.isNotBlank() } ?: return null
+            // `singleOrNull`, not `firstOrNull`: newest-first ordering answers
+            // "which is most recent", which is a different question from "which
+            // is this conversation's".
+            val match = requests.singleOrNull { stored ->
+                stored.raw.artistId.equals(artistKey, ignoreCase = true) &&
+                    stored.raw.clientId.equals(clientKey, ignoreCase = true) &&
+                    stored.status.rendersInThread
             } ?: return null
             return from(match, viewerIsArtist, nowMs)
         }

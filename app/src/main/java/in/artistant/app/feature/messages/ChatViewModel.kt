@@ -270,7 +270,7 @@ class ChatViewModel @Inject constructor(
             }
             hydrateArtist(thread, viewerIsArtist)
             loadGigContext(thread, viewerIsArtist)
-            loadQuote(thread?.artistId, viewerIsArtist)
+            loadQuote(thread, viewerIsArtist)
             markReadBestEffort()
         }.onFailure { e -> _state.update { it.copy(isLoading = false, error = e.message) } }
     }
@@ -551,8 +551,12 @@ class ChatViewModel @Inject constructor(
      * leaves the card absent: a quote that cannot be read is not a quote that
      * can be accepted, and a card with dead buttons is worse than no card.
      */
-    private fun loadQuote(artistId: String?, viewerIsArtist: Boolean) = viewModelScope.launch {
-        if (artistId.isNullOrBlank()) {
+    private fun loadQuote(thread: Thread?, viewerIsArtist: Boolean) = viewModelScope.launch {
+        // Nothing a bookingless thread can be matched against, or a thread that
+        // is about a booking rather than a negotiation: no request list is worth
+        // fetching for either. [ThreadQuote.pick] applies the same two rules, so
+        // this is a round trip saved, not a second opinion.
+        if (thread == null || !thread.bookingId.isNullOrBlank() || thread.artistId.isBlank()) {
             _state.update { it.copy(quote = null) }
             return@launch
         }
@@ -561,7 +565,7 @@ class ChatViewModel @Inject constructor(
         }.getOrNull() ?: return@launch
         val quote = ThreadQuote.pick(
             requests = rows,
-            artistId = artistId,
+            thread = thread,
             viewerIsArtist = viewerIsArtist,
             nowMs = System.currentTimeMillis(),
         )
@@ -593,7 +597,7 @@ class ChatViewModel @Inject constructor(
             // Re-read rather than patching the card locally: the same row is what
             // the bookings surfaces read, and a card that says "accepted" off a
             // local guess would disagree with them if the write raced anything.
-            loadQuote(_state.value.thread?.artistId, _state.value.viewerIsArtist).join()
+            loadQuote(_state.value.thread, _state.value.viewerIsArtist).join()
             _state.update { it.copy(quoteAction = QuoteAction.Idle) }
             _events.send(ChatEvent.QuoteAccepted(_state.value.context.bookingId))
         }
@@ -623,7 +627,7 @@ class ChatViewModel @Inject constructor(
                     _state.update { s -> s.copy(quoteAction = QuoteAction.Failed(COUNTER_FAILED)) }
                     return@launch
                 }
-            loadQuote(_state.value.thread?.artistId, _state.value.viewerIsArtist)
+            loadQuote(_state.value.thread, _state.value.viewerIsArtist)
         }
     }
 

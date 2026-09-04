@@ -236,6 +236,10 @@ private data class DbGigRequestWithClient(
                 packageLabel = "Custom",
                 timeAgo = relativeTimeAgo(createdAt),
                 artistId = artistId.lowercase(),
+                // Already on the row and already decoded; it was simply dropped
+                // here. Both halves of the pair are what lets a CONVERSATION
+                // find the quote that belongs to it — see [ThreadQuote.pick].
+                clientId = clientId.lowercase(),
                 // Canonical parser, not the lenient ladder below it: `expires_at`
                 // is a deadline the UI states in words ("holds till Fri"), so a
                 // misread is a lie about how long an offer stands. Null when it
@@ -310,9 +314,13 @@ class FakeRequestsRepository(
                 message = message.orEmpty(),
                 date = dateLabel,
                 amount = proposedAmountInr,
-                // Carried through, like the real seam: a fake that drops the two
+                // Carried through, like the real seam: a fake that drops the
                 // fields the chat matches a quote on would make the chat's own
                 // tests pass against a repository that answers nothing.
+                //
+                // `clientId` is left empty on purpose — the fake has no session
+                // and inventing one would let a test match a pair the server
+                // never would. A caller that needs the pair seeds the row.
                 artistId = artistId.lowercase(),
                 expiresAtEpochMs = expiresAtEpochMs,
             ),

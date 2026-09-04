@@ -207,7 +207,7 @@ class MessagesViewModel @Inject constructor(
                 context = ThreadContext.resolve(thread, bookingsById, viewerIsArtist),
                 quote = ThreadQuote.pick(
                     requests = quotes,
-                    artistId = thread.artistId,
+                    thread = thread,
                     viewerIsArtist = viewerIsArtist,
                     nowMs = System.currentTimeMillis(),
                 ),

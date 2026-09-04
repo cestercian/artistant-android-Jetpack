@@ -15,6 +15,7 @@ import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
+import `in`.artistant.app.testsupport.OTHER_CLIENT_ID
 import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.CompletableDeferred
@@ -537,20 +538,23 @@ class MessagesInboxViewModelTest {
      * A live quote reaches the row it belongs to, and only that row.
      *
      * This is what makes the inbox read as a pipeline instead of a contact list
-     * (design 19). The match is on the ARTIST, because `threads` has no
-     * `request_id` — so the test that matters is that a quote with a different
-     * artist does not leak onto a thread it has nothing to do with.
+     * (design 19). `threads` has no `request_id`, so the match is on BOTH halves
+     * of the pair — and on the artist's own seat the client half is the only one
+     * doing any work: `listForArtist()` returns every client's requests and
+     * `artist_id` is the viewer's own id on all of them. Matching on the artist
+     * alone printed one client's number on every artist row at once.
      */
     @Test
     fun aLiveQuoteLandsOnItsOwnThreadAndNoOther() = runTest {
-        val mine = StoredRequest(
+        fun quote(id: String, clientId: String, amount: Int) = StoredRequest(
             raw = GigRequest(
-                id = "q-1",
+                id = id,
                 client = "Rhea",
                 message = "",
                 date = "Sat 12 Oct",
-                amount = 48_000,
+                amount = amount,
                 artistId = ARTIST_ID,
+                clientId = clientId,
                 expiresAtEpochMs = 4_102_444_800_000L,
             ),
             status = GigRequestStatus.Open,
@@ -558,18 +562,53 @@ class MessagesInboxViewModelTest {
         val model = vm(
             StaticThreads(
                 listOf(
-                    Thread(id = "t-1", artistId = ARTIST_ID),
-                    Thread(id = "t-2", artistId = OTHER_ARTIST_ID),
+                    Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID),
+                    Thread(id = "t-2", artistId = ARTIST_ID, clientId = OTHER_CLIENT_ID),
+                    Thread(id = "t-3", artistId = OTHER_ARTIST_ID, clientId = CLIENT_ID),
                 ),
             ),
             // The seat is the artist's, so `open` is theirs to answer.
             viewerId = ARTIST_ID,
-            requests = FakeRequestsRepository(listOf(mine)),
+            requests = FakeRequestsRepository(
+                listOf(quote("q-1", CLIENT_ID, 48_000), quote("q-2", OTHER_CLIENT_ID, 12_000)),
+            ),
         )
 
         val rows = model.state.value.threads.associateBy { it.thread.id }
         assertEquals(48_000, rows.getValue("t-1").quote?.amountInr)
-        assertNull(rows.getValue("t-2").quote)
+        assertEquals(
+            "the other client's thread carries the other client's number",
+            12_000,
+            rows.getValue("t-2").quote?.amountInr,
+        )
+        assertNull(rows.getValue("t-3").quote)
+    }
+
+    /** A thread about a booking is about its booking — the capsule, not a quote card. */
+    @Test
+    fun aBookingThreadCarriesNoQuoteEvenWithALiveRequestBetweenTheSamePair() = runTest {
+        val live = StoredRequest(
+            raw = GigRequest(
+                id = "q-1",
+                client = "Rhea",
+                message = "",
+                date = "Sat 12 Oct",
+                amount = 48_000,
+                artistId = ARTIST_ID,
+                clientId = CLIENT_ID,
+                expiresAtEpochMs = 4_102_444_800_000L,
+            ),
+            status = GigRequestStatus.Open,
+        )
+        val model = vm(
+            StaticThreads(
+                listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID, bookingId = "b-1")),
+            ),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(live)),
+        )
+
+        assertNull(model.state.value.threads.single().quote)
     }
 
     /** No request between these two people means no deal line — never a fake one. */

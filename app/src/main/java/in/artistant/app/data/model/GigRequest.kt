@@ -87,6 +87,22 @@ data class GigRequest(
      */
     val artistId: String = "",
     /**
+     * Who the quote is with on the OTHER side (`gig_requests.client_id`),
+     * lowercased.
+     *
+     * The artist half of the pair is not enough to name a conversation, and on
+     * the artist's own seat it is not a filter at all: `listForArtist()` returns
+     * every client's requests and `artist_id` is the viewer's own id on all of
+     * them. Matching on it alone made one client's quote appear on another
+     * client's thread. Both halves together are the pair, which — with
+     * `threads`' bookingless-per-pair uniqueness — is what identifies the
+     * conversation a request belongs to. See [ThreadQuote.pick].
+     *
+     * Empty only for a row minted locally by a fake; the server column is NOT
+     * NULL.
+     */
+    val clientId: String = "",
+    /**
      * When the offer lapses (`gig_requests.expires_at`), or null if it could not
      * be parsed.
      *
