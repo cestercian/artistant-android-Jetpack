@@ -77,6 +77,17 @@ fun AccountScreen(
      * registered the screen on both graphs, so the seam is closed and the row is unconditional.
      */
     onSafetyCentre: () -> Unit,
+    /**
+     * The help centre (design 63), owned by `feature/system`.
+     *
+     * This row used to raise an inline Help/Feedback sheet that this package owned. Section SH
+     * replaced it with real screens — and `FeedbackScreen` files into the same `app_feedback`
+     * (mig 0073) behind an outbox with a session guard, which the sheet had no notion of, so a
+     * note written while signed out was filed against whoever signed in next. Two feedback
+     * paths where one of them gets the `user_id` wrong is not a choice worth keeping, so the
+     * sheet is gone and the row pushes SH's screen.
+     */
+    onHelpCentre: () -> Unit,
     onNotifications: () -> Unit,
     onLanguage: () -> Unit,
     onAccessibility: () -> Unit,
@@ -116,7 +127,7 @@ fun AccountScreen(
             onManageAvailability = {
                 onManageAvailability?.invoke() ?: viewModel.manageAvailabilityMissingNav()
             },
-            onHelp = viewModel::showHelp,
+            onHelp = onHelpCentre,
             onSignOut = viewModel::showSignOutConfirm,
             onCalendarToggle = { on ->
                 if (on && !state.calendarHasPermission) {
@@ -161,35 +172,8 @@ fun AccountScreen(
             )
         }
 
-        if (state.showHelp) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-                // No indication: this is a scrim, not a button, and Material's default ripple
-                // on a full-screen tap surface expands across the whole window.
-                val scrimInteraction = remember { MutableInteractionSource() }
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(colors.ink.copy(alpha = SCRIM_ALPHA))
-                        .clickable(
-                            interactionSource = scrimInteraction,
-                            indication = null,
-                            onClick = viewModel::dismissHelp,
-                        ),
-                )
-                HelpFeedbackSheet(
-                    sending = state.feedbackSending,
-                    status = state.feedbackStatus,
-                    statusOk = state.feedbackOk,
-                    onSubmit = viewModel::submitFeedback,
-                    onDismiss = viewModel::dismissHelp,
-                )
-            }
-        }
     }
 }
-
-/** How far the help sheet's scrim darkens the list behind it. */
-private const val SCRIM_ALPHA = 0.4f
 
 @Composable
 private fun AccountContent(

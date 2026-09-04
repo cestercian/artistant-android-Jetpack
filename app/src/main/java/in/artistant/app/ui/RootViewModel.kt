@@ -102,24 +102,31 @@ class RootViewModel @Inject constructor(
                                 launchRouting()
                             }
                         }
-                        // Initializing → keep Loading (avoids an auth-screen flash before the
-                        // persisted session restores); every other non-auth state → sign in.
-                        is SessionStatus.Initializing -> _gate.value = RootGate.Loading
                         else -> {
-                            lastRoutedKey = null
-                            // A pass still in flight belongs to the session that just
-                            // ended: stop it and invalidate its writes (routingGeneration).
-                            routingJob?.cancel()
-                            routingGeneration++
-                            // The hydration payload leaves with the session. `profile`
-                            // feeds the signup flow's prefill and the error feeds its
-                            // Retry banner, so keeping either past a sign-out means the
-                            // NEXT person to reach onboarding on this device can be
-                            // shown the previous account's name, city and @handle
-                            // (see SignupViewModel.reset).
-                            _profile.value = null
-                            _profileHydrationError.value = null
-                            _gate.value = RootGate.NotSignedIn
+                            // Tear the session's payload down ONLY for the status that
+                            // actually ended it. Initializing and RefreshFailure are
+                            // still-hydrating states — supabase-kt has not dropped the
+                            // session in either — so they must not cancel the routing
+                            // pass, bump the generation, or clear the profile. Doing
+                            // that on a RefreshFailure is what turned a token refresh
+                            // that could not reach the server into a sign-out.
+                            if (status is SessionStatus.NotAuthenticated) {
+                                lastRoutedKey = null
+                                // A pass still in flight belongs to the session that just
+                                // ended: stop it and invalidate its writes (routingGeneration).
+                                routingJob?.cancel()
+                                routingGeneration++
+                                // The hydration payload leaves with the session. `profile`
+                                // feeds the signup flow's prefill and the error feeds its
+                                // Retry banner, so keeping either past a sign-out means the
+                                // NEXT person to reach onboarding on this device can be
+                                // shown the previous account's name, city and @handle
+                                // (see SignupViewModel.reset).
+                                _profile.value = null
+                                _profileHydrationError.value = null
+                            }
+                            // One place decides the gate, and it is pure and tested.
+                            gateForSessionStatus(status, _gate.value)?.let { _gate.value = it }
                         }
                     }
                 }

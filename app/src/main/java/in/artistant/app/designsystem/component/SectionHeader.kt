@@ -99,6 +99,33 @@ fun EyebrowLabel(
     )
 }
 
+/**
+ * The label that divides a list into runs — "TODAY" / "EARLIER" on screen 123,
+ * "ALSO FIXED" on 137.
+ *
+ * Not [EyebrowLabel], and the difference is in the markup rather than in taste:
+ * the design sets an eyebrow in JetBrains Mono and a group divider in the SANS
+ * at 12.5/700 with a hair of tracking. The two do different jobs — an eyebrow
+ * names the block under it, a group label says where you are in a list you are
+ * already reading — and setting a run of them in mono makes a scrolling list
+ * look like a log file.
+ */
+@Composable
+fun GroupLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: androidx.compose.ui.graphics.Color = AppTheme.colors.ink3,
+) {
+    Text(
+        text = text.uppercase(),
+        style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
 @Preview(showBackground = true, backgroundColor = 0xFFFAFAF6)
 @Composable
 private fun SectionHeaderPreview() {

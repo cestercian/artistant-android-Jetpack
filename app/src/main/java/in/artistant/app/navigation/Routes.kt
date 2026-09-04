@@ -138,6 +138,39 @@ object ClientNavRoutes {
      *  opening segment, not a lock: it is segmented, so the other document is one
      *  tap away whichever one you arrive on. */
     fun legal(doc: String) = "legal/$doc"
+
+    /** See [SystemRoutes]. Spelled here so a client call site reads like every other. */
+    const val HELP_CENTRE = SystemRoutes.HELP_CENTRE
+    const val FEEDBACK = SystemRoutes.FEEDBACK
+    const val ACTIVITY = SystemRoutes.ACTIVITY
+}
+
+/**
+ * Section SH's four destinations, registered on BOTH graphs.
+ *
+ * One object rather than a copy in each role's table, because unlike
+ * [ClientNavRoutes.BLOCKED_ACCOUNTS] — which is the same literal written twice
+ * on purpose, so each graph owns its own — these are genuinely role-neutral
+ * housekeeping: help, feedback, the activity log and the release notes have no
+ * client or artist variant at all. Both role objects re-export them so a call
+ * site in either scaffold reads the same as its neighbours.
+ *
+ * "whats_new" has no destination: screen 137 is a sheet the root presents once
+ * per version, not a page you can navigate to. The constant exists because
+ * account settings links to it, and the link is a request to present the sheet.
+ */
+object SystemRoutes {
+    /** Design 63. */
+    const val HELP_CENTRE = "help_centre"
+
+    /** Design 64. */
+    const val FEEDBACK = "feedback"
+
+    /** Design 123. */
+    const val ACTIVITY = "activity"
+
+    /** Design 137 — presented, never pushed. See the object's note. */
+    const val WHATS_NEW = "whats_new"
 }
 
 /** String routes for the artist NavHost. */
@@ -202,4 +235,9 @@ object ArtistNavRoutes {
     const val DELETE_ACCOUNT = "delete_account"
 
     fun legal(doc: String) = "legal/$doc"
+
+    /** See [SystemRoutes]. */
+    const val HELP_CENTRE = SystemRoutes.HELP_CENTRE
+    const val FEEDBACK = SystemRoutes.FEEDBACK
+    const val ACTIVITY = SystemRoutes.ACTIVITY
 }

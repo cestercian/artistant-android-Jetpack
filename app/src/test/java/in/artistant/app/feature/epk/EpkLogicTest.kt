@@ -22,6 +22,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * The EPK editor's decisions.
@@ -351,6 +352,89 @@ class EpkLogicTest {
         assertFalse(canAddPhoto(currentCount = MAX_PHOTOS, uploadInFlight = false))
         assertFalse(canAddPhoto(currentCount = 0, uploadInFlight = true))
     }
+
+    // ── Staged photo uploads ─────────────────────────────────────────────────
+    //
+    // The bug these cover destroyed the artist's photo. A camera capture is
+    // unlinked at adoption — by design, it is a temp file the app minted so the
+    // camera had somewhere to write, and the staged copy is meant to be the
+    // survivor. The direct upload path then deleted that staged copy in a
+    // `finally`, which also runs when the upload THROWS. So one dropped
+    // connection removed both app-owned copies and the only way forward was to
+    // shoot the photo again — for the most temporary failure there is.
+
+    /** The regression test proper: a failed upload must leave the bytes behind. */
+    @Test
+    fun stagedPhoto_survivesAFailedUploadAndARetrySendsTheSameBytes() = runTest {
+        val staged = stagedFile("photo-1.jpg", "the artist's only copy")
+
+        val failed = sendStagedPhoto(staged) { throw IllegalStateException("connection reset") }
+
+        assertEquals(StagedPhotoOutcome.Held("photo-1.jpg"), failed)
+        assertTrue("a failed upload must not delete the staged copy", staged.isFile)
+        assertEquals("the artist's only copy", staged.readText())
+
+        // The point of keeping it: the retry needs no new pick and no new
+        // capture, because the same file is still there to send.
+        var sentBytes: String? = null
+        val retried = sendStagedPhoto(staged) { file -> sentBytes = file.readText() }
+
+        assertEquals(StagedPhotoOutcome.Sent, retried)
+        assertEquals("the artist's only copy", sentBytes)
+        assertFalse("a landed upload makes the staged copy dead weight", staged.exists())
+    }
+
+    @Test
+    fun stagedPhoto_isUnlinkedOnceTheUploadLands() = runTest {
+        val staged = stagedFile("photo-2.jpg", "jpeg")
+
+        val outcome = sendStagedPhoto(staged) { assertTrue(it.isFile) }
+
+        assertEquals(StagedPhotoOutcome.Sent, outcome)
+        assertFalse(staged.exists())
+    }
+
+    /**
+     * `cacheDir` is reclaimable and the wizard's orphan sweep deletes what its
+     * draft stops referencing, so a recorded filename is a claim to verify. A
+     * missing file is not a retryable failure — offering Retry on it would be a
+     * button that cannot work — and nothing should be uploaded from it.
+     */
+    @Test
+    fun stagedPhoto_reportsAReclaimedFileRatherThanRetryingIt() = runTest {
+        val missing = File(tempDir(), "photo-gone.jpg")
+        var uploaded = false
+
+        val outcome = sendStagedPhoto(missing) { uploaded = true }
+
+        assertEquals(StagedPhotoOutcome.Gone, outcome)
+        assertFalse("nothing to send means nothing was sent", uploaded)
+    }
+
+    /**
+     * Cancellation is the one case that still unlinks, and deliberately: what
+     * cancels this is the ViewModel scope being cleared, which takes the state
+     * holding the retry with it. Keeping the file then would leak a
+     * multi-megabyte JPEG into the cache with no reader left.
+     */
+    @Test
+    fun stagedPhoto_unlinksOnCancellationBecauseNothingIsLeftToRetryIt() = runTest {
+        val staged = stagedFile("photo-3.jpg", "jpeg")
+
+        val thrown = runCatching {
+            sendStagedPhoto(staged) { throw CancellationException("screen closed") }
+        }.exceptionOrNull()
+
+        assertTrue(thrown is CancellationException)
+        assertFalse("a cancelled upload has no reader, so it must not leak", staged.exists())
+    }
+
+    private fun tempDir(): File =
+        File(System.getProperty("java.io.tmpdir"), "epk-staged-${System.nanoTime()}")
+            .also { it.mkdirs(); it.deleteOnExit() }
+
+    private fun stagedFile(name: String, contents: String): File =
+        File(tempDir(), name).also { it.writeText(contents); it.deleteOnExit() }
 
     // ── Completeness ─────────────────────────────────────────────────────────
 

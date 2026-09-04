@@ -557,10 +557,52 @@ class WizardViewModel @Inject constructor(
     fun onCoverGradientSelected(index: Int) =
         _state.update { it.copy(coverGradientIndex = ArtistGradient.clampIndex(index)) }
 
-    fun onCoverPicked(uri: Uri) {
+    /**
+     * A cover chosen from the gallery / SAF.
+     *
+     * The source is the artist's own file and is left exactly where it is —
+     * `consumeSource` stays false, and the one thing that must never happen on this
+     * path is deleting a photo out of someone's library.
+     */
+    fun onCoverPicked(uri: Uri) = stageCover(uri, consumeSource = false)
+
+    /**
+     * A cover shot with the camera.
+     *
+     * The capture destination is a file THIS app minted inside its own staging
+     * directory purely to give `TakePicture` somewhere to write, so once the staged
+     * copy exists the original is dead weight: two files where the draft names one.
+     * It used to sit there until the wizard's resume sweep, which runs on the next
+     * restore and not before.
+     */
+    fun onCoverCaptured(uri: Uri) = stageCover(uri, consumeSource = true)
+
+    /**
+     * The shutter was cancelled, or the camera reported failure.
+     *
+     * Nothing was staged, so nothing references the destination — but the file
+     * exists, because `TakePicture` hands the camera a URI it has already created.
+     * Delete it here rather than leaving it for the sweep: a wizard that is never
+     * resumed never sweeps, and this is the path an artist takes every time they
+     * open the camera and change their mind.
+     */
+    fun onCoverCaptureCancelled(uri: Uri) {
+        mediaCache.discardCapture(uri)
+    }
+
+    /**
+     * Copy [uri] into the staging cache and point the draft at the copy.
+     *
+     * The STAGED copy is what survives from here — it is the artist's cover until
+     * the upload commits it, and nothing on this path deletes it. Only the capture
+     * original is [consumeSource]d, and only after the copy has landed: a copy that
+     * threw leaves the source alone, because at that moment it is still the only
+     * copy of the photo they took.
+     */
+    private fun stageCover(uri: Uri, consumeSource: Boolean) {
         viewModelScope.launch {
             runCatching {
-                val pending = mediaCache.adoptPhoto(uri)
+                val pending = mediaCache.adoptPhoto(uri, consumeSource = consumeSource)
                 _state.update {
                     it.copy(
                         pendingCover = pending,

@@ -24,6 +24,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 
 /**
@@ -164,6 +166,16 @@ private object HarnessSession {
         fun supabaseClient(): SupabaseClient
     }
 
+    /**
+     * How long the activity-create thread will wait for the synthetic session.
+     *
+     * The wait is a `SharedPreferences`-shaped read of an empty store, so in practice it
+     * costs single-digit milliseconds. The cap is there for the case where it does not —
+     * a stall on the create path is worth a bounded couple of seconds against a harness
+     * that silently boots to the wrong screen, but it is not worth an ANR.
+     */
+    private const val IMPORT_TIMEOUT_MS = 2_000L
+
     fun bootstrap(app: Application, flags: HarnessFlags) {
         // No role requested → leave the real auth gate completely alone. `seed-fixture-data`
         // on its own still swaps repositories, which is useful for inspecting signup screens.
@@ -176,14 +188,48 @@ private object HarnessSession {
             return
         }
 
+        // BLOCKING, on the activity-create thread, for the same reason everything else in
+        // this file is installed there: `RootViewModel` reads `sessionStatus` — a StateFlow,
+        // so it sees whatever the CURRENT value is the instant Compose builds it — and it
+        // renders `NotSignedIn` for anything that is not `Authenticated`.
+        //
+        // The import cannot simply happen earlier: supabase-kt restores a persisted session
+        // asynchronously on client creation and publishes the result, so an import that beat
+        // the restore would be overwritten by it. The wait for a settled value is therefore
+        // load-bearing — but done on a background dispatcher it was a race against composition,
+        // and the value it waits for is `NotAuthenticated`. Whenever composition won, the app
+        // rendered the signup flow for the width of that gap, which is how a `skip-signup-as-*`
+        // launch could put the auth screen in front of the operator and then behave on the
+        // next try. Blocking here makes the ordering a fact rather than a coin flip.
+        //
+        // `withTimeout` inside `runBlocking` is honest here: the timer runs on `runBlocking`'s
+        // own event loop, so it fires and releases the thread even if the awaited work wanted
+        // this one.
+        val imported = runCatching {
+            runBlocking {
+                withTimeout(IMPORT_TIMEOUT_MS) {
+                    client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
+                    client.auth.importSession(fakeSession(role), autoRefresh = false)
+                }
+            }
+            true
+        }.onFailure { Timber.e(it, "[harness] blocking session import failed") }.getOrDefault(false)
+
+        if (imported) {
+            Timber.i("[harness] synthetic $role session installed before first composition")
+            return
+        }
+
+        // The restore took longer than the create path is willing to wait. Fall back to the
+        // old asynchronous install: the gate may show the signup flow for a moment first,
+        // which is the behaviour this method used to have unconditionally, and is still far
+        // better than a harness launch with no session at all.
+        Timber.w("[harness] session import did not settle in ${IMPORT_TIMEOUT_MS}ms; retrying async")
         scope.launch {
-            // supabase-kt restores any persisted session asynchronously on client creation and
-            // then publishes NotAuthenticated/Authenticated. Importing before that settles
-            // would get clobbered by the restore, so wait for the first settled value.
             runCatching {
                 client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
                 client.auth.importSession(fakeSession(role), autoRefresh = false)
-                Timber.i("[harness] synthetic $role session installed")
+                Timber.i("[harness] synthetic $role session installed (async)")
             }.onFailure { Timber.e(it, "[harness] session import failed") }
         }
     }

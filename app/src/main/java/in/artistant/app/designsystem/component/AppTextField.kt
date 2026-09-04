@@ -125,11 +125,20 @@ fun AppTextField(
                 )
                 .defaultMinSize(minHeight = minHeight)
                 .padding(horizontal = dimens.space.lg, vertical = dimens.space.md),
-            verticalAlignment = Alignment.CenterVertically,
+            // A prose box grows DOWNWARD, so its first line has to start at the
+            // top. Centred, the text (and the hint before it) sits in the middle
+            // of an empty 180dp box and then walks upward as the writer types,
+            // which reads as the field re-laying itself out on every return.
+            // Single-line controls keep centring, which is what a 50dp input
+            // wants.
+            verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         ) {
             leading?.invoke()
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            Box(
+                Modifier.weight(1f),
+                contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart,
+            ) {
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
@@ -158,7 +167,10 @@ fun AppTextField(
                         text = hint,
                         style = AppTheme.type.body,
                         color = colors.hint,
-                        maxLines = 1,
+                        // A prose field's hint is a sentence, and clipping it at
+                        // one line is how "Clients read this before anything else
+                        // on your profile" becomes "Clients read this before…".
+                        maxLines = if (singleLine) 1 else HINT_MAX_LINES,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -175,6 +187,9 @@ fun AppTextField(
         }
     }
 }
+
+/** How much of a prose field's hint is shown before it clips. */
+private const val HINT_MAX_LINES = 3
 
 @Preview(showBackground = true, backgroundColor = 0xFFFAFAF6)
 @Composable

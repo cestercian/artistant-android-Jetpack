@@ -268,6 +268,29 @@ private fun CentreAction(action: LightTabAction) {
 private fun systemNavigationInset(): Dp =
     WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
+/**
+ * How tall [LightTabBar] renders right now, system navigation inset included.
+ *
+ * For the one caller that has to clear the bar without being laid out relative
+ * to it: the app-level toast host (design 77), which floats above the whole
+ * NavHost and so is never inside the `Scaffold` that insets content above the
+ * bar. Composed from the same tokens the bar itself pads with, so the two cannot
+ * drift — the alternative is a second copy of the arithmetic in `navigation/`,
+ * which is how a toast ends up sitting a few dp inside the bar on one device and
+ * floating above it on another.
+ */
+@Composable
+fun lightTabBarHeight(): Dp {
+    val chrome = AppTheme.dimens.chrome
+    // hairline + top pad + the glyph row (a 48dp tap target, not the 24dp
+    // glyph — the row is as tall as its tallest cell) + bottom pad + inset.
+    return AppTheme.dimens.size.hairline +
+        chrome.barTopPad +
+        AppTheme.dimens.size.controlMin +
+        chrome.barBottomPad +
+        systemNavigationInset()
+}
+
 @Preview(showBackground = true, backgroundColor = 0xFFFAFAF6)
 @Composable
 private fun LightTabBarPreview() {

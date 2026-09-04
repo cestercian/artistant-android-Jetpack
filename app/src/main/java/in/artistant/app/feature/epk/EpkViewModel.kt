@@ -178,6 +178,25 @@ data class EpkUiState(
      */
     val samplesStaging: Int = 0,
 
+    /**
+     * What the upload queue is doing, in the press kit's words — design screens
+     * 76 (working) and 66 (stalled). Null when the queue has nothing to report,
+     * which is the absence of a banner rather than a banner saying so.
+     *
+     * Derived in [observeUploadQueue] rather than in the Composable so the
+     * mapping is a pure function over queue state with a test, and so the screen
+     * never has to hold a reference to the queue itself.
+     */
+    val uploadBanner: EpkUploadBanner? = null,
+
+    /**
+     * The burned tasks, one row each, for the stalled sheet (66).
+     *
+     * Carries the staged file's SIZE, which is a `stat` — measured on the IO
+     * dispatcher in the queue observer, never in composition.
+     */
+    val stalledUploads: List<StalledUpload> = emptyList(),
+
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val savingPackages: Boolean = false,
@@ -197,12 +216,29 @@ data class EpkUiState(
      * attempt budget. Carries the message rather than a flag, because which kind
      * stalled decides which section the artist should look at.
      *
-     * Its own field rather than a [saveError], because it is the one failure on
-     * this screen with somewhere to go: the file is still staged and the queue
-     * can be told to drain it again, so the banner carries a Retry that
-     * [saveError]'s dismiss-only banner has no room for.
+     * Its own field rather than a [saveError], because it is a failure with
+     * somewhere to go: the file is still staged and the queue can be told to
+     * drain it again, so the banner carries a Retry that [saveError]'s
+     * dismiss-only banner has no room for. [heldPhotoFile] is the same idea for
+     * the one upload path that does not go through the queue.
      */
     val uploadFailedMessage: String? = null,
+
+    /**
+     * A gallery photo whose upload failed with its staged bytes still on disk.
+     *
+     * Its own field rather than a [saveError] for [uploadFailedMessage]'s reason
+     * — it is a failure with somewhere to go. The direct photo path does not use
+     * [UploadQueue] (see `onPhotoPicked` for why the queue's cover task is the
+     * wrong shape for a gallery append), so it cannot borrow the queue's stalled
+     * sheet either; it carries its own staged filename and its own Retry.
+     *
+     * The filename alone, because that is the whole of what a retry needs and
+     * `cacheDir` may have reclaimed the file by the time anyone asks — the name
+     * is a claim to verify, which [sendStagedPhoto] does.
+     */
+    val heldPhotoFile: String? = null,
+
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
@@ -326,7 +362,22 @@ class EpkViewModel @Inject constructor(
                 // never missing from both numbers at once — which is the window the
                 // cap used to be picked through.
                 val staged = queue.pending.count { task -> task is UploadQueue.Task.AudioSample }
-                _state.update { it.copy(samplesUploading = staged) }
+                // The banner the press kit draws, and the rows the stalled sheet
+                // lists. Both are recomputed on every emission — unlike the
+                // dismissible message below they are not something the artist can
+                // wave away, they are a report of what the queue holds right now.
+                //
+                // The sizes are a `stat` per burned task, so the whole mapping
+                // goes to IO: this collector runs on `viewModelScope`, i.e. the
+                // main dispatcher.
+                val stalled = withContext(Dispatchers.IO) { stalledRowsFor(queue) }
+                _state.update {
+                    it.copy(
+                        samplesUploading = staged,
+                        uploadBanner = uploadBannerFor(queue),
+                        stalledUploads = stalled,
+                    )
+                }
                 val failed = failedUploadMessage(queue.failed)
                 if (failed != lastFailed) {
                     lastFailed = failed
@@ -489,6 +540,31 @@ class EpkViewModel @Inject constructor(
     }
 
     fun dismissUploadError() = _state.update { it.copy(uploadFailedMessage = null) }
+
+    /**
+     * Send ONE burned upload back round — the stalled sheet's per-item Retry (66).
+     *
+     * Per-item first, bulk second, because two uploads rarely stall for the same
+     * reason: an oversized clip beside a cover that hit a dead cell. "Retry all"
+     * on its own spends the drain on the one that is going to fail again.
+     */
+    fun retryStalledUpload(taskId: String) {
+        _state.update { it.copy(statusNote = "Retrying upload…") }
+        uploadQueue.retryFailed(taskId)
+    }
+
+    /**
+     * Forget one burned upload and its staged bytes (66's Discard).
+     *
+     * No confirmation dialog. The thing being discarded is a copy the app made of
+     * a file the artist still has, of an upload that has already failed three
+     * times — the cost of a mis-tap is picking it again, and a modal in front of
+     * every row would make clearing a stuck queue a six-tap job.
+     */
+    fun discardStalledUpload(taskId: String) {
+        uploadQueue.discardFailed(taskId)
+        _state.update { it.copy(statusNote = "Upload discarded.") }
+    }
 
     // ── Cover palette ────────────────────────────────────────────────────────
 
@@ -745,7 +821,7 @@ class EpkViewModel @Inject constructor(
     fun onServiceTagToggled(slug: String) {
         val current = _state.value
         if (!current.identityHydrated) return
-        val shown = shownServiceTags(current.serviceTags, current.artist?.serviceTags.orEmpty())
+        val shown = effectiveServiceTags(current)
         val next = ServiceTags.toggle(shown, slug)
         // At the cap, toggling ON is refused rather than silently truncated. Say
         // so — a chip that does not light up on tap reads as a broken control.
@@ -757,14 +833,20 @@ class EpkViewModel @Inject constructor(
         }
         val owner = current.artist?.id ?: return
         _state.update { it.copy(serviceTags = next, saveError = null) }
+        persistServiceTags(owner, next, note = "Services saved.")
+    }
+
+    /** What the chips currently show: the local edit if there is one, else the row. */
+    private fun effectiveServiceTags(state: EpkUiState): List<String> =
+        shownServiceTags(state.serviceTags, state.artist?.serviceTags.orEmpty())
+
+    /** Publish a service set and reconcile the cached row with the result. */
+    private fun persistServiceTags(owner: String, tags: List<String>, note: String) {
         viewModelScope.launch {
-            runCatching { artists.updateServiceTags(owner, next) }
+            runCatching { artists.updateServiceTags(owner, tags) }
                 .onSuccess {
                     _state.update {
-                        it.copy(
-                            statusNote = "Services saved.",
-                            artist = it.artist?.copy(serviceTags = next),
-                        )
+                        it.copy(statusNote = note, artist = it.artist?.copy(serviceTags = tags))
                     }
                 }
                 .onFailure {
@@ -775,6 +857,78 @@ class EpkViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    // ── Sheet edits are transactions ─────────────────────────────────────────
+
+    // The bio and personality sheets (design 67, 68) each carry a Cancel/Skip,
+    // and a Cancel that only closes the sheet is a lie on this screen: every
+    // field in them edits shared draft state that autosaves 1.2s later, and the
+    // service chips beside the bio wrote on the tap. Typing a new bio and
+    // tapping Cancel published the new bio. See [epkEditRevert].
+    private var editSnapshot: EpkEditSnapshot? = null
+
+    /** Open a sheet: remember what Cancel has to be able to restore. */
+    fun beginSheetEdit() {
+        val current = _state.value
+        editSnapshot = EpkEditSnapshot(
+            bio = current.bioDraft,
+            services = effectiveServiceTags(current),
+            prompts = current.promptDrafts,
+        )
+    }
+
+    /**
+     * Save: the edits stand, so the snapshot is dropped and everything owed goes
+     * out now rather than waiting out a debounce the artist has stopped watching.
+     */
+    fun commitSheetEdit() {
+        editSnapshot = null
+        flushPendingSaves()
+    }
+
+    /**
+     * Cancel / Skip: put the values back and undo whatever already left.
+     *
+     * [epkEditRevert] decides what changed and therefore what has to be written
+     * back; this applies it. Disarming comes first — nothing still waiting may
+     * fire the values being discarded — then the local restore, then the
+     * write-backs for the fields that differ.
+     */
+    fun cancelSheetEdit() {
+        val snap = editSnapshot ?: return
+        editSnapshot = null
+        val current = _state.value
+        val revert = epkEditRevert(
+            snapshot = snap,
+            bio = current.bioDraft,
+            services = effectiveServiceTags(current),
+            prompts = current.promptDrafts,
+        )
+        if (revert.isEmpty) return
+
+        bioSaveJob?.cancel()
+        promptsSaveJob?.cancel()
+        armedSaves -= EpkSave.Bio
+        armedSaves -= EpkSave.Prompts
+
+        _state.update {
+            it.copy(
+                bioDraft = snap.bio,
+                promptDrafts = snap.prompts,
+                serviceTags = snap.services,
+                saveError = null,
+            )
+        }
+
+        revert.bio?.let { scheduleBioSave(immediate = true) }
+        revert.prompts?.let { schedulePromptsSave(immediate = true) }
+        // Service chips never had a debounce to cancel — they wrote on the tap —
+        // so undoing them is only ever the write-back.
+        val owner = current.artist?.id
+        if (revert.services != null && owner != null) {
+            persistServiceTags(owner, snap.services, note = "Changes discarded.")
         }
     }
 
@@ -1157,6 +1311,10 @@ class EpkViewModel @Inject constructor(
      * task would resume. Acceptable for a single image the artist can see did not
      * arrive, and the alternative is a gallery that cannot hold a second photo.
      *
+     * **A failure keeps the bytes.** Giving up the queue also gave up its retry,
+     * so this path holds its own staged copy across a failure and offers Retry on
+     * it — see [sendStagedPhoto] for what deleting it eagerly used to cost.
+     *
      * **Off the main thread, explicitly.** Giving up the queue also gave up its
      * IO scope, and everything this path does before its first suspension point
      * is blocking work on whatever dispatcher it was launched from — which for
@@ -1166,39 +1324,141 @@ class EpkViewModel @Inject constructor(
      * frozen UI, so the whole body moves to IO rather than trusting a repository
      * two layers down to switch for us.
      */
-    fun onPhotoPicked(uri: Uri) {
+    fun onPhotoPicked(uri: Uri) = addPhoto(uri, ownsSource = false)
+
+    /**
+     * A photo from OUR camera, whose file is ours to unlink once it is staged.
+     *
+     * Separate from [onPhotoPicked] because ownership differs and nothing about
+     * the URI says so — see [WizardMediaCache.adoptPhoto]. The call site that
+     * minted the file is the one that knows, so it is the one that says.
+     */
+    fun onPhotoCaptured(uri: Uri) = addPhoto(uri, ownsSource = true)
+
+    private fun addPhoto(uri: Uri, ownsSource: Boolean) {
         val userId = session.currentUserId ?: return
         if (!canAddPhoto(_state.value.photos.size, _state.value.uploadingPhoto)) return
         viewModelScope.launch {
+            // A new pick abandons whatever the last failure was holding. This is
+            // the discard path, and it is a side effect of the artist's own
+            // choice rather than a second control they have to find: they have
+            // picked a different photo, so the held one has no future, and its
+            // banner must not outlive it.
+            releaseHeldPhoto()
             _state.update { it.copy(uploadingPhoto = true, saveError = null) }
-            val result = saveCatching {
-                withContext(Dispatchers.IO) {
-                    val pending = mediaCache.adoptPhoto(uri)
-                    val file = pending.file(mediaCache)
-                    try {
-                        media.uploadPhoto(file, userId, position = null)
-                    } finally {
-                        // The cache copy exists to survive the wizard's
-                        // pick-now-publish-later gap. Here the upload IS the
-                        // commit, so the copy is dead weight the moment it
-                        // returns.
-                        file.delete()
-                    }
+            val staged = saveCatching {
+                withContext(Dispatchers.IO) { mediaCache.adoptPhoto(uri, consumeSource = ownsSource) }
+            }.getOrElse {
+                // Staging failed, so there is nothing on disk to hold and nothing
+                // to retry from — the source is the only copy and re-reading it
+                // means re-picking it. Distinct from a failed UPLOAD, which is
+                // the case that now keeps its bytes.
+                _state.update {
+                    it.copy(
+                        uploadingPhoto = false,
+                        saveError = "Couldn't read that photo — pick it again.",
+                    )
                 }
+                return@launch
             }
-            result
-                .onSuccess {
-                    _state.update { it.copy(uploadingPhoto = false, statusNote = "Photo added.") }
-                    loadMedia(userId)
+            sendPhoto(staged.fileName, userId)
+        }
+    }
+
+    /**
+     * Retry the photo the last failure kept — no re-pick, no retake.
+     *
+     * The whole point of holding the staged copy: a temporary connection failure
+     * used to cost the artist the photo itself, because the staged copy was
+     * deleted in a `finally` and a camera capture's original had already been
+     * unlinked at adoption. Now the bytes are still here and this sends them
+     * again. See [sendStagedPhoto].
+     *
+     * Not gated on [canAddPhoto]'s ceiling: this is finishing an add the artist
+     * already began, not starting a new one, and a Retry that silently did
+     * nothing would be worse than the server's own answer. It IS gated on an
+     * upload in flight, which is the conflict that actually matters.
+     */
+    fun retryHeldPhoto() {
+        val fileName = _state.value.heldPhotoFile ?: return
+        val userId = session.currentUserId ?: return
+        if (_state.value.uploadingPhoto) return
+        viewModelScope.launch {
+            _state.update { it.copy(uploadingPhoto = true, saveError = null) }
+            sendPhoto(fileName, userId)
+        }
+    }
+
+    /**
+     * Send staged bytes, and let the outcome decide what happens to them.
+     *
+     * Shared by the first attempt and every retry so the two cannot drift — a
+     * retry that deleted on failure would reintroduce the bug one call site over.
+     */
+    private suspend fun sendPhoto(fileName: String, userId: String) {
+        val outcome = withContext(Dispatchers.IO) {
+            sendStagedPhoto(WizardMediaCache.PendingPhoto(fileName).file(mediaCache)) { file ->
+                media.uploadPhoto(file, userId, position = null)
+            }
+        }
+        when (outcome) {
+            StagedPhotoOutcome.Sent -> {
+                _state.update {
+                    it.copy(
+                        uploadingPhoto = false,
+                        heldPhotoFile = null,
+                        saveError = null,
+                        statusNote = "Photo added.",
+                    )
                 }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            uploadingPhoto = false,
-                            saveError = "Couldn't add that photo — check your connection and try again.",
-                        )
-                    }
-                }
+                loadMedia(userId)
+            }
+
+            is StagedPhotoOutcome.Held -> _state.update {
+                it.copy(uploadingPhoto = false, heldPhotoFile = outcome.fileName)
+            }
+
+            // The cache was reclaimed under us. Saying "retry" here would offer a
+            // button that cannot work, so it says the one thing that can.
+            StagedPhotoOutcome.Gone -> _state.update {
+                it.copy(
+                    uploadingPhoto = false,
+                    heldPhotoFile = null,
+                    saveError = "That photo is no longer on this device — pick it again.",
+                )
+            }
+        }
+    }
+
+    /**
+     * Drop the held photo from state and unlink its staged copy.
+     *
+     * The only discard path, and it hangs off picking another photo rather than
+     * off a control of its own: the banner has one action slot and Retry is what
+     * belongs in it. The other two exits are a retry that lands and a staged file
+     * the cache has already reclaimed, so nothing keeps the banner up forever.
+     */
+    private suspend fun releaseHeldPhoto() {
+        val fileName = _state.value.heldPhotoFile ?: return
+        _state.update { it.copy(heldPhotoFile = null) }
+        withContext(Dispatchers.IO) { mediaCache.delete(listOf(fileName)) }
+    }
+
+    /**
+     * The camera permission was refused — screen 65's "Take a photo" row.
+     *
+     * A refusal has to say something. After the second one Android stops showing
+     * the dialog at all, so without this the row is simply dead and looks
+     * identical to "Choose from library" beside it. A `saveError` rather than a
+     * toast because it is a state the artist has to fix in Settings, not a thing
+     * that happened and passed.
+     */
+    fun onCameraUnavailable() {
+        _state.update {
+            it.copy(
+                saveError = "Artistant can't open the camera without permission — " +
+                    "you can still choose a photo from your library.",
+            )
         }
     }
 

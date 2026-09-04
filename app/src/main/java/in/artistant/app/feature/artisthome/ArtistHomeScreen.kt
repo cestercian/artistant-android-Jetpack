@@ -804,8 +804,17 @@ private fun StripCell(day: StripDay, booked: Boolean, modifier: Modifier = Modif
     ) {
         Text(
             day.dayOfMonth.toString(),
-            style = AppTheme.type.monoCount,
+            style = AppTheme.type.monoStripDay,
             color = if (booked) colors.onAccent else colors.ink4,
+            // The strip is fourteen equal cells across one row, so a cell can
+            // never be widened to suit its contents — a date that does not fit
+            // must overflow its cell, never wrap inside it. Without this a
+            // two-digit date broke as "1" over "0", which reads as two dates.
+            // [monoStripDay] fits at every normal density; this is what holds at
+            // a large system font scale, where the numeral outgrows the cell
+            // whatever token it is drawn in.
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }

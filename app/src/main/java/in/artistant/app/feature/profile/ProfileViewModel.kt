@@ -37,7 +37,6 @@ data class ProfileUiState(
     val actionMessage: String? = null,
     val actionError: String? = null,
     val showSignOutConfirm: Boolean = false,
-    val showHelp: Boolean = false,
     val calendarSyncEnabled: Boolean = false,
     val calendarHasPermission: Boolean = false,
     val calendarTitle: String = "Artistant",
@@ -93,9 +92,6 @@ data class ProfileUiState(
     val isPro: Boolean = false,
     /** In flight while the "Switch to artist mode" pill (screen 26) writes the new role. */
     val switchingRole: Boolean = false,
-    val feedbackSending: Boolean = false,
-    val feedbackStatus: String? = null,
-    val feedbackOk: Boolean = false,
 ) {
     val displayName: String
         get() = profile?.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: "You"
@@ -315,30 +311,6 @@ class ProfileViewModel @Inject constructor(
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
     fun dismissSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = false) }
-
-    fun showHelp() = _state.update {
-        it.copy(showHelp = true, feedbackStatus = null, feedbackOk = false, feedbackSending = false)
-    }
-    fun dismissHelp() = _state.update {
-        it.copy(showHelp = false, feedbackStatus = null, feedbackOk = false, feedbackSending = false)
-    }
-
-    fun submitFeedback(body: String, isBug: Boolean) = viewModelScope.launch {
-        if (_state.value.feedbackSending) return@launch
-        _state.update { it.copy(feedbackSending = true, feedbackStatus = null) }
-        val ok = bookingsRepository.submitFeedback(body, isBug)
-        _state.update {
-            it.copy(
-                feedbackSending = false,
-                feedbackOk = ok,
-                feedbackStatus = if (ok) {
-                    "Thanks — we got it."
-                } else {
-                    "Couldn't send — check your connection and try again."
-                },
-            )
-        }
-    }
 
     /**
      * "Switch to artist mode" (design screen 26 — "A host who starts performing switches here

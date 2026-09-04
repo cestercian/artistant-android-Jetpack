@@ -8,22 +8,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -39,7 +31,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
 import java.util.Locale
@@ -53,73 +44,6 @@ import java.util.Locale
  * design system fills up with near-duplicates. If the artist home or the wizard
  * grows the same need, this is the file to lift from.
  */
-
-/**
- * The page's own masthead: what this screen is, what it is for, and the way into
- * the artist's account.
- *
- * The editor used to open straight onto a full-bleed cover, which made it look
- * like the artist's public page rather than the form that produces it — the
- * screen never said its own name, and the first thing under the status bar was a
- * photo the artist could not edit from there. A title plus a subtitle costs one
- * row and settles both questions before the first section.
- *
- * **The avatar is the account entry, and it is deliberately here.** It sits on
- * the surface an artist opens to work on their own profile, which is where they
- * come looking for "my account" — sign out, availability, data export, delete
- * account. It is an avatar rather than a gear because a gear reads as app
- * preferences and this is specifically *your* account; the monogram is the same
- * one the dashboard greeting shows, at row-control size.
- *
- * Not a `ScreenTitleBar`: that draws a centred 44dp inline bar, which is the
- * right chrome for the tab roots whose reference uses an inline title. This root
- * uses a large left-aligned one, and rendering it centred and small would be a
- * different screen wearing the same words.
- */
-@Composable
-fun EpkTitleBar(
-    title: String,
-    subtitle: String,
-    avatarName: String,
-    onOpenAccount: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    val space = dimens.space
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        modifier.fillMaxWidth(),
-        // Top, not centre: the title is two lines and the avatar belongs beside
-        // the first one. Centred, it drifts down against the subtitle and stops
-        // reading as a bar control.
-        verticalAlignment = Alignment.Top,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = AppTheme.type.pageTitle, color = colors.ink)
-            Text(subtitle, style = AppTheme.type.footnote, color = colors.ink3)
-        }
-        Spacer(Modifier.width(space.md))
-        Avatar(
-            name = avatarName,
-            size = dimens.size.avatarSm,
-            ring = true,
-            modifier = Modifier
-                // The 32dp disc sits inside a 44dp tap target rather than being
-                // grown to it — the touch floor is a hit area, not a size.
-                .sizeIn(minWidth = dimens.size.rowMin, minHeight = dimens.size.rowMin)
-                .wrapContentSize()
-                .pressScale(interaction)
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = interaction,
-                    indication = null,
-                    onClick = onOpenAccount,
-                )
-                .semantics { contentDescription = "Account and settings" },
-        )
-    }
-}
 
 /**
  * A section rule: caps label on the left, one optional text action on the right.
@@ -311,72 +235,6 @@ fun EpkChip(
                 else -> colors.ink2
             },
         )
-    }
-}
-
-/**
- * Inline notice with an optional action and an optional dismiss.
- *
- * Not a snackbar: a save failure has to stay on screen next to the edit that did
- * not land, and a snackbar's whole contract is that it leaves. The artist must
- * be able to see "your pricing didn't save" at the same time as the price.
- *
- * One tone. Every banner this screen raises — a failed load, a failed save, a
- * stalled upload — is something that did not happen, so the "warning" half of the
- * two-value tone enum this used to take never had a caller and never will until
- * one of those stops being an error.
- */
-@Composable
-fun EpkBanner(
-    message: String,
-    modifier: Modifier = Modifier,
-    actionLabel: String? = null,
-    onAction: (() -> Unit)? = null,
-    onDismiss: (() -> Unit)? = null,
-) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    val accent = colors.hot
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(dimens.radii.md))
-            .background(accent.copy(alpha = 0.10f))
-            .border(dimens.size.hairline, accent.copy(alpha = 0.25f), RoundedCornerShape(dimens.radii.md))
-            .padding(dimens.space.md),
-        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(message, style = AppTheme.type.footnote, color = colors.ink, modifier = Modifier.weight(1f))
-            if (onDismiss != null) {
-                Spacer(Modifier.width(dimens.space.sm))
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = "Dismiss",
-                    tint = colors.ink3,
-                    modifier = Modifier
-                        // The glyph stays 20dp; the tap node around it grows to the
-                        // touch floor, the same way the title bar's avatar does. It
-                        // matters here because this X is the only way to clear a
-                        // save error.
-                        .sizeIn(minWidth = dimens.size.rowMin, minHeight = dimens.size.rowMin)
-                        .clickable(onClick = onDismiss)
-                        .wrapContentSize()
-                        .size(dimens.size.iconLg),
-                )
-            }
-        }
-        if (actionLabel != null && onAction != null) {
-            Text(
-                actionLabel,
-                style = AppTheme.type.footnote,
-                color = colors.accentInk,
-                modifier = Modifier
-                    .heightIn(min = AppTheme.dimens.size.rowMin)
-                    .clickable(onClick = onAction)
-                    .padding(vertical = dimens.space.sm),
-            )
-        }
     }
 }
 
