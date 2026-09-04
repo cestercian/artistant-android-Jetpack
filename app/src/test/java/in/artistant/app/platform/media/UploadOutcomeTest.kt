@@ -1,6 +1,7 @@
 package `in`.artistant.app.platform.media
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -195,5 +196,64 @@ class UploadOutcomeTest {
             "a whole batch must not burn its budget faster than a handover recovers",
             waited >= 30_000L,
         )
+    }
+
+    // ── Per-item retry / discard (design screen 66) ──────────────────────────
+
+    /**
+     * Retrying one burned task hands it a fresh budget and puts it at the BACK.
+     *
+     * The back, not the head: the artist retrying one item has said nothing about
+     * the others, and jumping the queue would delay uploads that are still working
+     * in favour of one that has already failed three times.
+     */
+    @Test
+    fun retryingOneBurnedTaskRequeuesItWithAFreshBudget() {
+        val state = UploadQueue.State(
+            pending = listOf(photo("live", attempts = 1)),
+            failed = listOf(photo("burned", attempts = 3)),
+            batchTotal = 2,
+            batchCompleted = 1,
+        )
+
+        val next = retryOne(state, "burned")
+
+        assertEquals(listOf("live", "burned"), next.pending.map { it.id })
+        assertEquals(0, next.pending.last().attempts)
+        assertTrue(next.failed.isEmpty())
+        // The banner's "k of n" has to count the requeued task, or it reports a
+        // batch the queue has already outgrown.
+        assertEquals(3, next.batchTotal)
+    }
+
+    /** An id that names nothing failed returns the SAME state, so the caller can skip
+     *  the snapshot write and the drain kick — what a double-tap looks like. */
+    @Test
+    fun retryingAnUnknownIdIsAnIdentity() {
+        val state = UploadQueue.State(failed = listOf(photo("burned", attempts = 3)))
+
+        assertSame(state, retryOne(state, "someone-elses-task"))
+        // And a task that is merely pending is not retryable — it has not failed.
+        val withLive = state.copy(pending = listOf(photo("live")))
+        assertSame(withLive, retryOne(withLive, "live"))
+    }
+
+    /** Discard drops exactly one and leaves the rest of the failure set alone. */
+    @Test
+    fun discardingOneBurnedTaskLeavesTheOthers() {
+        val state = UploadQueue.State(
+            failed = listOf(photo("a", attempts = 3), photo("b", attempts = 3)),
+        )
+
+        val next = discardOne(state, "a")
+
+        assertEquals(listOf("b"), next.failed.map { it.id })
+    }
+
+    @Test
+    fun discardingAnUnknownIdChangesNothing() {
+        val state = UploadQueue.State(failed = listOf(photo("a", attempts = 3)))
+
+        assertEquals(state.failed.map { it.id }, discardOne(state, "ghost").failed.map { it.id })
     }
 }

@@ -230,13 +230,18 @@ fun epkCompletion(rows: List<EpkSectionRow>, hasCover: Boolean): EpkCompletion {
  * already itemise it.
  */
 internal fun completionSummary(gaps: List<String>): String {
-    if (gaps.isEmpty()) return "Your press kit is complete — nothing left to add."
+    if (gaps.isEmpty()) return "Your press kit is complete — clients see all of it."
     val shown = gaps.take(MAX_SUMMARY_GAPS)
-    val listed = when (shown.size) {
-        1 -> shown[0]
+    val truncated = gaps.size > shown.size
+    // "a, b and c, and 2 more" has two conjunctions fighting each other. When
+    // there is a tail, the shown items are a plain comma list and the tail
+    // carries the only "and".
+    val listed = when {
+        shown.size == 1 -> shown[0]
+        truncated -> shown.joinToString(", ")
         else -> shown.dropLast(1).joinToString(", ") + " and " + shown.last()
     }
-    val tail = if (gaps.size > shown.size) ", and ${gaps.size - shown.size} more" else ""
+    val tail = if (truncated) ", and ${gaps.size - shown.size} more" else ""
     val noun = if (gaps.size == 1) "thing" else "things"
     return "${countWord(gaps.size).replaceFirstChar { it.titlecase(Locale.US) }} $noun left: $listed$tail."
 }
