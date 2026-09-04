@@ -193,6 +193,32 @@ class BookingsLogicTest {
     }
 
     @Test
+    fun aSnapshotIsReadableOnlyByTheAccountThatWroteIt() {
+        val mine = BookingsSnapshot(cachedAtMs = 1L, ownerId = "AAAA-1111")
+
+        assertTrue(snapshotBelongsTo(mine, "aaaa-1111"))
+        assertFalse(snapshotBelongsTo(mine, "bbbb-2222"))
+        // Signed out reads nothing: there is no "current account" to match, and
+        // the cost of guessing wrong is one person's schedule shown to another.
+        assertFalse(snapshotBelongsTo(mine, null))
+        assertFalse(snapshotBelongsTo(mine, "   "))
+    }
+
+    @Test
+    fun aSnapshotWithNoOwnerCannotVouchForItself() {
+        // Written by a build before the stamp existed. It has no owner to check,
+        // so it is nobody's.
+        val unstamped = BookingsSnapshot(cachedAtMs = 1L)
+        assertFalse(snapshotBelongsTo(unstamped, "aaaa-1111"))
+    }
+
+    @Test
+    fun theOwnerSurvivesTheCodec() {
+        val snapshot = BookingsSnapshot(cachedAtMs = 1L, ownerId = "aaaa-1111")
+        assertEquals("aaaa-1111", decodeSnapshot(encodeSnapshot(snapshot))?.ownerId)
+    }
+
+    @Test
     fun aCachedStatusThisBuildCannotReadDecodesAsUnknown() {
         // A snapshot written by a newer build must still open. `Unknown` is
         // exactly how the offline screen renders anything it cannot vouch for.

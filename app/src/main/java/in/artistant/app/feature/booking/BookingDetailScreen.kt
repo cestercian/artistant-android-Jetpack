@@ -930,6 +930,22 @@ private fun BookingDock(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
+            // The counterparty thread, beside Support and not instead of it.
+            //
+            // The page says three lines up that "the thread stays open", and
+            // `BookingActions.primary` really does allow Message on a disputed
+            // booking — but the dock offered only Support, so the one screen that
+            // PROMISES the conversation survives was the one screen you could not
+            // reach it from. A dispute is exactly when the two sides most need to
+            // talk, and the design's 96 keeps the thread reachable.
+            if (BookingAction.Message in BookingActions.primary(viewer, booking.status)) {
+                SecondaryButton(
+                    text = if (openingChat) "Opening…" else "Message $counterparty",
+                    onClick = onMessage,
+                    fullWidth = true,
+                    enabled = !openingChat,
+                )
+            }
             Text(
                 "Message Artistant Support",
                 style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),

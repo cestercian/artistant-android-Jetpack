@@ -34,12 +34,43 @@ data class CachedBooking(
     val venueNotes: String? = null,
 )
 
-/** The last list we read, and when we read it. */
+/**
+ * The last list we read, whose it was, and when we read it.
+ *
+ * [ownerId] is not bookkeeping — it is the only thing standing between two
+ * accounts on one phone. `wipeAll()` clears this store on sign-out, but a
+ * refresh already in flight for the OUTGOING account can finish afterwards and
+ * write its list back into the emptied store; the next person to sign in offline
+ * would then be shown a stranger's artist, venue and load-in note. So every
+ * snapshot is stamped with the uid it belongs to, every read checks that stamp
+ * against the live session, and a mismatch is DELETED rather than merely
+ * ignored — leaving it on disk means the same leak waits for the next reader.
+ *
+ * Defaulted to blank so a snapshot written before this field existed still
+ * decodes — and, having no owner to vouch for it, is treated as somebody else's
+ * and dropped. See [snapshotBelongsTo].
+ */
 @Serializable
 data class BookingsSnapshot(
     val cachedAtMs: Long,
     val items: List<CachedBooking> = emptyList(),
+    val ownerId: String = "",
 )
+
+/**
+ * May [userId] read this snapshot?
+ *
+ * Deliberately closed rather than permissive: a signed-out reader, an unstamped
+ * snapshot and a stamp belonging to somebody else all answer false. The cost of
+ * a false negative is one uncached list; the cost of a false positive is one
+ * person's schedule shown to another.
+ */
+fun snapshotBelongsTo(snapshot: BookingsSnapshot, userId: String?): Boolean {
+    val owner = snapshot.ownerId.trim()
+    val reader = userId?.trim().orEmpty()
+    if (owner.isEmpty() || reader.isEmpty()) return false
+    return owner.equals(reader, ignoreCase = true)
+}
 
 /**
  * The Bookings tab's own persisted state: the offline snapshot, and whether the
@@ -61,6 +92,16 @@ interface BookingsLocalStore {
     suspend fun loadSnapshot(): BookingsSnapshot?
     suspend fun saveSnapshot(snapshot: BookingsSnapshot)
 
+    /**
+     * Drop the snapshot outright.
+     *
+     * Called when a read finds one belonging to a different account, which is
+     * the case `wipeAll()` cannot cover on its own: an in-flight refresh can
+     * land after the wipe. Ignoring such a snapshot would leave it on disk for
+     * the next reader to trip over, so the mismatch deletes it.
+     */
+    suspend fun clearSnapshot()
+
     /** Screen 89's nudge is dismissible, and the dismissal has to outlive the process. */
     suspend fun nudgeDismissed(): Boolean
     suspend fun setNudgeDismissed(dismissed: Boolean)
@@ -76,6 +117,11 @@ class DataStoreBookingsLocalStore @Inject constructor(
 
     override suspend fun saveSnapshot(snapshot: BookingsSnapshot) =
         prefs.setString(SNAPSHOT_KEY, encodeSnapshot(snapshot))
+
+    // An empty string rather than a key removal: `AppPreferences` exposes only
+    // get/set over its generic string slot, and `decodeSnapshot` already answers
+    // null for a blank value — so this reads back as "no snapshot" either way.
+    override suspend fun clearSnapshot() = prefs.setString(SNAPSHOT_KEY, "")
 
     override suspend fun nudgeDismissed(): Boolean =
         prefs.getString(NUDGE_KEY).first() == DISMISSED

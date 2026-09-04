@@ -17,6 +17,10 @@ class FakeBookingsLocalStore(
         private set
     var failLoad: Boolean = false
 
+    /** Whether a foreign snapshot was actually deleted, not merely ignored. */
+    var cleared: Boolean = false
+        private set
+
     override suspend fun loadSnapshot(): BookingsSnapshot? {
         if (failLoad) error("cache unreadable")
         return snapshot
@@ -25,6 +29,11 @@ class FakeBookingsLocalStore(
     override suspend fun saveSnapshot(snapshot: BookingsSnapshot) {
         saved = snapshot
         this.snapshot = snapshot
+    }
+
+    override suspend fun clearSnapshot() {
+        cleared = true
+        snapshot = null
     }
 
     override suspend fun nudgeDismissed(): Boolean = dismissed

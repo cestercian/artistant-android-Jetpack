@@ -11,6 +11,9 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.UsersRepository
+import `in`.artistant.app.feature.messages.ViewerIdentity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -91,10 +94,26 @@ class BookingsViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val localStore: BookingsLocalStore,
     private val usersRepository: UsersRepository,
+    private val viewerIdentity: ViewerIdentity,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(BookingsUiState())
     val state: StateFlow<BookingsUiState> = _state.asStateFlow()
+
+    /**
+     * The in-flight load, and the stamp that decides whether it may still commit.
+     *
+     * Refresh is a button (and a pull, and an `init`), so two loads can be alive
+     * at once and can return in either order. Without this an older, slower read
+     * finishing last overwrote the fresher one it was supposed to replace — and
+     * worse, an older FAILURE could attach `error` and `offline` to a newer
+     * success, putting the offline banner over a list that had just loaded fine.
+     * Cancelling is most of the fix; the stamp closes the rest of the window,
+     * because a coroutine cancelled after its last suspension point can still
+     * reach the `update` below. Same pattern as `ArtistProfileViewModel`.
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
 
     init {
         refresh()
@@ -104,8 +123,14 @@ class BookingsViewModel @Inject constructor(
     fun selectTab(tab: BookingsTab) = _state.update { it.copy(tab = tab) }
 
     fun refresh() {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
+            // Captured BEFORE the read, so the snapshot is stamped with the
+            // account the list was actually fetched for — not with whoever
+            // happens to be signed in when the slow request finally lands.
+            val owner = viewerIdentity.currentUserId()
             try {
                 // Cancelled and disputed rows are NOT filtered out any more. They
                 // are the Past segment's whole point: a cancelled booking keeps
@@ -124,11 +149,21 @@ class BookingsViewModel @Inject constructor(
                         endMs = b.resolvedEndEpochMs(),
                     )
                 }
+                if (generation != loadGeneration) return@launch
                 val now = System.currentTimeMillis()
                 // Written on every successful read, not on a timer: the snapshot's
                 // whole job is to be the last thing we KNEW, and the honest stamp
                 // for that is the moment we learned it.
-                localStore.saveSnapshot(snapshotOf(items, now))
+                //
+                // Dropped entirely when the account that started this read is no
+                // longer the one signed in. `wipeAll()` clears the store on
+                // sign-out, but a read already in flight for the outgoing account
+                // lands afterwards — and writing it back would hand the next
+                // person to open this tab offline a stranger's venue and load-in
+                // note.
+                if (!owner.isNullOrBlank() && owner == viewerIdentity.currentUserId()) {
+                    localStore.saveSnapshot(snapshotOf(items, now, owner))
+                }
                 _state.update {
                     it.copy(
                         items = items,
@@ -140,9 +175,15 @@ class BookingsViewModel @Inject constructor(
                     )
                 }
             } catch (e: BookingRepositoryError) {
-                degrade(e)
+                degrade(e, generation)
+            } catch (e: CancellationException) {
+                // A superseded load, not a failure. Rethrowing keeps the
+                // structured-concurrency contract — and stops the catch below
+                // reporting "the read didn't complete" for a read WE cancelled,
+                // which would have put an error banner over the newer list.
+                throw e
             } catch (e: Exception) {
-                degrade(e)
+                degrade(e, generation)
             }
         }
     }
@@ -153,15 +194,27 @@ class BookingsViewModel @Inject constructor(
      * The cached list is only fetched on the failure path — reading it eagerly
      * would mean a DataStore round-trip on every successful load for a value
      * nothing renders.
+     *
+     * A snapshot belonging to another account is not merely ignored, it is
+     * deleted: leaving it on disk means the same leak waits for the next reader.
      */
-    private suspend fun degrade(error: Throwable) {
-        val cached = runCatching { localStore.loadSnapshot() }.getOrNull()
+    private suspend fun degrade(error: Throwable, generation: Int) {
+        // Checked FIRST, so a superseded load touches no storage at all. It is
+        // belt-and-braces behind `loadJob.cancel()` — the window it closes is a
+        // coroutine cancelled after its last suspension point, which still runs
+        // to its next one — and the same trade `ArtistProfileViewModel` makes.
+        if (generation != loadGeneration) return
+        val stored = runCatching { localStore.loadSnapshot() }.getOrNull()
+        val mine = stored?.takeIf { snapshotBelongsTo(it, viewerIdentity.currentUserId()) }
+        if (stored != null && mine == null) {
+            runCatching { localStore.clearSnapshot() }
+        }
         _state.update {
             it.copy(
                 isLoading = false,
                 error = error.message ?: "Couldn't load bookings.",
                 offline = isConnectivityFailure(error),
-                cached = cached,
+                cached = mine,
             )
         }
     }
@@ -223,9 +276,14 @@ class BookingsViewModel @Inject constructor(
  *
  * See [CachedBooking] for what is left out and why.
  */
-internal fun snapshotOf(items: List<BookingsListItem>, nowMs: Long): BookingsSnapshot =
+internal fun snapshotOf(
+    items: List<BookingsListItem>,
+    nowMs: Long,
+    ownerId: String,
+): BookingsSnapshot =
     BookingsSnapshot(
         cachedAtMs = nowMs,
+        ownerId = ownerId,
         items = items.map {
             CachedBooking(
                 id = it.booking.id,
