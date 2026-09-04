@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,7 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -26,36 +25,35 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
-import `in`.artistant.app.data.model.BookingDraft
-import `in`.artistant.app.designsystem.component.Avatar
+import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.InlineBanner
-import `in`.artistant.app.designsystem.component.Pill
-import `in`.artistant.app.designsystem.component.PillTone
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
+import `in`.artistant.app.designsystem.component.isTrusted
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
- * Confirm request — the last screen before a booking exists.
+ * Screen 06 — "Confirm request", the last screen before a booking exists.
  *
- * It is a review, not a form: every value on it was decided one screen back, and
- * each row's chevron pops there to change it rather than re-rendering the editor
- * inline. That keeps one source for each input, which is what stops the venue
- * being editable in two places that then disagree.
+ * The design's note is the product's whole v1 position: **no money in v1.**
+ * Checkout confirms terms and sets an expectation; it never collects a payment.
+ * So there is exactly one number on the page — the artist's quoted fee — and the
+ * accent-washed note under it says in words what the absent card field says by
+ * omission.
  *
- * v1 is a matchmaker, so there is exactly one number on this page — the artist's
- * quoted fee. No platform fee, no GST, no total, no payment step: the CTA sends a
- * REQUEST that lands `pending_confirm` for the artist to accept.
+ * It is a review, not a form: every value on it was decided one screen back. The
+ * rows lost their per-row chevrons in the redesign, which is deliberate — the
+ * light design draws them as plain terms, and with the funnel now explicitly
+ * "Step 1 of 2" the back control IS the way to change them. Six tappable rows
+ * that all did the same thing were six affordances for one action.
  */
 @Composable
 fun CheckoutScreen(
@@ -67,7 +65,9 @@ fun CheckoutScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    val gutter = dimens.component.gutter
     val haptics = rememberHaptics()
 
     LaunchedEffect(Unit) {
@@ -97,11 +97,16 @@ fun CheckoutScreen(
     // send it again. Both exits are held shut until the write resolves.
     BackHandler(enabled = state.isSubmitting) { /* swallow */ }
 
-    Box(modifier.fillMaxSize().background(colors.bg)) {
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(colors.surface),
+    ) {
         Column(Modifier.fillMaxSize()) {
-            FunnelHeader(
+            FunnelBar(
                 title = "Confirm request",
-                onBack = { if (!state.isSubmitting) onBack() },
+                subtitle = "Nothing is charged — v1 takes no payment",
+                onLeading = { if (!state.isSubmitting) onBack() },
             )
 
             val draft = state.draft
@@ -122,12 +127,12 @@ fun CheckoutScreen(
                         Modifier
                             .weight(1f)
                             .verticalScroll(rememberScrollState())
-                            .padding(horizontal = space.lg)
-                            .padding(top = space.md, bottom = space.xl),
+                            .padding(horizontal = gutter)
+                            .padding(top = space.lg, bottom = space.xl),
                         verticalArrangement = Arrangement.spacedBy(space.lg),
                     ) {
                         state.lastCreateErrorMessage?.let { message ->
-                            InlineBanner(
+                            Banner(
                                 title = message,
                                 tone = BannerTone.Failure,
                                 actionLabel = "Retry",
@@ -135,41 +140,55 @@ fun CheckoutScreen(
                             )
                         }
 
-                        IdentityHeader(
-                            name = state.artistName.ifBlank { "Artist" },
-                            packageName = draft.packageName,
-                            score = state.artist?.score,
-                        )
+                        FunnelCard {
+                            ActRow(
+                                name = state.artistName.ifBlank { "Artist" },
+                                coverUrl = state.artist?.coverUrl,
+                                trusted = state.artist?.let { isTrusted(it.score, it.gigs) } == true,
+                                lines = checkoutActMeta(draft),
+                            )
+                        }
 
                         if (state.artistHasNoPackages) {
-                            // Nothing here can be confirmed: a package-less
-                            // artist has no tier and no fixed price, so sending
-                            // would file a request against a number they never
-                            // quoted. Point at the path that does work instead of
-                            // leaving a dead button under a blank summary.
+                            // Nothing here can be confirmed: a package-less artist
+                            // has no tier and no fixed price, so sending would file
+                            // a request against a number they never quoted. Point
+                            // at the path that does work instead of leaving a dead
+                            // button under a blank summary.
                             CustomQuoteNotice()
                         } else {
-                            ReviewRows(draft = draft, onEdit = onBack)
-                            FeeRow(draft.feeInr)
+                            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+                                Text(
+                                    "Your request",
+                                    style = AppTheme.type.sectionTitle,
+                                    color = colors.ink,
+                                )
+                                checkoutReviewRows(draft).forEach { row ->
+                                    TermRow(label = row.label, value = row.value)
+                                }
+                                HRule(Modifier.padding(vertical = space.xs))
+                                TermRow(
+                                    label = "Artist fee",
+                                    value = formatInr(draft.feeInr),
+                                    emphasis = true,
+                                )
+                            }
+                            NoteBlock(
+                                "No card, no deposit. The fee is what you agree with the artist " +
+                                    "and settle directly — Artistant takes nothing in this version.",
+                            )
+                            WhatHappensNext()
                         }
                     }
 
                     CtaBar {
-                        Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                            Text(
-                                CHECKOUT_EXPECTATION,
-                                style = AppTheme.type.footnote,
-                                color = colors.ink3,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            FunnelCta(
-                                text = if (state.isSubmitting) "Sending request…" else "Send request",
-                                onClick = viewModel::sendRequest,
-                                fullWidth = true,
-                                enabled = !state.blocked,
-                            )
-                        }
+                        PrimaryButton(
+                            text = if (state.isSubmitting) "Sending request…" else "Send request",
+                            onClick = viewModel::sendRequest,
+                            fullWidth = true,
+                            enabled = !state.blocked,
+                        )
+                        CtaCaption("We recommend asking at least 3 artists")
                     }
                 }
             }
@@ -183,131 +202,42 @@ fun CheckoutScreen(
 }
 
 /**
- * Who this request is going to, which tier, and how they score.
+ * What the client gets for tapping Send — the design's closing block.
  *
- * Read-only, unlike everything below it: the artist and their score are not
- * things this screen can change, and giving them a chevron would suggest
- * otherwise.
+ * A card rather than another note: it is not a term of the deal, it is what
+ * happens next, and the two blocks have to be told apart at a glance on a page
+ * whose one accent has already been spent on the fee note above.
  */
 @Composable
-private fun IdentityHeader(name: String, packageName: String, score: Int?) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(space.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Avatar(name = name, size = AppTheme.dimens.size.avatarMd)
-        Column(Modifier.weight(1f)) {
-            Text(
-                name,
-                style = AppTheme.type.headline,
-                color = colors.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                packageName,
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // Self-hiding rather than showing a zero: an artist we couldn't hydrate
-        // has no score to report, and "0" is a claim about them.
-        score?.let {
-            Pill(
-                it.toString(),
-                // Solid, not washed: this is the only chip on the screen and the
-                // reference build fills it. A soft chip here read as decoration
-                // beside the artist's name rather than as their score.
-                tone = PillTone.BrandSolid,
-                modifier = Modifier.semantics {
-                    contentDescription = "Bookability score $it"
-                },
-            )
-        }
-    }
-}
-
-/**
- * The decided inputs, one collapsed line each, every one of them a way back to
- * the form that owns it.
- */
-@Composable
-private fun ReviewRows(draft: BookingDraft, onEdit: () -> Unit) {
-    Column {
-        val rows = checkoutReviewRows(draft)
-        rows.forEachIndexed { index, row ->
-            if (index == 0) HRule()
-            ReviewRow(row, onEdit)
-            HRule()
-        }
-    }
-}
-
-@Composable
-private fun ReviewRow(row: CheckoutReviewRow, onEdit: () -> Unit) {
+private fun WhatHappensNext() {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onEdit)
-            .padding(vertical = dimens.space.md)
-            .semantics(mergeDescendants = true) {
-                contentDescription = "${row.label}: ${row.value}. Edit"
-            },
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Muted label left, value hard right — the same row anatomy the booking
-        // detail's terms use, so the request reads identically before and after
-        // it is sent.
-        Text(row.label, style = AppTheme.type.footnote, color = colors.ink3)
+    FunnelCard {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        ) {
+            Icon(
+                Icons.Filled.Schedule,
+                contentDescription = null,
+                tint = colors.ink,
+                modifier = Modifier.size(dimens.size.iconLg),
+            )
+            Text(
+                "What happens next",
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = colors.ink,
+            )
+        }
         Text(
-            row.value,
-            style = AppTheme.type.callout,
-            color = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f),
-        )
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            // The row's own semantics already announce "Edit"; the chevron is a
-            // glyph, not a second thing to read.
-            contentDescription = null,
-            tint = colors.ink3,
-            modifier = Modifier.size(dimens.size.iconMd),
-        )
-    }
-}
-
-/**
- * The one number on the page. Brand-tinted mono, because it is the figure the
- * client is weighing and the only place this screen asks for a decision about
- * money — v1 takes none of it.
- */
-@Composable
-private fun FeeRow(feeInr: Int) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        Modifier.fillMaxWidth().padding(top = space.sm),
-        horizontalArrangement = Arrangement.spacedBy(space.md),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Artist fee", style = AppTheme.type.headline, color = colors.ink)
-        Spacer(Modifier.weight(1f))
-        Text(
-            formatInr(feeInr),
-            style = AppTheme.type.monoHero,
-            color = colors.accentInk,
-            maxLines = 1,
+            // No response-window promise: nothing on this path enforces one
+            // (`expires_at` belongs to the gig-request flow, not to a booking),
+            // so "usually within an hour" is the artist's own published reply
+            // speed being repeated, not a guarantee we can keep. It is left out.
+            "$CHECKOUT_EXPECTATION Accepting opens a chat thread with them.",
+            style = AppTheme.type.subtitle,
+            color = colors.ink2,
+            modifier = Modifier.padding(top = dimens.space.sm),
         )
     }
 }
@@ -325,7 +255,7 @@ private fun CustomQuoteNotice() {
         Text(
             "They don't list fixed packages — go back and use \"Request a quote\" to tell them " +
                 "about your event and get a price.",
-            style = AppTheme.type.footnote,
+            style = AppTheme.type.subtitle,
             color = colors.ink3,
         )
     }
@@ -348,7 +278,7 @@ private fun NarratedWait(copy: CheckoutWaitCopy) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(colors.bg)
+            .background(colors.surface)
             // Swallows taps for the duration. An opaque fill hides the CTA but
             // does not consume touches on its own — without this the Send button
             // underneath is still tappable through the overlay, which is the
@@ -363,16 +293,15 @@ private fun NarratedWait(copy: CheckoutWaitCopy) {
             verticalArrangement = Arrangement.spacedBy(space.sm),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Editorial serif — this is a moment in the flow, not chrome.
             Text(
                 copy.title,
-                style = AppTheme.type.displaySub,
+                style = AppTheme.type.displaySmall,
                 color = colors.ink,
                 textAlign = TextAlign.Center,
             )
             Text(
                 copy.subtitle,
-                style = AppTheme.type.callout,
+                style = AppTheme.type.body,
                 color = colors.ink3,
                 textAlign = TextAlign.Center,
             )
