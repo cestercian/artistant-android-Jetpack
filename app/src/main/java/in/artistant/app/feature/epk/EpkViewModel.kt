@@ -1303,14 +1303,25 @@ class EpkViewModel @Inject constructor(
      * frozen UI, so the whole body moves to IO rather than trusting a repository
      * two layers down to switch for us.
      */
-    fun onPhotoPicked(uri: Uri) {
+    fun onPhotoPicked(uri: Uri) = addPhoto(uri, ownsSource = false)
+
+    /**
+     * A photo from OUR camera, whose file is ours to unlink once it is staged.
+     *
+     * Separate from [onPhotoPicked] because ownership differs and nothing about
+     * the URI says so — see [WizardMediaCache.adoptPhoto]. The call site that
+     * minted the file is the one that knows, so it is the one that says.
+     */
+    fun onPhotoCaptured(uri: Uri) = addPhoto(uri, ownsSource = true)
+
+    private fun addPhoto(uri: Uri, ownsSource: Boolean) {
         val userId = session.currentUserId ?: return
         if (!canAddPhoto(_state.value.photos.size, _state.value.uploadingPhoto)) return
         viewModelScope.launch {
             _state.update { it.copy(uploadingPhoto = true, saveError = null) }
             val result = saveCatching {
                 withContext(Dispatchers.IO) {
-                    val pending = mediaCache.adoptPhoto(uri)
+                    val pending = mediaCache.adoptPhoto(uri, consumeSource = ownsSource)
                     val file = pending.file(mediaCache)
                     try {
                         media.uploadPhoto(file, userId, position = null)

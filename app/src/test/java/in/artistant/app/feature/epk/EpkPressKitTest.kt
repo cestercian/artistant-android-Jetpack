@@ -400,6 +400,40 @@ class EpkPressKitTest {
         assertNull(linkLabelProblem("Bandcamp"))
     }
 
+    // ── Camera captures are temp files somebody has to delete ────────────────
+
+    /**
+     * A capture that survives to the next visit is one the process died holding,
+     * so it is an orphan by definition — nothing outside that dead process ever
+     * knew its name.
+     */
+    @Test
+    fun everyStaleCaptureIsSwept() {
+        val onDisk = listOf("a.jpg", "b.jpg", "c.jpg")
+
+        assertEquals(onDisk, orphanCaptureFiles(onDisk, keep = null))
+    }
+
+    /**
+     * The one exception, and the one that matters: a capture still IN FLIGHT
+     * across a recreation. `cameraUri` is `rememberSaveable`, so it is restored
+     * during composition and the sweep sees it — otherwise the sweep would
+     * delete the photo the artist is at that moment taking.
+     */
+    @Test
+    fun aCaptureStillInFlightIsNotSwept() {
+        val onDisk = listOf("a.jpg", "inflight.jpg", "c.jpg")
+
+        assertEquals(listOf("a.jpg", "c.jpg"), orphanCaptureFiles(onDisk, keep = "inflight.jpg"))
+    }
+
+    /** An empty directory is the ordinary case and sweeps to nothing. */
+    @Test
+    fun anEmptyCaptureDirSweepsNothing() {
+        assertTrue(orphanCaptureFiles(emptyList(), keep = null).isEmpty())
+        assertTrue(orphanCaptureFiles(emptyList(), keep = "inflight.jpg").isEmpty())
+    }
+
     // ── A failed media read is not "you have no cover" ───────────────────────
 
     // `directUrl` because `publicUrl` is derived — it prefers a direct URL and

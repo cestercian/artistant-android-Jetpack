@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.epk
 
 import android.Manifest
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -63,6 +64,9 @@ import `in`.artistant.app.platform.media.WizardMediaCache
 import `in`.artistant.app.platform.media.rememberSamplePlayer
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import timber.log.Timber
 
 /**
  * The press kit — design screens **23** (filled), **87** (empty), **76**
@@ -128,7 +132,17 @@ fun EpkScreen(
     // the photo sitting on disk under a name nothing remembers.
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) cameraUri?.let { viewModel.onPhotoPicked(Uri.parse(it)) }
+        val pending = cameraUri
+        cameraUri = null
+        // The capture is a temp file we minted, and this is the only code that
+        // knows it. `onPhotoCaptured` copies it into the staging cache and
+        // unlinks it; a cancel or a camera failure unlinks it here. Without
+        // either, every shutter press and every backed-out camera left a
+        // multi-megabyte JPEG in `cacheDir/artist-epk` that nothing referenced
+        // and nothing swept — the OS clears the cache dir only under storage
+        // pressure, which is late.
+        if (pending == null) return@rememberLauncherForActivityResult
+        if (ok) viewModel.onPhotoCaptured(Uri.parse(pending)) else deleteCapture(context, pending)
     }
     val launchCamera = {
         val file = File(context.cacheDir, "$CAMERA_DIR/${UUID.randomUUID()}.jpg")
@@ -136,6 +150,15 @@ fun EpkScreen(
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         cameraUri = uri.toString()
         takePicture.launch(uri)
+    }
+
+    // Whatever the last run left behind. A capture that survives to here is one
+    // the process died holding — killed behind the camera activity, or a result
+    // the registry never redelivered — so it is an orphan by definition. The one
+    // exception is a capture still IN FLIGHT across a recreation: `cameraUri` is
+    // `rememberSaveable`, so it is restored during composition, before this runs.
+    LaunchedEffect(Unit) {
+        sweepCaptureOrphans(context, keep = cameraUri)
     }
     val requestCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         // A refusal has to say something. After the second one the OS stops
@@ -691,6 +714,40 @@ internal fun EpkUiState.sectionRows(): List<EpkSectionRow> {
 
 /** Where a camera capture lands before it is adopted into the media cache. */
 private const val CAMERA_DIR = "artist-epk"
+
+/** Unlink one camera capture, by the FileProvider URI we handed the camera. */
+private fun deleteCapture(context: Context, uri: String) {
+    runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
+        .onFailure { Timber.w(it, "Camera capture delete failed") }
+}
+
+/**
+ * Delete every stale capture, keeping the one a launch is still waiting on.
+ *
+ * Off the main thread: this touches the filesystem, and a directory left to
+ * accumulate can hold a dozen multi-megabyte JPEGs.
+ */
+private suspend fun sweepCaptureOrphans(context: Context, keep: String?) {
+    withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, CAMERA_DIR)
+        val keepName = keep?.let { Uri.parse(it).lastPathSegment }
+        val files = dir.listFiles().orEmpty().map { it.name }
+        orphanCaptureFiles(files, keepName).forEach { name ->
+            runCatching { File(dir, name).delete() }
+                .onFailure { Timber.w(it, "Camera capture sweep failed: %s", name) }
+        }
+    }
+}
+
+/**
+ * Which staged captures are orphans — everything but the one still in flight.
+ *
+ * Split out and pure for the same reason `orphanWizardMediaFiles` is: the rule is
+ * one line and the consequence of getting it wrong is deleting the photo the
+ * artist is in the middle of taking.
+ */
+internal fun orphanCaptureFiles(onDisk: List<String>, keep: String?): List<String> =
+    onDisk.filterNot { it == keep }
 
 /** What the library picker offers for a cover or a gallery photo. */
 private const val PHOTO_MIME = "image/*"
