@@ -104,6 +104,46 @@ class SignupStepTest {
     }
 
     @Test
+    fun `an entry past the role step meets the unpaid pledge first`() {
+        // The gate's signed-in-but-incomplete tier asks for `.Profile`. The pledge is not a
+        // step — it is what `.Role` renders while the flag is unset — so an entry that lands
+        // straight on `.Profile` is an account that completes onboarding never having been
+        // asked. Every entry after `.Role` is held at `.Role`.
+        assertEquals(
+            SignupStep.Role,
+            entryStep(SignupStep.Profile, SignupMode.Signup, communityAgreed = false),
+        )
+        listOf(SignupStep.Auth, SignupStep.Code, SignupStep.Notif, SignupStep.Done).forEach { step ->
+            assertEquals(
+                "$step should be held at the pledge",
+                SignupStep.Role,
+                entryStep(step, SignupMode.Signup, communityAgreed = false),
+            )
+        }
+    }
+
+    @Test
+    fun `a paid pledge leaves every entry exactly where the gate put it`() {
+        SignupStep.entries.forEach { step ->
+            assertEquals(step, entryStep(step, SignupMode.Signup, communityAgreed = true))
+            assertEquals(step, entryStep(step, SignupMode.Login, communityAgreed = true))
+        }
+    }
+
+    @Test
+    fun `the pledge never displaces a fresh signup or a login`() {
+        // `.Welcome` and `.Role` are at or before the pledge, so the walk from the top is
+        // untouched — it already meets screen 27 on its way through `.Role`.
+        assertEquals(SignupStep.Welcome, entryStep(SignupStep.Welcome, SignupMode.Signup, false))
+        assertEquals(SignupStep.Role, entryStep(SignupStep.Role, SignupMode.Signup, false))
+        // Login carries no `.Role` at all: a returning user is not re-pledged, and nothing
+        // in that order can be redirected to a step it does not contain.
+        SignupStep.entries.forEach { step ->
+            assertEquals(step, entryStep(step, SignupMode.Login, communityAgreed = false))
+        }
+    }
+
+    @Test
     fun `only the handle step draws a progress strip, and it reads 04 of 06`() {
         // The extracted design puts the strip on screens 29 and 90 and nowhere else: 11, 12,
         // 27, 28 and 119 all render an empty header middle, and 13 and 30 have no header.
