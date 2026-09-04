@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -27,6 +28,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.component.LightTabAction
 import `in`.artistant.app.designsystem.component.LightTabBar
@@ -53,14 +55,23 @@ import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
 import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
-import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.profile.AccessibilityScreen
+import `in`.artistant.app.feature.profile.AccessibilityViewModel
+import `in`.artistant.app.feature.profile.AccountScreen
+import `in`.artistant.app.feature.profile.DataExportScreen
+import `in`.artistant.app.feature.profile.DeleteAccountScreen
+import `in`.artistant.app.feature.profile.DevicesScreen
+import `in`.artistant.app.feature.profile.LanguageScreen
+import `in`.artistant.app.feature.profile.NotificationSettingsScreen
 import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.score.ScoreHistoryScreen
 import `in`.artistant.app.feature.system.ActivityScreen
+import `in`.artistant.app.feature.system.AppStore
 import `in`.artistant.app.feature.system.FeedbackScreen
 import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.ToastViewModel
+import `in`.artistant.app.feature.system.WhatsNewViewModel
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -82,6 +93,11 @@ private enum class ArtistTab(val route: String, val label: String, val icon: Ima
 @Composable
 fun ArtistTabsScaffold() {
     val nav = rememberNavController()
+    val accessibilityViewModel: AccessibilityViewModel = hiltViewModel()
+    // Accessibility -> "Always show labels" (design 129). Read here rather than inside
+    // `LightTabBar` so the design-system component stays free of Hilt and of this app's
+    // preference store; the host owns the preference, the bar just draws what it is told.
+    val a11ySettings by accessibilityViewModel.state.collectAsStateWithLifecycle()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ArtistTab.entries.any { it.route == route }
@@ -94,6 +110,11 @@ fun ArtistTabsScaffold() {
     // the handle a destination raises a toast with. There is no rating prompt on
     // this graph — it fires on a review the CLIENT leaves.
     val toasts: ToastViewModel = hiltViewModel()
+    // Screen 137, for the account list's "What's new" row — see [ClientTabsScaffold] for why
+    // this resolves the same instance the root's `WhatsNewHost` draws.
+    val whatsNew: WhatsNewViewModel = hiltViewModel()
+    // The Play listing, for the same list's "Rate Artistant" row (138).
+    val context = LocalContext.current
 
     // One-shot, for both reasons spelled out on [ClientTabsScaffold] and
     // [TabRouter]: a recreation must not re-apply a stale tab and pop the restored
@@ -147,6 +168,7 @@ fun ArtistTabsScaffold() {
                 // It goes to the availability editor: the artist-side verb that
                 // actually changes what the market can see is "open a date", and
                 // that editor already exists. Not a new flow — a shortcut to one.
+                showLabels = a11ySettings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Availability",
                     icon = Icons.Filled.PlayArrow,
@@ -192,14 +214,63 @@ fun ArtistTabsScaffold() {
                     )
                 }
             }
-            composable(ArtistNavRoutes.PROFILE) {
+            // Design 69 — the artist's half of the ONE account list (47 / 69). Same screen the
+            // client reaches from the Profile gear; the ARTIST group of rows is injected by
+            // role rather than forked into a second implementation, which is the design's own
+            // note on this pair and the reason artist deletion is reachable at all.
+            composable(ArtistNavRoutes.ACCOUNT) {
                 TabPane(inner) {
-                    ProfileScreen(
+                    AccountScreen(
+                        onBack = { nav.popBackStack() },
                         onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                         onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
-                        onBack = { nav.popBackStack() },
-                        onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
+                        onSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
+                        onHelpCentre = { nav.navigate(ArtistNavRoutes.HELP_CENTRE) },
+                        onFeedback = { nav.navigate(ArtistNavRoutes.FEEDBACK) },
+                        onActivity = { nav.navigate(ArtistNavRoutes.ACTIVITY) },
+                        // Not a route: screen 137 is presented by the root's host, and this is
+                        // the root-scoped ViewModel that host draws — see [SystemRoutes].
+                        onWhatsNew = whatsNew::showOnDemand,
+                        onRateApp = { AppStore.openListing(context) },
+                        onNotifications = { nav.navigate(ArtistNavRoutes.NOTIFICATIONS) },
+                        onLanguage = { nav.navigate(ArtistNavRoutes.LANGUAGE) },
+                        onAccessibility = { nav.navigate(ArtistNavRoutes.ACCESSIBILITY) },
+                        onDevices = { nav.navigate(ArtistNavRoutes.DEVICES) },
+                        onDataExport = { nav.navigate(ArtistNavRoutes.DATA_EXPORT) },
+                        onDeleteAccount = { nav.navigate(ArtistNavRoutes.DELETE_ACCOUNT) },
+                        onSubscription = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.NOTIFICATIONS) {
+                TabPane(inner) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.ACCESSIBILITY) {
+                TabPane(inner) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.LANGUAGE) {
+                TabPane(inner) { LanguageScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.DEVICES) {
+                TabPane(inner) { DevicesScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.DATA_EXPORT) {
+                TabPane(inner) {
+                    DataExportScreen(
+                        onBack = { nav.popBackStack() },
+                        onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.DELETE_ACCOUNT) {
+                TabPane(inner) {
+                    DeleteAccountScreen(
+                        onBack = { nav.popBackStack() },
+                        onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
+                        // Nothing to navigate TO: the account is gone, so the cleared session
+                        // propagates to the root gate and replaces this whole graph.
+                        onFinished = {},
                     )
                 }
             }
@@ -223,8 +294,10 @@ fun ArtistTabsScaffold() {
                         onBack = { nav.popBackStack() },
                         // Account settings, where the name lives. A pushed
                         // destination on this graph rather than a tab, so it
-                        // stacks like every other push.
-                        onFixProfile = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                        // stacks like every other push. `PROFILE` was retired by
+                        // section AC — `ACCOUNT` is the same surface, now the
+                        // real settings list (design 69).
+                        onFixProfile = { nav.navigate(ArtistNavRoutes.ACCOUNT) },
                     )
                 }
             }
@@ -380,10 +453,9 @@ fun ArtistTabsScaffold() {
                         // instead: a reasonable-looking place, and the wrong one,
                         // because the screen an artist opens to work on their own
                         // profile is the screen they go to looking for their own
-                        // account. `ProfileScreen` renames itself "Account" and
-                        // grows a back control when it is pushed rather than
-                        // rooted, so the artist gets the right chrome for free.
-                        onOpenAccount = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                        // account. `AccountScreen` is that list, and it is the
+                        // same one the client reaches from the Profile gear.
+                        onOpenAccount = { nav.navigate(ArtistNavRoutes.ACCOUNT) },
                     )
                 }
             }

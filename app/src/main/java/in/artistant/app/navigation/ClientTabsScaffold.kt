@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import `in`.artistant.app.designsystem.component.LightTabAction
 import `in`.artistant.app.designsystem.component.LightTabBar
 import `in`.artistant.app.designsystem.component.LightTabItem
@@ -69,14 +70,25 @@ import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
 import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
+import `in`.artistant.app.feature.profile.AccessibilityScreen
+import `in`.artistant.app.feature.profile.AccessibilityViewModel
+import `in`.artistant.app.feature.profile.AccountScreen
+import `in`.artistant.app.feature.profile.DataExportScreen
+import `in`.artistant.app.feature.profile.DeleteAccountScreen
+import `in`.artistant.app.feature.profile.DevicesScreen
+import `in`.artistant.app.feature.profile.LanguageScreen
+import `in`.artistant.app.feature.profile.NotificationSettingsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.system.ActivityScreen
+import `in`.artistant.app.feature.system.AppStore
 import `in`.artistant.app.feature.system.FeedbackScreen
 import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.RatePromptHost
 import `in`.artistant.app.feature.system.RatePromptViewModel
 import `in`.artistant.app.feature.system.ToastViewModel
+import `in`.artistant.app.feature.system.WhatsNewViewModel
+import `in`.artistant.app.ui.RootViewModel
 
 /**
  * Client navigation: five top-level routes, four of which are glyphs in the bar.
@@ -117,6 +129,16 @@ private const val ARTIST_PROFILE_ROUTE = "artist/{artistId}"
 @Composable
 fun ClientTabsScaffold() {
     val nav = rememberNavController()
+    // The ACTIVITY's RootViewModel, not a new one: this composable is called directly from
+    // `ArtistantNavHost`, above any NavHost, so `LocalViewModelStoreOwner` here is still the
+    // activity and `hiltViewModel()` resolves the same instance the gate is driven by. Profile's
+    // "Switch to artist mode" needs its `retryRouting` — see that destination.
+    val rootViewModel: RootViewModel = hiltViewModel()
+    val accessibilityViewModel: AccessibilityViewModel = hiltViewModel()
+    // Accessibility -> "Always show labels" (design 129). Read here rather than inside
+    // `LightTabBar` so the design-system component stays free of Hilt and of this app's
+    // preference store; the host owns the preference, the bar just draws what it is told.
+    val a11ySettings by accessibilityViewModel.state.collectAsStateWithLifecycle()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ClientTab.entries.any { it.route == route }
@@ -131,6 +153,16 @@ fun ClientTabsScaffold() {
     // Screen 138. Scaffold-scoped so the booking-detail destination that arms it
     // and the sheet that draws it are the same instance.
     val ratePrompt: RatePromptViewModel = hiltViewModel()
+    // Screen 137, for the account list's "What's new" row. The SAME instance the root's
+    // `WhatsNewHost` collects: this composable sits above any NavHost, so
+    // `LocalViewModelStoreOwner` is still the activity — exactly like `rootViewModel` above.
+    // A `hiltViewModel()` inside a destination would resolve against that destination's
+    // back-stack entry instead, and the sheet would be asked to open on a ViewModel nobody
+    // is drawing.
+    val whatsNew: WhatsNewViewModel = hiltViewModel()
+    // Screen 138's other half — the row that goes to the listing without waiting for a
+    // completed booking to earn the prompt.
+    val context = LocalContext.current
 
     // Push deep links: flip tab then push the detail/chat route.
     //
@@ -195,6 +227,7 @@ fun ClientTabsScaffold() {
                 // nothing to compose until an artist is picked — the funnel
                 // starts on a profile. A dedicated "new booking" flow is a
                 // section-PR decision, not a P1 invention.
+                showLabels = a11ySettings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Find an artist",
                     icon = Icons.Filled.Add,
@@ -226,9 +259,11 @@ fun ClientTabsScaffold() {
                     DiscoverScreen(
                         onArtistClick = { id -> nav.navigate("artist/$id") },
                         onOpenSearch = { navigateToTab(nav, ClientTab.Search.route) },
-                        onOpenSaved = {
-                            nav.navigate(ClientNavRoutes.artistList(ArtistListKind.Saved.raw))
-                        },
+                        // The header bell (design 02) — screen 123, which until
+                        // now was registered on both graphs with nothing
+                        // pointing at it. Saved kept its Profile row (26) and is
+                        // not lost with the heart that used to sit here.
+                        onOpenActivity = { nav.navigate(ClientNavRoutes.ACTIVITY) },
                     )
                 }
             }
@@ -295,10 +330,79 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Profile.route) {
                 TabPane(inner) {
                     ProfileScreen(
+                        onAccount = { nav.navigate(ClientNavRoutes.ACCOUNT) },
+                        // Profile is Bookings' front door: the light bar dropped the calendar
+                        // glyph, so this row and the booking cards are the only ways in.
+                        onBookings = { navigateToTab(nav, ClientTab.Bookings.route) },
+                        onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
+                        onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
+                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
+                        onSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
+                        // The role write lands on the server, but the root gate only re-reads
+                        // the profile when the SESSION changes — which a role switch is not.
+                        // `RootViewModel` is resolved from the activity's store here (this
+                        // composable sits above the NavHost, so `hiltViewModel()` returns the
+                        // same instance `ArtistantNavHost` created), and its `retryRouting` is
+                        // the nudge that moves the gate Client → Artist without a cold start.
+                        onRoleSwitched = rootViewModel::retryRouting,
+                    )
+                }
+            }
+            composable(ClientNavRoutes.ACCOUNT) {
+                TabPane(inner) {
+                    AccountScreen(
+                        onBack = { nav.popBackStack() },
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                         onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
-                        onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
-                        onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
+                        onSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
+                        onHelpCentre = { nav.navigate(ClientNavRoutes.HELP_CENTRE) },
+                        onFeedback = { nav.navigate(ClientNavRoutes.FEEDBACK) },
+                        onActivity = { nav.navigate(ClientNavRoutes.ACTIVITY) },
+                        // Not a route: screen 137 is presented by the root's host, and this is
+                        // the root-scoped ViewModel that host draws — see [SystemRoutes].
+                        onWhatsNew = whatsNew::showOnDemand,
+                        onRateApp = { AppStore.openListing(context) },
+                        onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
+                        onLanguage = { nav.navigate(ClientNavRoutes.LANGUAGE) },
+                        onAccessibility = { nav.navigate(ClientNavRoutes.ACCESSIBILITY) },
+                        onDevices = { nav.navigate(ClientNavRoutes.DEVICES) },
+                        onDataExport = { nav.navigate(ClientNavRoutes.DATA_EXPORT) },
+                        onDeleteAccount = { nav.navigate(ClientNavRoutes.DELETE_ACCOUNT) },
+                        onSubscription = { nav.navigate(ClientNavRoutes.PAYWALL) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.NOTIFICATIONS) {
+                TabPane(inner) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.ACCESSIBILITY) {
+                TabPane(inner) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.LANGUAGE) {
+                TabPane(inner) { LanguageScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.DEVICES) {
+                TabPane(inner) { DevicesScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.DATA_EXPORT) {
+                TabPane(inner) {
+                    DataExportScreen(
+                        onBack = { nav.popBackStack() },
+                        // The scripted support assistant, not the safety centre: a failed
+                        // export is a support question, and 34 is the screen that takes one.
+                        onContactSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.DELETE_ACCOUNT) {
+                TabPane(inner) {
+                    DeleteAccountScreen(
+                        onBack = { nav.popBackStack() },
+                        onContactSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
+                        // Nothing to navigate TO: the account is gone, so the cleared session
+                        // propagates to the root gate and replaces this whole graph with the
+                        // signup flow. Popping the stack here would only race that.
+                        onFinished = {},
                     )
                 }
             }

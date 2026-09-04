@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -77,12 +78,13 @@ import `in`.artistant.app.feature.search.SearchSeedRequest
 fun DiscoverScreen(
     onArtistClick: (artistId: String) -> Unit,
     onOpenSearch: () -> Unit,
-    onOpenSaved: () -> Unit,
+    onOpenActivity: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: DiscoverViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val savedIds by viewModel.savedIds.collectAsStateWithLifecycle()
+    val hasUnread by viewModel.hasUnreadActivity.collectAsStateWithLifecycle()
     val dimens = AppTheme.dimens
     val gutter = dimens.component.gutter
 
@@ -163,18 +165,22 @@ fun DiscoverScreen(
                             subtitle = state.headerSubtitle,
                             modifier = Modifier.padding(horizontal = gutter),
                             trailing = {
-                                // The design draws a notification bell here. The
-                                // shared schema has no notifications table (and
-                                // the Notifications screen belongs to another
-                                // section), so a bell would be a control with
-                                // nowhere to go and a dot with nothing to count.
-                                // Saved is the real destination this header can
-                                // offer — screen 32, one tap from the feed the
-                                // hearts are set on.
+                                // The bell the design draws (02), now that it has
+                                // somewhere to go: section SH shipped screen 123,
+                                // and the dot counts the pushes THIS DEVICE
+                                // received — the log Activity itself reads. Saved
+                                // used to borrow this slot; it keeps its own row
+                                // on Profile (26), which is where the design puts
+                                // it.
                                 IconCircle(
-                                    icon = Icons.Filled.FavoriteBorder,
-                                    contentDescription = "Saved artists",
-                                    onClick = onOpenSaved,
+                                    icon = Icons.Outlined.Notifications,
+                                    contentDescription = if (hasUnread) {
+                                        "Activity, unread notifications"
+                                    } else {
+                                        "Activity"
+                                    },
+                                    onClick = onOpenActivity,
+                                    dot = hasUnread,
                                 )
                             },
                         )

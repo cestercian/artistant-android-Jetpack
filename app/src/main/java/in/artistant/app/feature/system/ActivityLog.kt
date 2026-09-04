@@ -97,6 +97,15 @@ fun matchesFilter(entry: ActivityEntry, filter: ActivityFilter): Boolean = when 
 }
 
 /**
+ * How many of [entries] the account has not read.
+ *
+ * The bell on Discover (screen 02) draws its accent dot off this, and screen
+ * 123's own header asks the same question — so the count is one function rather
+ * than two `any { !it.read }`s that could drift apart about what "unread" means.
+ */
+fun unreadActivityCount(entries: List<ActivityEntry>): Int = entries.count { !it.read }
+
+/**
  * Prepend [entry] and cap the log at [limit].
  *
  * Newest first, because that is the order the screen reads in and sorting on

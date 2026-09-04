@@ -43,9 +43,25 @@ class EntitlementStore {
     }
 }
 
+/**
+ * Everything design screens 25 / 91 / 92 / 93 are drawn from.
+ *
+ * Note there is no `state` field: which of the four screens shows is DERIVED by [proStateFor]
+ * from the three facts below, so it cannot be set to something billing disagrees with.
+ */
 data class PaywallUiState(
     val isArtist: Boolean = true,
+    /** The first store query is still out. */
+    val loading: Boolean = true,
+    /** A purchase or restore is in flight. */
     val working: Boolean = false,
-    val productPrice: String? = null,
+    /** Play Billing says there is an active subscription. */
+    val entitled: Boolean = false,
+    /** A purchase flow finished and the entitlement has not landed — a deferred payment. */
+    val awaitingEntitlement: Boolean = false,
+    /** The formatted price from Play, or null when the store could not answer. */
+    val price: String? = null,
     val error: String? = null,
-)
+) {
+    val proState: ProState get() = proStateFor(entitled, awaitingEntitlement, price)
+}
