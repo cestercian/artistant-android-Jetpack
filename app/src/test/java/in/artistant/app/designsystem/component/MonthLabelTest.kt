@@ -142,15 +142,17 @@ class MonthLabelTest {
     }
 
     @Test
-    fun `the selected-day heading names the weekday, the month and the date`() {
-        // The heading a calendar tap puts above its filtered list. It is the only
-        // thing on screen saying which day the list narrowed to, so the format is
+    fun `the selected-day heading names the weekday, the date and the month`() {
+        // The heading a calendar tap puts above its filtered list, in the light
+        // design's own words (screen 78: "Sat 12 October"). It is the only thing
+        // on screen saying which day the list narrowed to, so the format is
         // load-bearing: weekday first (that is what a user picking a gig date is
-        // actually checking), then month and day, no year — the year is already
-        // in the month header directly above the grid.
-        assertEquals("Wednesday, August 12", selectedDayLabel(2026, 7, 12))
-        assertEquals("Thursday, January 1", selectedDayLabel(2026, 0, 1))
-        assertEquals("Thursday, December 31", selectedDayLabel(2026, 11, 31))
+        // actually checking), abbreviated so it cannot crowd the "2 events" count
+        // sharing its row, then the date and the spelled-out month — and no year,
+        // which the month header directly above the grid already carries.
+        assertEquals("Wed 12 August", selectedDayLabel(2026, 7, 12))
+        assertEquals("Thu 1 January", selectedDayLabel(2026, 0, 1))
+        assertEquals("Thu 31 December", selectedDayLabel(2026, 11, 31))
     }
 
     @Test
@@ -158,7 +160,7 @@ class MonthLabelTest {
         // Feb 29 exists in 2028 and not in 2026; the helper clears the calendar
         // before setting the date so nothing carries over from "now", which is
         // what would otherwise make this drift by a day depending on the clock.
-        assertEquals("Tuesday, February 29", selectedDayLabel(2028, 1, 29))
+        assertEquals("Tue 29 February", selectedDayLabel(2028, 1, 29))
     }
 
     // --- the month dropdown --------------------------------------------------
@@ -186,7 +188,7 @@ class MonthLabelTest {
         Locale.setDefault(Locale.forLanguageTag("hi-IN"))
         assertEquals("August", monthNames[Calendar.AUGUST])
         assertEquals("August 2026", monthLabelFromEpoch(firstOfMonth(2026, Calendar.AUGUST)))
-        assertEquals("Wednesday, August 12", selectedDayLabel(2026, Calendar.AUGUST, 12))
+        assertEquals("Wed 12 August", selectedDayLabel(2026, Calendar.AUGUST, 12))
         assertEquals("August 2026", monthLabelFromDateLabel("Wed, Aug 12, 2026"))
     }
 

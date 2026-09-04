@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -94,6 +95,34 @@ fun AccentNote(
             )
         }
     }
+}
+
+/**
+ * The same block with its content left to the caller.
+ *
+ * [AccentNote] is the shape this wash is nearly always in — a glyph and a
+ * paragraph — but not always: screen 89's profile nudge is a title, a subtitle,
+ * a dark "Go" pill and a dismiss cross inside the identical frame. Rebuilding
+ * the fill and the rim at that call site would be two more places for the wash
+ * to drift, so the frame is what is shared and the arrangement is what varies.
+ */
+@Composable
+fun AccentNoteCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.buttonLg)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.accent.copy(alpha = FILL_ALPHA))
+            .border(dimens.size.hairline, colors.accent.copy(alpha = STROKE_ALPHA), shape)
+            .padding(horizontal = dimens.space.md, vertical = dimens.space.md),
+        content = content,
+    )
 }
 
 /** The accent as a wash — readable ink over it, still obviously the accent. */

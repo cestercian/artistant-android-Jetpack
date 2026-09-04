@@ -13,6 +13,8 @@ import `in`.artistant.app.platform.storage.KeyValueStore
 import `in`.artistant.app.platform.auth.AuthGateway
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.SignupConsentStore
+import `in`.artistant.app.feature.bookings.BookingsLocalStore
+import `in`.artistant.app.feature.bookings.DataStoreBookingsLocalStore
 import `in`.artistant.app.feature.search.DataStoreSearchRecents
 import `in`.artistant.app.feature.search.SearchRecents
 
@@ -45,6 +47,16 @@ abstract class AppModule {
 
     @Binds
     abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents
+
+    /**
+     * The Bookings tab's local state: the offline snapshot behind screen 122 —
+     * the essentials of the night, kept so a basement Wi-Fi cannot take the venue
+     * and the load-in note with it — plus the profile nudge's dismissal.
+     */
+    @Binds
+    abstract fun bindBookingsLocalStore(
+        impl: DataStoreBookingsLocalStore,
+    ): BookingsLocalStore
 
     /** [SessionManager] IS the gateway — the interface only keeps the auth VM unit-testable. */
     @Binds

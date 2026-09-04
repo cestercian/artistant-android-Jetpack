@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.booking
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -19,19 +20,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.Message
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.outlined.Cancel
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -43,14 +44,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,35 +63,46 @@ import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.resolvedEndEpochMs
 import `in`.artistant.app.data.model.resolvedStartEpochMs
+import `in`.artistant.app.designsystem.component.AccentNote
+import `in`.artistant.app.designsystem.component.AccentNoteCard
+import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
-import `in`.artistant.app.designsystem.component.BookingStatusTimeline
+import `in`.artistant.app.designsystem.component.BottomActionBar
 import `in`.artistant.app.designsystem.component.ButtonVariant
+import `in`.artistant.app.designsystem.component.DetailHeader
 import `in`.artistant.app.designsystem.component.EmptyState
+import `in`.artistant.app.designsystem.component.EventStep
+import `in`.artistant.app.designsystem.component.EventStepState
+import `in`.artistant.app.designsystem.component.EventTimeline
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.InlineBanner
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.MediaSlot
 import `in`.artistant.app.designsystem.component.Pill
+import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
-import `in`.artistant.app.designsystem.component.bookingStatusTone
-import `in`.artistant.app.designsystem.component.dockSurface
+import `in`.artistant.app.designsystem.component.SecondaryButton
+import `in`.artistant.app.designsystem.component.SkeletonBlock
+import `in`.artistant.app.designsystem.component.hairlineBottom
+import `in`.artistant.app.designsystem.component.hairlineTop
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.feature.bookings.compactDate
+import `in`.artistant.app.feature.bookings.daysUntilGig
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import kotlinx.coroutines.delay
 
 /**
- * Booking detail — the whole gig on one page: where it stands, what was agreed,
- * how to get there, and the actions this side of the row is allowed to take.
+ * Booking detail — five pages behind one route (screens 18, 83, 95, 96, 97) plus
+ * the two the flow can end on: not found (84) and the cancel flow (117 → 52).
  *
- * The layout is a cover hero over a scrolling body, with the fee and the CTAs
- * pinned in a dock. That is the flat translation of the reference build's
- * draggable glass sheet: blur is out by the owner's call, and a fake-frosted
- * panel that can be dragged to two heights is a lot of machinery to reproduce a
- * scroll. The information order is preserved exactly — progress, terms, getting
- * there, manage — because that order is the argument the screen makes.
+ * The variant is not a tint on a shared layout, it is a different page, because
+ * each state answers a different question — see [BookingDetailVariant]. What all
+ * of them share is the top: a record header naming the booking and where it
+ * stands, and an identity card saying who the other side is.
  *
- * Every fork on this page keys off [isArtistViewer], which is which SIDE of the
- * booking the viewer is on, not their account role. See [BookingViewer].
+ * Every fork keys off [isArtistViewer], which is which SIDE of the booking the
+ * viewer is on, not their account role. See [BookingViewer].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,6 +111,10 @@ fun BookingDetailScreen(
     onBack: () -> Unit,
     onOpenChat: (threadId: String) -> Unit = {},
     modifier: Modifier = Modifier,
+    /** "Book again" on a cancelled booking — back to the artist's profile. */
+    onBookAgain: (artistId: String) -> Unit = {},
+    /** Where support lives. The disputed page's only live action. */
+    onOpenSupport: () -> Unit = {},
     viewModel: BookingDetailViewModel = hiltViewModel(),
     chatOpen: ChatOpenViewModel = hiltViewModel(),
     // Resolved HERE, not inside the sheet, and it is the same instance the sheet
@@ -109,7 +127,7 @@ fun BookingDetailScreen(
     val openingChat by chatOpen.opening.collectAsStateWithLifecycle()
     val chatError by chatOpen.error.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val booking = state.booking
@@ -117,22 +135,20 @@ fun BookingDetailScreen(
     val haptics = rememberHaptics()
 
     var showReview by remember { mutableStateOf(false) }
-    var showCancel by remember { mutableStateOf(false) }
-    // Outside `if (showReview)` on purpose. The insert runs on the ViewModel's
-    // scope so a scrim tap mid-submit no longer cancels it — which means it can
-    // also land when the sheet is already gone. An effect inside the sheet would
-    // not be in composition to hear it: the row would keep offering "Leave a
-    // review", and reopening would flash shut on the leftover flag.
+    var showTechRider by remember { mutableStateOf(false) }
+    var cancelStage by remember { mutableStateOf<CancelStage?>(null) }
+    var cancelReason by remember { mutableStateOf<CancelReason?>(null) }
+
+    // Outside the sheet on purpose. The insert runs on the ViewModel's scope so a
+    // scrim tap mid-submit no longer cancels it — which means it can also land
+    // when the sheet is already gone. An effect inside the sheet would not be in
+    // composition to hear it: the row would keep offering "Leave a review", and
+    // reopening would flash shut on the leftover flag.
     LaunchedEffect(review.submitted) {
         if (review.submitted) {
-            // The success buzz for the review lands HERE rather than in the
-            // sheet, for the same reason the rest of this effect does: the sheet
-            // may already be gone when the insert returns.
             haptics.success()
             reviewVm.consumeSubmitted()
             showReview = false
-            // The stars are on the booking row, so re-read it rather than
-            // trusting the screen to already know.
             viewModel.refresh()
         }
     }
@@ -147,98 +163,61 @@ fun BookingDetailScreen(
         }
     }
 
-    when {
-        state.isLoading && booking == null -> {
-            Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.accentInk)
-            }
-        }
-        booking == null -> {
-            Column(modifier.fillMaxSize().background(colors.bg)) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
-                }
-                // Title AND body come off the same failure, so the page can't
-                // report a dropped connection as a deleted booking — or print
-                // one sentence twice. See [BookingLoadFailure].
-                val failure = state.loadFailure ?: BookingLoadFailure.NotFound
-                EmptyState(
-                    title = failure.title,
-                    body = failure.body,
-                    actionLabel = "Retry",
-                    onAction = viewModel::refresh,
-                )
-            }
-        }
-        else -> {
-            val counterparty = viewModel.counterpartyName(isArtistViewer)
-            val city = state.artist?.city
-            val address = venueAddress(booking.venue, city)
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(colors.page),
+    ) {
+        when {
+            state.isLoading && booking == null -> DetailSkeleton(onBack)
 
-            RevealOnAppear {
-                Column(modifier.fillMaxSize().background(colors.bg)) {
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Hero(
-                            booking = booking,
-                            counterparty = counterparty,
-                            // The artist gets a neutral hero, never their own
-                            // cover. Their photo here made the page read as "my
-                            // profile" instead of "my gig" — the same confusion
-                            // that had them looking at the client's screen.
-                            coverUrl = if (isArtistViewer) null else state.artist?.coverUrl,
-                            gradient = state.artist?.gradient,
-                            onBack = onBack,
-                        )
-                        Column(
-                            Modifier.padding(horizontal = space.lg),
-                            verticalArrangement = Arrangement.spacedBy(space.xl),
-                        ) {
-                            ProgressSection(booking.status)
-                            TermsSection(bookingTerms(booking, viewModel.packageName()))
-                            if (BookingActions.showsGettingThere(booking.status)) {
-                                GettingThereSection(
-                                    address = address,
-                                    notes = booking.venueNotes,
-                                    copied = copied,
-                                    onOpenMaps = {
-                                        openMaps(context, address)
-                                            ?.let(viewModel::reportActionError)
-                                    },
-                                    onCopy = {
-                                        clipboard.setText(AnnotatedString(address))
-                                        haptics.success()
-                                        copied = true
-                                    },
-                                )
-                            }
-                            ManageSection(
-                                // Rows only — the states whose single secondary
-                                // action belongs beside the primary hand it to
-                                // the dock instead. The two halves partition the
-                                // manage set, so nothing renders twice.
-                                actions = BookingActions.manageRows(viewer, booking.status),
-                                viewer = viewer,
-                                onShare = {
-                                    shareGig(context, shareGigText(counterparty, booking, city))
-                                        ?.let(viewModel::reportActionError)
-                                },
-                                onAddToCalendar = {
-                                    launchAddToCalendar(context, booking)
-                                        ?.let(viewModel::reportActionError)
-                                },
-                                onCancel = { showCancel = true },
-                            )
-                            Spacer(Modifier.height(space.sm))
-                        }
-                    }
+            booking == null -> BookingNotFound(
+                failure = state.loadFailure ?: BookingLoadFailure.NotFound,
+                onBack = onBack,
+                onRetry = viewModel::refresh,
+            )
 
-                    Dock(
+            cancelStage != null -> CancelFlow(
+                stage = requireNotNull(cancelStage),
+                viewer = viewer,
+                counterparty = viewModel.counterpartyName(isArtistViewer),
+                reason = cancelReason,
+                daysBefore = daysUntilGig(booking.resolvedStartEpochMs(), System.currentTimeMillis()),
+                isDecline = viewer == BookingViewer.Artist &&
+                    booking.status == BookingStatus.PendingConfirm,
+                onPickReason = { cancelReason = it },
+                onContinue = { cancelStage = CancelStage.Consequences },
+                onBack = {
+                    cancelStage =
+                        if (cancelStage == CancelStage.Consequences) CancelStage.Reason else null
+                },
+                onKeep = { cancelStage = null },
+                onConfirm = {
+                    // Warning at the confirm: cancelling is a deliberate act with
+                    // a cost to the other party, not a failure. The result gets no
+                    // buzz of its own.
+                    haptics.warning()
+                    cancelStage = null
+                    viewModel.cancelBooking(viewer, cancelReason?.label)
+                },
+            )
+
+            else -> {
+                val counterparty = viewModel.counterpartyName(isArtistViewer)
+                val city = state.artist?.city
+                val address = venueAddress(booking.venue, city)
+                val variant = variantFor(booking.status)
+
+                RevealOnAppear {
+                    BookingDetailBody(
                         booking = booking,
+                        variant = variant,
                         viewer = viewer,
+                        counterparty = counterparty,
+                        packageName = viewModel.packageName(),
+                        coverUrl = if (isArtistViewer) null else state.artist?.coverUrl,
+                        address = address,
+                        copied = copied,
                         acting = state.actingAction,
                         openingChat = openingChat,
                         error = state.actionError ?: chatError,
@@ -246,55 +225,68 @@ fun BookingDetailScreen(
                             viewModel.dismissActionError()
                             chatOpen.dismissError()
                         },
-                        onAccept = viewModel::acceptRequest,
-                        onDecline = { showCancel = true },
+                        onBack = onBack,
                         onMessage = { chatOpen.open(booking.artistId, booking.id, onOpenChat) },
-                        onCancel = { showCancel = true },
+                        onAccept = viewModel::acceptRequest,
+                        onCancel = {
+                            cancelReason = null
+                            cancelStage = CancelStage.Reason
+                        },
                         onReview = { showReview = true },
+                        onTechRider = { showTechRider = true },
+                        onBookAgain = { onBookAgain(booking.artistId) },
+                        onOpenSupport = onOpenSupport,
+                        onAddToCalendar = {
+                            launchAddToCalendar(context, booking)?.let(viewModel::reportActionError)
+                        },
+                        onOpenMaps = {
+                            openMaps(context, address)?.let(viewModel::reportActionError)
+                        },
+                        onCopyAddress = {
+                            clipboard.setText(AnnotatedString(address))
+                            haptics.success()
+                            copied = true
+                        },
+                        onShare = {
+                            shareGig(context, shareGigText(counterparty, booking, city))
+                                ?.let(viewModel::reportActionError)
+                        },
+                        onUpdateApp = {
+                            openPlayStore(context)?.let(viewModel::reportActionError)
+                        },
                     )
                 }
-            }
 
-            if (showCancel) {
-                // Decline and Cancel share this sheet on purpose: both end the
-                // booking, both want a reason on the row, and both route by side
-                // — the artist's lands as `cancelled_by = "artist"` either way,
-                // since `cancelBooking(Artist, …)` is one Edge Function call
-                // whichever button opened the sheet. Only the copy differs,
-                // which is what `isDecline` selects (the ViewModel makes the
-                // same fork to decide which button wears the progress label).
-                val isDecline = viewer == BookingViewer.Artist &&
-                    booking.status == BookingStatus.PendingConfirm
-                CancelFlowSheet(
-                    viewer = viewer,
-                    isDecline = isDecline,
-                    onDismiss = { showCancel = false },
-                    onConfirm = { reason ->
-                        // Warning at the confirm, as on iOS: cancelling is a
-                        // deliberate act with a cost to the other party, not a
-                        // failure. The result gets no buzz of its own.
-                        haptics.warning()
-                        showCancel = false
-                        viewModel.cancelBooking(viewer, reason)
-                    },
-                )
-            }
-
-            if (showReview) {
-                val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                ModalBottomSheet(
-                    onDismissRequest = { showReview = false },
-                    sheetState = sheetState,
-                    containerColor = colors.bgElev,
-                ) {
-                    // No repository handed down: the sheet owns a ViewModel of
-                    // its own, resolved against THIS destination, so a scrim tap
-                    // mid-submit no longer cancels the write.
-                    ReviewSheet(
-                        bookingId = booking.id,
-                        onDismiss = { showReview = false },
-                        viewModel = reviewVm,
+                if (showTechRider) {
+                    TechRiderSheet(
+                        artistName = counterparty,
+                        items = state.artist?.tech.orEmpty(),
+                        onDismiss = { showTechRider = false },
                     )
+                }
+
+                if (showReview) {
+                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    ModalBottomSheet(
+                        onDismissRequest = { showReview = false },
+                        sheetState = sheetState,
+                        containerColor = Color.Transparent,
+                        dragHandle = null,
+                    ) {
+                        // No repository handed down: the sheet owns a ViewModel of
+                        // its own, resolved against THIS destination, so a scrim
+                        // tap mid-submit no longer cancels the write.
+                        ReviewSheet(
+                            bookingId = booking.id,
+                            // Screen 98: a name we could not load never blocks the
+                            // review — the booking reference carries the identity
+                            // instead, and the sheet says so.
+                            artistName = state.artistName.takeIf { it.isNotBlank() },
+                            subtitle = reviewSubtitleFor(booking, state.artist?.category),
+                            onDismiss = { showReview = false },
+                            viewModel = reviewVm,
+                        )
+                    }
                 }
             }
         }
@@ -304,260 +296,1082 @@ fun BookingDetailScreen(
 /** How long the Copy row wears its "Copied" label before reverting. */
 private const val COPIED_LABEL_MS = 1_600L
 
+/** How far a terminal page's picture and name step back. */
+private const val DIMMED = 0.6f
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Hero
+// The page
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Cover, scrim, status, who and where.
- *
- * Shorter than the artist profile's hero ([Size.heroShort] rather than a screen
- * fraction) because the photo is context here, not the product: the thing being
- * read is the status and the terms below it, and a half-screen of cover pushes
- * both under the fold.
- */
 @Composable
-private fun Hero(
+private fun BookingDetailBody(
     booking: Booking,
+    variant: BookingDetailVariant,
+    viewer: BookingViewer,
     counterparty: String,
+    packageName: String?,
     coverUrl: String?,
-    gradient: List<Color>?,
+    address: String,
+    copied: Boolean,
+    acting: BookingAction?,
+    openingChat: Boolean,
+    error: String?,
+    onDismissError: () -> Unit,
     onBack: () -> Unit,
+    onMessage: () -> Unit,
+    onAccept: () -> Unit,
+    onCancel: () -> Unit,
+    onReview: () -> Unit,
+    onTechRider: () -> Unit,
+    onBookAgain: () -> Unit,
+    onOpenSupport: () -> Unit,
+    onAddToCalendar: () -> Unit,
+    onOpenMaps: () -> Unit,
+    onCopyAddress: () -> Unit,
+    onShare: () -> Unit,
+    onUpdateApp: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val space = dimens.space
+    val nowMs = remember(booking.id, booking.status) { System.currentTimeMillis() }
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(dimens.size.heroShort),
-    ) {
-        // Floor first, so a slow or failed cover never shows a hole. The artist's
-        // side gets the neutral surface ladder rather than the artist's own brand
-        // gradient — this is their gig, not their profile, and a caller that
-        // suppresses the cover means it.
-        val floor = if (coverUrl.isNullOrBlank() || gradient.isNullOrEmpty()) {
-            listOf(colors.bgElev, colors.bgSoft, colors.bg)
-        } else {
-            gradient
-        }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(floor)))
-        if (!coverUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = coverUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        1f - dimens.fraction.heroFade to Color.Transparent,
-                        1f to colors.bg,
-                    ),
-                ),
-        )
-
-        CircleIconButton(
-            icon = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
-            onClick = onBack,
-            tint = Color.White,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(horizontal = space.md, vertical = space.xs),
-        )
-
+    Column(Modifier.fillMaxSize()) {
         Column(
             Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .padding(bottom = space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.sm),
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = dimens.component.gutter),
+            verticalArrangement = Arrangement.spacedBy(dimens.space.lg),
         ) {
-            // The one status→tone mapping in the app. Every surface that painted
-            // its own disagreed with the others; this one is shared with the
-            // bookings list and the artist drill-down.
-            Pill(booking.status.label, tone = bookingStatusTone(booking.status))
-            // NOT on media: this block sits in the bottom band where the cover
-            // has already faded to `bg`. That fade ends on a token, so it
-            // followed the palette into daylight — and white text followed it
-            // into invisibility. Page ink is correct here; the back control
-            // above still takes white, because it floats on the photo itself.
-            Text(
-                counterparty,
-                style = AppTheme.type.profileHeroName,
-                color = colors.ink,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            DetailHeader(
+                title = bookingTitle(booking.id),
+                subtitle = headerStatusLine(booking, variant, nowMs),
+                onBack = onBack,
+                trailing = if (variant == BookingDetailVariant.Confirmed) {
+                    {
+                        IconCircle(
+                            icon = Icons.AutoMirrored.Outlined.Message,
+                            contentDescription = if (openingChat) "Opening chat" else "Message",
+                            onClick = onMessage,
+                            size = dimens.component.iconCircleSm,
+                        )
+                    }
+                } else {
+                    null
+                },
             )
-            Text(
-                heroWhereLine(booking),
-                style = AppTheme.type.callout,
-                color = colors.ink2,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+
+            // A failed accept, or a thread that would not open, is still true next
+            // time this screen is opened — so it states itself here rather than as
+            // a transient the user can miss.
+            error?.let {
+                Banner(
+                    title = it,
+                    tone = BannerTone.Failure,
+                    actionLabel = "Dismiss",
+                    onAction = onDismissError,
+                )
+            }
+
+            // The page's own explanation, above everything it explains.
+            when (variant) {
+                BookingDetailVariant.Awaiting -> Banner(
+                    title = "Waiting on $counterparty",
+                    // No response-time promise: nothing in the backend enforces
+                    // one, and checkout one screen earlier deliberately refuses to
+                    // make it. The notification IS real — a push fires when a
+                    // booking is confirmed — so that is what is promised.
+                    detail = "We'll let you know the moment they accept.",
+                    tone = BannerTone.Attention,
+                )
+
+                BookingDetailVariant.Cancelled -> Banner(
+                    title = cancelledByLine(booking, viewer, counterparty),
+                    detail = cancelDetailLine(booking),
+                    tone = BannerTone.Failure,
+                )
+
+                BookingDetailVariant.Disputed -> Banner(
+                    title = "Under review by Artistant",
+                    detail = "Both sides have been asked for their account. " +
+                        "Reviews and scoring are paused until it closes.",
+                    tone = BannerTone.Failure,
+                )
+
+                BookingDetailVariant.ReadOnly -> Banner(
+                    title = "This app version doesn't know this status",
+                    detail = "It is shown read-only. Nothing here can be actioned — " +
+                        "updating the app will restore the controls.",
+                    tone = BannerTone.Attention,
+                )
+
+                BookingDetailVariant.Confirmed -> Unit
+            }
+
+            IdentityCard(
+                name = counterparty,
+                line = identityLine(booking, variant, packageName),
+                statusLabel = booking.status.label,
+                statusTone = bookingPillTone(booking.status),
+                coverUrl = coverUrl,
+                dimmed = variant == BookingDetailVariant.Cancelled ||
+                    variant == BookingDetailVariant.ReadOnly,
             )
+
+            when (variant) {
+                BookingDetailVariant.Confirmed -> ConfirmedBody(
+                    booking = booking,
+                    nowMs = nowMs,
+                    address = address,
+                    copied = copied,
+                    viewer = viewer,
+                    onOpenMaps = onOpenMaps,
+                    onCopyAddress = onCopyAddress,
+                    onAddToCalendar = onAddToCalendar,
+                    onTechRider = onTechRider,
+                    onShare = onShare,
+                    onCancel = onCancel,
+                )
+
+                BookingDetailVariant.Awaiting -> AwaitingBody(
+                    booking = booking,
+                    nowMs = nowMs,
+                    packageName = packageName,
+                )
+
+                BookingDetailVariant.Cancelled -> CancelledBody(
+                    booking = booking,
+                    packageName = packageName,
+                    viewer = viewer,
+                    openingChat = openingChat,
+                    onMessage = onMessage,
+                    onBookAgain = onBookAgain,
+                )
+
+                BookingDetailVariant.Disputed -> DisputedBody()
+
+                BookingDetailVariant.ReadOnly -> ReadOnlyBody(
+                    booking = booking,
+                    packageName = packageName,
+                )
+            }
+
+            Spacer(Modifier.height(dimens.space.lg))
         }
+
+        BookingDock(
+            variant = variant,
+            booking = booking,
+            viewer = viewer,
+            counterparty = counterparty,
+            acting = acting,
+            openingChat = openingChat,
+            onAccept = onAccept,
+            onCancel = onCancel,
+            onMessage = onMessage,
+            onReview = onReview,
+            onOpenSupport = onOpenSupport,
+            onUpdateApp = onUpdateApp,
+        )
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sections
-// ─────────────────────────────────────────────────────────────────────────────
+/** The header's second line — a different fact per variant. */
+private fun headerStatusLine(
+    booking: Booking,
+    variant: BookingDetailVariant,
+    nowMs: Long,
+): String? = when (variant) {
+    BookingDetailVariant.Awaiting ->
+        relativeSince(booking.createdAtEpochMs, nowMs)?.let { "Sent $it" } ?: "Sent"
+    BookingDetailVariant.Confirmed ->
+        listOf(booking.status.label, compactDate(booking.date))
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+    BookingDetailVariant.Cancelled -> cancelledOnLabel(booking)
+    BookingDetailVariant.Disputed -> "Disputed"
+    BookingDetailVariant.ReadOnly -> "Status not recognised"
+}
+
+/** The identity card's second line — the tier, or where and when. */
+private fun identityLine(
+    booking: Booking,
+    variant: BookingDetailVariant,
+    packageName: String?,
+): String = when (variant) {
+    BookingDetailVariant.Confirmed, BookingDetailVariant.Cancelled ->
+        packageName?.takeIf { it.isNotBlank() }
+            ?: listOf(compactDate(booking.date), booking.venue).filter { it.isNotBlank() }
+                .joinToString(" · ")
+    else -> listOf(compactDate(booking.date), booking.venue)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+}
 
 /**
- * Where the booking actually is in its life.
+ * "2 Aug · reason" under the cancelled banner.
  *
- * This is the shared [BookingStatusTimeline] the post-request screen already
- * uses, not a lookalike: the two screens answer the same question ("what happens
- * next") and had no business drawing two different pictures of it. A status word
- * alone doesn't answer it — "Awaiting confirm" says nothing about what comes
- * after, and the timeline shows the whole arc with the current step lit.
+ * The reason is printed because it is on the row and BOTH parties can read it —
+ * `bookings_select_participants` grants the whole row to client and artist alike.
+ * The design's line here ("the artist only sees that you cancelled") describes a
+ * privacy this schema does not implement, and printing it would be a promise the
+ * database breaks.
  */
-@Composable
-private fun ProgressSection(status: BookingStatus) {
-    val space = AppTheme.dimens.space
-    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        SectionLabel("Progress")
-        BookingStatusTimeline(status = status)
-    }
+private fun cancelDetailLine(booking: Booking): String? =
+    booking.cancelReason?.takeIf { it.isNotBlank() }?.let { "Reason given: $it" }
+
+private fun bookingPillTone(status: BookingStatus): PillTone = when (status) {
+    BookingStatus.Confirmed -> PillTone.BrandSolid
+    BookingStatus.Completed -> PillTone.Good
+    BookingStatus.PendingConfirm -> PillTone.Neutral
+    BookingStatus.Cancelled, BookingStatus.Disputed -> PillTone.Hot
+    BookingStatus.Unknown -> PillTone.Warm
 }
 
-/** The agreed terms, one per hairline-separated row. */
+/** Who the other side is, on every variant. */
 @Composable
-private fun TermsSection(terms: List<BookingTerm>) {
-    val space = AppTheme.dimens.space
-    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        SectionLabel("Details")
-        Column {
-            terms.forEachIndexed { index, term ->
-                TermRow(term)
-                if (index != terms.lastIndex) HRule()
-            }
-        }
-    }
-}
-
-@Composable
-private fun TermRow(term: BookingTerm) {
+private fun IdentityCard(
+    name: String,
+    line: String,
+    statusLabel: String,
+    statusTone: PillTone,
+    coverUrl: String?,
+    dimmed: Boolean,
+) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = space.md),
-        horizontalArrangement = Arrangement.spacedBy(space.md),
+            .clip(RoundedCornerShape(dimens.radii.card))
+            .background(colors.surface3)
+            .padding(dimens.space.lg)
+            .alpha(if (dimmed) DIMMED else 1f),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(term.label, style = AppTheme.type.footnote, color = colors.ink3)
-        Spacer(Modifier.weight(1f))
-        Text(
-            term.value,
-            // The id is a machine value and reads as one; everything else is
-            // prose the client typed or picked.
-            style = if (term.mono) AppTheme.type.monoSmall else AppTheme.type.callout,
-            color = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (coverUrl.isNullOrBlank()) {
+            // A flat initial disc, not the hashed-gradient Avatar: this card sits
+            // on a page whose one accent is spent elsewhere, and a saturated
+            // gradient disc would out-rank the status pill beside it.
+            Box(
+                Modifier
+                    .size(dimens.size.avatarLg)
+                    .clip(CircleShape)
+                    .background(colors.hairline),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    name.trim().split(Regex("\\s+")).take(2)
+                        .mapNotNull { it.firstOrNull()?.uppercaseChar() }
+                        .joinToString("")
+                        .ifEmpty { "?" },
+                    style = AppTheme.type.sectionTitle,
+                    color = colors.ink2,
+                )
+            }
+        } else {
+            MediaSlot(
+                modifier = Modifier.size(dimens.size.avatarLg),
+                radius = dimens.radii.lg,
+            ) {
+                AsyncImage(
+                    model = coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                style = AppTheme.type.cardTitle,
+                color = if (dimmed) colors.ink2 else colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (line.isNotBlank()) {
+                Text(
+                    line,
+                    style = AppTheme.type.subtitle,
+                    color = colors.ink4,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = dimens.space.xs / 2),
+                )
+            }
+        }
+        Pill(statusLabel, tone = statusTone)
     }
 }
 
-/**
- * Address, load-in notes, and the two things anyone does with an address.
- *
- * Confirmed-only: a pending booking has nothing to travel to yet, and a
- * completed one is in the past.
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Variant bodies
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Screen 18 — the day, hour by hour, then the fee, then what you can do. */
 @Composable
-private fun GettingThereSection(
+private fun ConfirmedBody(
+    booking: Booking,
+    nowMs: Long,
     address: String,
-    notes: String?,
     copied: Boolean,
+    viewer: BookingViewer,
     onOpenMaps: () -> Unit,
-    onCopy: () -> Unit,
+    onCopyAddress: () -> Unit,
+    onAddToCalendar: () -> Unit,
+    onTechRider: () -> Unit,
+    onShare: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        SectionLabel("Getting there")
-        Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
-            Text(address, style = AppTheme.type.callout, color = colors.ink)
-            notes?.trim()?.takeIf { it.isNotEmpty() }?.let {
-                Text(it, style = AppTheme.type.footnote, color = colors.ink3)
+    val dimens = AppTheme.dimens
+    val moments = remember(booking.id, nowMs) { runOfShow(booking, nowMs) }
+
+    if (moments.isNotEmpty()) {
+        SectionTitle("Run of show")
+        EventTimeline(steps = moments.map { it.toStep() })
+    }
+
+    if (BookingActions.showsGettingThere(booking.status)) {
+        SectionTitle("Getting there")
+        Column(verticalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
+            Text(address, style = AppTheme.type.body, color = colors.ink)
+            booking.venueNotes?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                Text(it, style = AppTheme.type.caption, color = colors.ink4)
             }
         }
         Column {
             HRule()
-            ActionRow(Icons.Filled.Place, "Open in Maps", onClick = onOpenMaps)
+            ActionRow(Icons.Outlined.Place, "Open in Maps", onClick = onOpenMaps)
             HRule()
             ActionRow(
                 Icons.Filled.ContentCopy,
                 if (copied) "Copied" else "Copy address",
-                tint = if (copied) colors.good else colors.ink,
-                onClick = onCopy,
+                tint = if (copied) colors.accentInk else colors.ink,
+                onClick = onCopyAddress,
+            )
+            HRule()
+            ActionRow(Icons.Filled.CalendarMonth, "Add to calendar", onClick = onAddToCalendar)
+            HRule()
+        }
+    }
+
+    SectionTitle("The fee")
+    AccentNoteCard {
+        FeeRow("Agreed fee", formatInr(booking.fee))
+        Spacer(Modifier.height(dimens.space.sm))
+        FeeRow("Settled", "Directly, after the set")
+        Text(
+            "Artistant holds no money in this version — this is the number you and the " +
+                "artist agreed, and the record of it.",
+            style = AppTheme.type.caption,
+            color = colors.ink2,
+            modifier = Modifier.padding(top = dimens.space.md),
+        )
+    }
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        FlatAction("Tech rider", onTechRider, Modifier.weight(1f))
+        FlatAction("Share", onShare, Modifier.weight(1f))
+        // Only while the booking is still actionable: a completed gig has nothing
+        // to withdraw from, and offering it would be a button the server refuses.
+        if (BookingAction.Cancel in BookingActions.manage(viewer, booking.status)) {
+            FlatAction(
+                if (viewer == BookingViewer.Artist) "Cancel gig" else "Cancel",
+                onCancel,
+                Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** Screen 95 — the only editable state, and what it is waiting for. */
+@Composable
+private fun AwaitingBody(booking: Booking, nowMs: Long, packageName: String?) {
+    val dimens = AppTheme.dimens
+    SectionTitle("Progress")
+    EventTimeline(steps = requestProgress(booking, nowMs).map { it.toStep() })
+
+    SectionTitle("What you asked for")
+    TermsList(bookingTerms(booking, packageName))
+
+    Spacer(Modifier.height(dimens.space.xs))
+    AccentNote(
+        "You can still withdraw this while it's awaiting — once it's accepted, the " +
+            "terms are fixed.",
+    )
+}
+
+/** Screen 83 — terminal, but the relationship may survive. */
+@Composable
+private fun CancelledBody(
+    booking: Booking,
+    packageName: String?,
+    viewer: BookingViewer,
+    openingChat: Boolean,
+    onMessage: () -> Unit,
+    onBookAgain: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    SectionTitle("What was agreed")
+    Column(Modifier.alpha(DIMMED)) {
+        TermsList(bookingTerms(booking, packageName))
+    }
+
+    AccentNote(
+        "Terms are frozen and read-only now. The thread stays open so you can rebook " +
+            "or explain.",
+    )
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        PrimaryButton(
+            text = if (openingChat) "Opening…" else "Message",
+            onClick = onMessage,
+            enabled = !openingChat,
+            modifier = Modifier.weight(1f),
+        )
+        // Only the client can start a booking, so only the client is offered one.
+        if (viewer == BookingViewer.Client) {
+            SecondaryButton("Book again", onBookAgain, modifier = Modifier.weight(1f))
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = dimens.space.md)
+            .hairlineTop()
+            .padding(top = dimens.space.md),
+    ) {
+        Text(
+            "No money moved — Artistant holds none, so there is nothing to refund.",
+            style = AppTheme.type.caption,
+            color = colors.ink4,
+        )
+    }
+}
+
+/**
+ * Screen 96 — an escalated state, not an error.
+ *
+ * The design lists what each side reported and when. The schema has no such
+ * record: `bookings.status` carries 'disputed' and nothing else, `reports` does
+ * not reference a booking at all, and there is no dispute-events table. So the
+ * account of what happened is stated as UNAVAILABLE rather than invented — and
+ * the half of the screen that IS true, the policy while a dispute is open, is
+ * printed in full, because saying reviews and scoring are suspended is what
+ * stops retaliatory ratings.
+ */
+@Composable
+private fun DisputedBody() {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+
+    SectionTitle("What happened")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.buttonLg))
+            .background(colors.surface3)
+            .padding(dimens.space.lg),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Outlined.Info,
+            contentDescription = null,
+            tint = colors.ink3,
+            modifier = Modifier.size(dimens.size.iconLg),
+        )
+        Text(
+            "The account of this dispute isn't in the app. Artistant Support holds both " +
+                "sides' messages from the night.",
+            style = AppTheme.type.subtitle,
+            color = colors.ink2,
+        )
+    }
+
+    SectionTitle("While this is open")
+    Column {
+        HRule()
+        FactRow("Reviews are paused", "Neither side publishes until it closes")
+        HRule()
+        FactRow("The score is untouched", "No points move on a disputed booking")
+        HRule()
+        FactRow("The thread stays open", "You can still message each other")
+        HRule()
+    }
+}
+
+/** Screen 97 — forward compatibility, visible. */
+@Composable
+private fun ReadOnlyBody(booking: Booking, packageName: String?) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    SectionTitle("What we can still show")
+    Column(Modifier.alpha(0.85f)) {
+        TermsList(bookingTerms(booking, packageName))
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
+        // Disabled rather than hidden, per the design: you can see what WOULD be
+        // available, which is what makes "update the app" an obvious next step
+        // instead of a mystery.
+        DisabledAction("Cancel booking")
+        DisabledAction("Leave a review")
+        DisabledAction("Add to calendar")
+    }
+    Text(
+        "Actions are disabled rather than hidden, so you can see what would be available.",
+        style = AppTheme.type.caption,
+        color = colors.ink4,
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The dock
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The pinned bar, per variant.
+ *
+ * Screen 18 has none: a confirmed booking's one conversational action is the
+ * message circle in its header, and everything else is a row in the page. The
+ * other four each end in a bar because each has exactly one thing the page is
+ * asking you to decide.
+ */
+@Composable
+private fun BookingDock(
+    variant: BookingDetailVariant,
+    booking: Booking,
+    viewer: BookingViewer,
+    counterparty: String,
+    acting: BookingAction?,
+    openingChat: Boolean,
+    onAccept: () -> Unit,
+    onCancel: () -> Unit,
+    onMessage: () -> Unit,
+    onReview: () -> Unit,
+    onOpenSupport: () -> Unit,
+    onUpdateApp: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val isActing = acting != null
+
+    when (variant) {
+        BookingDetailVariant.Confirmed -> {
+            // A completed booking's one remaining act is the review — and only the
+            // client's: an artist reviewing their own gig is not a thing the
+            // reviews table models.
+            if (BookingAction.LeaveReview in BookingActions.manage(viewer, booking.status)) {
+                BottomActionBar { PrimaryButton("Leave a review", onReview, fullWidth = true) }
+            }
+        }
+
+        BookingDetailVariant.Awaiting -> BottomActionBar {
+            if (viewer == BookingViewer.Artist) {
+                // The artist's pending dock is the answer to the request. There is
+                // no Message here on purpose: no thread exists until the booking
+                // confirms, and `findOrCreateThread` refuses artist-side creation
+                // on a pending booking.
+                PrimaryButton(
+                    text = if (acting == BookingAction.Accept) "Accepting…" else "Accept request",
+                    onClick = onAccept,
+                    fullWidth = true,
+                    enabled = !isActing,
+                )
+                SecondaryButton(
+                    text = if (acting == BookingAction.Decline) "Declining…" else "Decline",
+                    onClick = onCancel,
+                    fullWidth = true,
+                    enabled = !isActing,
+                )
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
+                    SecondaryButton(
+                        text = if (acting == BookingAction.Cancel) "Withdrawing…" else "Withdraw",
+                        onClick = onCancel,
+                        enabled = !isActing,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PrimaryButton(
+                        text = if (openingChat) "Opening…" else "Message $counterparty",
+                        onClick = onMessage,
+                        enabled = !openingChat,
+                        modifier = Modifier.weight(WIDE_ACTION_WEIGHT),
+                    )
+                }
+            }
+        }
+
+        // The cancelled page's actions are in the body, beside the record they
+        // act on, and its bar would have nothing left to hold.
+        BookingDetailVariant.Cancelled -> Unit
+
+        BookingDetailVariant.Disputed -> BottomActionBar {
+            // Disabled, with the reason under it. There is no evidence endpoint —
+            // no dispute table, no attachment path — and a button that silently
+            // does nothing is worse than one that says why it can't.
+            PrimaryButton("Add evidence", onClick = {}, fullWidth = true, enabled = false)
+            Text(
+                "Evidence goes through Support in this version.",
+                style = AppTheme.type.caption,
+                color = colors.ink4,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // The counterparty thread, beside Support and not instead of it.
+            //
+            // The page says three lines up that "the thread stays open", and
+            // `BookingActions.primary` really does allow Message on a disputed
+            // booking — but the dock offered only Support, so the one screen that
+            // PROMISES the conversation survives was the one screen you could not
+            // reach it from. A dispute is exactly when the two sides most need to
+            // talk, and the design's 96 keeps the thread reachable.
+            if (BookingAction.Message in BookingActions.primary(viewer, booking.status)) {
+                SecondaryButton(
+                    text = if (openingChat) "Opening…" else "Message $counterparty",
+                    onClick = onMessage,
+                    fullWidth = true,
+                    enabled = !openingChat,
+                )
+            }
+            Text(
+                "Message Artistant Support",
+                style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.accentInk,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(dimens.radii.sm))
+                    .clickable(role = Role.Button, onClick = onOpenSupport)
+                    .padding(vertical = dimens.space.md),
+            )
+        }
+
+        BookingDetailVariant.ReadOnly -> BottomActionBar {
+            PrimaryButton("Update Artistant", onUpdateApp, fullWidth = true)
+        }
+    }
+}
+
+/**
+ * The client's awaiting dock is not two equal halves: Message is the useful act
+ * while you wait, Withdraw is the exit. The design draws 1 : 1.3, and the ratio
+ * is what says which is which without colouring the smaller one red.
+ */
+private const val WIDE_ACTION_WEIGHT = 1.3f
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Not found (84)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Two causes, no guess.
+ *
+ * A push tap can outrun the sync that would have fetched the row, so "we can't
+ * find this booking" offers BOTH explanations rather than implying it is gone.
+ * A read that FAILED is a different sentence with a retry on it — see
+ * [BookingLoadFailure].
+ */
+@Composable
+private fun BookingNotFound(
+    failure: BookingLoadFailure,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val missing = failure == BookingLoadFailure.NotFound
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = dimens.component.gutter),
+    ) {
+        DetailHeader(title = "", onBack = onBack)
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            EmptyState(
+                title = failure.title,
+                body = failure.body,
+                icon = Icons.Filled.CalendarMonth,
+                actionLabel = if (missing) "Back to Bookings" else "Try again",
+                onAction = if (missing) onBack else onRetry,
+            )
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .hairlineTop()
+                .padding(vertical = dimens.space.lg),
+        ) {
+            Text(
+                if (missing) {
+                    "Opened from a notification on a device that hasn't synced yet? " +
+                        "Pull Bookings to refresh."
+                } else {
+                    "Nothing was changed — this is a read that didn't complete."
+                },
+                style = AppTheme.type.caption,
+                color = colors.ink4,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cancel flow (117 → 52)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Which half of the cancel flow is on screen. */
+enum class CancelStage { Reason, Consequences }
+
+/**
+ * Reason, then consequences.
+ *
+ * Two stages rather than one confirm dialog because the two questions are
+ * different: the reason is for us (it lands on the row and feeds matching), the
+ * consequences are for them. Collapsing them into a single "Are you sure?" gets
+ * a reflexive yes and no reason at all — and, per screen 117's note, asking why
+ * first "creates the moment where a reschedule can replace a cancellation",
+ * which is what the aside under the reason list is for.
+ *
+ * A full page rather than a sheet, as the design draws it: both stages carry a
+ * header, a list and a pinned bar, and a sheet tall enough for that is a page
+ * with a grabber on it.
+ */
+@Composable
+private fun CancelFlow(
+    stage: CancelStage,
+    viewer: BookingViewer,
+    counterparty: String,
+    reason: CancelReason?,
+    daysBefore: Int?,
+    isDecline: Boolean,
+    onPickReason: (CancelReason) -> Unit,
+    onContinue: () -> Unit,
+    onBack: () -> Unit,
+    onKeep: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val title = if (isDecline) "Decline request" else "Cancel booking"
+    val keepLabel = if (isDecline) "Keep request" else "Keep booking"
+
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = dimens.component.gutter),
+            verticalArrangement = Arrangement.spacedBy(dimens.space.lg),
+        ) {
+            DetailHeader(
+                title = title,
+                subtitle = if (stage == CancelStage.Reason) "Step 1 of 2" else "Step 2 of 2",
+                onBack = onBack,
+            )
+
+            when (stage) {
+                CancelStage.Reason -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
+                        Text(
+                            if (isDecline) "Why are you declining?" else "Why are you cancelling?",
+                            style = AppTheme.type.screenTitle,
+                            color = colors.ink,
+                        )
+                        Text(
+                            "This helps us match you better next time. It is saved on the " +
+                                "booking, so $counterparty can see it too.",
+                            style = AppTheme.type.subtitle,
+                            color = colors.ink4,
+                        )
+                    }
+                    Column {
+                        cancelReasons(viewer).forEach { option ->
+                            ReasonRow(
+                                label = option.label,
+                                selected = reason == option,
+                                onClick = { onPickReason(option) },
+                            )
+                        }
+                    }
+                    // The moment a reschedule can replace a cancellation. Only for
+                    // the reason that has one — a client whose event moved has a
+                    // date to offer, a client whose event is off does not.
+                    if (reason == CancelReason.DateChanged) {
+                        AccentNote(
+                            lead = "Date moved?",
+                            text = "Message $counterparty first — shifting a date is usually " +
+                                "easier than starting over.",
+                        )
+                    }
+                }
+
+                CancelStage.Consequences -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
+                        Text(
+                            "Here's what happens",
+                            style = AppTheme.type.screenTitle,
+                            color = colors.ink,
+                        )
+                        Text(
+                            "This can't be undone.",
+                            style = AppTheme.type.subtitle,
+                            color = colors.ink4,
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(dimens.space.md)) {
+                        cancelConsequences(viewer, counterparty, daysBefore).forEach {
+                            ConsequenceCard(it)
+                        }
+                    }
+                    reason?.let {
+                        AccentNote(
+                            lead = "You said: ${it.label.lowercase()}.",
+                            // Not "the artist only sees that you cancelled" —
+                            // `bookings_select_participants` grants the whole row
+                            // to both sides, `cancel_reason` included.
+                            text = "We use it to match you better next time. It is saved " +
+                                "on the booking, so $counterparty can see it too.",
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(dimens.space.lg))
+        }
+
+        BottomActionBar {
+            when (stage) {
+                CancelStage.Reason -> PrimaryButton(
+                    text = "Continue",
+                    onClick = onContinue,
+                    fullWidth = true,
+                    // The whole point of this stage is that it produces a reason.
+                    enabled = reason != null,
+                )
+
+                CancelStage.Consequences -> DestructiveButton(
+                    text = if (isDecline) "Decline this request" else "Cancel this booking",
+                    onClick = onConfirm,
+                )
+            }
+            Text(
+                keepLabel,
+                style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.ink2,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(dimens.radii.sm))
+                    .clickable(role = Role.Button, onClick = onKeep)
+                    .padding(vertical = dimens.space.sm),
             )
         }
     }
 }
 
 /**
- * The post-confirmation action list — hairline rows, no card chrome.
+ * The one destructive control in the app: a `danger` fill with white on it.
  *
- * Message is deliberately absent: it is the pinned primary below, and the
- * always-visible CTA duplicated as a row is one more thing to read past.
+ * Not a [ButtonVariant]: the accent rule says a screen has one signal, and this
+ * button deliberately breaks it — on the second stage of a cancellation the
+ * destructive act IS the signal. Keeping it local to that flow is what stops it
+ * becoming a general-purpose red button.
  */
 @Composable
-private fun ManageSection(
-    actions: List<BookingAction>,
-    viewer: BookingViewer,
-    onShare: () -> Unit,
-    onAddToCalendar: () -> Unit,
-    onCancel: () -> Unit,
-) {
+private fun DestructiveButton(text: String, onClick: () -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    // Maps + Copy already rendered above under their own heading.
-    val rows = actions.filter { it != BookingAction.OpenMaps && it != BookingAction.CopyAddress }
-    if (rows.isEmpty()) return
+    val dimens = AppTheme.dimens
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(dimens.component.cta)
+            .clip(RoundedCornerShape(dimens.radii.buttonLg))
+            .background(colors.danger)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = AppTheme.type.cta, color = colors.onDark)
+    }
+}
 
-    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-        SectionLabel("Manage")
-        Column {
-            rows.forEachIndexed { index, action ->
-                if (index == 0) HRule()
-                when (action) {
-                    BookingAction.Share ->
-                        ActionRow(Icons.Filled.Share, "Share gig details", onClick = onShare)
-                    BookingAction.AddToCalendar ->
-                        ActionRow(Icons.Filled.CalendarMonth, "Add to calendar", onClick = onAddToCalendar)
-                    BookingAction.Cancel -> ActionRow(
-                        Icons.Outlined.Cancel,
-                        // The label differs because the consequences do: an
-                        // artist pulling out of a gig they accepted is a
-                        // different act from a client withdrawing a request.
-                        if (viewer == BookingViewer.Artist) "Cancel this gig" else "Cancel booking",
-                        tint = colors.warm,
-                        onClick = onCancel,
-                    )
-                    else -> Unit
-                }
-                HRule()
+/**
+ * One reason. A circle that FILLS when chosen, not a ring with a dot: the list is
+ * a single choice made once, and the design draws the accent disc with a tick in
+ * it — which is also the only thing on the page saying an answer has been given.
+ */
+@Composable
+private fun ReasonRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .hairlineBottom()
+            .padding(vertical = dimens.space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(dimens.size.radio)
+                .clip(CircleShape)
+                .background(if (selected) colors.accent else Color.Transparent)
+                .border(
+                    if (selected) dimens.size.hairline else dimens.size.strokeEmphasis,
+                    if (selected) colors.accent else colors.lineStrong,
+                    CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = colors.onAccent,
+                    modifier = Modifier.size(dimens.size.iconSm),
+                )
             }
         }
+        Text(
+            label,
+            style = AppTheme.type.rowTitle,
+            color = colors.ink,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** One consequence, as its own quiet card. */
+@Composable
+private fun ConsequenceCard(consequence: CancelConsequence) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.buttonLg))
+            .background(colors.surface3)
+            .padding(dimens.space.lg),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Outlined.Info,
+            contentDescription = null,
+            tint = colors.ink4,
+            modifier = Modifier.size(dimens.size.iconLg),
+        )
+        Column {
+            Text(consequence.title, style = AppTheme.type.rowTitle, color = colors.ink)
+            Text(
+                consequence.detail,
+                style = AppTheme.type.caption,
+                color = colors.ink4,
+                modifier = Modifier.padding(top = dimens.space.xs / 2),
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Small parts
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        style = AppTheme.type.sectionTitle,
+        color = AppTheme.colors.ink,
+        modifier = Modifier.padding(top = AppTheme.dimens.space.xs),
+    )
+}
+
+/** The agreed terms, label left and value right, one per row. */
+@Composable
+private fun TermsList(terms: List<BookingTerm>) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space.md)) {
+        terms.forEach { term ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+            ) {
+                Text(term.label, style = AppTheme.type.body, color = colors.ink2)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    term.value,
+                    // The id is a machine value and reads as one; everything else
+                    // is prose the client typed or picked.
+                    style = if (term.mono) {
+                        AppTheme.type.monoSmall
+                    } else {
+                        AppTheme.type.rowTitle.copy(fontWeight = FontWeight.SemiBold)
+                    },
+                    color = colors.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeeRow(label: String, value: String) {
+    val colors = AppTheme.colors
+    Row(Modifier.fillMaxWidth()) {
+        Text(label, style = AppTheme.type.body, color = colors.ink2)
+        Spacer(Modifier.weight(1f))
+        Text(
+            value,
+            style = AppTheme.type.body.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+        )
+    }
+}
+
+/** A stated fact with a line under it — the dispute page's policy list. */
+@Composable
+private fun FactRow(title: String, detail: String) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(Modifier.padding(vertical = dimens.space.md)) {
+        Text(title, style = AppTheme.type.rowTitle, color = colors.ink)
+        Text(
+            detail,
+            style = AppTheme.type.caption,
+            color = colors.ink4,
+            modifier = Modifier.padding(top = dimens.space.xs / 2),
+        )
     }
 }
 
 /** Icon, label, chevron; the whole row is the target. */
 @Composable
 private fun ActionRow(
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
     tint: Color = AppTheme.colors.ink,
@@ -567,314 +1381,92 @@ private fun ActionRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = dimens.space.md),
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(dimens.size.iconLg))
-        Text(label, style = AppTheme.type.callout, color = tint, modifier = Modifier.weight(1f))
+        Text(label, style = AppTheme.type.rowTitle, color = tint, modifier = Modifier.weight(1f))
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             // The label names the control; the chevron is a glyph, not a second
             // thing for a screen reader to announce.
             contentDescription = null,
-            tint = colors.ink3,
+            tint = colors.ink4,
             modifier = Modifier.size(dimens.size.iconMd),
         )
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dock
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Fee and actions, pinned.
- *
- * The fee sits here rather than in the scroll for the same reason the CTAs do:
- * it is the number both sides came to check, and having to scroll for it on a
- * page whose top half is a photo is a bad trade. Only the artist's fee appears —
- * v1 moves no money, so there is no platform fee, no GST and no total to show.
- */
+/** One of the flat buttons under a confirmed booking. */
 @Composable
-private fun Dock(
-    booking: Booking,
-    viewer: BookingViewer,
-    /**
-     * The action currently in flight, or null. Only the button that OWNS it
-     * wears the progress label: Accept and Decline co-render for an artist on a
-     * pending request, and a shared boolean had the dock announcing both at
-     * once. Everything else is merely disabled while a mutation runs.
-     */
-    acting: BookingAction?,
-    openingChat: Boolean,
-    error: String?,
-    onDismissError: () -> Unit,
-    onAccept: () -> Unit,
-    onDecline: () -> Unit,
-    onMessage: () -> Unit,
-    onCancel: () -> Unit,
-    onReview: () -> Unit,
-) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val isActing = acting != null
-    val primary = BookingActions.primary(viewer, booking.status)
-    // Only the secondary actions the in-page list did NOT take — see the
-    // manageRows/dockSecondary partition.
-    val secondary = BookingActions.dockSecondary(viewer, booking.status)
-
-    Column(
-        Modifier
-            .dockSurface()
-            .padding(space.lg),
-        verticalArrangement = Arrangement.spacedBy(space.md),
-    ) {
-        // A failed accept or a chat that wouldn't open surfaces where the tap
-        // happened, not as a transient snackbar the user can miss — both are
-        // still true next time the screen is opened.
-        error?.let {
-            InlineBanner(
-                title = it,
-                tone = BannerTone.Failure,
-                actionLabel = "Dismiss",
-                onAction = onDismissError,
-            )
-        }
-
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(space.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("ARTIST FEE", style = AppTheme.type.caption, color = colors.ink3)
-            Spacer(Modifier.weight(1f))
-            Text(formatInr(booking.fee), style = AppTheme.type.monoDock, color = colors.accentInk)
-        }
-
-        primary.forEach { action ->
-            when (action) {
-                BookingAction.Accept -> PrimaryButton(
-                    text = if (acting == BookingAction.Accept) "Accepting…" else "Accept request",
-                    onClick = onAccept,
-                    fullWidth = true,
-                    enabled = !isActing,
-                )
-                BookingAction.Decline -> PrimaryButton(
-                    text = if (acting == BookingAction.Decline) "Declining…" else "Decline",
-                    onClick = onDecline,
-                    variant = ButtonVariant.Ghost,
-                    fullWidth = true,
-                    enabled = !isActing,
-                )
-                BookingAction.Message -> PrimaryButton(
-                    text = when {
-                        openingChat -> "Opening…"
-                        viewer == BookingViewer.Artist -> "Message client"
-                        else -> "Message artist"
-                    },
-                    onClick = onMessage,
-                    fullWidth = true,
-                    enabled = !openingChat,
-                )
-                else -> Unit
-            }
-        }
-
-        // Pending has no Manage list to hold its Cancel, and a completed booking's
-        // review opens a sheet rather than a row — so both pin here under the
-        // primary rather than floating a one-item section above the dock.
-        secondary.forEach { action ->
-            when (action) {
-                BookingAction.Cancel -> PrimaryButton(
-                    text = if (acting == BookingAction.Cancel) "Cancelling…" else "Cancel request",
-                    onClick = onCancel,
-                    variant = ButtonVariant.Ghost,
-                    fullWidth = true,
-                    enabled = !isActing,
-                )
-                BookingAction.LeaveReview -> PrimaryButton(
-                    text = "Leave a review",
-                    onClick = onReview,
-                    variant = ButtonVariant.Ghost,
-                    fullWidth = true,
-                )
-                else -> Unit
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cancel flow
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Reason, then consequences, then the destructive tap.
- *
- * Two stages rather than one confirm dialog because the two questions are
- * different: the reason is for us (it lands on the row and feeds matching), the
- * consequences are for them. Collapsing them into a single "Are you sure?" gets
- * a reflexive yes and no reason at all.
- *
- * It carries no in-flight state of its own: confirming closes the sheet and the
- * mutation reports itself on the dock underneath. The `isActing` parameter this
- * used to take could never be observed true — the sheet was already out of
- * composition by the time the flag flipped — so its disabled button was a
- * promise the screen never kept.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CancelFlowSheet(
-    viewer: BookingViewer,
-    isDecline: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (reason: String?) -> Unit,
-) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var reason by remember { mutableStateOf<CancelReason?>(null) }
-    var stage by remember { mutableStateOf(CancelStage.Reason) }
-    val title = if (isDecline) "Decline request" else "Cancel booking"
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = colors.bgElev,
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .padding(bottom = space.xxl),
-            verticalArrangement = Arrangement.spacedBy(space.xl),
-        ) {
-            when (stage) {
-                CancelStage.Reason -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                        Text(title, style = AppTheme.type.title, color = colors.ink)
-                        Text(
-                            if (isDecline) {
-                                "Why are you declining? It helps us match you with better-fitting requests."
-                            } else {
-                                "Why are you cancelling? This helps us match you better next time."
-                            },
-                            style = AppTheme.type.footnote,
-                            color = colors.ink3,
-                        )
-                    }
-                    Column {
-                        cancelReasons(viewer).forEachIndexed { index, option ->
-                            ReasonRow(
-                                label = option.label,
-                                selected = reason == option,
-                                onClick = { reason = option },
-                            )
-                            if (index != cancelReasons(viewer).lastIndex) HRule()
-                        }
-                    }
-                    PrimaryButton(
-                        text = "Continue",
-                        onClick = { stage = CancelStage.Consequences },
-                        fullWidth = true,
-                        // Disabled until a reason is picked — the whole point of
-                        // this stage is that it produces one.
-                        enabled = reason != null,
-                    )
-                    PrimaryButton(
-                        text = if (isDecline) "Keep request" else "Keep booking",
-                        onClick = onDismiss,
-                        variant = ButtonVariant.Ghost,
-                        fullWidth = true,
-                    )
-                }
-
-                CancelStage.Consequences -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                        Text("Here's what happens", style = AppTheme.type.title, color = colors.ink)
-                        Text(
-                            "This can't be undone.",
-                            style = AppTheme.type.footnote,
-                            color = colors.ink3,
-                        )
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                        cancelConsequences(viewer).forEach {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(space.md),
-                                verticalAlignment = Alignment.Top,
-                            ) {
-                                Box(
-                                    Modifier
-                                        .padding(top = space.sm)
-                                        .size(AppTheme.dimens.size.dot)
-                                        .clip(androidx.compose.foundation.shape.CircleShape)
-                                        .background(colors.ink3),
-                                )
-                                Text(it, style = AppTheme.type.callout, color = colors.ink2)
-                            }
-                        }
-                    }
-                    PrimaryButton(
-                        text = title,
-                        onClick = { onConfirm(reason?.label) },
-                        fullWidth = true,
-                    )
-                    PrimaryButton(
-                        text = if (isDecline) "Keep request" else "Keep booking",
-                        onClick = onDismiss,
-                        variant = ButtonVariant.Ghost,
-                        fullWidth = true,
-                    )
-                }
-            }
-        }
-    }
-}
-
-private enum class CancelStage { Reason, Consequences }
-
-/**
- * One reason, with the same radio idiom the package picker uses — a filled core
- * inside a ring, not a checkbox. The rows are a single choice, and the radio is
- * what says so before anything is tapped.
- */
-@Composable
-private fun ReasonRow(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun FlatAction(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    Row(
+    Box(
+        modifier
+            .height(dimens.size.controlMin)
+            .clip(RoundedCornerShape(dimens.radii.md))
+            .background(colors.surface2)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = AppTheme.type.rowTitle, color = colors.ink, maxLines = 1)
+    }
+}
+
+/** The same shape, visibly inert — screen 97's disabled list. */
+@Composable
+private fun DisabledAction(label: String) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Box(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = dimens.space.lg),
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
-        verticalAlignment = Alignment.CenterVertically,
+            .height(dimens.size.controlMin)
+            .clip(RoundedCornerShape(dimens.radii.md))
+            .background(colors.lineSoft),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = AppTheme.type.callout, color = colors.ink, modifier = Modifier.weight(1f))
-        Box(
-            Modifier
-                .size(dimens.size.radio)
-                .border(
-                    dimens.size.stroke,
-                    if (selected) colors.brand else colors.line,
-                    CircleShape,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) {
-                Box(
-                    Modifier
-                        .size(dimens.size.radioCore)
-                        .clip(CircleShape)
-                        .background(colors.brand),
-                )
-            }
+        Text(label, style = AppTheme.type.rowTitle, color = colors.ink3)
+    }
+}
+
+/** Loading: the shape of the page that is coming, not a spinner. */
+@Composable
+private fun DetailSkeleton(onBack: () -> Unit) {
+    val dimens = AppTheme.dimens
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = dimens.component.gutter),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.lg),
+    ) {
+        DetailHeader(title = "Booking", onBack = onBack)
+        SkeletonBlock(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(dimens.size.avatarLg + dimens.space.xl),
+            radius = dimens.radii.card,
+        )
+        repeat(3) {
+            SkeletonBlock(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(dimens.component.skeletonChipHeight),
+                radius = dimens.radii.md,
+            )
         }
     }
 }
+
+/** [BookingMoment] → the timeline's own step. */
+private fun BookingMoment.toStep(): EventStep = EventStep(
+    title = title,
+    detail = detail,
+    state = if (done) EventStepState.Done else EventStepState.Current,
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System handoffs
@@ -888,10 +1480,10 @@ private fun launchAddToCalendar(context: Context, booking: Booking): String? {
     // The canonical resolver, not a local ISO parse: `Instant.parse` is
     // ISO_INSTANT, which rejects the numeric-offset form PostgREST emits for a
     // `timestamptz`, and it has nothing to fall back on when the column is
-    // missing from a projection. `resolvedStartEpochMs` tries the offset
-    // patterns and then the date+time labels this very screen is displaying two
-    // sections up — so "Add to calendar" stops refusing a gig whose show time is
-    // plainly on screen.
+    // missing from a projection. `resolvedStartEpochMs` tries the offset patterns
+    // and then the date+time labels this very screen is displaying two sections
+    // up — so "Add to calendar" stops refusing a gig whose show time is plainly
+    // on screen.
     val startMs = booking.resolvedStartEpochMs()
         ?: return "Couldn't add to calendar — missing show time."
     val endMs = booking.resolvedEndEpochMs() ?: (startMs + DEFAULT_GIG_MS)
@@ -929,4 +1521,30 @@ private fun shareGig(context: Context, text: String): String? {
         .putExtra(Intent.EXTRA_TEXT, text)
     return runCatching { context.startActivity(Intent.createChooser(intent, null)); null }
         .getOrElse { "Couldn't open the share sheet." }
+}
+
+/**
+ * Screen 97's only live control: the store listing for THIS package.
+ *
+ * `market://` first because it opens the Play app directly; the https form is the
+ * fallback for a device without it (an emulator, a sideloaded build), which is
+ * exactly where a read-only booking is most likely to be seen during
+ * development.
+ */
+private fun openPlayStore(context: Context): String? {
+    val id = context.packageName
+    return try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$id")))
+        null
+    } catch (_: ActivityNotFoundException) {
+        runCatching {
+            context.startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://play.google.com/store/apps/details?id=$id"),
+                ),
+            )
+            null
+        }.getOrElse { "Couldn't open the Play Store on this device." }
+    }
 }

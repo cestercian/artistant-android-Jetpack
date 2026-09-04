@@ -6,14 +6,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -34,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -41,8 +44,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -85,15 +91,68 @@ fun currentCalendarMonth(nowMs: Long = System.currentTimeMillis()): CalendarMont
     return CalendarMonth(year = cal.get(Calendar.YEAR), month = cal.get(Calendar.MONTH))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The five day states (screen 78)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a day tile is SAYING, which is what decides its fill.
+ *
+ * Screen 78 exists to document exactly this, in the designer's words: "Five day
+ * states, a month dropdown, and multi-event days" — and its note explains why it
+ * is a screen at all rather than a paragraph: "Documenting the shared component
+ * is what stops Bookings and Gigs drifting apart."
+ *
+ * Four fills, plus one ring:
+ *
+ *  - [Booked] — accent. There is a gig here. The one thing both surfaces exist to
+ *    show, so it takes the screen's one accent.
+ *  - [Unavailable] — a grey fill. The day is spoken for by something that is not
+ *    a booking (an artist's blocked-out date). Deliberately a FILL and not a
+ *    strike or an opacity: an unavailable day is as definite as a booked one, and
+ *    a faded day reads as "loading".
+ *  - [Open] — no fill at all. Most of a month is open, and filling all of it
+ *    turns the grid into a wall.
+ *  - [Selected] — ink. Near-black beats both accent and grey, which is what lets
+ *    the selection sit ON a booked day without either mark being lost.
+ *
+ * TODAY is not in this list because it is not exclusive with the others: today
+ * can be booked, or unavailable, or the day you just tapped. It renders as a
+ * ring around whatever fill the day already has (see [MonthDayGrid]), and the
+ * ring is dropped only when the day is selected — an ink ring on an ink fill is
+ * invisible, and the selection has already answered "which day is this".
+ */
+enum class MonthDayFill { Open, Booked, Unavailable, Selected }
+
+/**
+ * Which fill a day takes, as a pure function so the precedence is testable
+ * without a Compose runtime.
+ *
+ * Precedence is selection → booked → unavailable → open, and the order is the
+ * argument: a tap must always be visible (otherwise the grid stops responding to
+ * the user), and a booking must out-rank an availability block (an artist who
+ * blocked a date and then accepted a gig on it has a gig on it).
+ */
+fun monthDayFill(booked: Boolean, unavailable: Boolean, selected: Boolean): MonthDayFill = when {
+    selected -> MonthDayFill.Selected
+    booked -> MonthDayFill.Booked
+    unavailable -> MonthDayFill.Unavailable
+    else -> MonthDayFill.Open
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Header
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Month header. Used two ways: as the grid's title (with [onPrevMonth] /
  * [onNextMonth] wired, which draws the stepper chevrons) and as a plain group
- * header above each month's rows in the list below (both null → title only).
+ * header above each month's rows in a list (both null → title only).
  *
- * Chevrons mirror iOS `MonthCalendarView`'s header steppers: trailing edge, bare
- * glyphs in the hairline header style (no bordered chrome, no accent), and NOT
- * clamped to a date range — past gigs and far-future holds are both legitimate
- * destinations there, so they are here too.
+ * The light design sets the whole label — month AND year — at one section-title
+ * step with a caret after it (screen 78). The dark design split them, month in a
+ * 26sp serif and year in mono beside it; that made a calendar's masthead the
+ * largest thing on a page whose actual subject is the list under it.
  */
 @Composable
 fun MonthCalendarHeader(
@@ -113,47 +172,30 @@ fun MonthCalendarHeader(
      */
     onSelectMonth: ((Int) -> Unit)? = null,
 ) {
-    val space = AppTheme.dimens.space
-    // "August 2026" arrives as one string, but it is TWO pieces of information
-    // at two levels of importance, and iOS sets them that way: the month is the
-    // editorial headline (the serif display step), the year is a quiet mono
-    // disambiguator beside it. Rendering the whole label at one serif size made
-    // the year shout as loudly as the month and left the header reading like a
-    // section title rather than like a calendar's masthead.
-    //
-    // Split on the LAST space so a spelled-out month survives; anything without
-    // a trailing year token renders whole, which is what the plain group-header
-    // use (both callbacks null) relies on.
-    val split = monthLabel.trim().lastIndexOf(' ')
-    val yearToken = if (split > 0) monthLabel.trim().substring(split + 1) else ""
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    // The menu offers months, so it needs the month name alone; the header
+    // renders the full label. Split on the LAST space so a spelled-out month
+    // survives, and only when the tail really is a 4-digit year.
+    val trimmed = monthLabel.trim()
+    val split = trimmed.lastIndexOf(' ')
+    val yearToken = if (split > 0) trimmed.substring(split + 1) else ""
     val isYear = yearToken.length == 4 && yearToken.all { it.isDigit() }
-    val month = if (isYear) monthLabel.trim().substring(0, split) else monthLabel
+    val monthName = if (isYear) trimmed.substring(0, split) else trimmed
+
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = space.lg, vertical = space.md),
-        // Baseline, not centre: the year has to sit ON the month's baseline, and
-        // centring two wildly different type sizes floats the small one.
-        verticalAlignment = Alignment.Bottom,
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onSelectMonth != null) {
-            MonthMenu(monthName = month, onSelectMonth = onSelectMonth)
+            MonthMenu(label = trimmed, monthName = monthName, onSelectMonth = onSelectMonth)
         } else {
             Text(
-                text = month,
-                style = AppTheme.type.displayTitle,
-                color = AppTheme.colors.ink,
-            )
-        }
-        if (isYear) {
-            Spacer(Modifier.width(space.sm))
-            Text(
-                text = yearToken,
-                style = AppTheme.type.monoYear,
-                color = AppTheme.colors.ink3,
-                // Nudged off the very bottom so it aligns to the serif's baseline
-                // rather than to its descender line.
-                modifier = Modifier.padding(bottom = space.sm),
+                text = trimmed,
+                style = AppTheme.type.sectionTitle,
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Spacer(Modifier.weight(1f))
@@ -163,63 +205,62 @@ fun MonthCalendarHeader(
         onNextMonth?.let {
             MonthStepButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next month", it)
         }
+        // Balance the row when it has no steppers, so a bare group header's text
+        // still starts on the same x as one that does.
+        if (onPrevMonth == null && onNextMonth == null) Spacer(Modifier.width(dimens.space.xs))
     }
 }
 
 /**
- * The month name as a dropdown trigger: the name at the display step with a
- * small caret after it, opening a list of all twelve.
+ * The month label as a dropdown trigger: the label with a small caret after it,
+ * opening a list of all twelve months.
  *
- * The caret is deliberately quiet (`ink3`, one caption step) — the month name is
- * the calendar's masthead and the affordance should hang off it, not compete
- * with it. A tick marks the live month so the open menu still answers "where am
- * I" without the header behind it.
- *
- * Picking holds the YEAR fixed, matching the reference. That is why this never
- * replaces the steppers: they remain the only way across a year boundary, which
- * is exactly the case a December gig makes.
+ * A tick marks the live month so the open menu still answers "where am I"
+ * without the header behind it. Picking holds the YEAR fixed, matching the
+ * design — which is why this never replaces the steppers: they remain the only
+ * way across a year boundary, exactly the case a December gig makes.
  */
 @Composable
-private fun MonthMenu(monthName: String, onSelectMonth: (Int) -> Unit) {
+private fun MonthMenu(label: String, monthName: String, onSelectMonth: (Int) -> Unit) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val space = dimens.space
     var open by remember { mutableStateOf(false) }
-    // [monthNames] — the same twelve strings the group headers below this grid are
-    // built from — and NOT `DateFormatSymbols.getInstance(Locale.getDefault())`.
-    // Nothing else on this surface is localised: [monthLabelFromEpoch] and
-    // [selectedDayLabel] both format with `Locale.US` and the weekday row is
-    // "M T W T F S S". So a default-locale menu was the one translated control on
-    // an English screen, and worse, the tick below marks the live month by
-    // comparing against the header's own name — on a hi-IN/bn-IN/ta-IN device
-    // (all shipping locales in this market) the header read "August" and the menu
-    // "अगस्त", nothing ever matched, and the open menu could no longer answer
-    // "where am I".
+    // [monthNames] — the same twelve strings the group headers are built from —
+    // and NOT `DateFormatSymbols.getInstance(Locale.getDefault())`. Nothing else
+    // on this surface is localised: [monthLabelFromEpoch] and [selectedDayLabel]
+    // both format with `Locale.US` and the weekday row is "M T W T F S S". So a
+    // default-locale menu was the one translated control on an English screen,
+    // and worse, the tick below marks the live month by comparing against the
+    // header's own name — on a hi-IN/bn-IN/ta-IN device (all shipping locales in
+    // this market) the header read "August" and the menu "अगस्त", nothing ever
+    // matched, and the open menu could no longer answer "where am I".
     val months = monthNames
     Box {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(dimens.radii.sm))
                 .clickable { open = true }
-                .semantics { contentDescription = "$monthName, choose month" },
-            verticalAlignment = Alignment.Bottom,
+                .semantics { contentDescription = "$label, choose month" },
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = monthName, style = AppTheme.type.displayTitle, color = colors.ink)
+            Text(
+                text = label,
+                style = AppTheme.type.sectionTitle,
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Icon(
                 Icons.Filled.ArrowDropDown,
                 contentDescription = null,
-                tint = colors.ink3,
-                modifier = Modifier
-                    .size(dimens.size.iconLg)
-                    // Sits on the name's baseline rather than under its
-                    // descender, same nudge the year token takes.
-                    .padding(bottom = space.sm),
+                tint = colors.ink,
+                modifier = Modifier.size(dimens.size.iconLg),
             )
         }
         DropdownMenu(
             expanded = open,
             onDismissRequest = { open = false },
-            containerColor = colors.bgCard,
+            containerColor = colors.surface,
         ) {
             months.forEachIndexed { index, name ->
                 val selected = name.equals(monthName, ignoreCase = true)
@@ -227,7 +268,7 @@ private fun MonthMenu(monthName: String, onSelectMonth: (Int) -> Unit) {
                     text = {
                         Text(
                             name,
-                            style = AppTheme.type.callout,
+                            style = AppTheme.type.rowTitle,
                             color = if (selected) colors.ink else colors.ink2,
                         )
                     },
@@ -253,8 +294,7 @@ private fun MonthMenu(monthName: String, onSelectMonth: (Int) -> Unit) {
 
 /**
  * One stepper glyph. Sized to `size.rowMin` (44dp) so the tap target clears the
- * a11y minimum even though the glyph itself is small — the same trade iOS makes
- * with its 44pt frame around a footnote-weight chevron.
+ * a11y minimum even though the glyph itself is small.
  */
 @Composable
 private fun MonthStepButton(icon: ImageVector, label: String, onClick: () -> Unit) {
@@ -263,11 +303,15 @@ private fun MonthStepButton(icon: ImageVector, label: String, onClick: () -> Uni
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = AppTheme.colors.ink3,
+            tint = AppTheme.colors.ink,
             modifier = Modifier.size(size.iconLg),
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grid
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * One cell of the month grid.
@@ -314,29 +358,19 @@ private fun monthGridDays(year: Int, month: Int): List<DayCell> {
 }
 
 /**
- * The month grid: seven columns of day TILES.
+ * The month grid: seven columns of day cells, in the four fills [MonthDayFill]
+ * describes plus today's ring.
  *
- * Rebuilt against the iOS original, which this had been approximating with bare
- * numerals in circles. Four things changed, and each of them was carrying
- * information the old grid could not:
+ * Numerals on a quiet ground, not a wall of tiles. The dark design filled every
+ * day with a hairlined tile and hung a status dot under each numeral; the light
+ * design fills only the days that are SAYING something, which is what lets the
+ * accent on a booked day be the thing the eye finds. The dot went with the
+ * tiles: an open day is now open by having no mark at all, which is both the
+ * design and one less thing to explain.
  *
- *  - **Tiles, not circles.** Every current-month day is a filled, hairlined
- *    rounded tile. That is what makes the grid legible as a month at a glance
- *    instead of as scattered numbers, and it is the surface the states below
- *    paint onto.
- *  - **Adjacent-month fill.** Leading and trailing cells carry the neighbouring
- *    months' dates, dimmed and inert, so no week row has a hole in it.
- *  - **A status dot under every open day.** A blank day and a day with no data
- *    used to look identical; the dot is the difference between "nothing booked"
- *    and "nothing known".
- *  - **Booked days FILL brand** rather than tinting to 20%. A gig is the thing
- *    the screen exists to show, and lime is signal — a 20% wash spends the
- *    accent without earning attention.
- *
- * Selection and today are rings, not fills, so they can stack on top of a booked
- * day without competing with it. [busyDays] and [selectedDay] stay day-of-month
- * ints — the callers filter their own lists by that, and widening it here would
- * be a change to their contract, not a visual fix.
+ * [busyDays] and [unavailableDays] stay day-of-month ints — the callers filter
+ * their own lists by that, and widening it here would be a change to their
+ * contract, not a visual fix.
  */
 @Composable
 fun MonthDayGrid(
@@ -346,17 +380,24 @@ fun MonthDayGrid(
     selectedDay: Int?,
     onDayClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Days the owner of this calendar has blocked out — the artist's
+     * `days_available` gaps, on the Gigs seat. Empty on the client's Bookings
+     * seat, which has no such concept, and that is why it is the one optional
+     * parameter: the two surfaces share every other state.
+     */
+    unavailableDays: Set<Int> = emptySet(),
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     // Both derivations below are pure functions of the displayed month, and this
     // grid recomposes on every day tap ([selectedDay] is a parameter) — so
     // unremembered, tapping a date re-read the wall clock and rebuilt all 42
-    // cells (three `Calendar`s and a 42-element list) just to move one ring.
-    // The clock read is keyed on the month too, which means a grid left on screen
-    // across midnight keeps its ring on yesterday until the month is stepped —
-    // cheaper and steadier than subscribing to a clock for one ring, and the
-    // dates themselves are unaffected either way.
+    // cells just to move one ring. The clock read is keyed on the month too,
+    // which means a grid left on screen across midnight keeps its ring on
+    // yesterday until the month is stepped — cheaper and steadier than
+    // subscribing to a clock for one ring, and the dates are unaffected either
+    // way.
     val todayDay = remember(year, month) {
         val today = Calendar.getInstance()
         if (today.get(Calendar.YEAR) == year && today.get(Calendar.MONTH) == month) {
@@ -367,10 +408,10 @@ fun MonthDayGrid(
     }
     val weeks = remember(year, month) { monthGridDays(year, month).chunked(7) }
     Column(
-        modifier.padding(horizontal = space.lg),
-        verticalArrangement = Arrangement.spacedBy(space.sm),
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(dimens.space.xs),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
             // Weekend letters drop a rung on the ink ladder — the only thing
             // distinguishing S and S from the rest of a mono row of capitals.
             listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { i, d ->
@@ -384,12 +425,18 @@ fun MonthDayGrid(
             }
         }
         weeks.forEach { week ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
+            ) {
                 week.forEach { cell ->
                     DayTile(
                         cell = cell,
-                        busy = cell.inMonth && cell.number in busyDays,
-                        selected = cell.inMonth && selectedDay == cell.number,
+                        fill = monthDayFill(
+                            booked = cell.inMonth && cell.number in busyDays,
+                            unavailable = cell.inMonth && cell.number in unavailableDays,
+                            selected = cell.inMonth && selectedDay == cell.number,
+                        ),
                         isToday = cell.inMonth && cell.number == todayDay,
                         onClick = { onDayClick(cell.number) },
                         modifier = Modifier.weight(1f),
@@ -403,84 +450,294 @@ fun MonthDayGrid(
 @Composable
 private fun DayTile(
     cell: DayCell,
-    busy: Boolean,
-    selected: Boolean,
+    fill: MonthDayFill,
     isToday: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val shape = RoundedCornerShape(dimens.radii.sm)
+    val shape = RoundedCornerShape(dimens.radii.md)
+    val marked = fill != MonthDayFill.Open
 
-    // Ring rules, in priority order. Selected wins, and on a lime tile it has to
-    // switch to ink or it disappears into its own fill. A booked-but-unselected
-    // tile takes no ring at all — the fill has already said everything.
-    val ring = when {
-        selected -> if (busy) colors.ink else colors.brand
-        isToday && !busy -> colors.ink
-        busy -> Color.Transparent
-        else -> colors.lineSoft
+    val background = when (fill) {
+        MonthDayFill.Open -> Color.Transparent
+        MonthDayFill.Booked -> colors.accent
+        // No token sits between `hairline` and `lineStrong`, and the design's
+        // unavailable grey is nearly `hairline` — close enough that adding a
+        // palette entry for the gap would be a theme change made for two pixels.
+        MonthDayFill.Unavailable -> colors.hairline
+        MonthDayFill.Selected -> colors.ink
     }
-    val ringWidth = if (selected || (isToday && !busy)) dimens.size.strokeEmphasis else dimens.size.hairline
-
-    val base = modifier
-        .height(dimens.size.gridCellH)
-        .clip(shape)
-        .background(
-            when {
-                !cell.inMonth -> colors.bgCard.copy(alpha = 0.35f)
-                busy -> colors.brand
-                else -> colors.bgCard
-            },
-        )
+    val ink = when {
+        !cell.inMonth -> colors.lineStrong
+        fill == MonthDayFill.Selected -> colors.onDark
+        fill == MonthDayFill.Booked -> colors.ink
+        fill == MonthDayFill.Unavailable -> colors.ink3
+        else -> colors.ink
+    }
+    // Today is a ring around whatever fill the day already carries — except when
+    // it is selected, where an ink ring on an ink fill would be invisible and the
+    // selection has already answered the question.
+    val ringed = isToday && fill != MonthDayFill.Selected
 
     Box(
-        if (cell.inMonth) {
-            base
-                .border(ringWidth, ring, shape)
-                .semantics {
-                    contentDescription = buildString {
-                        append("Day ${cell.number}")
-                        if (busy) append(", has bookings")
-                        if (selected) append(", selected")
-                    }
-                    this.selected = selected
-                    if (busy) stateDescription = "Busy"
-                }
-                .clickable(onClick = onClick)
-        } else {
-            base
-        },
+        modifier = modifier
+            .heightIn(min = dimens.size.rowMin)
+            .clip(shape)
+            .background(background)
+            .then(
+                if (ringed) Modifier.border(dimens.size.strokeEmphasis, colors.ink, shape)
+                else Modifier,
+            )
+            .then(
+                if (cell.inMonth) {
+                    Modifier
+                        .semantics {
+                            contentDescription = buildString {
+                                append("Day ${cell.number}")
+                                when (fill) {
+                                    MonthDayFill.Booked -> append(", booked")
+                                    MonthDayFill.Unavailable -> append(", unavailable")
+                                    MonthDayFill.Selected -> append(", selected")
+                                    MonthDayFill.Open -> Unit
+                                }
+                                if (isToday) append(", today")
+                            }
+                            selected = fill == MonthDayFill.Selected
+                            if (fill == MonthDayFill.Booked) stateDescription = "Booked"
+                        }
+                        .clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(dimens.space.xs),
-        ) {
-            Text(
-                "${cell.number}",
-                style = AppTheme.type.monoDay.copy(
-                    fontWeight = if (busy || isToday) FontWeight.Bold else FontWeight.Medium,
-                ),
-                color = when {
-                    !cell.inMonth -> colors.ink4
-                    busy -> colors.brandInk
-                    else -> colors.ink
-                },
-            )
-            // The dot occupies its slot even when it has nothing to say, so the
-            // numerals stay on one baseline across a row where some days are
-            // booked and some are not.
-            Box(
-                Modifier
-                    .size(dimens.size.gridDot)
-                    .clip(CircleShape)
-                    .background(if (cell.inMonth && !busy) colors.ink3 else Color.Transparent),
-            )
-        }
+        Text(
+            "${cell.number}",
+            style = AppTheme.type.chip.copy(
+                fontWeight = if (marked || isToday) FontWeight.Bold else FontWeight.Medium,
+            ),
+            color = ink,
+        )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legend + card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The key under the grid — the only place the five states are named.
+ *
+ * It is not optional chrome. A colour-coded grid with no key asks the reader to
+ * infer that lime means booked and grey means blocked, and the two surfaces that
+ * share this component disagree about which of those they even use — so the
+ * legend is also what tells a client that "Unavailable" is not a state their
+ * calendar has.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MonthCalendarLegend(
+    modifier: Modifier = Modifier,
+    showUnavailable: Boolean = true,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        LegendItem("Booked", fill = colors.accent)
+        if (showUnavailable) LegendItem("Unavailable", fill = colors.hairline)
+        LegendItem("Open", fill = Color.Transparent, stroke = colors.lineStrong)
+        LegendItem("Selected", fill = colors.ink)
+        LegendItem("Today", fill = Color.Transparent, stroke = colors.ink, emphasis = true)
+    }
+}
+
+@Composable
+private fun LegendItem(
+    label: String,
+    fill: Color,
+    stroke: Color? = null,
+    emphasis: Boolean = false,
+) {
+    val dimens = AppTheme.dimens
+    val shape: Shape = RoundedCornerShape(dimens.space.xs)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm - dimens.space.xs / 2),
+    ) {
+        Box(
+            Modifier
+                .size(dimens.size.iconSm)
+                .clip(shape)
+                .background(fill)
+                .then(
+                    if (stroke != null) {
+                        Modifier.border(
+                            if (emphasis) dimens.size.strokeEmphasis else dimens.size.hairline,
+                            stroke,
+                            shape,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
+        )
+        Text(label, style = AppTheme.type.caption, color = AppTheme.colors.ink3)
+    }
+}
+
+/**
+ * Header, weekdays, grid and legend inside one rounded `surface3` card — the
+ * whole calendar as screen 78 draws it.
+ *
+ * The card is what makes the calendar a single object on a page that also
+ * carries a day's schedule under it. Both Bookings and Gigs take this rather
+ * than assembling the four pieces themselves, which is the drift the design's
+ * note is about.
+ */
+@Composable
+fun MonthCalendarCard(
+    month: CalendarMonth,
+    busyDays: Set<Int>,
+    selectedDay: Int?,
+    onDayClick: (Int) -> Unit,
+    onStepMonth: (Int) -> Unit,
+    onSelectMonth: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    unavailableDays: Set<Int> = emptySet(),
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.xl))
+            .background(colors.surface3)
+            .padding(horizontal = dimens.space.lg, vertical = dimens.space.lg),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.md),
+    ) {
+        MonthCalendarHeader(
+            monthLabel = monthLabelFromEpoch(month.firstDayEpochMs),
+            onPrevMonth = { onStepMonth(-1) },
+            onNextMonth = { onStepMonth(1) },
+            onSelectMonth = onSelectMonth,
+        )
+        MonthDayGrid(
+            year = month.year,
+            month = month.month,
+            busyDays = busyDays,
+            selectedDay = selectedDay,
+            onDayClick = onDayClick,
+            unavailableDays = unavailableDays,
+        )
+        MonthCalendarLegend(showUnavailable = unavailableDays.isNotEmpty())
+    }
+}
+
+/**
+ * One entry on the selected day's schedule (screen 78): the clock in mono at the
+ * leading edge, a coloured spine, and what is happening.
+ *
+ * The spine is per-event and takes the accent only for the thing that IS the
+ * booking; anything around it (a load-in note, a hold) takes the quiet grey. On
+ * a day with two entries that tint is the only thing saying which of them is the
+ * gig.
+ */
+@Composable
+fun DayEventRow(
+    time: String,
+    meridiem: String?,
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    accented: Boolean = true,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.lg))
+            .background(colors.surface3)
+            .clickable(onClick = onClick)
+            .padding(dimens.space.lg)
+            .heightIn(min = dimens.size.rowMin)
+            .semantics(mergeDescendants = true) {
+                contentDescription = listOfNotNull(
+                    listOfNotNull(time, meridiem).joinToString(" ").takeIf { it.isNotBlank() },
+                    title,
+                    subtitle,
+                ).joinToString(". ")
+            },
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(time, style = AppTheme.type.monoSmall, color = colors.ink4)
+            meridiem?.let {
+                Text(it, style = AppTheme.type.monoSmall, color = colors.ink3)
+            }
+        }
+        Box(
+            Modifier
+                .width(dimens.size.hairline * 3)
+                .height(dimens.size.iconXl)
+                .clip(RoundedCornerShape(dimens.space.xs))
+                .background(if (accented) colors.accent else colors.hairline),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = colors.ink,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            subtitle?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = dimens.space.xs / 2),
+                )
+            }
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = colors.lineStrong,
+            modifier = Modifier.size(dimens.size.iconMd),
+        )
+    }
+}
+
+/**
+ * Split "8:00 PM" into the clock and its meridiem, for [DayEventRow]'s stacked
+ * time column. Anything that isn't two tokens comes back whole with no
+ * meridiem — a label we cannot read is still a label, and stacking half of it is
+ * worse than printing all of it on one line.
+ */
+fun splitClockLabel(timeLabel: String): Pair<String, String?> {
+    val parts = timeLabel.trim().split(' ').filter { it.isNotEmpty() }
+    return when (parts.size) {
+        0 -> "" to null
+        2 -> parts[0] to parts[1].lowercase(Locale.US)
+        else -> timeLabel.trim() to null
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Labels
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * The twelve month names this whole calendar surface speaks: [MonthMenu]'s
@@ -561,13 +818,13 @@ fun monthLabelFromEpoch(epochMs: Long): String {
 }
 
 /**
- * "Wednesday, August 12" — the heading that names the day a calendar tap has
- * selected, so a filtered list reads as filtered rather than as a short list.
+ * "Sat 12 October" — the heading that names the day a calendar tap has selected,
+ * so a filtered list reads as filtered rather than as a short list.
  *
- * The reference prints this above the selected day's schedule and it is the only
+ * The design prints this above the selected day's schedule and it is the only
  * thing on screen saying which day you are looking at; without it, tapping a day
- * here narrowed the list silently and an empty day showed a bare "no bookings"
- * line with no date attached to it.
+ * narrowed the list silently and an empty day showed a bare "no bookings" line
+ * with no date attached to it.
  *
  * [month] is `Calendar.MONTH`, 0-based, matching every other helper in this file.
  */
@@ -576,7 +833,7 @@ fun selectedDayLabel(year: Int, month: Int, day: Int): String {
         clear()
         set(year, month, day)
     }
-    return SimpleDateFormat("EEEE, MMMM d", Locale.US).format(cal.time)
+    return SimpleDateFormat("EEE d MMMM", Locale.US).format(cal.time)
 }
 
 /**
@@ -587,4 +844,22 @@ fun dayOfMonthInMonth(dateLabel: String, year: Int, month: Int): Int? {
     val c = BookingDateFormat.parseLabel(dateLabel) ?: return null
     if (c.get(Calendar.YEAR) != year || c.get(Calendar.MONTH) != month) return null
     return c.get(Calendar.DAY_OF_MONTH)
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFFFAFAF6)
+@Composable
+private fun MonthCalendarPreview() {
+    ArtistantTheme {
+        Column(Modifier.padding(AppTheme.dimens.component.gutter)) {
+            MonthCalendarCard(
+                month = CalendarMonth(2026, Calendar.OCTOBER),
+                busyDays = setOf(4, 24),
+                unavailableDays = setOf(7, 15, 20),
+                selectedDay = 12,
+                onDayClick = {},
+                onStepMonth = {},
+                onSelectMonth = {},
+            )
+        }
+    }
 }

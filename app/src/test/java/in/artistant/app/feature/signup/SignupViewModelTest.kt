@@ -167,6 +167,74 @@ class SignupViewModelTest {
         assertTrue(consents.communityAgreed.value)
     }
 
+    /** What [in.artistant.app.feature.signup.SignupFlow] computes for `RootGate.Onboarding`:
+     *  the tier asks for `.Profile`, and the container resolves that against the live pledge
+     *  mirror before seeding the flow. */
+    private fun SignupViewModel.resumeAsOnboardingGate() {
+        resumeAt(entryStep(SignupStep.Profile, SignupMode.Signup, state.value.communityAgreed))
+    }
+
+    @Test
+    fun `an incomplete profile meets the pledge before the profile step`() = runTest(dispatcher) {
+        // The gate's signed-in-but-incomplete tier used to seed the flow straight at `.Profile`,
+        // so an account that got a session before its `users` row was complete finished
+        // onboarding without ever being shown the community pledge — permanently, since the
+        // profile save is the last screen that would have asked.
+        val consents = FakeConsentStore(agreed = false)
+        val vm = vm(consents = consents)
+        advanceUntilIdle()
+
+        vm.resumeAsOnboardingGate()
+        vm.setSignedIn(true)
+
+        // `.Role` with the flag unset IS the pledge screen (the container renders screen 27
+        // there, not the role picker) — and a signed-in user has nothing behind it, so Agree
+        // is the only way out.
+        assertEquals(SignupStep.Role, vm.state.value.step)
+        assertFalse(vm.state.value.communityAgreed)
+        assertFalse(vm.state.value.canGoBack)
+
+        vm.agreeCommunity()
+        advanceUntilIdle()
+        assertTrue(consents.communityAgreed.value)
+
+        // Agreeing flips the mirror, which re-computes the entry the container is keyed on.
+        vm.resumeAsOnboardingGate()
+        assertEquals(SignupStep.Profile, vm.state.value.step)
+    }
+
+    @Test
+    fun `a device that already took the pledge resumes straight at the profile step`() = runTest(dispatcher) {
+        val vm = vm(consents = FakeConsentStore(agreed = true))
+        advanceUntilIdle() // the mirror hydrates from the store before the gate seeds the flow
+
+        vm.resumeAsOnboardingGate()
+        vm.setSignedIn(true)
+
+        assertEquals(SignupStep.Profile, vm.state.value.step)
+    }
+
+    @Test
+    fun `a fresh signup still walks welcome then the pledge then the role picker`() = runTest(dispatcher) {
+        // The not-signed-in tier asks for `.Welcome`, which is before the pledge, so nothing
+        // about the walk from the top changes: it already meets screen 27 inside `.Role`.
+        val vm = vm(consents = FakeConsentStore(agreed = false))
+        advanceUntilIdle()
+
+        val entry = entryStep(SignupStep.Welcome, SignupMode.Signup, vm.state.value.communityAgreed)
+        assertEquals(SignupStep.Welcome, entry)
+        vm.resumeAt(entry)
+
+        vm.startSignup()
+        assertEquals(SignupStep.Role, vm.state.value.step)
+        assertFalse(vm.state.value.communityAgreed) // → the pledge
+        vm.agreeCommunity()
+        advanceUntilIdle()
+        assertEquals(SignupStep.Role, vm.state.value.step) // → the role picker, same step
+        vm.advance()
+        assertEquals(SignupStep.Auth, vm.state.value.step)
+    }
+
     @Test
     fun `ticking the terms box persists it`() = runTest(dispatcher) {
         // The checkbox is the ONLY place consent is collected, and the flow can be

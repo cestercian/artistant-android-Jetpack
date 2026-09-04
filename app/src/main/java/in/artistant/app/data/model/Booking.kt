@@ -136,6 +136,28 @@ data class Booking(
     val startDatetimeIso: String? = null,
     val endDatetimeIso: String? = null,
     val venueNotes: String? = null,
+    /**
+     * The cancellation, as the row records it (`cancelled_at`, `cancelled_by`,
+     * `cancel_reason` — all on `bookings` since 0001).
+     *
+     * Read-only here, and read for one screen: the cancelled booking detail
+     * (design 83) has to say WHO cancelled and WHEN, because "You cancelled this
+     * booking" and "The artist cancelled this booking" are opposite facts and a
+     * page that shows neither leaves the client guessing.
+     *
+     * No write path touches these: cancellation goes through the `cancel-booking`
+     * Edge Function, which stamps all three server-side. They are nullable for
+     * the obvious reason — a booking that was never cancelled has none — and the
+     * projection already asks for them (`select("*")`), so nothing changes on the
+     * wire.
+     *
+     * [cancelReason] is visible to BOTH parties: `bookings_select_participants`
+     * grants the whole row to the client and the artist alike, with no
+     * column-level revoke. Nothing in the UI may imply otherwise.
+     */
+    val cancelledAtIso: String? = null,
+    val cancelledBy: String? = null,
+    val cancelReason: String? = null,
 )
 
 /**

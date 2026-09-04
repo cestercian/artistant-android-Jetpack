@@ -494,6 +494,10 @@ private data class DbBooking(
     @SerialName("end_datetime") val endDatetime: String? = null,
     @SerialName("venue_notes") val venueNotes: String? = null,
     @SerialName("client_name") val clientName: String? = null,
+    /** The cancellation stamp the Edge Function writes — see [Booking.cancelledAtIso]. */
+    @SerialName("cancelled_at") val cancelledAt: String? = null,
+    @SerialName("cancelled_by") val cancelledBy: String? = null,
+    @SerialName("cancel_reason") val cancelReason: String? = null,
 ) {
     fun toDomain(clientFullName: String? = null): Booking {
         val stamped = clientName?.trim()?.takeIf { it.isNotEmpty() }
@@ -521,6 +525,9 @@ private data class DbBooking(
             startDatetimeIso = startDatetime,
             endDatetimeIso = endDatetime,
             venueNotes = venueNotes,
+            cancelledAtIso = cancelledAt,
+            cancelledBy = cancelledBy?.trim()?.takeIf { it.isNotEmpty() },
+            cancelReason = cancelReason?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 }
@@ -548,6 +555,9 @@ private data class DbBookingWithClient(
     @SerialName("end_datetime") val endDatetime: String? = null,
     @SerialName("venue_notes") val venueNotes: String? = null,
     @SerialName("client_name") val clientName: String? = null,
+    @SerialName("cancelled_at") val cancelledAt: String? = null,
+    @SerialName("cancelled_by") val cancelledBy: String? = null,
+    @SerialName("cancel_reason") val cancelReason: String? = null,
     val client: ClientEmbed? = null,
 ) {
     @Serializable
@@ -578,6 +588,9 @@ private data class DbBookingWithClient(
             endDatetime = endDatetime,
             venueNotes = venueNotes,
             clientName = clientName,
+            cancelledAt = cancelledAt,
+            cancelledBy = cancelledBy,
+            cancelReason = cancelReason,
         ).toDomain(clientFullName = embed ?: stamped)
     }
 }
@@ -676,13 +689,39 @@ class FakeBookingsRepository(
     }
 
     override suspend fun cancel(id: String, reason: String?): Booking =
-        mutate(id) { it.copy(status = BookingStatus.Cancelled, escrowStatus = EscrowStatus.Refunded) }
+        cancelStamped(id, reason, by = "client")
 
     override suspend fun accept(id: String): Booking =
         mutate(id) { it.copy(status = BookingStatus.Confirmed) }
 
     override suspend fun declineByArtist(id: String, reason: String?): Booking =
-        cancel(id, reason)
+        cancelStamped(id, reason, by = "artist")
+
+    /**
+     * The three columns the `cancel-booking` Edge Function stamps, applied here
+     * too.
+     *
+     * Without them the fake and the server disagreed about what a cancelled row
+     * looks like, and the cancelled detail screen — which reads all three to say
+     * WHO cancelled and WHEN — could not be exercised against the fake at all.
+     * `declineByArtist` no longer delegates to `cancel`: the stamp is the whole
+     * difference between the two calls.
+     */
+    private fun cancelStamped(id: String, reason: String?, by: String): Booking =
+        mutate(id) {
+            it.copy(
+                status = BookingStatus.Cancelled,
+                escrowStatus = EscrowStatus.Refunded,
+                cancelledAtIso = nowIso(),
+                cancelledBy = by,
+                cancelReason = reason?.trim()?.takeIf { r -> r.isNotEmpty() },
+            )
+        }
+
+    private fun nowIso(): String =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            .apply { timeZone = TimeZone.getTimeZone("UTC") }
+            .format(Date())
 
     override suspend fun submitFeedback(body: String, isBug: Boolean): Boolean {
         if (body.trim().isEmpty() || !signedIn) return false
