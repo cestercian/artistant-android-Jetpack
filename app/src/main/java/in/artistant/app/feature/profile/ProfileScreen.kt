@@ -43,10 +43,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.HRule
@@ -72,6 +70,13 @@ fun ProfileScreen(
      * a safety action; the compiler asking the question is the point.
      */
     onBlockedAccounts: () -> Unit,
+    /**
+     * Also without a default, for the same reason. The "Privacy" row used to hand off to the
+     * hosted policy in a browser, which left the app's own privacy screen with no entry point
+     * anywhere in either tab graph — registered, routable and unreachable. A default would let
+     * the next host reintroduce exactly that.
+     */
+    onPrivacy: () -> Unit,
     onNavigateToPaywall: () -> Unit = {},
     onManageAvailability: (() -> Unit)? = null,
     onArtistList: ((ArtistListKind) -> Unit)? = null,
@@ -276,13 +281,13 @@ fun ProfileScreen(
                                     )?.let(viewModel::reportActionError)
                                 }
                                 HRule()
-                                SettingsRow("Privacy") {
-                                    handOff(
-                                        context,
-                                        Intent(Intent.ACTION_VIEW, AppEnvironment.privacyPolicyUrl.toUri()),
-                                        "Couldn't open a browser on this device.",
-                                    )?.let(viewModel::reportActionError)
-                                }
+                                // The in-app privacy screen (design 62), not the hosted policy:
+                                // the switch it carries is a setting, and a settings row that
+                                // leaves the app for a document is not where a setting lives.
+                                // The policy is still one tap further in, from that screen's own
+                                // "Privacy policy" row, which opens the viewer that links the
+                                // authoritative online copy.
+                                SettingsRow("Privacy", onClick = onPrivacy)
                                 HRule()
                                 // Sits next to Privacy because it belongs to the
                                 // same question — who can see me and who I've

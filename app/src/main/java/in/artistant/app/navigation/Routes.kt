@@ -79,6 +79,23 @@ object ClientNavRoutes {
      * identical way back.
      */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /**
+     * Account settings → privacy (design screen 62) and the legal viewer
+     * (31 / 114).
+     *
+     * Same literals on both roles because they are the same screens in two
+     * graphs: neither the two privacy switches nor the terms/privacy pair is
+     * role-specific, and a client and an artist need the identical way back.
+     * Same reasoning as [BLOCKED_ACCOUNTS].
+     */
+    const val PRIVACY = "privacy"
+    const val LEGAL = "legal/{doc}"
+
+    /** [doc] is a [in.artistant.app.feature.signup.LegalDoc] name — the viewer's
+     *  opening segment, not a lock: it is segmented, so the other document is one
+     *  tap away whichever one you arrive on. */
+    fun legal(doc: String) = "legal/$doc"
 }
 
 /** String routes for the artist NavHost. */
@@ -120,4 +137,10 @@ object ArtistNavRoutes {
 
     /** See [ClientNavRoutes.SUPPORT]. */
     const val SUPPORT = "support"
+
+    /** See [ClientNavRoutes.PRIVACY] / [ClientNavRoutes.LEGAL] — same screens, artist graph. */
+    const val PRIVACY = "privacy"
+    const val LEGAL = "legal/{doc}"
+
+    fun legal(doc: String) = "legal/$doc"
 }

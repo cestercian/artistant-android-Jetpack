@@ -47,6 +47,9 @@ import `in`.artistant.app.feature.messages.SafetyCentreScreen
 import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
+import `in`.artistant.app.feature.signup.LegalDoc
+import `in`.artistant.app.feature.signup.LegalScreen
+import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
@@ -175,6 +178,7 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     ProfileScreen(
                         onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
+                        onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
                         onBack = { nav.popBackStack() },
                         onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
@@ -190,6 +194,32 @@ fun ArtistTabsScaffold() {
                         // is the inbox, not a form with no thread behind it.
                         onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
                     )
+                }
+            }
+            // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
+            // because neither is role-specific. Reached from the account settings
+            // list's "Privacy" row above; the legal viewer is also reachable from the
+            // signup flow's welcome and sign-in screens.
+            composable(ArtistNavRoutes.PRIVACY) {
+                TabPane(inner) {
+                    PrivacyScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenLegal = { doc -> nav.navigate(ArtistNavRoutes.legal(doc.name)) },
+                    )
+                }
+            }
+            composable(
+                route = ArtistNavRoutes.LEGAL,
+                arguments = listOf(navArgument("doc") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    // An unknown or missing argument opens the terms rather than
+                    // failing: the viewer is segmented, so the wrong opening tab costs
+                    // one tap and a crash costs the screen.
+                    val doc = LegalDoc.entries
+                        .firstOrNull { it.name == entry.arguments?.getString("doc") }
+                        ?: LegalDoc.Terms
+                    LegalScreen(doc = doc, onClose = { nav.popBackStack() })
                 }
             }
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {

@@ -4,7 +4,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.feature.signup.PrivacyPreferences
 import kotlinx.coroutines.flow.first
 import javax.inject.Singleton
 
@@ -41,9 +41,18 @@ import javax.inject.Singleton
  * absent key produces; see [ChatViewModel.markReadBestEffort], where an escaping
  * throw would also skip the unread-flag cleanup that follows it.
  *
- * The key is shared with `feature/signup/PrivacyPreferences.kt` on the
- * getting-started branch — same DataStore, same string — so the two reconcile to
- * one preference when those branches merge.
+ * **One store, not two.** This used to read the DataStore key directly and agree
+ * with `feature/signup/PrivacyPreferences` — screen 62's own switch — by
+ * convention: same key string, same "absent means on" rule, written down in two
+ * places. Now that both are on `main` it simply DELEGATES to that class. Two
+ * copies of a privacy default is a bug waiting for someone to change one of
+ * them, and the direction it would fail in is silent: the switch reads ON on the
+ * settings screen while the chat has stopped broadcasting, or the reverse.
+ *
+ * The seam itself stays. `PrivacyPreferences` lives in `feature/signup` because
+ * that section owns the screen, and the chat has no business reaching across
+ * into another feature package for a boolean; this `fun interface` is the one
+ * question the chat actually asks, and it is what the tests substitute.
  */
 fun interface ReadReceiptsPreference {
     /** True when the viewer is willing to broadcast that they have read. */
@@ -54,19 +63,19 @@ fun interface ReadReceiptsPreference {
 @InstallIn(SingletonComponent::class)
 object ReadReceiptsModule {
     /**
-     * The DataStore key the Privacy screen writes.
+     * Screen 62's switch, read through the class that owns it.
      *
-     * Stored as a string rather than a boolean because [AppPreferences] exposes
-     * a string-keyed pair and adding a parallel boolean API for one flag is more
-     * surface than the flag is worth. Anything that is not the literal "false"
-     * reads as enabled — an absent key, a half-written value, or a future
-     * spelling — because the failure direction that matters is silently going
-     * quiet on someone who never asked for it.
+     * `PrivacyPreferences.readReceipts` is a `Flow` because the settings screen
+     * renders it; this takes `first()` because the chat needs the value at the
+     * moment it is about to broadcast, not a subscription. It is read per call
+     * for that reason — see the interface doc — and the one caller wraps it,
+     * because a DataStore read can throw.
+     *
+     * The key (`privacy.read_receipts`) and the "absent means on" rule now live
+     * in exactly one place, `PrivacyPreferences`.
      */
-    const val KEY = "privacy.read_receipts"
-
     @Provides
     @Singleton
-    fun provideReadReceiptsPreference(prefs: AppPreferences): ReadReceiptsPreference =
-        ReadReceiptsPreference { prefs.getString(KEY).first() != false.toString() }
+    fun provideReadReceiptsPreference(privacy: PrivacyPreferences): ReadReceiptsPreference =
+        ReadReceiptsPreference { privacy.readReceipts.first() }
 }

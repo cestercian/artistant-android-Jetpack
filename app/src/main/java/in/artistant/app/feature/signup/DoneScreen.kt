@@ -9,14 +9,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
@@ -29,25 +27,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import `in`.artistant.app.designsystem.component.PrimaryButton
-import `in`.artistant.app.designsystem.component.ScoreRing
+import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
 
 /**
- * The celebration screen (iOS `SignupDoneView`): spring pop-in brand checkmark, editorial
- * "You're in, {firstName}." (guarded so an empty name reads "You're in."), a Bookability-Score
- * primer, and "Start exploring →" which fires the completion analytics + hands off to the gate.
+ * Screen 30 — **ends on the score**.
+ *
+ * The design's note explains the whole shape of it: "the last signup beat teaches the one
+ * concept the whole marketplace rests on." So the celebration is one line, and the rest of the
+ * screen is a primer on the Bookability Score — which is the thing a new user has to
+ * understand before the artist list means anything.
+ *
+ * **What is missing from it, and why.** The design's subtitle reads "412 acts play your city".
+ * There is no count endpoint behind that number and no repository this section owns that could
+ * fetch one, and a hard-coded 412 is exactly the fabricated figure REDESIGN_2026-09 §5.2 rules
+ * out — so the sentence keeps its shape and drops its number. The count is listed as a gap in
+ * the PR; wiring it needs an artists-in-city aggregate the client can read under RLS.
+ *
+ * The score card's `86` stays, because it is not a claim: it is an illustration of what a
+ * score looks like, sitting beside a paragraph that says whose score it would be ("every
+ * artist is rated"). Nothing on this screen attributes it to the reader or to anyone else.
  */
 @Composable
 fun DoneScreen(
@@ -55,70 +62,138 @@ fun DoneScreen(
     city: String,
     onStartExploring: () -> Unit,
     modifier: Modifier = Modifier,
+    role: AppRole = AppRole.Client,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
-    // Spring pop-in the checkmark on appear (iOS scale 0.6 → 1.0).
+
+    // Spring pop-in on appear (iOS scale 0.6 → 1.0).
     var popped by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (popped) 1f else 0.6f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow),
+        targetValue = if (popped) 1f else POP_FROM,
+        animationSpec = spring(dampingRatio = POP_DAMPING, stiffness = Spring.StiffnessLow),
         label = "donePop",
     )
-    val alpha by animateFloatAsState(if (popped) 1f else 0f, label = "doneAlpha")
     LaunchedEffect(Unit) { popped = true }
 
-    Column(
-        modifier = modifier.fillMaxSize().background(colors.bg).statusBarsPadding().padding(horizontal = space.xl).padding(bottom = space.xxl),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    SignupScaffold(
+        modifier = modifier.semantics { testTag = "screen.done" },
+        // Fills the viewport: the footnote is pushed to the bottom of the body by a flex
+        // spacer, which has no meaning inside an infinitely-tall scroll.
+        scrollable = false,
+        footer = {
+            PrimaryButton(
+                text = if (role == AppRole.Artist) "Set up your profile" else "Start browsing",
+                onClick = onStartExploring,
+                fullWidth = true,
+                modifier = Modifier.semantics { testTag = "done.continue" },
+            )
+        },
     ) {
-        Spacer(Modifier.height(80.dp))
-
+        Spacer(Modifier.height(space.xl))
         Box(
-            Modifier.size(dimens.size.avatarLg).scale(scale).clip(CircleShape).background(colors.brand),
+            Modifier
+                .size(dimens.component.emptyGlyphCircle)
+                .scale(scale)
+                .clip(CircleShape)
+                .background(colors.accent),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.brandInk, modifier = Modifier.size(dimens.size.iconXl))
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = colors.onAccent,
+                modifier = Modifier.size(dimens.size.iconXl),
+            )
         }
-        Spacer(Modifier.height(space.xxl + space.sm))
 
+        Spacer(Modifier.height(space.xl))
         Text(
-            if (firstName.isBlank()) "You're in." else "You're in, $firstName.",
+            // The city is the greeting when we know it; the name is the fallback, and a bare
+            // "You're in." is what is left when signup collected neither (a login-mode walk).
+            when {
+                city.isNotBlank() -> "You're in,\n$city."
+                firstName.isNotBlank() -> "You're in,\n$firstName."
+                else -> "You're in."
+            },
             style = AppTheme.type.displayHero,
             color = colors.ink,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.alpha(alpha),
         )
-        Spacer(Modifier.height(space.lg))
-        // "booking-ready" stays the mono accent run; the rest is callout ink2.
+        Spacer(Modifier.height(space.md))
         Text(
-            text = buildAnnotatedString {
-                withStyle(SpanStyle(color = colors.ink2)) { append(if (city.isBlank()) "Discover " else "$city is full of ") }
-                withStyle(SpanStyle(color = colors.ink, fontFamily = AppTheme.type.monoMedium.fontFamily, fontWeight = FontWeight.Black)) { append("booking-ready") }
-                withStyle(SpanStyle(color = colors.ink2)) { append(" artists right now.") }
-            },
-            style = AppTheme.type.callout,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.widthIn(max = 300.dp),
+            "Bands, DJs, comics, classical and dance — all booking through Artistant.",
+            style = AppTheme.type.body,
+            color = colors.ink4,
         )
 
-        Spacer(Modifier.weight(1f))
-
-        // Score primer — no card chrome, just the ring + two lines.
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = space.xl), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(space.md)) {
-            ScoreRing(value = 94, size = dimens.size.avatarMd, stroke = 4.dp, showLabel = false)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Bookability Score™", style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Black), color = colors.ink)
-                Text("Every artist rated for reliability — not just talent.", style = AppTheme.type.caption, color = colors.ink3)
+        Spacer(Modifier.height(space.xl))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(dimens.radii.card))
+                .background(colors.surface3)
+                .padding(space.lg)
+                .semantics(mergeDescendants = true) { testTag = "done.scorePrimer" },
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(space.md),
+            ) {
+                Box(
+                    Modifier
+                        .size(dimens.component.iconCircleSm)
+                        .clip(CircleShape)
+                        .background(colors.accent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        EXAMPLE_SCORE,
+                        style = AppTheme.type.monoPill.copy(fontWeight = FontWeight.Black),
+                        color = colors.onAccent,
+                    )
+                }
+                Text(
+                    "The Bookability Score",
+                    style = AppTheme.type.sectionTitle,
+                    color = colors.ink,
+                )
             }
+            Spacer(Modifier.height(space.md))
+            Text(
+                "Every artist is rated for reliability, not just talent — reply speed, show-up " +
+                    "rate, reviews and cancellations. It is the number to trust when two acts " +
+                    "sound alike.",
+                style = AppTheme.type.subtitle,
+                color = colors.ink2,
+            )
         }
 
-        PrimaryButton(
-            text = "Start exploring →",
-            onClick = onStartExploring,
-            fullWidth = true,
-            modifier = Modifier.semantics { testTag = "done.continue" },
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(space.lg))
+        Text(
+            if (role == AppRole.Artist) {
+                "You can switch to hosting anytime from your profile."
+            } else {
+                "You can switch to performing anytime from your profile."
+            },
+            style = AppTheme.type.caption,
+            color = colors.ink4,
         )
+        Spacer(Modifier.height(space.md))
+    }
+}
+
+/** The score in the primer — an illustration of the scale, attributed to nobody. */
+private const val EXAMPLE_SCORE = "86"
+
+private const val POP_FROM = 0.6f
+private const val POP_DAMPING = 0.55f
+
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 820)
+@Composable
+private fun DonePreview() {
+    ArtistantTheme {
+        DoneScreen(firstName = "Rhea", city = "Bengaluru", onStartExploring = {})
     }
 }

@@ -9,6 +9,9 @@ import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.observability.PostHogAnalytics
 import `in`.artistant.app.platform.observability.SentryCrash
 import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.platform.storage.KeyValueStore
+import `in`.artistant.app.platform.auth.AuthGateway
+import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.SignupConsentStore
 import `in`.artistant.app.feature.search.DataStoreSearchRecents
 import `in`.artistant.app.feature.search.SearchRecents
@@ -36,8 +39,16 @@ abstract class AppModule {
     @Binds
     abstract fun bindSignupConsentStore(prefs: AppPreferences): SignupConsentStore
 
+    /** Ditto for the generic snapshot store — see [KeyValueStore]. */
+    @Binds
+    abstract fun bindKeyValueStore(prefs: AppPreferences): KeyValueStore
+
     @Binds
     abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents
+
+    /** [SessionManager] IS the gateway — the interface only keeps the auth VM unit-testable. */
+    @Binds
+    abstract fun bindAuthGateway(impl: SessionManager): AuthGateway
 
     // Real observability wrappers — DARK-UNTIL-KEY: a guarded no-op until the
     // operator sets POSTHOG_API_KEY / SENTRY_DSN (see the wrapper class headers).
