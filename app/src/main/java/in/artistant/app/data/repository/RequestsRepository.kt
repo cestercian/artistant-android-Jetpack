@@ -204,6 +204,7 @@ private data class DbGigRequestWithClient(
     @SerialName("crowd_size") val crowdSize: Int? = null,
     val status: String = "open",
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("client_name") val clientName: String? = null,
     val client: ClientEmbed? = null,
 ) {
@@ -233,6 +234,9 @@ private data class DbGigRequestWithClient(
                 amount = proposedAmountInr,
                 packageLabel = "Custom",
                 timeAgo = relativeTimeAgo(createdAt),
+                venue = venue?.trim()?.takeIf { it.isNotEmpty() },
+                crowdSize = crowdSize,
+                updatedAgo = relativeTimeAgo(updatedAt),
             ),
             status = GigRequestStatus.fromDb(status),
             counterAmount = counterAmountInr,
@@ -300,6 +304,8 @@ class FakeRequestsRepository(
                 message = message.orEmpty(),
                 date = dateLabel,
                 amount = proposedAmountInr,
+                venue = venue?.trim()?.takeIf { it.isNotEmpty() },
+                crowdSize = crowdSize,
             ),
             status = GigRequestStatus.Open,
         )
