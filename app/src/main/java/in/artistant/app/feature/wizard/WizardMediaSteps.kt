@@ -95,7 +95,7 @@ fun LazyListScope.coverStep(state: WizardUiState, vm: WizardViewModel) {
     state.mediaError?.let { message -> item(key = "cover.error") { CoverPermissionBanner(message) } }
     item(key = "cover.gradient") {
         Column {
-            EyebrowLabel("Behind your photo")
+            WizardFieldLabel("Behind your photo")
             Spacer(Modifier.height(AppTheme.dimens.space.md))
             GradientPicker(selected = state.coverGradientIndex, onSelect = vm::onCoverGradientSelected)
             Spacer(Modifier.height(AppTheme.dimens.space.md))
@@ -485,7 +485,7 @@ private fun BioField(state: WizardUiState, vm: WizardViewModel) {
     val dimens = AppTheme.dimens
     val shape = RoundedCornerShape(dimens.radii.control)
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
-        EyebrowLabel("Short bio")
+        WizardFieldLabel("Short bio")
         BasicTextField(
             value = state.bio,
             onValueChange = vm::onBioChanged,

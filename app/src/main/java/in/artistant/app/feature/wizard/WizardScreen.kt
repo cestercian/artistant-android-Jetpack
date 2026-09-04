@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EyebrowLabel
+import `in`.artistant.app.designsystem.component.hairlineTop
 import `in`.artistant.app.designsystem.component.IconCircle
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.SecondaryButton
@@ -288,6 +289,12 @@ private fun WizardFooter(state: WizardUiState, onContinue: () -> Unit, onSkip: (
     Column(
         Modifier
             .fillMaxWidth()
+            // Opaque, with a hairline over it. The step above is a scroller and
+            // the CTA is pinned, so a transparent bar lets the last field slide
+            // under the button and read as a rendering fault. The design draws
+            // the same rule on every step that has something to scroll.
+            .background(colors.surface)
+            .hairlineTop()
             .navigationBarsPadding()
             .imePadding()
             .padding(

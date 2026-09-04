@@ -438,17 +438,26 @@ private const val HIGHLIGHT_RULE_ALPHA = 0.5f
  * the primary way in.
  */
 fun LazyListScope.techStep(state: WizardUiState, vm: WizardViewModel) {
-    item(key = "tech.presetsLabel") { EyebrowLabel("Common requirements") }
-    items(TECH_PRESETS, key = { "tech.preset.$it" }) { preset ->
-        // Case-insensitive, matching the EPK's rider chips and the add/toggle
-        // rules behind them: "4 Vocal Mics" IS the "4 vocal mics" preset, and an
-        // exact-match test rendered it unselected while its twin sat in "Yours"
-        // — two lines on one rider for one requirement.
-        CheckRow(
-            label = preset,
-            checked = state.techItems.any { it.equals(preset, ignoreCase = true) },
-            onToggle = { vm.toggleTechItem(preset) },
-        )
+    // One item, not seven. The scaffold spaces its items at `xl` so that separate
+    // SECTIONS breathe; a rider is one list, and 24dp between its rows turns
+    // seven checkboxes into seven cards the eye has to re-group.
+    item(key = "tech.presets") {
+        Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.sm)) {
+            WizardFieldLabel("Common requirements")
+            Spacer(Modifier.height(AppTheme.dimens.space.xs))
+            TECH_PRESETS.forEach { preset ->
+                // Case-insensitive, matching the EPK's rider chips and the
+                // add/toggle rules behind them: "4 Vocal Mics" IS the "4 vocal
+                // mics" preset, and an exact-match test rendered it unselected
+                // while its twin sat in "Yours" — two lines on one rider for one
+                // requirement.
+                CheckRow(
+                    label = preset,
+                    checked = state.techItems.any { it.equals(preset, ignoreCase = true) },
+                    onToggle = { vm.toggleTechItem(preset) },
+                )
+            }
+        }
     }
     // Anything the artist added by hand — rendered separately so a custom entry
     // is visibly theirs and removable, rather than lost among the presets.
@@ -466,7 +475,7 @@ fun LazyListScope.techStep(state: WizardUiState, vm: WizardViewModel) {
     }
     item(key = "tech.add") {
         Column {
-            EyebrowLabel("Anything else")
+            WizardFieldLabel("Anything else")
             Spacer(Modifier.height(AppTheme.dimens.space.sm))
             AppTextField(
                 value = state.techDraft,
@@ -566,7 +575,7 @@ private fun CheckRow(label: String, checked: Boolean, onToggle: () -> Unit) {
 fun LazyListScope.availabilityStep(state: WizardUiState, vm: WizardViewModel) {
     item(key = "availability.days") {
         Column {
-            EyebrowLabel("Days you play")
+            WizardFieldLabel("Days you play")
             Spacer(Modifier.height(AppTheme.dimens.space.md))
             DayStrip(selected = state.daysAvailable, onToggle = vm::toggleDay)
         }
@@ -693,6 +702,32 @@ private fun AvailabilityBadgeCard(state: WizardUiState) {
 // ── Shared ───────────────────────────────────────────────────────────────────
 
 /**
+ * The label above a control that is not a text field.
+ *
+ * Deliberately the SAME step [AppTextField] draws over its own well — sentence
+ * case, caption weight, `ink4` — rather than the mono eyebrow. On the identity
+ * step "Stage name", "Handle", "Category" and "Genre" sit in one column, and two
+ * of them are fields and two are chip grids; setting half of them in mono caps
+ * would split one list of questions into two visual registers for no reason the
+ * artist can see.
+ *
+ * [EyebrowLabel] stays for the blocks that are genuinely a labelled REGION
+ * rather than a question — "HOW HOSTS SEE IT", "YOUR SAMPLES" — which is how the
+ * design uses it too.
+ */
+@Composable
+fun WizardFieldLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+        color = AppTheme.colors.ink4,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+/**
  * An eyebrow over a wrapping chip grid — the shape six of these steps share.
  *
  * The chip is the design system's, not a local copy: the wizard and the
@@ -716,7 +751,7 @@ fun WizardChipSection(
     // reads as a bug, not as parity.
     val haptics = rememberHaptics()
     Column(modifier.semantics { testTag = tag }) {
-        EyebrowLabel(title)
+        WizardFieldLabel(title)
         Spacer(Modifier.height(dimens.space.md))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
