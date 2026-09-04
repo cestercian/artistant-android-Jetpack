@@ -217,6 +217,7 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     ProfileScreen(
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
+                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
                         onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
                         onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
                     )
@@ -228,10 +229,9 @@ fun ClientTabsScaffold() {
                 }
             }
             // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
-            // because neither is role-specific. The account-settings ROW that pushes
-            // Privacy belongs to `feature/profile` — section AC's file this wave — so
-            // until that lands the entry point is this route; the legal viewer is
-            // already reachable from the signup flow's welcome and sign-in screens.
+            // because neither is role-specific. Reached from the account settings
+            // list's "Privacy" row above; the legal viewer is also reachable from the
+            // signup flow's welcome and sign-in screens.
             composable(ClientNavRoutes.PRIVACY) {
                 TabPane(inner) {
                     PrivacyScreen(
