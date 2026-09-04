@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,7 +41,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import coil3.compose.AsyncImage
-import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EyebrowLabel
@@ -53,8 +51,8 @@ import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.score.ScoreBands
-import `in`.artistant.app.domain.artist.ServiceTags
 import java.io.File
+import `in`.artistant.app.feature.epk.shareLinkUrl
 
 /**
  * The last two steps: read your own profile as a client would, then publish.
@@ -168,94 +166,24 @@ private fun PreviewIdentity(state: WizardUiState, vm: WizardViewModel) {
  * Every section as a row that states what it holds and jumps back to the step
  * that owns it.
  *
- * The value line is the point: "2 tiers · ₹15k–₹38k" is a fact the artist can
- * check against what they meant, where "Packages ›" is a door they have to open
- * to find out. Skipped steps say "Not added" rather than disappearing — the
- * artist should discover a thin profile here, where one tap fixes it, and not
- * from a week of silence.
+ * The rows themselves — their copy, and which step each Edit goes to — are
+ * [wizardPreviewRows], because a mapping from a section to a screen is the kind
+ * of thing that is silently wrong: both screens render, and only the artist
+ * looking for the field they wanted finds out. This composable draws them.
  */
 @Composable
 private fun PreviewRows(state: WizardUiState, vm: WizardViewModel) {
     val dimens = AppTheme.dimens
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
-        PreviewRow(
-            label = "Bio",
-            value = if (state.bio.isBlank()) "Not added" else "${state.bio.length} characters",
-            filled = state.bio.isNotBlank(),
-            onEdit = { vm.jumpTo(WizardStep.Bio) },
-        )
-        PreviewRow(
-            label = "Packages",
-            value = packagesSummary(state),
-            filled = state.previewPackages.isNotEmpty(),
-            onEdit = { vm.jumpTo(WizardStep.Pricing) },
-        )
-        PreviewRow(
-            label = "Tech rider",
-            value = if (state.techItems.isEmpty()) {
-                "Not added"
-            } else {
-                "${state.techItems.size} line${if (state.techItems.size == 1) "" else "s"}"
-            },
-            filled = state.techItems.isNotEmpty(),
-            onEdit = { vm.jumpTo(WizardStep.Tech) },
-        )
-        PreviewRow(
-            label = "Availability",
-            value = availabilityBadge(state.daysAvailable, state.timeSlots) ?: "No badge yet",
-            filled = availabilityBadge(state.daysAvailable, state.timeSlots) != null,
-            onEdit = { vm.jumpTo(WizardStep.Availability) },
-        )
-        PreviewRow(
-            label = "Samples",
-            value = if (state.pendingSamples.isEmpty()) {
-                "Not added"
-            } else {
-                "${state.pendingSamples.size} clip${if (state.pendingSamples.size == 1) "" else "s"} " +
-                    "— upload after you publish"
-            },
-            filled = state.pendingSamples.isNotEmpty(),
-            onEdit = { vm.jumpTo(WizardStep.Samples) },
-        )
-        PreviewRow(
-            label = "Services",
-            value = if (state.serviceTags.isEmpty()) {
-                "Not added"
-            } else {
-                ServiceTags.labels(state.serviceTags).joinToString(", ")
-            },
-            filled = state.serviceTags.isNotEmpty(),
-            onEdit = { vm.jumpTo(WizardStep.Bio) },
-        )
-        PreviewRow(
-            label = "Socials",
-            value = socialSummary(state),
-            filled = wizardStepIsFilled(state, WizardStep.Socials),
-            onEdit = { vm.jumpTo(WizardStep.Socials) },
-        )
+        wizardPreviewRows(state).forEach { row ->
+            PreviewRow(
+                label = row.label,
+                value = row.value,
+                filled = row.filled,
+                onEdit = { vm.jumpTo(row.step) },
+            )
+        }
     }
-}
-
-/** "2 tiers · ₹15,000–₹38,000", derived through the same filter publish uses. */
-private fun packagesSummary(state: WizardUiState): String {
-    val savable = state.previewPackages
-    if (savable.isEmpty()) return "No publishable tier yet"
-    val prices = savable.map { it.price }
-    val range = if (prices.min() == prices.max()) {
-        formatInr(prices.min())
-    } else {
-        "${formatInr(prices.min())}–${formatInr(prices.max())}"
-    }
-    return "${savable.size} tier${if (savable.size == 1) "" else "s"} · $range"
-}
-
-private fun socialSummary(state: WizardUiState): String {
-    val present = buildList {
-        if (state.instagramHandle.isNotBlank()) add("Instagram")
-        if (state.spotifyArtistUrl.isNotBlank()) add("Spotify")
-        if (state.youtubeChannelUrl.isNotBlank()) add("YouTube")
-    }
-    return if (present.isEmpty()) "Not added" else present.joinToString(", ")
 }
 
 @Composable
@@ -349,7 +277,7 @@ fun WizardDoneScreen(state: WizardUiState, onOpenDashboard: () -> Unit, modifier
     val dimens = AppTheme.dimens
     val clipboard = LocalClipboardManager.current
     val haptics = rememberHaptics()
-    val address = wizardPublicAddress(state.handle)
+    val address = shareLinkUrl(state.handle)
 
     // RevealOnAppear rather than a hand-rolled spring: it is the repo's one
     // entrance animation and it already collapses to nothing under

@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.HandleAvailability
 import `in`.artistant.app.data.model.HandleRules
@@ -41,6 +40,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
 
@@ -793,12 +793,16 @@ class WizardViewModel @Inject constructor(
                 // mid-publish would land in the catch-all below and report the
                 // cancellation to the artist as a publish failure.
                 throw e
-            } catch (e: AppError.UniqueViolation) {
-                failPublish("That handle is already taken.")
-            } catch (e: AppError) {
-                failPublish(e.message ?: "Couldn't publish. Try again.")
-            } catch (e: Exception) {
-                failPublish(e.message ?: "Couldn't publish. Try again.")
+            } catch (t: Throwable) {
+                // Throwable, not Exception. Everything below this line is about
+                // one flag: `isPublishing` disables the CTA, refuses every step
+                // change and narrates "Publishing…" forever, and the wizard is a
+                // gate with no screen behind it. A `LinkageError` off a bad OEM
+                // split, a `NoClassDefFoundError`, an OOM while the cover is
+                // being staged — none of those are Exceptions, all of them used
+                // to walk past every arm here and strand the artist in a screen
+                // whose only exit was force-quitting the app.
+                failPublish(t)
             }
         }
     }
@@ -833,10 +837,18 @@ class WizardViewModel @Inject constructor(
         artists.updateServiceTags(userId, tags)
     }
 
-    private fun failPublish(message: String) {
-        _state.update {
-            it.copy(isPublishing = false, publishPhase = WizardPublishPhase.Idle, publishError = message)
-        }
+    /**
+     * Land a failed publish: log the real cause, clear the in-flight flag, say
+     * something true.
+     *
+     * The artist-facing wording is [wizardPublishFailureMessage] — typed on
+     * `AppError` and generic for everything else, because raw platform text is
+     * not a sentence to show someone who just tapped Publish. Timber keeps the
+     * throwable, which is the half that is actually diagnosable.
+     */
+    private fun failPublish(error: Throwable) {
+        Timber.w(error, "Wizard publish failed")
+        _state.update { wizardPublishFailed(it, error) }
         // An event, not a read off `publishError`: two consecutive failures with
         // the same message leave that field unchanged, and the second attempt is
         // the one the artist most needs acknowledged.

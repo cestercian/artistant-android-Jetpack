@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -288,6 +289,21 @@ private fun CoverActions(state: WizardUiState, vm: WizardViewModel) {
  * would be a button that provably does nothing. The only real recovery is the
  * system settings page for this app, which is what the action opens, and the
  * library beside it is the other one, which is why the copy names it.
+ *
+ * The launch is checked rather than fired and forgotten. Every OEM is supposed
+ * to answer [Settings.ACTION_APPLICATION_DETAILS_SETTINGS], and on the ones that
+ * do not — a stripped ROM, a work profile with the settings app suppressed, a
+ * device where the activity is disabled — `startActivity` throws
+ * `ActivityNotFoundException`, and swallowing it left a button that did nothing
+ * at all: the artist taps Settings, nothing happens, and the only recovery path
+ * in the app looks broken instead of unavailable. Resolving first says which
+ * case we are in, and the toast says it out loud so the copy above ("Open
+ * Settings → Artistant → Permissions") stops being an instruction they cannot
+ * follow and becomes one they follow by hand.
+ *
+ * A null resolve on API 30+ can also be package-visibility filtering rather than
+ * a missing page — but a target the filter hides throws from `startActivity`
+ * too, so the two agree and the toast is the right answer either way.
  */
 @Composable
 private fun CoverPermissionBanner(message: String) {
@@ -298,18 +314,24 @@ private fun CoverPermissionBanner(message: String) {
         detail = "Open Settings → Artistant → Permissions to turn the camera on, or pick from your library.",
         actionLabel = "Settings",
         onAction = {
-            runCatching {
-                context.startActivity(
-                    Intent(
-                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.fromParts("package", context.packageName, null),
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val opened = intent.resolveActivity(context.packageManager) != null &&
+                runCatching { context.startActivity(intent) }.isSuccess
+            if (!opened) {
+                Toast.makeText(context, CAMERA_SETTINGS_UNAVAILABLE, Toast.LENGTH_LONG).show()
             }
         },
         modifier = Modifier.semantics { testTag = "wizard.media.error" },
     )
 }
+
+/** Said when this device has no app-details settings page to send the artist to. */
+private const val CAMERA_SETTINGS_UNAVAILABLE =
+    "Couldn't open Settings on this device. Turn on Camera for Artistant in your " +
+        "system settings, or pick a photo from your library."
 
 @Composable
 private fun GradientPicker(selected: Int, onSelect: (Int) -> Unit) {

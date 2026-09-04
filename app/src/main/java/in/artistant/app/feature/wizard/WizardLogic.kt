@@ -1,5 +1,7 @@
 package `in`.artistant.app.feature.wizard
 
+import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.model.HandleRules
 import `in`.artistant.app.data.model.SearchCatalog
 import `in`.artistant.app.domain.artist.ServiceTags
@@ -8,6 +10,7 @@ import `in`.artistant.app.data.repository.WizardProfileDraft
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.epk.PackageRow
 import `in`.artistant.app.feature.epk.packageRowIsSavable
+import `in`.artistant.app.feature.epk.parsePrice
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.debounce
@@ -65,14 +68,49 @@ val WizardFlowOrder: List<WizardStep> = listOf(
     WizardStep.Done,
 )
 
-/** The steps that carry a progress segment — everything the artist fills in. */
-private val WizardFormSteps: List<WizardStep> = WizardFlowOrder.filter { it != WizardStep.Done }
+/**
+ * The steps the track counts: the ones the artist fills in, and only those.
+ *
+ * Preview and Done are both excluded because neither DRAWS the track — Preview
+ * swaps it for its own centred title (screen 45) and Done has no chrome at all.
+ * Counting a step that never renders a segment made the bar promise a cell
+ * nothing could fill: the last screen that shows the counter read "09 / 10", and
+ * an artist who finished every form step never saw the track complete. A
+ * progress bar that is wrong on the last step is wrong on the step it matters
+ * most on.
+ */
+private val WizardProgressSteps: List<WizardStep> =
+    WizardFlowOrder.filter { it != WizardStep.Preview && it != WizardStep.Done }
 
-/** Segment index for the progress bar, or null on the steps that hide it. */
+/** Segment index for the counter, or null on the steps that hide the track. */
 fun wizardProgressIndex(step: WizardStep): Int? =
-    WizardFormSteps.indexOf(step).takeIf { it >= 0 }
+    WizardProgressSteps.indexOf(step).takeIf { it >= 0 }
 
-fun wizardProgressTotal(): Int = WizardFormSteps.size
+fun wizardProgressTotal(): Int = WizardProgressSteps.size
+
+/**
+ * How many segments are FILLED — the steps left behind.
+ *
+ * Preview and Done sit past every form step, so they fill the whole track rather
+ * than none of it. That matters because Save & exit is reachable from Preview
+ * and draws this same bar: keyed on the index alone it had nothing to draw and
+ * rendered an empty track over the words "9 of 10".
+ */
+fun wizardProgressFilled(step: WizardStep): Int =
+    wizardProgressIndex(step) ?: wizardProgressTotal()
+
+/**
+ * What a screen reader is told about the track.
+ *
+ * Past the form steps there is no "step N" left to announce, so it says the
+ * thing the filled bar is showing instead of counting to a number that is no
+ * longer the artist's position.
+ */
+fun wizardProgressLabel(step: WizardStep): String {
+    val total = wizardProgressTotal()
+    val index = wizardProgressIndex(step)
+    return if (index == null) "All $total steps done" else "Step ${index + 1} of $total"
+}
 
 fun advanceWizardStep(current: WizardStep): WizardStep? {
     val idx = WizardFlowOrder.indexOf(current)
@@ -346,17 +384,21 @@ fun pricingBandFor(category: String): WizardPricingBand? {
 /**
  * What the host pays, from what the artist takes home.
  *
- * Straight through [BookingMath], which is the same arithmetic the checkout runs
- * — 5% platform fee, then 18% GST on fee + platform. Re-deriving it here with
- * the same two constants is how the wizard and the checkout start quoting
- * different totals for the same tier, and the artist finds out from a client.
+ * BOTH halves are borrowed rather than re-derived, because both can drift. The
+ * fee comes out of the typed field through [parsePrice] — the same parser
+ * `packageDrafts` publishes with, so the number this row quotes is the number
+ * that will actually be stored on the tier — and the total comes out of
+ * [BookingMath], the same 5%-then-18% the checkout charges against it
+ * (`BookingDraft.charges`). A second copy of either is how the wizard and the
+ * checkout start quoting different totals for one gig, and the artist finds out
+ * from a client.
  *
  * A blank or unparseable price returns null rather than 0: "no number yet" and
  * "a free gig" are different, and rendering the second for the first puts "Host
  * sees ₹0" under a row the artist is halfway through typing.
  */
 fun packageAllInInr(price: String): Int? {
-    val fee = price.filter { it.isDigit() }.toIntOrNull()?.takeIf { it > 0 } ?: return null
+    val fee = parsePrice(price)?.takeIf { it > 0 } ?: return null
     return BookingMath.compute(fee).total
 }
 
@@ -664,8 +706,7 @@ fun wizardCtaLabel(state: WizardUiState): String = when (state.step) {
  * growing a `when` per job.
  */
 fun wizardFooterNote(state: WizardUiState): String? = when (state.step) {
-    WizardStep.Pricing ->
-        "Step ${(wizardProgressIndex(state.step) ?: 0) + 1} of ${wizardProgressTotal()} · takes about 6 minutes"
+    WizardStep.Pricing -> "${wizardProgressLabel(state.step)} · takes about 6 minutes"
     WizardStep.Preview -> "You can keep editing after you publish"
     // Only when the CTA still says Continue: the label already says "Skip for
     // now" when the step is empty, and repeating it under the button reads as
@@ -676,15 +717,18 @@ fun wizardFooterNote(state: WizardUiState): String? = when (state.step) {
 }
 
 /**
- * The "01 / 10" counter on the step bar.
+ * The "01 / 09" counter on the step bar.
  *
- * Zero-padded, because the alternative jitters: "9 / 10" and "10 / 10" are
- * different widths, and the counter sits at the trailing edge of a bar whose
- * other half is a progress track that must not move under it.
+ * Both halves zero-padded, because the alternative jitters: "9 / 10" and
+ * "10 / 10" are different widths, and the counter sits at the trailing edge of a
+ * bar whose other half is a progress track that must not move under it. Padding
+ * the total as well keeps the design's two-digit shape when the flow has fewer
+ * than ten form steps, which it does.
  */
 fun wizardStepCounter(step: WizardStep): String? {
     val index = wizardProgressIndex(step) ?: return null
-    return "${(index + 1).toString().padStart(2, '0')} / ${wizardProgressTotal()}"
+    val total = wizardProgressTotal().toString().padStart(2, '0')
+    return "${(index + 1).toString().padStart(2, '0')} / $total"
 }
 
 /**
@@ -696,19 +740,162 @@ fun wizardStepCounter(step: WizardStep): String? {
  * artist may be standing on it with the field still empty.
  */
 fun wizardSavedSoFarLabel(step: WizardStep): String =
-    "${wizardProgressIndex(step) ?: wizardProgressTotal()} of ${wizardProgressTotal()}"
+    "${wizardProgressFilled(step)} of ${wizardProgressTotal()}"
+
+// The public address the profile will answer on is `shareLinkUrl` in
+// `EpkLogic` — the same builder the press-kit editor's Copy row and the profile
+// share sheet already use. The wizard had its own, which rendered the handle as
+// `artistant.in/@tiltcollective`; the app shares `artistant.in/tiltcollective`.
+// The wizard's copy was the one an artist is most likely to paste to a venue,
+// having just been told it is where their profile lives, and it is the one that
+// does not resolve. The design mock draws the `@`, but a link that has to work
+// beats a link that has to match a mock, and one builder is what keeps the two
+// surfaces from drifting again.
+
+// ── Preview: every section, and the step that owns it ────────────────────────
 
 /**
- * The public address the profile will answer on.
+ * One row of the preview list: what the section holds, and where Edit goes.
  *
- * Rendered on the last screen and in the preview because it is the first time
- * the handle stops being a field the artist filled in and starts being a place
- * a client can go. Blank handle returns null rather than "artistant.in/@" —
- * a half-formed URL reads as a bug, and the identity gate makes this
- * unreachable in practice.
+ * The target is the [WizardStep] itself, never a position in the flow. A row
+ * that remembers "step 8" is a row that silently points at the wrong screen the
+ * next time the flow gains or loses one — and the flow order is a product
+ * decision that has already been changed once (see [WizardFlowOrder]). Carrying
+ * the enum means a reordered wizard cannot misroute an Edit chip, only
+ * [WizardFlowOrder] can, in one place.
+ *
+ * Built as data rather than inline in the Composable so the mapping is a thing a
+ * test can read: "does every section's Edit land on the step that owns its
+ * fields?" is exactly the question that cannot be answered from a screenshot,
+ * because both screens look plausible.
  */
-fun wizardPublicAddress(handle: String): String? =
-    handle.trim().takeIf { it.isNotEmpty() }?.let { "artistant.in/@$it" }
+data class WizardPreviewRow(
+    val label: String,
+    val value: String,
+    val filled: Boolean,
+    val step: WizardStep,
+)
+
+/**
+ * Every section as a row that states what it holds.
+ *
+ * Skipped steps say "Not added" rather than disappearing — the artist should
+ * discover a thin profile here, where one tap fixes it, and not from a week of
+ * silence. The value line is the point: "2 tiers · ₹15,000–₹38,000" is a fact
+ * they can check against what they meant, where "Packages ›" is a door they have
+ * to open to find out.
+ *
+ * The cover hero and the identity header carry the other two Edit jumps
+ * ([WizardStep.Cover] and [WizardStep.Identity]) because they render as the
+ * picture and the headline rather than as rows; between them and this list,
+ * every step the artist filled in has a way back.
+ */
+fun wizardPreviewRows(state: WizardUiState): List<WizardPreviewRow> {
+    val badge = availabilityBadge(state.daysAvailable, state.timeSlots)
+    return listOf(
+        // Base city lives on the LOCATION step, not identity — it is rendered up
+        // in the identity header beside genre and category (that is where a
+        // client reads it), and an Edit chip that followed the picture would land
+        // the artist on a screen with no city field on it.
+        WizardPreviewRow(
+            label = "Where you play",
+            value = wizardLocationSummary(state),
+            filled = state.baseCity.isNotBlank(),
+            step = WizardStep.Location,
+        ),
+        WizardPreviewRow(
+            label = "Bio",
+            value = if (state.bio.isBlank()) NOT_ADDED else "${state.bio.length} characters",
+            filled = state.bio.isNotBlank(),
+            step = WizardStep.Bio,
+        ),
+        WizardPreviewRow(
+            label = "Packages",
+            value = wizardPackagesSummary(state),
+            filled = state.previewPackages.isNotEmpty(),
+            step = WizardStep.Pricing,
+        ),
+        WizardPreviewRow(
+            label = "Tech rider",
+            value = if (state.techItems.isEmpty()) {
+                NOT_ADDED
+            } else {
+                "${state.techItems.size} line${plural(state.techItems.size)}"
+            },
+            filled = state.techItems.isNotEmpty(),
+            step = WizardStep.Tech,
+        ),
+        WizardPreviewRow(
+            label = "Availability",
+            value = badge ?: "No badge yet",
+            filled = badge != null,
+            step = WizardStep.Availability,
+        ),
+        WizardPreviewRow(
+            label = "Samples",
+            value = if (state.pendingSamples.isEmpty()) {
+                NOT_ADDED
+            } else {
+                "${state.pendingSamples.size} clip${plural(state.pendingSamples.size)} " +
+                    "— upload after you publish"
+            },
+            filled = state.pendingSamples.isNotEmpty(),
+            step = WizardStep.Samples,
+        ),
+        // The service picker sits ON the bio step, so that is the step that owns
+        // it — not the one whose name matches the row.
+        WizardPreviewRow(
+            label = "Services",
+            value = if (state.serviceTags.isEmpty()) {
+                NOT_ADDED
+            } else {
+                ServiceTags.labels(state.serviceTags).joinToString(", ")
+            },
+            filled = state.serviceTags.isNotEmpty(),
+            step = WizardStep.Bio,
+        ),
+        WizardPreviewRow(
+            label = "Socials",
+            value = wizardSocialSummary(state),
+            filled = wizardStepIsFilled(state, WizardStep.Socials),
+            step = WizardStep.Socials,
+        ),
+    )
+}
+
+/** What a skipped section says. One string, so eight rows cannot word it eight ways. */
+private const val NOT_ADDED = "Not added"
+
+private fun plural(count: Int): String = if (count == 1) "" else "s"
+
+/** "Bengaluru · Up to 150 km". The radius is draft-only, and the step says so. */
+private fun wizardLocationSummary(state: WizardUiState): String {
+    val city = state.baseCity.trim()
+    if (city.isEmpty()) return NOT_ADDED
+    return "$city · ${travelRadiusLabel(state.travelRadiusKm)}"
+}
+
+/** "2 tiers · ₹15,000–₹38,000", derived through the same filter publish uses. */
+private fun wizardPackagesSummary(state: WizardUiState): String {
+    val savable = state.previewPackages
+    if (savable.isEmpty()) return "No publishable tier yet"
+    val prices = savable.map { it.price }
+    val range = if (prices.min() == prices.max()) {
+        formatInr(prices.min())
+    } else {
+        "${formatInr(prices.min())}–${formatInr(prices.max())}"
+    }
+    return "${savable.size} tier${plural(savable.size)} · $range"
+}
+
+private fun wizardSocialSummary(state: WizardUiState): String {
+    val present = buildList {
+        if (state.instagramHandle.isNotBlank()) add("Instagram")
+        if (state.spotifyArtistUrl.isNotBlank()) add("Spotify")
+        if (state.youtubeChannelUrl.isNotBlank()) add("YouTube")
+    }
+    return if (present.isEmpty()) NOT_ADDED else present.joinToString(", ")
+}
 
 /** Narration for the publish overlay — the artist should never watch a bare spinner. */
 fun wizardPublishProgressLabel(phase: WizardPublishPhase): String = when (phase) {
@@ -720,6 +907,43 @@ fun wizardPublishProgressLabel(phase: WizardPublishPhase): String = when (phase)
 
 /** Where the publish sequence currently is. Drives the CTA's narration only. */
 enum class WizardPublishPhase { Idle, SavingProfile, SavingDetails, GoingLive }
+
+/** The line a publish failure falls back to when nothing better can be said. */
+const val WIZARD_PUBLISH_FAILED = "Couldn't publish. Try again."
+
+/**
+ * What the Preview step says after a publish threw.
+ *
+ * Typed on [AppError] only. Those messages are ours — written to be read by an
+ * artist — and the handle collision gets the one sentence that names the fix.
+ * Anything else is raw platform text: a PostgREST dump, an OkHttp stack message,
+ * an OutOfMemoryError's allocation figures. None of that is a sentence to put in
+ * front of someone who just tapped Publish, so it goes to Timber and the artist
+ * gets the line that is both true and actionable.
+ */
+fun wizardPublishFailureMessage(error: Throwable): String = when {
+    error is AppError.UniqueViolation -> "That handle is already taken."
+    error is AppError -> error.message?.takeIf { it.isNotBlank() } ?: WIZARD_PUBLISH_FAILED
+    else -> WIZARD_PUBLISH_FAILED
+}
+
+/**
+ * The state a failed publish leaves behind.
+ *
+ * The flag reset is the load-bearing part. `publish()` used to catch [Exception]
+ * and a `Throwable` that is not one — a `LinkageError` off a bad OEM split, a
+ * `NoClassDefFoundError`, an OOM mid-upload — walked straight past every arm
+ * with `isPublishing` still true. That state disables the CTA, refuses every
+ * step change ([wizardMayChangeStep]) and narrates "Publishing…" forever: the
+ * wizard is a gate with no screen behind it, so the artist's only way out was to
+ * kill the app. A crash would at least have said something.
+ */
+fun wizardPublishFailed(state: WizardUiState, error: Throwable): WizardUiState =
+    state.copy(
+        isPublishing = false,
+        publishPhase = WizardPublishPhase.Idle,
+        publishError = wizardPublishFailureMessage(error),
+    )
 
 // ── Bio counter and guidance ─────────────────────────────────────────────────
 

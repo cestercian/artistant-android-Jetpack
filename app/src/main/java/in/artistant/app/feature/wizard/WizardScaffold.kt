@@ -98,24 +98,29 @@ private fun WizardStepHeader(step: WizardStep) {
  *
  * Filled means FINISHED, not "reached" — the current step's segment stays grey
  * until the artist advances off it. That is what the counter beside it says too
- * ("02 / 10" with one segment lit), and the Save & exit sheet repeats the same
+ * ("02 / 09" with one segment lit), and the Save & exit sheet repeats the same
  * arithmetic in words. Three surfaces, one rule.
  *
  * Segments are driven off the flow order rather than the enum's ordinal — see
- * [WizardFlowOrder] for why those are allowed to diverge.
+ * [WizardFlowOrder] for why those are allowed to diverge — and off
+ * [wizardProgressFilled] rather than off the counter's index, so the two steps
+ * that sit PAST the form (Preview, Done) draw a complete track instead of
+ * returning early and leaving the Save & exit sheet with a hole where the bar
+ * should be.
  */
 @Composable
 fun WizardProgressBar(step: WizardStep, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val index = wizardProgressIndex(step) ?: return
+    val filled = wizardProgressFilled(step)
     val total = wizardProgressTotal()
+    val label = wizardProgressLabel(step)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .semantics {
                 testTag = "wizard.progress"
-                contentDescription = "Step ${index + 1} of $total"
+                contentDescription = label
             },
         horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
     ) {
@@ -130,7 +135,7 @@ fun WizardProgressBar(step: WizardStep, modifier: Modifier = Modifier) {
                     // already measured.
                     .height(dimens.dashboard.meterHeight)
                     .clip(CircleShape)
-                    .background(if (i < index) colors.accent else colors.hairline),
+                    .background(if (i < filled) colors.accent else colors.hairline),
             )
         }
     }

@@ -1,7 +1,12 @@
 package `in`.artistant.app.feature.wizard
 
+import `in`.artistant.app.data.model.BookingDraft
 import `in`.artistant.app.domain.booking.BookingMath
+import `in`.artistant.app.feature.epk.PackageRow
+import `in`.artistant.app.feature.epk.packageDrafts
+import `in`.artistant.app.feature.epk.shareLinkUrl
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -75,6 +80,30 @@ class WizardCopyTest {
     @Test
     fun `a price typed with separators still resolves`() {
         assertEquals(BookingMath.compute(26_000).total, packageAllInInr("26,000"))
+    }
+
+    @Test
+    fun `the all-in the wizard quotes is the total the checkout will charge`() {
+        // End to end through the two things that can drift, not just one. The
+        // wizard reads a TYPED string and the checkout reads a STORED Int, so
+        // the number only holds if both the parse (`parsePrice`, via
+        // `packageDrafts`) and the arithmetic (`BookingMath`, via
+        // `BookingDraft.charges`) are shared. A private copy of either — a
+        // digits-only filter here, a 1.239 factor there — is how the artist
+        // publishes one number and a client is shown another.
+        listOf("1", "14000", "22,000", " 36000 ", "₹99,999").forEach { typed ->
+            val row = PackageRow("k", "Peak Time", "2h", typed, popular = false)
+            val published = packageDrafts(listOf(row)).single()
+            val checkout = BookingDraft(
+                artistId = "a",
+                feeInr = published.priceInr,
+                date = "Fri, Mar 6, 2026",
+                dateRawEpochMs = 0L,
+                time = "8:00 PM",
+            )
+
+            assertEquals(checkout.charges.total, packageAllInInr(typed))
+        }
     }
 
     // --- Availability: one badge ---------------------------------------------
@@ -192,13 +221,18 @@ class WizardCopyTest {
 
     @Test
     fun `the counter is zero-padded so it cannot jitter under the track`() {
-        // Ten, not the design's eleven: the design's flow has one step this app
+        // Nine, not the design's eleven: the design's flow has steps this app
         // does not, and the total is derived from WizardFlowOrder rather than
         // typed, so the bar, the counter and the sheet all count the same steps.
-        assertEquals("01 / 10", wizardStepCounter(WizardStep.Identity))
-        assertEquals("02 / 10", wizardStepCounter(WizardStep.Location))
-        assertEquals("10 / 10", wizardStepCounter(WizardStep.Preview))
-        // Done carries no segment, so it carries no counter.
+        assertEquals("01 / 09", wizardStepCounter(WizardStep.Identity))
+        assertEquals("02 / 09", wizardStepCounter(WizardStep.Location))
+        // The counter's LAST screen reads N of N. It used to read "09 / 10",
+        // counting a Preview step that hides the counter entirely — so the tenth
+        // cell belonged to no screen and the track never completed.
+        assertEquals("09 / 09", wizardStepCounter(WizardStep.Samples))
+        // Preview swaps the track for its own title; Done has no chrome. Neither
+        // is counted, so neither has a counter to show.
+        assertNull(wizardStepCounter(WizardStep.Preview))
         assertNull(wizardStepCounter(WizardStep.Done))
     }
 
@@ -206,9 +240,24 @@ class WizardCopyTest {
     fun `saved-so-far counts steps left behind, matching the filled segments`() {
         // Standing on step one, nothing is banked yet — and the bar under the
         // label draws zero filled cells, so the two must agree.
-        assertEquals("0 of 10", wizardSavedSoFarLabel(WizardStep.Identity))
-        assertEquals("6 of 10", wizardSavedSoFarLabel(WizardStep.Socials))
-        assertEquals("9 of 10", wizardSavedSoFarLabel(WizardStep.Preview))
+        assertEquals("0 of 9", wizardSavedSoFarLabel(WizardStep.Identity))
+        assertEquals("6 of 9", wizardSavedSoFarLabel(WizardStep.Socials))
+        // Everything is banked by the time the artist is reviewing it.
+        assertEquals("9 of 9", wizardSavedSoFarLabel(WizardStep.Preview))
+    }
+
+    @Test
+    fun `the counter, the sheet and the track cannot disagree`() {
+        // Three surfaces, one arithmetic. The counter says which step you are
+        // on (1-based), the sheet says how many are behind you (0-based), and
+        // the bar fills that many cells — so for every step that shows the
+        // counter, the sheet's number is exactly one less.
+        WizardFlowOrder.forEach { step ->
+            val counter = wizardStepCounter(step) ?: return@forEach
+            val position = counter.substringBefore(" /").trimStart('0').toInt()
+            assertEquals(position - 1, wizardProgressFilled(step))
+            assertEquals("${position - 1} of ${wizardProgressTotal()}", wizardSavedSoFarLabel(step))
+        }
     }
 
     @Test
@@ -220,7 +269,7 @@ class WizardCopyTest {
         // would be the same word twice.
         assertNull(wizardFooterNote(at(WizardStep.Bio)))
         assertEquals("Skip for now", wizardFooterNote(at(WizardStep.Bio, bio = "Rooftop sets")))
-        assertTrue(wizardFooterNote(at(WizardStep.Pricing))!!.startsWith("Step 3 of 10"))
+        assertTrue(wizardFooterNote(at(WizardStep.Pricing))!!.startsWith("Step 3 of 9"))
         assertEquals("You can keep editing after you publish", wizardFooterNote(at(WizardStep.Preview)))
         assertNull(wizardFooterNote(at(WizardStep.Identity)))
     }
@@ -228,11 +277,17 @@ class WizardCopyTest {
     // --- The public address ---------------------------------------------------
 
     @Test
-    fun `the address is only shown once there is a handle to show`() {
-        assertEquals("artistant.in/@tiltcollective", wizardPublicAddress("tiltcollective"))
-        // Not "artistant.in/@" — a half-formed URL reads as a rendering fault.
-        assertNull(wizardPublicAddress(""))
-        assertNull(wizardPublicAddress("   "))
+    fun `the address the wizard shows is the one the app shares`() {
+        // One builder, three surfaces: the wizard's identity hint and its
+        // "You're live" copy row, the press-kit editor's Copy row, and the
+        // profile share sheet. The wizard used to render `artistant.in/@handle`
+        // while the share intent sent `artistant.in/handle` — and the wizard's
+        // is the one an artist pastes to a venue, having just been told it is
+        // where their profile lives.
+        assertEquals("artistant.in/tiltcollective", shareLinkUrl("tiltcollective"))
+        // Not "artistant.in/" — a half-formed URL reads as a rendering fault.
+        assertNull(shareLinkUrl(""))
+        assertNull(shareLinkUrl("   "))
     }
 
     // --- Travel radius --------------------------------------------------------
@@ -243,5 +298,81 @@ class WizardCopyTest {
         assertEquals("Up to 150 km", travelRadiusLabel(150))
         // Every offered option has a label the chip row can render.
         WizardTravelRadii.forEach { assertTrue(travelRadiusLabel(it).isNotBlank()) }
+    }
+
+    // --- Preview: every section, and the step that owns it ---------------------
+
+    private fun previewState() = WizardUiState(
+        step = WizardStep.Preview,
+        stageName = "The Tilt Collective",
+        category = "DJ",
+        genre = "Indie folk",
+        baseCity = "Bengaluru",
+        travelRadiusKm = 150,
+        bio = "Rooftop sets.",
+        packageRows = starterPackageRows("DJ"),
+        techItems = listOf("2x DI box"),
+        serviceTags = listOf("dj-set"),
+        instagramHandle = "tiltcollective",
+    )
+
+    @Test
+    fun `every preview row's Edit lands on the step that owns its fields`() {
+        // The mapping, spelled out, because it is the kind of wrong that renders
+        // perfectly: tap Edit, land on a plausible screen, and the field you came
+        // for is not on it. Two of these are counter-intuitive and both used to
+        // be wrong — the city is drawn in the identity header but lives on the
+        // LOCATION step, and the service picker is drawn under its own heading
+        // but lives on the BIO step.
+        assertEquals(
+            mapOf(
+                "Where you play" to WizardStep.Location,
+                "Bio" to WizardStep.Bio,
+                "Packages" to WizardStep.Pricing,
+                "Tech rider" to WizardStep.Tech,
+                "Availability" to WizardStep.Availability,
+                "Samples" to WizardStep.Samples,
+                "Services" to WizardStep.Bio,
+                "Socials" to WizardStep.Socials,
+            ),
+            wizardPreviewRows(previewState()).associate { it.label to it.step },
+        )
+    }
+
+    @Test
+    fun `the preview can send the artist back to every step they filled in`() {
+        // The property worth locking, and the one a hard-coded index breaks
+        // silently: add or move a step and this fails rather than quietly
+        // stranding whatever that step holds on the last screen before publish —
+        // which is the screen an artist is on precisely because they want to
+        // change something.
+        val reachable = wizardPreviewRows(previewState()).map { it.step }.toSet() +
+            // The cover hero and the identity header carry these two; the rest
+            // are rows. Nothing may point at Preview or Done: a chip that
+            // reopens the screen it is drawn on does nothing.
+            setOf(WizardStep.Cover, WizardStep.Identity)
+
+        assertEquals(
+            WizardFlowOrder.filter { it != WizardStep.Preview && it != WizardStep.Done }.toSet(),
+            reachable,
+        )
+    }
+
+    @Test
+    fun `a skipped section says so rather than rendering a blank line`() {
+        // A blank value reads as a rendering fault, and the artist cannot tell a
+        // thin profile from a broken screen. Discovering it here costs one tap;
+        // discovering it from a week of silence costs the gig.
+        val rows = wizardPreviewRows(WizardUiState(step = WizardStep.Preview))
+        rows.forEach { assertTrue("${it.label} renders a value", it.value.isNotBlank()) }
+        assertEquals("Not added", rows.single { it.label == "Bio" }.value)
+        assertEquals("No publishable tier yet", rows.single { it.label == "Packages" }.value)
+        assertFalse(rows.single { it.label == "Where you play" }.filled)
+
+        val filled = wizardPreviewRows(previewState())
+        assertEquals("Bengaluru · Up to 150 km", filled.single { it.label == "Where you play" }.value)
+        assertEquals("3 tiers · ₹18,000–₹60,000", filled.single { it.label == "Packages" }.value)
+        assertEquals("1 line", filled.single { it.label == "Tech rider" }.value)
+        assertEquals("Instagram", filled.single { it.label == "Socials" }.value)
     }
 }

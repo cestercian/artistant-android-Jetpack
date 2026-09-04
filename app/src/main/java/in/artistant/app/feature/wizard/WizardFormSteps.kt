@@ -56,6 +56,7 @@ import `in`.artistant.app.feature.epk.TECH_PRESETS
 import `in`.artistant.app.feature.epk.packageRowBlocker
 import `in`.artistant.app.feature.epk.packageRowIsPartiallyFilled
 import `in`.artistant.app.feature.epk.popularBadgeWouldMeanSomething
+import `in`.artistant.app.feature.epk.shareLinkUrl
 
 /**
  * The five required steps: who you are, where you play, what you charge, what
@@ -144,7 +145,7 @@ private fun HandleField(state: WizardUiState, vm: WizardViewModel) {
             trailing = { HandleStatusIndicator(state.handleStatus) },
             modifier = Modifier.semantics { testTag = "wizard.identity.handle" },
         )
-        wizardPublicAddress(state.handle)?.let { address ->
+        shareLinkUrl(state.handle)?.let { address ->
             Spacer(Modifier.height(dimens.space.sm))
             Text(address, style = AppTheme.type.caption, color = colors.ink4)
         }

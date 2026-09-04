@@ -62,7 +62,7 @@ import `in`.artistant.app.designsystem.theme.motionTween
  * ## Shape
  *
  * Fixed chrome top and bottom, one scrolling step between them: a back circle,
- * a progress track and a "03 / 10" counter across the top, the
+ * a progress track and a "03 / 09" counter across the top, the
  * step's own lazy list in the middle, and one CTA pinned at the bottom. The CTA
  * is pinned rather than scrolled because on a form the artist is typing into, a
  * Continue button that has scrolled off is indistinguishable from a Continue
@@ -206,8 +206,10 @@ private fun WizardStepContent(state: WizardUiState, viewModel: WizardViewModel) 
  * Back circle, progress track, counter — and the close that opens Save & exit.
  *
  * The Preview step draws the same bar with the track and counter swapped for its
- * own centred title (screen 45): review is not a twelfth thing to fill in, and
- * showing "10 / 11" over it would say it is.
+ * own centred title (screen 45): review is not a tenth thing to fill in, and
+ * showing "10 / 10" over it would say it is. It is also why the track counts
+ * nine — see [wizardProgressTotal]; a total that included this screen left a
+ * segment the form could never fill.
  */
 @Composable
 private fun WizardTopBar(step: WizardStep, onBack: () -> Unit, onSaveAndExit: () -> Unit) {

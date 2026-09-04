@@ -1,6 +1,8 @@
 package `in`.artistant.app.feature.wizard
 
+import `in`.artistant.app.core.result.AppError
 import `in`.artistant.app.data.repository.FakeArtistsRepository
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.testsupport.ARTIST_ID
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -166,5 +168,81 @@ class WizardViewModelLogicTest {
             listOf("wedding-sangeet", "dj-set"),
             repo.fetchArtist(ARTIST_ID)?.serviceTags,
         )
+    }
+
+    @Test
+    fun serviceTagsToPublish_keepsATagTheWizardNeverShowed_throughTheToggleItself() {
+        // The finding through the operation that caused it, not around it.
+        // `ServiceTags.toggle` is exactly what a chip tap calls and
+        // `wizardServiceTagsToPublish` is exactly what publish sends, so this is
+        // the whole path: tick one service in a picker that opened empty, and the
+        // two services already on the row — which this wizard never displayed —
+        // are still published afterwards.
+        val published = listOf("wedding-sangeet", "corporate-set")
+        val picker = ServiceTags.toggle(emptyList(), "dj-set")
+
+        val sent = wizardServiceTagsToPublish(picker, published, seeded = false)!!
+
+        assertTrue("hidden tags survived", sent.containsAll(published))
+        assertTrue("the new tick landed", sent.contains("dj-set"))
+    }
+
+    @Test
+    fun serviceTagsToPublish_stillHonoursAnUntickOnceThePickerWasSeeded() {
+        // The other half, and the reason merging is not simply always right: a
+        // seeded picker's unticked chip is a real withdrawal. Merging here would
+        // make the control do nothing, which reads as a broken checkbox.
+        val published = listOf("wedding-sangeet", "corporate-set")
+        val picker = ServiceTags.toggle(published, "corporate-set")
+
+        assertEquals(
+            listOf("wedding-sangeet"),
+            wizardServiceTagsToPublish(picker, published, seeded = true),
+        )
+    }
+
+    // ── A publish that throws must always hand the wizard back ───────────────
+
+    @Test
+    fun publishFailed_clearsTheInFlightFlagForAThrowableThatIsNotAnException() {
+        // `isPublishing` is a lock: it disables the CTA, refuses every step
+        // change and narrates "Publishing…". The old catch chain ended at
+        // `Exception`, so a LinkageError off a bad OEM split — or an OOM while
+        // the cover was being staged — left that lock on in a gate with no
+        // screen behind it. Force-quitting was the only way out.
+        val inFlight = WizardUiState(
+            step = WizardStep.Preview,
+            isPublishing = true,
+            publishPhase = WizardPublishPhase.GoingLive,
+        )
+
+        val landed = wizardPublishFailed(inFlight, LinkageError("libartistant split missing"))
+
+        assertFalse(landed.isPublishing)
+        assertEquals(WizardPublishPhase.Idle, landed.publishPhase)
+        assertEquals(WIZARD_PUBLISH_FAILED, landed.publishError)
+        // And the wizard is genuinely usable again, not just flagged as such.
+        assertTrue(wizardMayChangeStep(landed))
+        assertTrue(landed.canAdvance)
+    }
+
+    @Test
+    fun publishFailed_namesTheOneFailureTheArtistCanActOn() {
+        // Ours are sentences; everything else is a stack message. A PostgREST
+        // dump or an allocation figure in a Banner tells the artist nothing and
+        // costs them the trust that the app knows what happened.
+        assertEquals(
+            "That handle is already taken.",
+            wizardPublishFailureMessage(AppError.UniqueViolation),
+        )
+        assertEquals(
+            AppError.GuardedWrite.message,
+            wizardPublishFailureMessage(AppError.GuardedWrite),
+        )
+        assertEquals(
+            WIZARD_PUBLISH_FAILED,
+            wizardPublishFailureMessage(IllegalStateException("PGRST204 column not found")),
+        )
+        assertEquals(WIZARD_PUBLISH_FAILED, wizardPublishFailureMessage(OutOfMemoryError()))
     }
 }
