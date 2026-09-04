@@ -1,682 +1,401 @@
 package `in`.artistant.app.feature.profile
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import android.Manifest
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.MicNone
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import `in`.artistant.app.data.repository.ExportResult
-import `in`.artistant.app.designsystem.component.Avatar
-import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.RevealOnAppear
-import `in`.artistant.app.designsystem.component.ScreenTitleBar
-import `in`.artistant.app.feature.booking.FunnelHeader
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.ListRow
+import `in`.artistant.app.designsystem.component.ScreenHeader
+import `in`.artistant.app.designsystem.component.SkeletonBlock
+import `in`.artistant.app.designsystem.component.SkeletonCircle
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
 
 /**
- * Signed-in account hub — port of iOS `ProfileView` (M6 slice).
+ * Design screen 26 — **"One account, two modes"**.
  *
- * Identity header + settings rows: sign out, delete account, data export,
- * privacy/help links, artist availability, and calendar sync toggle.
+ * The client's Profile tab root: who you are, what you have going, and the handful of places
+ * you go from here. It is deliberately NOT the settings list — that is screen 47, one tap away
+ * behind the gear, and keeping them apart is what stops the tab root becoming a wall of rows.
+ *
+ * **The pill is the note.** "A host who starts performing switches here instead of signing up
+ * again": the account is one row in `public.users` with a `role` column, and
+ * `users_update_self` (mig 0002) lets it change its own. So switching is a write, not a second
+ * signup — see [ProfileViewModel.switchToArtistMode] for what happens after it.
+ *
+ * **Two rows the design draws are not here**, and their absence is the honest reading of a
+ * no-payments v1: "Payment and billing" and "Invoices and GST" describe a product that takes
+ * money, and this one does not — there is no payment method, no GSTIN column anywhere in the
+ * 105 canonical migrations, and nothing for either row to open. A row that pushes an empty
+ * screen is worse than a row that isn't there.
+ *
+ * **"Your bookings" is here** because the light tab bar dropped the Bookings glyph (the P1
+ * decision on `ClientTabsScaffold`), which makes this screen its front door. The stat band's
+ * "Upcoming" column opens the drill-down LIST (screen 32) — a different screen — so the row is
+ * not a duplicate of the counter above it.
  */
 @Composable
 fun ProfileScreen(
     /**
-     * Deliberately has NO default, unlike the rest of these. It is the only way
-     * to reach [BlockedAccountsScreen], and that screen is the only way to undo
-     * a block — blocking removes the conversation the in-chat Unblock lives in.
-     * A default would let a new host silently ship the app without an exit from
-     * a safety action; the compiler asking the question is the point.
+     * Deliberately has NO default, unlike the rest of these. It is the only way to reach the
+     * settings list, and that list is the only way to reach sign-out, delete, export and the
+     * unblock screen. A default would let a new host silently ship a Profile tab with no exit;
+     * the compiler asking the question is the point.
      */
-    onBlockedAccounts: () -> Unit,
-    /**
-     * Also without a default, for the same reason. The "Privacy" row used to hand off to the
-     * hosted policy in a browser, which left the app's own privacy screen with no entry point
-     * anywhere in either tab graph — registered, routable and unreachable. A default would let
-     * the next host reintroduce exactly that.
-     */
+    onAccount: () -> Unit,
+    onBookings: () -> Unit,
+    onArtistList: (ArtistListKind) -> Unit,
+    onNotifications: () -> Unit,
     onPrivacy: () -> Unit,
-    onNavigateToPaywall: () -> Unit = {},
-    onManageAvailability: (() -> Unit)? = null,
-    onArtistList: ((ArtistListKind) -> Unit)? = null,
-    onBack: (() -> Unit)? = null,
+    /** @see AccountScreen.onSafetyCentre — nullable for the same reason; the row is omitted. */
+    onSafetyCentre: (() -> Unit)?,
+    /**
+     * Re-run the root gate after a role switch. Without it the write lands and the app stays
+     * in the client scaffold until the next cold start — see [ProfileViewModel.switchToArtistMode].
+     */
+    onRoleSwitched: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val size = AppTheme.dimens.size
-    val context = LocalContext.current
-
-    val calendarPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
-        val ok = grants[Manifest.permission.READ_CALENDAR] == true &&
-            grants[Manifest.permission.WRITE_CALENDAR] == true
-        viewModel.onCalendarPermissionResult(ok)
-    }
-
-    LaunchedEffect(state.pendingExport) {
-        val export = state.pendingExport ?: return@LaunchedEffect
-        val failure = when (export) {
-            is ExportResult.Inline -> handOff(
-                context,
-                Intent.createChooser(exportShareIntent(export.json), "Share export"),
-                "Couldn't open the share sheet — no app on this device can take the export.",
-            )
-            is ExportResult.SignedUrl -> handOff(
-                context,
-                exportViewIntent(export.url),
-                "Couldn't open a browser for the export link on this device.",
-            )
-        }
-        failure?.let(viewModel::reportActionError)
-        viewModel.clearPendingExport()
-    }
-
-    Box(
-        // NOT an opaque `background(colors.bg)`: Profile is the one tab that
-        // carries the role-tinted ambient wash behind its header, and an opaque
-        // fill here would paint straight over the scaffold's. The scaffold owns
-        // the wash rather than this screen so it spans the whole window —
-        // including the strip behind the floating tab bar, which this pane is
-        // inset out of. Every other tab keeps its flat fill; the glow is Profile's
-        // alone, and spraying it everywhere would spend the accent on nothing.
-        modifier = modifier.fillMaxSize(),
-    ) {
-        when {
-            state.isLoading && state.profile == null -> {
-                CircularProgressIndicator(
-                    color = colors.accentInk,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            }
-            state.error != null && state.profile == null -> {
-                Column(
-                    Modifier.align(Alignment.Center).padding(space.xl),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(space.md),
-                ) {
-                    Text(state.error!!, style = AppTheme.type.callout, color = colors.ink2, textAlign = TextAlign.Center)
-                    Text(
-                        "Retry",
-                        style = AppTheme.type.callout.copy(fontWeight = FontWeight.Bold),
-                        color = colors.accentInk,
-                        modifier = Modifier.clickable { viewModel.refresh() },
-                    )
-                }
-            }
-            else -> {
-                // The title band is OUTSIDE the scroll, because that is what it
-                // is on iOS: an inline navigation title pinned under the status
-                // bar, not a piece of content that scrolls away with the hero.
-                // The client reaches this as a tab root ("Profile"); the artist
-                // pushes it from their press kit, so they get the back control
-                // and the screen calls itself "Account" — the same split, and
-                // the same two words, the iOS build uses.
-                Column(Modifier.fillMaxSize()) {
-                    if (onBack != null) {
-                        FunnelHeader(title = "Account", onBack = onBack)
-                    } else {
-                        ScreenTitleBar("Profile")
-                    }
-                    RevealOnAppear {
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-
-                        // Identity header
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = space.xl)
-                                .padding(top = space.xxl, bottom = space.xl),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(space.lg),
-                        ) {
-                            val roleLabel = when (state.role) {
-                                AppRole.Client -> "CLIENT"
-                                AppRole.Artist -> "ARTIST"
-                            }
-                            val cityLabel = state.profile?.city?.trim()?.uppercase().orEmpty()
-                            // The account's own vintage, not today's year — see
-                            // ProfileUiState.vintageYear.
-                            val year = state.vintageYear
-                            Text(
-                                if (cityLabel.isBlank()) "$roleLabel · $year" else "$roleLabel · $cityLabel · $year",
-                                style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                                color = colors.ink3,
-                            )
-                            Avatar(
-                                name = state.displayName,
-                                size = size.avatarXl,
-                                ring = true,
-                            )
-                            // Name over subtitle, nothing between them. The
-                            // username used to sit here, but neither iOS identity
-                            // hero renders one — the handle belongs to the public
-                            // press kit, not to the private account page — and a
-                            // third line squeezed the pair into one dense block.
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(space.sm),
-                            ) {
-                                Text(state.displayName, style = AppTheme.type.displayTitle, color = colors.ink)
-                                Text(state.subtitle, style = AppTheme.type.footnote, color = colors.ink2)
-                            }
-                        }
-
-                        // The stat triple is fenced by hairlines top AND bottom —
-                        // the rule above is what separates the counters from the
-                        // identity block, and without it the numbers read as part
-                        // of the hero rather than as their own band.
-                        if (state.role == AppRole.Client && onArtistList != null) {
-                            HRule()
-                            ProfileStatsRow(
-                                bookings = state.bookingsCount,
-                                saved = state.savedCount,
-                                completed = state.completedCount,
-                                onClick = onArtistList,
-                            )
-                        }
-
-                        HRule()
-
-                        // Settings
-                        Column(
-                            Modifier.padding(horizontal = space.xl, vertical = space.xxl),
-                            verticalArrangement = Arrangement.spacedBy(space.md),
-                        ) {
-                            Text("Settings", style = AppTheme.type.displaySub, color = colors.ink)
-
-                            // ROW ORDER IS THE iOS ORDER, and it is not arbitrary:
-                            // identity (email) → the role's own rows → the
-                            // preference rows (notifications, privacy, export) →
-                            // calendar sync → help → the two destructive exits.
-                            // Calendar sync used to lead the list, which put a
-                            // toggle for an optional device mirror above the
-                            // user's own account details.
-                            Column {
-                                HRule()
-                                // Read-only identity, not an action — no chevron,
-                                // not clickable. Masked at render; see maskEmail.
-                                state.maskedEmail?.let { masked ->
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = space.lg),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text("Email", style = AppTheme.type.callout, color = colors.ink)
-                                        Text(masked, style = AppTheme.type.monoSmall, color = colors.ink3)
-                                    }
-                                    HRule()
-                                }
-                                if (state.subscriptionsEnabled) {
-                                    SettingsRow("Subscription", onClick = onNavigateToPaywall)
-                                    HRule()
-                                }
-                                if (state.role == AppRole.Artist) {
-                                    SettingsRow(
-                                        "Manage availability",
-                                        onClick = {
-                                            onManageAvailability?.invoke()
-                                                ?: viewModel.manageAvailabilityMissingNav()
-                                        },
-                                    )
-                                    HRule()
-                                }
-                                SettingsRow("Notifications") {
-                                    handOff(
-                                        context,
-                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                        },
-                                        "Couldn't open notification settings on this device.",
-                                    )?.let(viewModel::reportActionError)
-                                }
-                                HRule()
-                                // The in-app privacy screen (design 62), not the hosted policy:
-                                // the switch it carries is a setting, and a settings row that
-                                // leaves the app for a document is not where a setting lives.
-                                // The policy is still one tap further in, from that screen's own
-                                // "Privacy policy" row, which opens the viewer that links the
-                                // authoritative online copy.
-                                SettingsRow("Privacy", onClick = onPrivacy)
-                                HRule()
-                                // Sits next to Privacy because it belongs to the
-                                // same question — who can see me and who I've
-                                // shut out — and ABOVE the export/calendar rows
-                                // so the way back from a block is a settings row
-                                // people scroll past, not one they hunt for.
-                                SettingsRow("Blocked accounts", onClick = onBlockedAccounts)
-                                HRule()
-                                SettingsRow("Export my data", working = state.isExporting, onClick = viewModel::exportData)
-                                HRule()
-                                CalendarSyncRow(
-                                    enabled = state.calendarSyncEnabled,
-                                    calendarTitle = state.calendarTitle,
-                                    calendars = state.calendars,
-                                    onToggle = { on ->
-                                        if (on && !state.calendarHasPermission) {
-                                            calendarPermission.launch(
-                                                arrayOf(
-                                                    Manifest.permission.READ_CALENDAR,
-                                                    Manifest.permission.WRITE_CALENDAR,
-                                                ),
-                                            )
-                                        } else {
-                                            viewModel.setCalendarSyncEnabled(on)
-                                        }
-                                    },
-                                    onSelectCalendar = viewModel::selectCalendar,
-                                )
-                                HRule()
-                                SettingsRow("Get help", onClick = viewModel::showHelp)
-                                HRule()
-                                SettingsRow("Sign out", tint = colors.warm, onClick = viewModel::showSignOutConfirm)
-                                HRule()
-                                SettingsRow("Delete account", tint = colors.hot, onClick = viewModel::showDeleteConfirm)
-                                HRule()
-                            }
-                        }
-
-                        // Both lines are TAP-TO-DISMISS, the same affordance
-                        // BlockedAccountsScreen gives its action error. Nothing
-                        // else clears either one: "Calendar permission denied —
-                        // enable it in system Settings." used to sit under the
-                        // settings list for the life of the ViewModel, long after
-                        // the user had granted the permission and watched the
-                        // sync work.
-                        state.actionMessage?.let { msg ->
-                            Text(
-                                msg,
-                                style = AppTheme.type.footnote,
-                                color = colors.ink2,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(onClick = viewModel::clearActionFeedback)
-                                    .padding(horizontal = space.xl, vertical = space.sm),
-                            )
-                        }
-                        // Not while the delete sheet is up: that dialog renders
-                        // the very same string inside itself, so the failed
-                        // delete was being stated twice at once.
-                        if (!state.showDeleteConfirm) {
-                            state.actionError?.let { msg ->
-                                Text(
-                                    msg,
-                                    style = AppTheme.type.footnote,
-                                    color = colors.hot,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(onClick = viewModel::clearActionFeedback)
-                                        .padding(horizontal = space.xl, vertical = space.sm),
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(size.listTailroom))
-                    }
-                    }
-                }
-            }
-        }
-    }
-
-    if (state.showSignOutConfirm) {
-        AlertDialog(
-            shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
-            onDismissRequest = viewModel::dismissSignOutConfirm,
-            title = { Text("Sign out?") },
-            text = {
-                Text(
-                    "This clears your data from this device. Your bookings and chats are safe on your account and re-sync when you sign back in.",
-                    style = AppTheme.type.footnote,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = viewModel::signOut) {
-                    Text("Sign out", color = colors.hot)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissSignOutConfirm) {
-                    Text("Cancel")
-                }
-            },
-        )
-    }
-
-    if (state.showDeleteConfirm) {
-        AlertDialog(
-            shape = RoundedCornerShape(AppTheme.dimens.radii.xxl),
-            onDismissRequest = {
-                if (!state.isDeleting) viewModel.dismissDeleteConfirm()
-            },
-            title = { Text("Delete account?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                    Text(
-                        "This permanently erases your account and personal data. This cannot be undone.",
-                        style = AppTheme.type.footnote,
-                    )
-                    state.actionError?.let {
-                        Text(it, style = AppTheme.type.footnote, color = colors.hot)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = viewModel::deleteAccount,
-                    enabled = !state.isDeleting,
-                ) {
-                    if (state.isDeleting) {
-                        CircularProgressIndicator(
-                            Modifier.size(size.iconMd),
-                            strokeWidth = size.stroke,
-                            color = colors.accentInk,
-                        )
-                    } else {
-                        Text("Delete forever", color = colors.hot)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissDeleteConfirm, enabled = !state.isDeleting) {
-                    Text("Cancel")
-                }
-            },
-        )
-    }
-
-    if (state.showHelp) {
-        Box(
-            Modifier.fillMaxSize(),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            // No indication: this is a scrim, not a button, and Material's default
-            // ripple on a full-screen tap surface expands across the whole window.
-            val scrimInteraction = remember { MutableInteractionSource() }
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(colors.bg.copy(alpha = 0.72f))
-                    .clickable(
-                        interactionSource = scrimInteraction,
-                        indication = null,
-                        onClick = viewModel::dismissHelp,
-                    ),
-            )
-            HelpFeedbackSheet(
-                sending = state.feedbackSending,
-                status = state.feedbackStatus,
-                statusOk = state.feedbackOk,
-                onSubmit = viewModel::submitFeedback,
-                onDismiss = viewModel::dismissHelp,
-            )
-        }
-    }
-}
-
-/**
- * The three counters under the identity hero. [bookings] and [completed] are
- * nullable because the read that feeds them is best-effort — see
- * [profileStatValue], which is what turns "we don't know" into an em dash rather
- * than into a zero the account never earned.
- */
-@Composable
-private fun ProfileStatsRow(
-    bookings: Int?,
-    saved: Int,
-    completed: Int?,
-    onClick: (ArtistListKind) -> Unit,
-) {
-    val space = AppTheme.dimens.space
-    // IntrinsicSize.Min so the two dividers can size themselves to the row
-    // rather than to a hardcoded 40dp. The old fixed height was right for one
-    // type ramp and wrong for every other — it would not follow the system font
-    // scale, so at large text the rules stopped short of the labels they divide.
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .padding(vertical = space.xl),
-    ) {
-        StatCol("Bookings", bookings, Modifier.weight(1f)) {
-            onClick(ArtistListKind.Bookings)
-        }
-        StatDivider()
-        StatCol("Saved", saved, Modifier.weight(1f)) {
-            onClick(ArtistListKind.Saved)
-        }
-        StatDivider()
-        StatCol("Completed", completed, Modifier.weight(1f)) {
-            onClick(ArtistListKind.Completed)
-        }
-    }
-}
-
-/**
- * The rule between two stat columns. Full row height less a small inset at each
- * end, so it reads as a separator between the columns rather than as a tick mark
- * floating beside them.
- */
-@Composable
-private fun StatDivider() {
-    Box(
-        Modifier
-            .fillMaxHeight()
-            .padding(vertical = AppTheme.dimens.space.sm)
-            .width(AppTheme.dimens.size.hairline)
-            .background(AppTheme.colors.lineSoft),
+    ProfileContent(
+        state = state,
+        onAccount = onAccount,
+        onBookings = onBookings,
+        onArtistList = onArtistList,
+        onNotifications = onNotifications,
+        onPrivacy = onPrivacy,
+        onSafetyCentre = onSafetyCentre,
+        onSwitchToArtist = { viewModel.switchToArtistMode(onRoleSwitched) },
+        onRetry = viewModel::refresh,
+        onDismissMessage = viewModel::clearActionFeedback,
+        modifier = modifier,
     )
 }
 
 @Composable
-private fun StatCol(
-    title: String,
-    value: Int?,
+private fun ProfileContent(
+    state: ProfileUiState,
+    onAccount: () -> Unit,
+    onBookings: () -> Unit,
+    onArtistList: (ArtistListKind) -> Unit,
+    onNotifications: () -> Unit,
+    onPrivacy: () -> Unit,
+    onSafetyCentre: (() -> Unit)?,
+    onSwitchToArtist: () -> Unit,
+    onRetry: () -> Unit,
+    onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    Column(
-        modifier.clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+
+    AccountScaffold(
+        modifier = modifier.semantics { testTag = "screen.profile" },
+        header = {
+            ScreenHeader(
+                title = "Profile",
+                trailing = {
+                    IconCircle(
+                        icon = Icons.Filled.Settings,
+                        contentDescription = "Account settings",
+                        onClick = onAccount,
+                        modifier = Modifier.semantics { testTag = "profile.account" },
+                    )
+                },
+            )
+        },
     ) {
-        Text(profileStatValue(value), style = AppTheme.type.monoCount, color = colors.ink)
+        AccountGap()
+
+        // Loading and failed are two different screens and say which one they are
+        // (REDESIGN_2026-09 §2). Only the FIRST load gets the skeleton: a refresh over a
+        // profile we already have keeps the name on screen rather than replacing a real
+        // identity with grey bars.
+        when {
+            state.isLoading && state.profile == null -> ProfileIdentitySkeleton()
+            state.error != null && state.profile == null -> {
+                Banner(
+                    title = "Couldn't load your profile",
+                    tone = BannerTone.Failure,
+                    detail = state.error,
+                    actionLabel = "Retry",
+                    onAction = onRetry,
+                )
+            }
+            else -> ProfileIdentity(
+                state = state,
+                onSwitchToArtist = onSwitchToArtist,
+            )
+        }
+
+        AccountGap()
+        AccountStatBand(
+            stats = listOf(
+                AccountStat("Upcoming", accountStatValue(state.bookingsCount)),
+                AccountStat("Saved", accountStatValue(state.savedCount)),
+                AccountStat("Completed", accountStatValue(state.completedCount)),
+            ),
+            modifier = Modifier.semantics { testTag = "profile.stats" },
+        )
+        // The band is three tap targets, laid over the band rather than inside it so the
+        // dividers stay a single un-clickable rule. Each column stays tappable while its
+        // number is unknown: the drill-down list does its own read and reports its own
+        // failure, so "—" plus a tap is the honest route to the error.
+        Row(Modifier.fillMaxWidth()) {
+            StatTarget("Upcoming bookings", Modifier.weight(1f)) {
+                onArtistList(ArtistListKind.Bookings)
+            }
+            StatTarget("Saved artists", Modifier.weight(1f)) { onArtistList(ArtistListKind.Saved) }
+            StatTarget("Completed bookings", Modifier.weight(1f)) {
+                onArtistList(ArtistListKind.Completed)
+            }
+        }
+
+        AccountGap()
+        ListRow(
+            title = "Your bookings",
+            subtitle = bookingsRowSubtitle(state.bookingsCount),
+            onClick = onBookings,
+            modifier = Modifier.semantics { testTag = "profile.bookings" },
+        )
+        ListRow(
+            title = "Saved artists",
+            subtitle = savedRowSubtitle(state.savedCount),
+            onClick = { onArtistList(ArtistListKind.Saved) },
+        )
+        ListRow(title = "Notifications", onClick = onNotifications)
+        if (onSafetyCentre != null) {
+            ListRow(title = "Help and safety", onClick = onSafetyCentre)
+        }
+        ListRow(title = "Legal and privacy", onClick = onPrivacy, showHairline = false)
+
+        // Tap-to-dismiss, the same affordance every other action failure in this package
+        // gets. Nothing else clears it — a failed role switch used to sit under the list for
+        // the life of the ViewModel.
+        state.actionError?.let { message ->
+            AccountGap()
+            Text(
+                message,
+                style = AppTheme.type.caption,
+                color = colors.danger,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onDismissMessage)
+                    .padding(vertical = space.sm)
+                    .semantics { testTag = "profile.actionError" },
+            )
+        }
+        Spacer(Modifier.height(dimens.size.listTailroom))
+    }
+}
+
+/**
+ * Avatar, name, meta line, and the mode pill (screen 26).
+ *
+ * The avatar is initials on a hairline disc rather than a photo: `public.users` has an
+ * `avatar_url` column but nothing in this app ever writes one, so a photo slot here would be
+ * an empty circle on every account. Initials are derived from a name we always have.
+ */
+@Composable
+private fun ProfileIdentity(state: ProfileUiState, onSwitchToArtist: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(dimens.size.avatarLg)
+                .background(colors.hairline, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                initials(state.displayName),
+                style = AppTheme.type.displaySub,
+                color = colors.ink2,
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(state.displayName, style = AppTheme.type.displaySub, color = colors.ink)
+            Text(
+                state.subtitle,
+                style = AppTheme.type.subtitle,
+                color = colors.ink4,
+                modifier = Modifier.padding(top = dimens.space.xs / 2),
+            )
+            if (state.role == AppRole.Client) {
+                Spacer(Modifier.height(dimens.space.sm))
+                ModePill(working = state.switchingRole, onClick = onSwitchToArtist)
+            }
+        }
+    }
+}
+
+/**
+ * "Switch to artist mode" — a `surface2` capsule, not a CTA.
+ *
+ * The screen's one accent belongs to the tab bar's action circle (REDESIGN_2026-09 §2: one
+ * accent per screen), and this is a mode change rather than the page's primary verb. It gets a
+ * quiet capsule with a mic glyph, exactly as the design draws it.
+ */
+@Composable
+private fun ModePill(working: Boolean, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier
+            .background(colors.surface2, CircleShape)
+            .clickable(enabled = !working, role = Role.Button, onClick = onClick)
+            .padding(horizontal = dimens.space.md, vertical = dimens.space.sm)
+            .semantics { testTag = "profile.switchToArtist" },
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (working) {
+            CircularProgressIndicator(
+                Modifier.size(dimens.size.iconMd),
+                strokeWidth = dimens.size.stroke,
+                color = colors.accentInk,
+            )
+        } else {
+            Icon(
+                Icons.Filled.MicNone,
+                contentDescription = null,
+                tint = colors.ink,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
+        }
         Text(
-            title.uppercase(),
-            style = AppTheme.type.statLabel,
-            color = colors.ink3,
+            if (working) "Switching…" else "Switch to artist mode",
+            style = AppTheme.type.chip,
+            color = colors.ink,
         )
     }
 }
 
-/**
- * Hand an intent to the system, or return the line to show when nothing on the
- * device can take it.
- *
- * `startActivity` throws ActivityNotFoundException when no activity matches, on
- * the main thread, straight out of a click handler — which is an app crash from
- * tapping a settings row. Two of these are genuinely unresolvable in the field:
- * `ACTION_APP_NOTIFICATION_SETTINGS` is not on every OEM/Go build, and an
- * `ACTION_VIEW` on an https URL needs a browser, which a locked-down or
- * work-profile device may not offer. Same call BookingDetailScreen makes for its
- * maps/dial/share handoffs, and ArtistProfileScreen for its share sheet: a row
- * that can't open is a message, not a crash.
- */
-private fun handOff(context: Context, intent: Intent, failure: String): String? =
-    runCatching { context.startActivity(intent); null }.getOrElse { failure }
+/** An invisible tap target sitting under one column of [AccountStatBand]. */
+@Composable
+private fun StatTarget(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .height(AppTheme.dimens.size.rowMin)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+    )
+}
+
+/** The first letters of up to two words — "Rhea Menon" → "RM", "You" → "Y". */
+internal fun initials(name: String): String =
+    name.trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotEmpty() }
+        .take(2)
+        .mapNotNull { it.firstOrNull()?.uppercaseChar() }
+        .joinToString("")
+        .ifEmpty { "A" }
 
 /**
- * The calendar-sync control: a plain switch row, with the write target revealed
- * underneath only once it is on.
+ * "2 upcoming" / "Nothing on right now" / null.
  *
- * The row used to carry a permanent second line — "Mirrors confirmed bookings
- * onto this device." off, "Writing to <calendar>" on — which made it the only
- * two-line row in the list and broke the settings rhythm every other row keeps.
- * iOS explains nothing in the off state (the label already says what it does)
- * and surfaces the destination as its OWN sub-row once there is a destination
- * to name, so that is what this does now: the label answers "what", and the
- * target answers "where", but only when "where" exists.
- *
- * The picker still lists every writable calendar when there is more than one,
- * because choosing a Google-account calendar is how "sync to Google Calendar"
- * works with no Google API — same as iOS.
+ * Null when the count is unknown, so the row shows one line instead of asserting a number we
+ * could not read — the same rule the stat band's em dash follows.
  */
+internal fun bookingsRowSubtitle(count: Int?): String? = when {
+    count == null -> null
+    count == 0 -> "Nothing on right now"
+    count == 1 -> "1 upcoming"
+    else -> "$count upcoming"
+}
+
+/** "12 acts" / "None saved yet". Never null: the saved set is local and always has an answer. */
+internal fun savedRowSubtitle(count: Int): String =
+    if (count == 0) "None saved yet" else if (count == 1) "1 act" else "$count acts"
+
+/** The identity block's first-load stand-in: a disc and two bars, at the real geometry. */
 @Composable
-private fun CalendarSyncRow(
-    enabled: Boolean,
-    calendarTitle: String = "Artistant",
-    calendars: List<`in`.artistant.app.platform.calendar.CalendarSyncService.CalendarOption> = emptyList(),
-    onToggle: (Boolean) -> Unit,
-    onSelectCalendar: (Long) -> Unit = {},
-) {
-    val space = AppTheme.dimens.space
-    val colors = AppTheme.colors
-    Column(Modifier.fillMaxWidth()) {
-        // `sm`, not the `lg` every text-only row uses. Material's Switch expands
-        // itself to the 48dp minimum interactive size, so it already carries
-        // 8dp of slop above and below its 32dp track. Padding it by a full `lg`
-        // on top of that double-counts the breathing room and made this the
-        // tallest row in the list by 16dp — a toggle sitting visibly lower than
-        // the rules that bracket it. Total here lands within a couple of units
-        // of the iOS row, whose own switch is shorter to begin with.
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = space.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+private fun ProfileIdentitySkeleton() {
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier.fillMaxWidth().semantics { testTag = "profile.loading" },
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SkeletonCircle(dimens.size.avatarLg)
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
         ) {
-            Text(
-                "Sync gigs to calendar",
-                style = AppTheme.type.callout,
-                color = colors.ink,
-                modifier = Modifier.weight(1f),
+            SkeletonBlock(
+                Modifier
+                    .width(dimens.component.skeletonTitleWidth)
+                    .height(dimens.component.skeletonTitleHeight),
             )
-            Switch(checked = enabled, onCheckedChange = onToggle)
-        }
-        if (enabled) {
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = space.lg),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Calendar", style = AppTheme.type.footnote, color = colors.ink3)
-                Text(calendarTitle, style = AppTheme.type.footnote, color = colors.ink)
-            }
-            if (calendars.size > 1) {
-                calendars.forEach { option ->
-                    Text(
-                        option.title,
-                        style = AppTheme.type.footnote,
-                        color = if (option.title == calendarTitle) colors.brand else colors.ink2,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectCalendar(option.id) }
-                            .padding(vertical = space.xs),
-                    )
-                }
-                Spacer(Modifier.height(space.sm))
-            }
+            SkeletonBlock(
+                Modifier
+                    .width(dimens.component.skeletonSectionWidth)
+                    .height(dimens.component.skeletonLineHeight),
+            )
         }
     }
 }
 
-/**
- * One settings row.
- *
- * The chevron is NOT decoration — it means "this opens something". Sign out and
- * Delete account are terminal actions that raise a confirmation in place, so
- * they get no chevron; drawing one on them promised a screen that never comes.
- * The test is the tint: a row rendered in a status colour (warm/hot) is
- * destructive by definition, which is why the condition reads off [tint] rather
- * than asking each call site to repeat itself.
- */
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 800)
 @Composable
-private fun SettingsRow(
-    title: String,
-    tint: androidx.compose.ui.graphics.Color = AppTheme.colors.ink,
-    working: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val space = AppTheme.dimens.space
-    val navigates = tint == AppTheme.colors.ink
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(enabled = !working, onClick = onClick)
-            .padding(vertical = space.lg),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = AppTheme.type.callout, color = tint)
-        if (working) {
-            CircularProgressIndicator(
-                Modifier.size(AppTheme.dimens.size.iconMd),
-                strokeWidth = AppTheme.dimens.size.stroke,
-                color = AppTheme.colors.accentInk,
-            )
-        } else if (navigates) {
-            // Sized, not left at Material's 24dp default. A settings row is
-            // 16 + content + 16, so an unsized chevron — taller than the 15sp
-            // label beside it — was the thing SETTING the row height, and every
-            // row in the list came out 4.4 units taller than the reference's.
-            // The reference draws this glyph at footnote weight, i.e. smaller
-            // than the label, never larger.
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = AppTheme.colors.ink3,
-                modifier = Modifier.size(AppTheme.dimens.size.iconMd),
-            )
-        }
+private fun ProfilePreview() {
+    ArtistantTheme {
+        ProfileContent(
+            state = ProfileUiState(
+                isLoading = false,
+                bookingsCount = 2,
+                savedCount = 12,
+                completedCount = 7,
+            ),
+            onAccount = {},
+            onBookings = {},
+            onArtistList = {},
+            onNotifications = {},
+            onPrivacy = {},
+            onSafetyCentre = {},
+            onSwitchToArtist = {},
+            onRetry = {},
+            onDismissMessage = {},
+        )
     }
 }

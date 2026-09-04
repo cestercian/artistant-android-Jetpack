@@ -81,6 +81,29 @@ object ClientNavRoutes {
     const val PRIVACY = "privacy"
     const val LEGAL = "legal/{doc}"
 
+    /**
+     * Account & settings (design section AC), all seven registered on BOTH graphs with the
+     * same literals — none of them is role-specific, and a client and an artist need the
+     * identical way back. Same reasoning as [BLOCKED_ACCOUNTS].
+     *
+     * [ACCOUNT] is the settings list (47 / 69); the client reaches it from the Profile tab's
+     * gear, the artist from the press kit's account control.
+     */
+    const val ACCOUNT = "account"
+    const val NOTIFICATIONS = "notification_settings"
+    const val ACCESSIBILITY = "accessibility"
+    const val LANGUAGE = "language"
+    const val DEVICES = "devices"
+    const val DATA_EXPORT = "data_export"
+    const val DELETE_ACCOUNT = "delete_account"
+
+    /**
+     * The trust & safety centre (design 131), owned by `feature/messages` on the messaging
+     * branch. The account list links to it, so the literal has to exist here — it is defined
+     * on whichever branch lands first and reconciled on merge; both spell it the same.
+     */
+    const val SAFETY_CENTRE = "safety_centre"
+
     /** [doc] is a [in.artistant.app.feature.signup.LegalDoc] name — the viewer's
      *  opening segment, not a lock: it is segmented, so the other document is one
      *  tap away whichever one you arrive on. */
@@ -106,7 +129,6 @@ object ArtistNavRoutes {
     fun gigRequest(requestId: String) = "gig_request/$requestId"
     fun counterOffer(requestId: String) = "counter_offer/$requestId"
     fun chat(threadId: String) = "chat/$threadId"
-    const val PROFILE = "profile"
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"
     const val MANAGE_AVAILABILITY = "manage_availability"
@@ -127,6 +149,16 @@ object ArtistNavRoutes {
     /** See [ClientNavRoutes.PRIVACY] / [ClientNavRoutes.LEGAL] — same screens, artist graph. */
     const val PRIVACY = "privacy"
     const val LEGAL = "legal/{doc}"
+
+    /** See [ClientNavRoutes.ACCOUNT] and its neighbours — same screens, artist graph. */
+    const val ACCOUNT = "account"
+    const val NOTIFICATIONS = "notification_settings"
+    const val ACCESSIBILITY = "accessibility"
+    const val LANGUAGE = "language"
+    const val DEVICES = "devices"
+    const val DATA_EXPORT = "data_export"
+    const val DELETE_ACCOUNT = "delete_account"
+    const val SAFETY_CENTRE = "safety_centre"
 
     fun legal(doc: String) = "legal/$doc"
 }

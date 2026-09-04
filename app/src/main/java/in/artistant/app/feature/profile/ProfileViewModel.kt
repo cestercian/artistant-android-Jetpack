@@ -8,12 +8,14 @@ import `in`.artistant.app.core.config.AppEnvironment
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.model.SelfProfile
-import `in`.artistant.app.data.repository.AccountRepository
+import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.AvailabilityDraft
 import `in`.artistant.app.data.repository.BookingsRepository
-import `in`.artistant.app.data.repository.ExportResult
+import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.booking.BookingDraftStore
+import `in`.artistant.app.feature.paywall.EntitlementStore
 import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
@@ -34,11 +36,7 @@ data class ProfileUiState(
     val error: String? = null,
     val actionMessage: String? = null,
     val actionError: String? = null,
-    val isDeleting: Boolean = false,
-    val isExporting: Boolean = false,
-    val pendingExport: ExportResult? = null,
     val showSignOutConfirm: Boolean = false,
-    val showDeleteConfirm: Boolean = false,
     val showHelp: Boolean = false,
     val calendarSyncEnabled: Boolean = false,
     val calendarHasPermission: Boolean = false,
@@ -76,6 +74,25 @@ data class ProfileUiState(
     val bookingsCount: Int? = null,
     val savedCount: Int = 0,
     val completedCount: Int? = null,
+    /**
+     * The artist band on design screens 47 / 69 — "Gigs · Bookability · Completed".
+     *
+     * Same null-means-unknown rule as the client counters above, and for the same reason: the
+     * two reads that feed them (the artist's own bookings, and `score_history`'s latest row)
+     * are best-effort, and a score of 0 is a real, publishable value that an unread score must
+     * not be confused with.
+     */
+    val gigsCount: Int? = null,
+    val bookabilityScore: Int? = null,
+    /**
+     * The "Manage availability" row's subtitle — "Thu–Sun evenings". Null until the read
+     * answers, and the row simply drops its second line rather than inventing a schedule.
+     */
+    val availabilitySummary: String? = null,
+    /** Whether Play Billing reports an active subscription. Drives the "Subscription" row. */
+    val isPro: Boolean = false,
+    /** In flight while the "Switch to artist mode" pill (screen 26) writes the new role. */
+    val switchingRole: Boolean = false,
     val feedbackSending: Boolean = false,
     val feedbackStatus: String? = null,
     val feedbackOk: Boolean = false,
@@ -91,12 +108,14 @@ data class ProfileUiState(
     val vintageYear: Int
         get() = joinedYear ?: Calendar.getInstance().get(Calendar.YEAR)
 
+    /** "Host · Bengaluru · joined 2024" (screen 26). Drops the city when there isn't one. */
     val subtitle: String
         get() {
             val city = profile?.city?.trim().orEmpty()
             val roleNoun = if (role == AppRole.Client) "Host" else "Artist"
-            val suffix = "$roleNoun since $vintageYear"
-            return if (city.isBlank()) suffix else "$city · $suffix"
+            return listOf(roleNoun, city, "joined $vintageYear")
+                .filter { it.isNotBlank() }
+                .joinToString(" · ")
         }
 
     val handleLabel: String?
@@ -107,6 +126,21 @@ data class ProfileUiState(
         get() = email?.trim()?.takeIf { it.isNotEmpty() }?.let(::maskEmail)
 
     val subscriptionsEnabled: Boolean get() = AppEnvironment.subscriptionsEnabled
+
+    /**
+     * What the "Subscription" row says on its second line.
+     *
+     * Three answers, not two. With Play Billing dormant (`subscriptionsEnabled` off) the app
+     * has no way to know whether anyone is subscribed to anything, so it says the plan is not
+     * on sale rather than asserting "Free plan" — which would be a claim about an entitlement
+     * nothing checked.
+     */
+    val subscriptionSubtitle: String
+        get() = when {
+            !subscriptionsEnabled -> "Not available yet"
+            isPro -> "Artistant Pro"
+            else -> "Free plan"
+        }
 }
 
 /**
@@ -136,16 +170,30 @@ internal fun maskEmail(email: String): String {
     return "$head•••$tail$domain"
 }
 
+/**
+ * Identity + settings state for design screens 26 (client Profile tab) and 47 / 69 (the pushed
+ * Account list).
+ *
+ * Both screens read this same ViewModel because they are two views of one account: the tab root
+ * is the identity page, the pushed list is everything you can change about it. Export and
+ * delete used to live here too and now have their own screens and their own ViewModels
+ * ([DataExportViewModel], [DeleteAccountViewModel]) — each is a multi-state flow with a
+ * progress model of its own, and folding three of those into one state class is what made the
+ * old single-screen version carry `isExporting`, `isDeleting`, `pendingExport` and two
+ * different confirmation flags at once.
+ */
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     private val users: UsersRepository,
-    private val account: AccountRepository,
     private val session: SessionManager,
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
     private val draftStore: BookingDraftStore,
     private val bookingsRepository: BookingsRepository,
+    private val artists: ArtistsRepository,
+    private val scores: ScoreRepository,
+    private val entitlements: EntitlementStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ProfileUiState())
@@ -169,6 +217,9 @@ class ProfileViewModel @Inject constructor(
             savedStore.ids.collect { ids ->
                 _state.update { it.copy(savedCount = ids.size) }
             }
+        }
+        viewModelScope.launch {
+            entitlements.isEntitled.collect { pro -> _state.update { it.copy(isPro = pro) } }
         }
     }
 
@@ -205,17 +256,20 @@ class ProfileViewModel @Inject constructor(
                     it.copy(isLoading = false, error = e.message ?: "Couldn't load profile")
                 }
             }
-        // Client-only tail. Both reads below feed the stat band, which
-        // ProfileScreen renders behind `role == Client && onArtistList != null`
-        // — and the artist tab graph passes no `onArtistList` at all, so an
-        // artist opening Account was paying for a `bookings` select filtered on
-        // their own uid (invariably empty, invariably discarded) plus a
-        // saved-artists read. Resolved role, not the cached pref: the profile
-        // fetch above is what settles it.
-        if (_state.value.role != AppRole.Client) return@launch
-        // Best-effort stats — don't blank the profile if bookings fail. Note the
-        // counters stay NULL rather than 0 until a read answers; see
-        // [ProfileUiState.bookingsCount].
+        // Play Billing is queried rather than assumed; the store answers "not entitled" when
+        // subscriptions are dormant, so this is inert until the flag flips.
+        runCatching { entitlements.refresh() }
+        if (_state.value.role == AppRole.Client) refreshClientStats() else refreshArtistStats()
+    }
+
+    /**
+     * The client band — Upcoming / Saved / Completed (design 26).
+     *
+     * Resolved role, not the cached pref: the profile fetch above is what settles it. Both
+     * reads are best-effort and the counters stay NULL rather than 0 until one answers; see
+     * [ProfileUiState.bookingsCount].
+     */
+    private suspend fun refreshClientStats() {
         runCatching { bookingsRepository.listForClient() }
             .onSuccess { bookings ->
                 _state.update {
@@ -230,6 +284,32 @@ class ProfileViewModel @Inject constructor(
         // itself and now re-throws CancellationException, which wrapping it here
         // would put straight back in the bin.
         savedStore.refreshFromServer()
+    }
+
+    /**
+     * The artist band — Gigs / Bookability / Completed (design 47 / 69) plus the availability
+     * summary the "Manage availability" row prints.
+     *
+     * Three independent best-effort reads rather than one: a score that fails must not blank
+     * the gig counts, and an availability read that fails must not blank either. Each writes
+     * only its own fields.
+     */
+    private suspend fun refreshArtistStats() {
+        runCatching { bookingsRepository.listForArtist() }
+            .onSuccess { bookings ->
+                _state.update {
+                    it.copy(
+                        gigsCount = liveBookingsCount(bookings),
+                        completedCount = completedBookingsCount(bookings),
+                    )
+                }
+            }
+        runCatching { scores.breakdownForSelf() }
+            .onSuccess { breakdown -> _state.update { it.copy(bookabilityScore = breakdown.score) } }
+        runCatching { artists.fetchSelfAvailability() }
+            .onSuccess { availability ->
+                _state.update { it.copy(availabilitySummary = availabilitySummary(availability)) }
+            }
     }
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
@@ -259,6 +339,65 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    /**
+     * "Switch to artist mode" (design screen 26 — "A host who starts performing switches here
+     * instead of signing up again").
+     *
+     * One write: `public.users.role`, which `users_update_self` (mig 0002) lets the account
+     * change for itself. Everything downstream follows from it — the root gate re-reads the
+     * profile, sees an artist with no `setup_complete`, and routes into the setup wizard, which
+     * is the same place a fresh artist signup lands. So this does NOT create an artists row or
+     * publish anything: it changes what the account IS and hands the rest to the flow that
+     * already knows how to build an act.
+     *
+     * The upsert re-sends the handle, name and city unchanged because
+     * [UsersRepository.upsertSelfProfile] is the only write we have and it takes the whole row;
+     * an incomplete profile (no handle) is refused here rather than sent, since the upsert
+     * would write a blank handle over the user's own. `termsAccepted = false` is an assertion
+     * of nothing, not a revocation — see that method's contract.
+     *
+     * [onSwitched] is the caller's re-route (the root gate's `retryRouting`). It runs only on a
+     * successful write, so a failed switch leaves the user where they are with the reason on
+     * screen rather than half-moved.
+     */
+    fun switchToArtistMode(onSwitched: () -> Unit) = viewModelScope.launch {
+        val current = _state.value
+        if (current.switchingRole) return@launch
+        // A profile we never loaded and a profile with no username are the same refusal: the
+        // upsert takes the whole row, so sending it without a handle would write a blank one
+        // over the user's own. Reported rather than dropped — a pill that does nothing on tap
+        // is the failure mode the design's notes rule out.
+        val profile = current.profile
+        val handle = profile?.handle?.trim().orEmpty()
+        if (profile == null || handle.isEmpty()) {
+            _state.update {
+                it.copy(actionError = "Finish your profile first — an artist needs a username.")
+            }
+            return@launch
+        }
+        _state.update { it.copy(switchingRole = true, actionError = null) }
+        runCatching {
+            users.upsertSelfProfile(
+                handle = handle,
+                fullName = profile.fullName.orEmpty(),
+                city = profile.city.orEmpty(),
+                role = AppRole.Artist,
+                termsAccepted = false,
+            )
+            prefs.setRole(AppRole.Artist)
+        }.onSuccess {
+            _state.update { it.copy(switchingRole = false, role = AppRole.Artist) }
+            onSwitched()
+        }.onFailure { e ->
+            _state.update {
+                it.copy(
+                    switchingRole = false,
+                    actionError = e.message ?: "Couldn't switch to artist mode.",
+                )
+            }
+        }
+    }
+
     fun signOut() = viewModelScope.launch {
         _state.update { it.copy(showSignOutConfirm = false) }
         // Account-scoped state held in memory, which the next session must not
@@ -277,55 +416,6 @@ class ProfileViewModel @Inject constructor(
         if (message != null) _state.update { it.copy(actionError = message) }
     }
 
-    fun showDeleteConfirm() = _state.update { it.copy(showDeleteConfirm = true, actionError = null) }
-    fun dismissDeleteConfirm() = _state.update { it.copy(showDeleteConfirm = false) }
-
-    /** Server delete FIRST — local wipe only after success (DPDP §11 / PR #60). */
-    fun deleteAccount() = viewModelScope.launch {
-        _state.update { it.copy(isDeleting = true, actionError = null) }
-        runCatching { account.deleteAccount() }
-            .onSuccess {
-                // Sheet and spinner go down BEFORE the cleanup: the row is already
-                // erased server-side, nothing below can change that outcome, and
-                // holding the dialog open through a 30s logout timeout would read
-                // as a delete that never happened.
-                _state.update { it.copy(isDeleting = false, showDeleteConfirm = false) }
-                // Same in-memory, account-scoped state sign-out drops. Not
-                // folded into [wipeLocalState] below, which only runs when the
-                // logout itself fails.
-                draftStore.clear()
-                val cleanupError = cleanUpAfterAccountDelete(
-                    wipeCalendar = { calendarSync.wipeForAccountDelete() },
-                    signOut = { session.signOut() },
-                    wipeLocalState = { prefs.wipeAll(); savedStore.reset() },
-                )
-                if (cleanupError != null) _state.update { it.copy(actionError = cleanupError) }
-            }
-            .onFailure { e ->
-                _state.update {
-                    it.copy(
-                        isDeleting = false,
-                        actionError = e.message ?: "Account deletion failed",
-                    )
-                }
-            }
-    }
-
-    fun exportData() = viewModelScope.launch {
-        _state.update { it.copy(isExporting = true, actionError = null, actionMessage = null) }
-        runCatching { account.requestDataExport() }
-            .onSuccess { result ->
-                _state.update { it.copy(isExporting = false, pendingExport = result) }
-            }
-            .onFailure { e ->
-                _state.update {
-                    it.copy(isExporting = false, actionError = e.message ?: "Export failed")
-                }
-            }
-    }
-
-    fun clearPendingExport() = _state.update { it.copy(pendingExport = null) }
-
     /** Tap-to-dismiss for the two transient lines under the settings list. */
     fun clearActionFeedback() = _state.update { it.copy(actionMessage = null, actionError = null) }
 
@@ -339,7 +429,7 @@ class ProfileViewModel @Inject constructor(
 
     fun manageAvailabilityMissingNav() {
         _state.update {
-            it.copy(actionMessage = "Open Profile from the artist Home tab to manage availability.")
+            it.copy(actionMessage = "Open Account from the artist Profile tab to manage availability.")
         }
     }
 
@@ -448,7 +538,7 @@ internal suspend fun cleanUpAfterSignOut(
 
 /**
  * How many of [bookings] are still LIVE — the number under the profile header's
- * "Bookings" column, read beside "Completed".
+ * "Upcoming" column, read beside "Completed".
  *
  * The shipped rule was `status != Completed`, i.e. "everything that hasn't
  * finished". That put cancelled and disputed bookings — and `Unknown`, the
@@ -510,6 +600,71 @@ fun completedBookingsCount(bookings: List<Booking>): Int =
  * error the header used to hide behind a zero.
  */
 fun profileStatValue(count: Int?): String = count?.toString() ?: "—"
+
+/**
+ * The "Manage availability" row's second line — "Thu–Sun evenings", "Fri, Sat", "Not set yet".
+ *
+ * Null in, null out: an availability read that failed must leave the row with ONE line rather
+ * than claim the artist has set nothing. An artist who genuinely has no days open is a
+ * different fact and says so.
+ *
+ * Consecutive weekdays collapse to a range because that is how the design writes it and how
+ * people say it — "Thu–Sun" rather than "Thu, Fri, Sat, Sun" — and the run is detected against
+ * the canonical week order rather than against the list's own order, which the server does not
+ * promise. Times are summarised, not listed: a row is one line, and five start times is a
+ * screen's worth of detail that the editor one tap away already shows properly.
+ */
+fun availabilitySummary(availability: AvailabilityDraft?): String? {
+    if (availability == null) return null
+    val days = availability.daysAvailable.map { it.trim() }.filter { it.isNotEmpty() }
+    if (days.isEmpty()) return "Not set yet"
+    val part = weekdayRangeLabel(days)
+    val slot = timeOfDayLabel(availability.timeSlots)
+    return if (slot == null) part else "$part $slot"
+}
+
+/** Canonical week order, so a range is detected against the WEEK, not against the list. */
+private val WEEK = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+/** "Thu–Sun" for a consecutive run, else "Fri, Sat", else the raw list. */
+internal fun weekdayRangeLabel(days: List<String>): String {
+    val indices = days.mapNotNull { day ->
+        WEEK.indexOfFirst { it.equals(day.take(3), ignoreCase = true) }.takeIf { it >= 0 }
+    }.distinct().sorted()
+    if (indices.isEmpty()) return days.joinToString(", ")
+    val consecutive = indices.zipWithNext().all { (a, b) -> b == a + 1 }
+    return if (consecutive && indices.size > 2) {
+        "${WEEK[indices.first()]}–${WEEK[indices.last()]}"
+    } else {
+        indices.joinToString(", ") { WEEK[it] }
+    }
+}
+
+/**
+ * "evenings" / "afternoons" / "mornings", or null when the times say nothing useful.
+ *
+ * Keyed on the EARLIEST start time, because that is what decides whether a night is free: an
+ * act that can start at 6pm and at 9pm is an evening act.
+ */
+internal fun timeOfDayLabel(times: List<String>): String? {
+    val hours = times.mapNotNull { raw ->
+        val digits = raw.trim().takeWhile { it.isDigit() }
+        val hour = digits.toIntOrNull() ?: return@mapNotNull null
+        val pm = raw.contains("pm", ignoreCase = true)
+        val am = raw.contains("am", ignoreCase = true)
+        when {
+            pm && hour < 12 -> hour + 12
+            am && hour == 12 -> 0
+            else -> hour
+        }
+    }
+    val earliest = hours.minOrNull() ?: return null
+    return when {
+        earliest < 12 -> "mornings"
+        earliest < 17 -> "afternoons"
+        else -> "evenings"
+    }
+}
 
 private fun BookingStatus.isLive(): Boolean = when (this) {
     BookingStatus.PendingConfirm, BookingStatus.Confirmed -> true

@@ -185,10 +185,13 @@ fun AccountStatBand(stats: List<AccountStat>, modifier: Modifier = Modifier) {
  *
  * A count we HAVE is printed. A count we could not read prints an em dash, because "you have 0
  * bookings" and "we couldn't reach the server" are opposite claims and this band is the only
- * thing on the screen making either. Same rule — and the same dash — as
- * [profileStatValue], which this replaces at the band's call sites.
+ * thing on the screen making either.
+ *
+ * A delegation rather than a second copy of `count?.toString() ?: "—"`: [profileStatValue] is
+ * the rule, it has a test that pins the dash, and two independent spellings of one rule is how
+ * the artist band and the client band end up disagreeing about what "unknown" looks like.
  */
-fun accountStatValue(count: Int?): String = count?.toString() ?: "—"
+fun accountStatValue(count: Int?): String = profileStatValue(count)
 
 /** Vertical air between two blocks in an account body. */
 @Composable

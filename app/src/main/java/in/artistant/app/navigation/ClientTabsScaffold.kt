@@ -64,8 +64,16 @@ import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
 import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
+import `in`.artistant.app.feature.profile.AccessibilityScreen
+import `in`.artistant.app.feature.profile.AccountScreen
+import `in`.artistant.app.feature.profile.DataExportScreen
+import `in`.artistant.app.feature.profile.DeleteAccountScreen
+import `in`.artistant.app.feature.profile.DevicesScreen
+import `in`.artistant.app.feature.profile.LanguageScreen
+import `in`.artistant.app.feature.profile.NotificationSettingsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
+import `in`.artistant.app.ui.RootViewModel
 
 /**
  * Client navigation: five top-level routes, four of which are glyphs in the bar.
@@ -106,6 +114,11 @@ private const val ARTIST_PROFILE_ROUTE = "artist/{artistId}"
 @Composable
 fun ClientTabsScaffold() {
     val nav = rememberNavController()
+    // The ACTIVITY's RootViewModel, not a new one: this composable is called directly from
+    // `ArtistantNavHost`, above any NavHost, so `LocalViewModelStoreOwner` here is still the
+    // activity and `hiltViewModel()` resolves the same instance the gate is driven by. Profile's
+    // "Switch to artist mode" needs its `retryRouting` — see that destination.
+    val rootViewModel: RootViewModel = hiltViewModel()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ClientTab.entries.any { it.route == route }
@@ -229,10 +242,72 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Profile.route) {
                 TabPane(inner) {
                     ProfileScreen(
+                        onAccount = { nav.navigate(ClientNavRoutes.ACCOUNT) },
+                        // Profile is Bookings' front door: the light bar dropped the calendar
+                        // glyph, so this row and the booking cards are the only ways in.
+                        onBookings = { navigateToTab(nav, ClientTab.Bookings.route) },
+                        onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
+                        onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
+                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
+                        onSafetyCentre = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        // The role write lands on the server, but the root gate only re-reads
+                        // the profile when the SESSION changes — which a role switch is not.
+                        // `RootViewModel` is resolved from the activity's store here (this
+                        // composable sits above the NavHost, so `hiltViewModel()` returns the
+                        // same instance `ArtistantNavHost` created), and its `retryRouting` is
+                        // the nudge that moves the gate Client → Artist without a cold start.
+                        onRoleSwitched = rootViewModel::retryRouting,
+                    )
+                }
+            }
+            composable(ClientNavRoutes.ACCOUNT) {
+                TabPane(inner) {
+                    AccountScreen(
+                        onBack = { nav.popBackStack() },
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                         onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
-                        onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
-                        onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
+                        onSafetyCentre = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
+                        onLanguage = { nav.navigate(ClientNavRoutes.LANGUAGE) },
+                        onAccessibility = { nav.navigate(ClientNavRoutes.ACCESSIBILITY) },
+                        onDevices = { nav.navigate(ClientNavRoutes.DEVICES) },
+                        onDataExport = { nav.navigate(ClientNavRoutes.DATA_EXPORT) },
+                        onDeleteAccount = { nav.navigate(ClientNavRoutes.DELETE_ACCOUNT) },
+                        onSubscription = { nav.navigate(ClientNavRoutes.PAYWALL) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.NOTIFICATIONS) {
+                TabPane(inner) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.ACCESSIBILITY) {
+                TabPane(inner) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.LANGUAGE) {
+                TabPane(inner) { LanguageScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.DEVICES) {
+                TabPane(inner) { DevicesScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ClientNavRoutes.DATA_EXPORT) {
+                TabPane(inner) {
+                    DataExportScreen(
+                        onBack = { nav.popBackStack() },
+                        // Support lives inside the safety centre; a failed export is exactly
+                        // the case its "contact us" path exists for.
+                        onContactSupport = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                    )
+                }
+            }
+            composable(ClientNavRoutes.DELETE_ACCOUNT) {
+                TabPane(inner) {
+                    DeleteAccountScreen(
+                        onBack = { nav.popBackStack() },
+                        onContactSupport = rememberRouteIfRegistered(nav, ClientNavRoutes.SAFETY_CENTRE),
+                        // Nothing to navigate TO: the account is gone, so the cleared session
+                        // propagates to the root gate and replaces this whole graph with the
+                        // signup flow. Popping the stack here would only race that.
+                        onFinished = {},
                     )
                 }
             }

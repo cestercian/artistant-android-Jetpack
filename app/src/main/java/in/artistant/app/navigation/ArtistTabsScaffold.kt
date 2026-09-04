@@ -48,7 +48,13 @@ import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
 import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
-import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.profile.AccessibilityScreen
+import `in`.artistant.app.feature.profile.AccountScreen
+import `in`.artistant.app.feature.profile.DataExportScreen
+import `in`.artistant.app.feature.profile.DeleteAccountScreen
+import `in`.artistant.app.feature.profile.DevicesScreen
+import `in`.artistant.app.feature.profile.LanguageScreen
+import `in`.artistant.app.feature.profile.NotificationSettingsScreen
 import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.score.ScoreHistoryScreen
@@ -172,14 +178,56 @@ fun ArtistTabsScaffold() {
                     )
                 }
             }
-            composable(ArtistNavRoutes.PROFILE) {
+            // Design 69 — the artist's half of the ONE account list (47 / 69). Same screen the
+            // client reaches from the Profile gear; the ARTIST group of rows is injected by
+            // role rather than forked into a second implementation, which is the design's own
+            // note on this pair and the reason artist deletion is reachable at all.
+            composable(ArtistNavRoutes.ACCOUNT) {
                 TabPane(inner) {
-                    ProfileScreen(
+                    AccountScreen(
+                        onBack = { nav.popBackStack() },
                         onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                         onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
-                        onBack = { nav.popBackStack() },
-                        onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
+                        onSafetyCentre = rememberRouteIfRegistered(nav, ArtistNavRoutes.SAFETY_CENTRE),
+                        onNotifications = { nav.navigate(ArtistNavRoutes.NOTIFICATIONS) },
+                        onLanguage = { nav.navigate(ArtistNavRoutes.LANGUAGE) },
+                        onAccessibility = { nav.navigate(ArtistNavRoutes.ACCESSIBILITY) },
+                        onDevices = { nav.navigate(ArtistNavRoutes.DEVICES) },
+                        onDataExport = { nav.navigate(ArtistNavRoutes.DATA_EXPORT) },
+                        onDeleteAccount = { nav.navigate(ArtistNavRoutes.DELETE_ACCOUNT) },
+                        onSubscription = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.NOTIFICATIONS) {
+                TabPane(inner) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.ACCESSIBILITY) {
+                TabPane(inner) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.LANGUAGE) {
+                TabPane(inner) { LanguageScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.DEVICES) {
+                TabPane(inner) { DevicesScreen(onBack = { nav.popBackStack() }) }
+            }
+            composable(ArtistNavRoutes.DATA_EXPORT) {
+                TabPane(inner) {
+                    DataExportScreen(
+                        onBack = { nav.popBackStack() },
+                        onContactSupport = rememberRouteIfRegistered(nav, ArtistNavRoutes.SAFETY_CENTRE),
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.DELETE_ACCOUNT) {
+                TabPane(inner) {
+                    DeleteAccountScreen(
+                        onBack = { nav.popBackStack() },
+                        onContactSupport = rememberRouteIfRegistered(nav, ArtistNavRoutes.SAFETY_CENTRE),
+                        // Nothing to navigate TO: the account is gone, so the cleared session
+                        // propagates to the root gate and replaces this whole graph.
+                        onFinished = {},
                     )
                 }
             }
@@ -280,10 +328,9 @@ fun ArtistTabsScaffold() {
                         // instead: a reasonable-looking place, and the wrong one,
                         // because the screen an artist opens to work on their own
                         // profile is the screen they go to looking for their own
-                        // account. `ProfileScreen` renames itself "Account" and
-                        // grows a back control when it is pushed rather than
-                        // rooted, so the artist gets the right chrome for free.
-                        onOpenAccount = { nav.navigate(ArtistNavRoutes.PROFILE) },
+                        // account. `AccountScreen` is that list, and it is the
+                        // same one the client reaches from the Profile gear.
+                        onOpenAccount = { nav.navigate(ArtistNavRoutes.ACCOUNT) },
                     )
                 }
             }
@@ -344,6 +391,32 @@ fun ArtistTabsScaffold() {
             }
         }
     }
+}
+
+/**
+ * A navigate-to-[route] lambda, or null when nothing in this graph answers to that route.
+ *
+ * Exists for exactly one situation, and it is a real one: the account settings list links to
+ * the trust & safety centre (design 131), which lives in `feature/messages` and lands on its
+ * own branch. `NavController.navigate` THROWS on an unregistered route, so a hard-coded link
+ * would crash the moment the two branches were out of step — and a lambda that quietly does
+ * nothing would be the "failing silently on tap" the redesign's notes rule out. Returning null
+ * lets the caller omit the control entirely, so the row is absent while the screen is absent
+ * and appears the instant it is registered, with no code change on either side.
+ *
+ * Not a general escape hatch. Every other route in these graphs is registered in the same file
+ * that navigates to it, and should be linked directly.
+ */
+@Composable
+internal fun rememberRouteIfRegistered(
+    nav: androidx.navigation.NavController,
+    route: String,
+): (() -> Unit)? = remember(nav, route) {
+    // `graph` throws if the controller has no graph yet; every call site is inside a
+    // destination, so it always does. Guarded anyway — a null here costs a hidden row, and a
+    // throw costs the screen.
+    val registered = runCatching { nav.graph.findNode(route) != null }.getOrDefault(false)
+    if (registered) ({ nav.navigate(route) }) else null
 }
 
 /**
