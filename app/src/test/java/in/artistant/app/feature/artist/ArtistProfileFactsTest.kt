@@ -123,7 +123,41 @@ class ArtistProfileFactsTest {
     }
 
     @Test
-    fun `a measured reply time is the server's own words`() {
+    fun `the label half of response_label is stripped so the cell is the value`() {
+        // On the emulator this cell rendered "Replies in ~2h" stacked over its
+        // own label "Replies in": `response_label` is a whole sentence, written
+        // for a surface that printed it alone. The design (04) is value above
+        // label, so only the duration belongs in the cell.
+        assertEquals("~2h", ArtistProfileFacts.replyCell(artist(response = "Replies in ~2h")))
+        assertEquals("~1h", ArtistProfileFacts.replyCell(artist(response = "replies in ~1h")))
+        assertEquals("2h", ArtistProfileFacts.replyCell(artist(response = "Responds in 2h")))
+        assertEquals("~3h", ArtistProfileFacts.replyCell(artist(response = "Usually replies in ~3h")))
+    }
+
+    @Test
+    fun `the tilde survives — an estimate must not be printed as a certainty`() {
+        assertTrue(ArtistProfileFacts.replyCell(artist(response = "Replies in ~2h")).startsWith("~"))
+    }
+
+    @Test
+    fun `a phrasing we do not recognise is shown whole rather than mangled`() {
+        // Stripping by prefix, not by hunting for a duration inside the string:
+        // the column is free text, and a pattern that only knew "~2h" would
+        // silently blank anything a human wrote.
+        assertEquals(
+            "Answers within the day",
+            ArtistProfileFacts.replyCell(artist(response = "Answers within the day")),
+        )
+    }
+
+    @Test
+    fun `a label with nothing after it is unknown, not an empty cell`() {
+        assertEquals(ArtistProfileFacts.UNKNOWN, ArtistProfileFacts.replyCell(artist(response = "Replies in")))
+        assertEquals(ArtistProfileFacts.UNKNOWN, ArtistProfileFacts.replyCell(artist(response = "Responds")))
+    }
+
+    @Test
+    fun `a bare duration is left alone`() {
         assertEquals("1h", ArtistProfileFacts.replyCell(artist(response = "1h")))
     }
 
@@ -180,5 +214,13 @@ class ArtistProfileFactsTest {
     @Test
     fun `no report means no toast`() {
         assertNull(ArtistProfileFacts.reportToast(null))
+    }
+
+    @Test
+    fun `a lost report gets no toast at all`() {
+        // It gets a banner with a retry instead. A toast fades and cannot be
+        // recovered, which is the wrong shape for "nothing is holding your
+        // safety report" — and returning a string here would fire BOTH.
+        assertNull(ArtistProfileFacts.reportToast(ReportOutcome.Failed))
     }
 }

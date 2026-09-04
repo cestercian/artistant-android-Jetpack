@@ -154,6 +154,8 @@ fun ArtistProfileScreen(
                     onRequestQuote = { onRequestQuote(artist.id) },
                     onSeeReviews = { onSeeReviews(artist.id) },
                     onRetryReviews = viewModel::refresh,
+                    onRetryReport = viewModel::retryReport,
+                    onDismissReportFailure = viewModel::dismissReportFailure,
                     onMessage = { onMessage(artist.id) },
                     onBook = {
                         // Hand the tapped tier over BEFORE navigating — the route
@@ -359,6 +361,8 @@ private fun LoadedProfile(
     onRequestQuote: () -> Unit,
     onSeeReviews: () -> Unit,
     onRetryReviews: () -> Unit,
+    onRetryReport: () -> Unit,
+    onDismissReportFailure: () -> Unit,
     onMessage: () -> Unit,
     onBook: () -> Unit,
 ) {
@@ -405,6 +409,42 @@ private fun LoadedProfile(
                         onAction = onRetryReviews,
                         modifier = Modifier.padding(top = space.md),
                     )
+                }
+                // A report the server refused AND the device failed to log. This
+                // is a banner rather than the toast its two siblings get,
+                // because a toast fades and this one has to survive until the
+                // report is either filed or explicitly abandoned — the reader
+                // was told nothing is holding it, and the app owes them the way
+                // to try again without retyping.
+                if (state.failedReport != null) {
+                    Column(
+                        Modifier.padding(top = space.md),
+                        verticalArrangement = Arrangement.spacedBy(space.sm),
+                    ) {
+                        Banner(
+                            title = "Your report wasn't filed",
+                            detail = "It didn't reach Artistant, and we couldn't " +
+                                "save it on this device either. Nothing is holding " +
+                                "it right now.",
+                            tone = BannerTone.Failure,
+                            actionLabel = "Try again",
+                            onAction = onRetryReport,
+                        )
+                        Text(
+                            "Discard this report",
+                            style = AppTheme.type.subtitle.copy(
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = colors.ink4,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(dimens.radii.sm))
+                                .clickable(onClick = onDismissReportFailure)
+                                .padding(
+                                    horizontal = space.sm,
+                                    vertical = space.xs,
+                                ),
+                        )
+                    }
                 }
 
                 IdentityBlock(

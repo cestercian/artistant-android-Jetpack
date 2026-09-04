@@ -56,6 +56,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
 import `in`.artistant.app.feature.messages.ViewerIdentity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,24 +109,42 @@ class ScoreExplainerViewModel @Inject constructor(
         refresh()
     }
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(isLoading = true, failed = false) }
-        val breakdown = runCatching { scores.breakdownForSelf() }
-        // Both subordinate reads happen either way: the history sparkline and the
-        // "finish your profile" rows are useful even when the metrics fetch
-        // failed, and re-running them behind a second Retry would be a second
-        // round-trip for data this one already has.
-        val history = runCatching { scores.historyForSelf() }
-        val artist = viewer.currentUserId()?.let { id -> artists.ensureFull(id) }
-        _state.update {
-            it.copy(
-                breakdown = breakdown.getOrDefault(ScoreBreakdown.NewArtist),
-                failed = breakdown.isFailure,
-                history = history.getOrDefault(emptyList()),
-                historyFailed = history.isFailure,
-                artist = artist ?: it.artist,
-                isLoading = false,
-            )
+    /**
+     * The in-flight load, and the stamp that decides whether it may commit.
+     *
+     * Retry is a button and this screen fires three reads per load, so two loads
+     * can easily be alive at once and finish out of order — the older one
+     * landing last would overwrite the fresher score with a stale one. Cancelling
+     * is most of the fix; the stamp closes the rest of the window, because a
+     * coroutine cancelled after its last suspension point can still reach the
+     * `update`.
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
+
+    fun refresh() {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, failed = false) }
+            val breakdown = runCatching { scores.breakdownForSelf() }
+            // Both subordinate reads happen either way: the history sparkline and
+            // the "finish your profile" rows are useful even when the metrics
+            // fetch failed, and re-running them behind a second Retry would be a
+            // second round-trip for data this one already has.
+            val history = runCatching { scores.historyForSelf() }
+            val artist = viewer.currentUserId()?.let { id -> artists.ensureFull(id) }
+            if (generation != loadGeneration) return@launch
+            _state.update {
+                it.copy(
+                    breakdown = breakdown.getOrDefault(ScoreBreakdown.NewArtist),
+                    failed = breakdown.isFailure,
+                    history = history.getOrDefault(emptyList()),
+                    historyFailed = history.isFailure,
+                    artist = artist ?: it.artist,
+                    isLoading = false,
+                )
+            }
         }
     }
 }
@@ -445,9 +464,10 @@ private fun OpportunitiesTabContent(
 }
 
 /**
- * One win. The "+N" pill appears only where the number is real — points still
- * unearned on a published factor — and the chevron only where there is an
- * editor to open.
+ * One win. Every row opens something — that is [ScoreEditor]'s contract, and it
+ * is why the whole card is the tap target and the chevron is unconditional. The
+ * "+N" pill is the part that varies: it appears only where the number is real,
+ * i.e. points still unearned on a published factor.
  */
 @Composable
 private fun OpportunityRow(win: ScoreOpportunity, onOpenEditor: (ScoreEditor) -> Unit) {
@@ -458,13 +478,7 @@ private fun OpportunityRow(win: ScoreOpportunity, onOpenEditor: (ScoreEditor) ->
             .fillMaxWidth()
             .clip(RoundedCornerShape(dimens.radii.buttonLg))
             .background(colors.surface3)
-            .then(
-                if (win.editor != null) {
-                    Modifier.clickable { onOpenEditor(win.editor) }
-                } else {
-                    Modifier
-                },
-            )
+            .clickable { onOpenEditor(win.editor) }
             .padding(dimens.space.md),
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
@@ -493,13 +507,11 @@ private fun OpportunityRow(win: ScoreOpportunity, onOpenEditor: (ScoreEditor) ->
             )
             Text(win.detail, style = AppTheme.type.caption, color = colors.ink4)
         }
-        if (win.editor != null) {
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colors.lineStrong,
-                modifier = Modifier.size(dimens.size.iconMd),
-            )
-        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = colors.lineStrong,
+            modifier = Modifier.size(dimens.size.iconMd),
+        )
     }
 }

@@ -15,6 +15,7 @@ import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.feature.booking.BookingDraftStore
 import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.feature.saved.SavedStore
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,13 +60,24 @@ data class ArtistProfileUiState(
     /** Screen 56. Opened from the action sheet, which closes as it opens. */
     val showReportSheet: Boolean = false,
     /**
-     * Set once a report has been filed, and read by the toast.
+     * A report that reached somewhere — the server or the local log — read by
+     * the toast.
      *
      * [ReportOutcome.Queued] is not a failure and the copy must not call it one
-     * — see screen 56's note. Cleared when the toast is dismissed so a second
-     * report can raise a second toast.
+     * (screen 56's note). [ReportOutcome.Failed] never lands here: it is
+     * durable, not momentary, and rides [failedReport] instead. Cleared when the
+     * toast is dismissed so a second report can raise a second toast.
      */
     val reportOutcome: ReportOutcome? = null,
+    /**
+     * A report that is not held ANYWHERE — the insert failed and so did the
+     * local log.
+     *
+     * It keeps the reader's own reason and note so the retry does not ask them
+     * to write the thing twice, and it is not a toast: a message that fades
+     * after three seconds is the wrong shape for "your safety report was lost".
+     */
+    val failedReport: PendingReport? = null,
     /**
      * The signed-in user IS this artist (screen 103).
      *
@@ -84,6 +96,15 @@ data class ArtistProfileUiState(
     val selectedPackageIndex: Int = 0,
     val isSaved: Boolean = false,
 )
+
+/**
+ * A report the reader wrote that nothing is currently holding.
+ *
+ * Carried so the retry re-files exactly what they typed. The sheet's own state
+ * is `rememberSaveable` and dies with the sheet, so without this the only
+ * recovery would be "write it again".
+ */
+data class PendingReport(val reason: String, val details: String?)
 
 /** The read failed in transport / RLS — we do not know what this artist offers. */
 internal const val PROFILE_LOAD_FAILED = "Couldn't load this profile."
@@ -145,8 +166,23 @@ class ArtistProfileViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The in-flight load, and the stamp that decides whether it may still
+     * commit.
+     *
+     * Retry is a button, so two loads can be alive at once and they can return
+     * in either order — an older, slower read finishing last would overwrite the
+     * fresher one it was supposed to replace. Cancelling is most of the fix;
+     * the stamp closes the rest of the window, because a coroutine cancelled
+     * after its last suspension point can still reach the `update` below.
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
+
     fun refresh() {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
             _state.update { it.copy(isLoading = true, loadError = null) }
             val cached = artistsRepository.find(artistId)
             if (cached != null) {
@@ -158,6 +194,7 @@ class ArtistProfileViewModel @Inject constructor(
             // page may already be drawn from. See [artistProfileLoadError].
             val fetched = runCatching { artistsRepository.fetchArtist(artistId) }
             val full = fetched.getOrNull()
+            if (generation != loadGeneration) return@launch
             if (full == null) {
                 _state.update {
                     it.copy(
@@ -176,6 +213,7 @@ class ArtistProfileViewModel @Inject constructor(
                 .onFailure { reviewsFailed = true }
                 .getOrDefault(emptyList())
             val breakdownRead = runCatching { scoreRepository.breakdown(artistId) }
+            if (generation != loadGeneration) return@launch
             _state.update {
                 it.copy(
                     artist = full,
@@ -212,26 +250,52 @@ class ArtistProfileViewModel @Inject constructor(
     fun dismissReportSheet() = _state.update { it.copy(showReportSheet = false) }
 
     /**
-     * File the report and remember whether it landed.
+     * File the report and remember what became of it.
      *
      * The sheet closes immediately, before the round-trip: the report is
      * fire-and-forget by contract (`ReportsRepository` never throws), the reader
      * has nothing to decide while it is in flight, and holding a spinner over a
      * form they have finished with is the pattern the design's "narrated, not a
-     * spinner" note is written against. The toast that follows says which of the
-     * two things happened.
+     * spinner" note is written against.
+     *
+     * Sent and Queued are momentary facts and get a toast. **Failed is not** —
+     * nothing holds the report, so it becomes durable state ([failedReport])
+     * that survives the toast window and carries the reader's own words back
+     * into a retry. A safety report that vanished while a toast said "queued"
+     * is the failure this branch exists to prevent.
      */
     fun submitReport(reason: String, details: String?) {
-        _state.update { it.copy(showReportSheet = false) }
+        _state.update { it.copy(showReportSheet = false, failedReport = null) }
         viewModelScope.launch {
             val outcome = runCatching { reportsRepository.reportArtist(artistId, reason, details) }
-                // A throw here is a contract violation, not an ordinary failure;
-                // it still must not lose the reader's report silently, so it
-                // reads as the weaker of the two claims.
-                .getOrDefault(ReportOutcome.Queued)
-            _state.update { it.copy(reportOutcome = outcome) }
+                // A throw here is a contract violation (the interface promises
+                // not to), so it is the WORST of the three claims, not the
+                // middle one: we know nothing about where the report went.
+                .getOrDefault(ReportOutcome.Failed)
+            _state.update {
+                if (outcome == ReportOutcome.Failed) {
+                    it.copy(failedReport = PendingReport(reason, details))
+                } else {
+                    it.copy(reportOutcome = outcome)
+                }
+            }
         }
     }
+
+    /** Re-file the report the reader already wrote, from the failure banner. */
+    fun retryReport() {
+        val pending = _state.value.failedReport ?: return
+        submitReport(pending.reason, pending.details)
+    }
+
+    /**
+     * Give up on a lost report.
+     *
+     * Deliberately a separate control from [retryReport] and not a timeout: the
+     * banner states that nothing holds the report, and it must not disappear on
+     * its own while that is still true.
+     */
+    fun dismissReportFailure() = _state.update { it.copy(failedReport = null) }
 
     fun dismissReportToast() = _state.update { it.copy(reportOutcome = null) }
 

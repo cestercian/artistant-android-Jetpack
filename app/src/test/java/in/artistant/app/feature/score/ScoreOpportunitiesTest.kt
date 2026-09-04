@@ -146,12 +146,31 @@ class ScoreOpportunitiesTest {
     }
 
     @Test
-    fun `every profile row opens an editor`() {
-        val bare = ScoreOpportunities.of(
-            breakdown(),
+    fun `every row opens something, including the two that edit no field`() {
+        // Screen 50's note is that each win opens the thing it edits. The type
+        // enforces it now — `editor` is non-null — so what is worth pinning is
+        // that the two score-moving rows with no editable field still send the
+        // reader somewhere useful rather than being quietly dropped.
+        val wins = ScoreOpportunities.of(
+            breakdown(reply = 50, reviews = 60, social = 0),
             artist(samples = emptyList(), gallery = emptyList(), packages = emptyList(), bio = "", tech = emptyList()),
         )
-        assertTrue("advice must never dead-end", bare.all { it.editor != null })
+        assertTrue("advice must never dead-end", wins.isNotEmpty())
+
+        assertEquals(
+            ScoreEditor.Messages,
+            wins.single { it.title == "Reply faster" }.editor,
+        )
+        assertEquals(
+            ScoreEditor.Gigs,
+            wins.single { it.title == "Ask your hosts for a review" }.editor,
+        )
+        // The profile rows split between the two editors that own the fields:
+        // the press kit for the listing, the wizard for the tech rider.
+        assertEquals(
+            setOf(ScoreEditor.PressKit, ScoreEditor.Wizard),
+            wins.filter { it.points == null }.map { it.editor }.toSet(),
+        )
     }
 
     @Test

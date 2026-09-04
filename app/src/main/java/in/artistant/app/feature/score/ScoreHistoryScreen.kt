@@ -47,6 +47,7 @@ import `in`.artistant.app.designsystem.component.SkeletonBlock
 import `in`.artistant.app.designsystem.component.hairlineBottom
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -71,16 +72,34 @@ class ScoreHistoryViewModel @Inject constructor(
         refresh()
     }
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(isLoading = true) }
-        val read = runCatching { scores.historyForSelf() }
-        _state.update {
-            it.copy(
-                history = read.getOrDefault(emptyList()),
-                // Empty and unreadable are the same list and the opposite claim.
-                failed = read.isFailure,
-                isLoading = false,
-            )
+    /**
+     * The in-flight load, and the stamp that decides whether it may commit.
+     *
+     * Retry is a button, so two reads can be alive at once and can return in
+     * either order — an older, slower one finishing last would overwrite the
+     * fresher ledger it was supposed to replace, and on this screen that means
+     * showing yesterday's deltas as today's. Cancelling is most of the fix; the
+     * stamp closes the rest of the window, because a coroutine cancelled after
+     * its last suspension point can still reach the `update`.
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
+
+    fun refresh() {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            val read = runCatching { scores.historyForSelf() }
+            if (generation != loadGeneration) return@launch
+            _state.update {
+                it.copy(
+                    history = read.getOrDefault(emptyList()),
+                    // Empty and unreadable are the same list and the opposite claim.
+                    failed = read.isFailure,
+                    isLoading = false,
+                )
+            }
         }
     }
 }

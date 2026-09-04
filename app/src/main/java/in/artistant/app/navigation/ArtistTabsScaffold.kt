@@ -192,15 +192,20 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     ScoreExplainerScreen(
                         onBack = { nav.popBackStack() },
-                        // Every opportunity opens the thing it edits (design 50).
-                        // Two destinations cover the five: the press kit owns the
-                        // listing (samples, photos, packages, bio) and the wizard
-                        // owns the steps that were never surfaced anywhere else
-                        // (tech rider, socials).
+                        // Every opportunity opens the thing it is about (design
+                        // 50). The press kit owns the listing (samples, photos,
+                        // packages, bio); the wizard owns the steps surfaced
+                        // nowhere else (tech rider, socials); and the two
+                        // score-moving rows that are not "fields" at all go where
+                        // the metric is actually earned — the inbox for reply
+                        // speed, the gig list for the hosts a review is asked
+                        // from.
                         onOpenEditor = { editor ->
                             when (editor) {
                                 ScoreEditor.PressKit -> nav.navigate(ArtistTab.Epk.route)
                                 ScoreEditor.Wizard -> nav.navigate(ArtistNavRoutes.WIZARD)
+                                ScoreEditor.Messages -> nav.navigate(ArtistTab.Messages.route)
+                                ScoreEditor.Gigs -> nav.navigate(ArtistTab.Gigs.route)
                             }
                         },
                         onSeeHistory = { nav.navigate(ArtistNavRoutes.SCORE_HISTORY) },

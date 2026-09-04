@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +37,7 @@ import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.BackHeader
+import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.Meter
 import `in`.artistant.app.designsystem.component.SectionHeader
@@ -42,6 +45,7 @@ import `in`.artistant.app.designsystem.component.SkeletonBlock
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,21 +85,38 @@ class BookabilityViewModel @Inject constructor(
         refresh()
     }
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(isLoading = true) }
-        // The cached tile carries the score and the gig count, which is
-        // everything the headline needs — so the page paints before the
-        // round-trip and never flashes an empty card.
-        artists.find(artistId)?.let { cached -> _state.update { it.copy(artist = cached) } }
-        val full = artists.ensureFull(artistId)
-        val read = runCatching { scores.breakdown(artistId) }
-        _state.update {
-            it.copy(
-                artist = full ?: it.artist,
-                breakdown = read.getOrNull(),
-                breakdownFailed = read.isFailure,
-                isLoading = false,
-            )
+    /**
+     * The in-flight load, and the stamp that decides whether it may commit.
+     *
+     * Retry is a button, so two loads can be alive at once and can return in
+     * either order — the older, slower one finishing last would overwrite the
+     * fresher data it was supposed to replace. Cancelling is most of the fix;
+     * the stamp closes the rest of the window, because a coroutine cancelled
+     * after its last suspension point can still reach the `update`.
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
+
+    fun refresh() {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            // The cached tile carries the score and the gig count, which is
+            // everything the headline needs — so the page paints before the
+            // round-trip and never flashes an empty card.
+            artists.find(artistId)?.let { cached -> _state.update { it.copy(artist = cached) } }
+            val full = artists.ensureFull(artistId)
+            val read = runCatching { scores.breakdown(artistId) }
+            if (generation != loadGeneration) return@launch
+            _state.update {
+                it.copy(
+                    artist = full ?: it.artist,
+                    breakdown = read.getOrNull(),
+                    breakdownFailed = read.isFailure,
+                    isLoading = false,
+                )
+            }
         }
     }
 }
@@ -123,10 +144,29 @@ fun BookabilityScreen(
     val dimens = AppTheme.dimens
     val space = dimens.space
     val artist = state.artist
-    val tier = state.breakdown?.tier
+    val breakdown = state.breakdown
+    // The headline's two halves come from ONE source, whichever answered.
+    //
+    // They used to be picked independently — the tier from the breakdown, the
+    // number from the artist row — so a profile read that returned nothing while
+    // the metrics read succeeded rendered the tier of a real score above a
+    // headline that said "New / no score yet". Two rows disagreeing about the
+    // same artist, on the screen whose whole claim is that the number is
+    // auditable. `numericScore` is null on the New tier, which is what keeps a
+    // <5-gig artist from being shown their `score` column's 0.
+    val score: Int? = when {
+        breakdown != null -> breakdown.numericScore
+        artist != null ->
+            artist.score.takeIf { ScoreBands.tier(it, artist.gigs) != ScoreTier.New }
+        else -> null
+    }
+    val tier = breakdown?.tier
         ?: artist?.let { ScoreBands.tier(it.score, it.gigs) }
         ?: ScoreTier.New
-    val isNew = tier == ScoreTier.New
+    // Neither read answered. There is no artist, no score and no breakdown —
+    // rendering the "New" headline here would invent a tier for a page that
+    // knows nothing at all.
+    val nothingLoaded = artist == null && breakdown == null && !state.isLoading
 
     Column(
         modifier
@@ -148,18 +188,26 @@ fun BookabilityScreen(
                 .padding(top = space.lg),
             verticalArrangement = Arrangement.spacedBy(space.xl),
         ) {
-            if (artist == null && state.isLoading) {
+            if (artist == null && breakdown == null && state.isLoading) {
                 SkeletonBlock(
                     Modifier.fillMaxWidth().height(dimens.component.skeletonTile),
                     radius = dimens.radii.xl,
                 )
                 return@Column
             }
+            if (nothingLoaded) {
+                EmptyState(
+                    icon = Icons.Filled.Insights,
+                    title = "Couldn't load this score",
+                    body = "We couldn't reach this artist's record or their " +
+                        "breakdown. Nothing about their score has changed.",
+                    actionLabel = "Retry",
+                    onAction = viewModel::refresh,
+                )
+                return@Column
+            }
 
-            ScoreHeadline(
-                score = if (isNew) null else artist?.score,
-                tier = tier,
-            )
+            ScoreHeadline(score = score, tier = tier)
 
             if (state.breakdownFailed) {
                 Banner(
@@ -174,7 +222,6 @@ fun BookabilityScreen(
 
             SectionHeader("What moves it")
             Column(verticalArrangement = Arrangement.spacedBy(space.lg)) {
-                val breakdown = state.breakdown
                 if (breakdown != null) {
                     ScoreFactors.of(breakdown).forEach { factor ->
                         Meter(
@@ -198,18 +245,18 @@ fun BookabilityScreen(
                     "this down, and nothing on this screen can be bought.",
             )
 
-            if (artist != null) {
+            // Gigs from the same source that answered for the headline — the
+            // breakdown carries `total_gigs` too, so a page drawn from the
+            // metrics alone still has the count.
+            val gigs = breakdown?.totalGigs ?: artist?.gigs
+            if (gigs != null) {
                 HRule()
                 Row(
                     Modifier.fillMaxWidth().padding(top = space.sm),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        if (artist.gigs == 1) {
-                            "1 show on Artistant"
-                        } else {
-                            "${artist.gigs} shows on Artistant"
-                        },
+                        if (gigs == 1) "1 show on Artistant" else "$gigs shows on Artistant",
                         style = AppTheme.type.subtitle,
                         color = colors.ink4,
                     )

@@ -34,17 +34,34 @@ interface ReportsRepository {
 }
 
 /**
- * Whether a report reached the server, or is sitting in this install's local log
- * waiting for one.
+ * What actually became of a report.
  *
  * The distinction is the whole of screen 56's note ("says queued, not
  * received"). The insert soft-fails by design — a report must never throw into
  * the UI — and before this type existed the caller could not tell a landed
  * report from a logged one, so the only copy it could honestly show was the
- * weaker of the two for both. [Queued] is deliberately not called "failed": the
- * row is kept, and it is kept for THIS account on THIS device only.
+ * weaker of the two for both.
+ *
+ * Three values, not two, because the fallback can fail as well: the local log is
+ * a DataStore write, and a write that throws leaves NOTHING holding the report.
+ * [Queued] is claimed only once that write has returned; anything else is
+ * [Failed]. Telling someone their safety report is "queued on this device" when
+ * the device had just dropped it is the worst thing this type can say, and it is
+ * what the code said before [Failed] existed.
  */
-enum class ReportOutcome { Sent, Queued }
+enum class ReportOutcome {
+    /** The row reached `public.reports`. */
+    Sent,
+
+    /**
+     * The insert did not land and the report IS in this install's local log —
+     * for this account, on this device, waiting for a path to the server.
+     */
+    Queued,
+
+    /** Nothing holds the report. The caller owes the reader a retry. */
+    Failed,
+}
 
 val ReportReasons = listOf(
     "Inaccurate profile",
@@ -122,8 +139,19 @@ class SupabaseReportsRepository @Inject constructor(
             // report must never throw into the chat UI (see the class doc), and
             // the local log is what keeps the failure from being silent.
             Timber.w(t, "reports insert failed — logging locally")
-            appendLocal(row)
-            ReportOutcome.Queued
+            // The fallback gets its own guard. `appendLocal` is a DataStore
+            // read-modify-write and it can throw — a corrupt file, a full disk,
+            // an IO error — and when it does, nothing anywhere holds the report.
+            // This branch used to let that throw escape into the caller's
+            // `runCatching`, which then told the reader their report was queued
+            // on a device that had just dropped it.
+            runCatching { appendLocal(row) }.fold(
+                onSuccess = { ReportOutcome.Queued },
+                onFailure = { local ->
+                    Timber.e(local, "reports local log failed — the report is lost")
+                    ReportOutcome.Failed
+                },
+            )
         }
 
     /**
@@ -151,10 +179,11 @@ class SupabaseReportsRepository @Inject constructor(
 
 class FakeReportsRepository(
     /**
-     * What both methods answer. Flipping it to [ReportOutcome.Queued] is how a
-     * test drives the offline copy on screen 56 without a network stack — the
-     * Supabase twin reaches that branch through a caught throw, which a fake
-     * cannot reproduce by throwing (the interface never throws by contract).
+     * What both methods answer. Flipping it is how a test drives screen 56's
+     * offline ([ReportOutcome.Queued]) and lost ([ReportOutcome.Failed]) copy
+     * without a network stack or a DataStore — the Supabase twin reaches both
+     * branches through caught throws, which a fake cannot reproduce by throwing
+     * (the interface never throws by contract).
      */
     var outcome: ReportOutcome = ReportOutcome.Sent,
 ) : ReportsRepository {

@@ -42,6 +42,7 @@ import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.SearchBar
 import `in`.artistant.app.designsystem.component.SkeletonBlock
 import `in`.artistant.app.designsystem.theme.AppTheme
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,19 +77,37 @@ class ArtistReviewsViewModel @Inject constructor(
         refresh()
     }
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(isLoading = true) }
-        val name = artists.find(artistId)?.name ?: artists.ensureFull(artistId)?.name
-        val read = runCatching { reviews.listForArtist(artistId) }
-        _state.update {
-            it.copy(
-                artistName = name ?: it.artistName,
-                reviews = read.getOrDefault(emptyList()),
-                // A failed read and an unreviewed artist are the same empty list
-                // and say opposite things about the artist (screen 100).
-                failed = read.isFailure,
-                isLoading = false,
-            )
+    /**
+     * The in-flight load, and the stamp that decides whether it may commit.
+     *
+     * Retry is a button, so two reads can be alive at once and can return in
+     * either order — the older one landing last would replace a loaded corpus
+     * with a stale one, and on this screen the corpus size is quoted in the
+     * copy. Cancelling is most of the fix; the stamp closes the rest of the
+     * window, because a coroutine cancelled after its last suspension point can
+     * still reach the `update`.
+     */
+    private var loadJob: Job? = null
+    private var loadGeneration = 0
+
+    fun refresh() {
+        loadJob?.cancel()
+        val generation = ++loadGeneration
+        loadJob = viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            val name = artists.find(artistId)?.name ?: artists.ensureFull(artistId)?.name
+            val read = runCatching { reviews.listForArtist(artistId) }
+            if (generation != loadGeneration) return@launch
+            _state.update {
+                it.copy(
+                    artistName = name ?: it.artistName,
+                    reviews = read.getOrDefault(emptyList()),
+                    // A failed read and an unreviewed artist are the same empty
+                    // list and say opposite things about the artist (screen 100).
+                    failed = read.isFailure,
+                    isLoading = false,
+                )
+            }
         }
     }
 
@@ -218,23 +237,25 @@ fun ArtistReviewsScreen(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
+                    // Two different empties, and the reader must be able to tell
+                    // which rule emptied the list. A query gets the corpus-size
+                    // sentence (screen 102's note); a lens with no query gets
+                    // that LENS's own explanation — the copy used to describe the
+                    // Recent window whatever was selected, which is a false
+                    // statement about the corpus when the lens is "5 star".
+                    val lensCopy = ReviewSearch.lensEmpty(state.lens, total)
+                    val searching = state.query.isNotBlank()
                     EmptyState(
                         icon = Icons.Filled.Search,
-                        title = if (state.query.isBlank()) {
-                            "Nothing in this filter"
-                        } else {
-                            "No reviews mention that"
-                        },
-                        body = if (state.query.isBlank()) {
-                            "None of the $total reviews are in the last " +
-                                "$RECENT_WINDOW_DAYS days. Switch back to All to see " +
-                                "them."
-                        } else {
+                        title = if (searching) "No reviews mention that" else lensCopy.title,
+                        body = if (searching) {
                             "Nothing in the $total reviews matches " +
                                 "\"${state.query.trim()}\". Clear the search to see " +
                                 "them all."
+                        } else {
+                            lensCopy.body
                         },
-                        actionLabel = if (state.query.isBlank()) "Show all" else "Clear search",
+                        actionLabel = if (searching) "Clear search" else "Show all",
                         onAction = {
                             viewModel.clearSearch()
                             viewModel.select(ReviewLens.All)

@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.artist
 
 import `in`.artistant.app.data.model.Review
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -140,5 +141,36 @@ class ReviewSearchTest {
     @Test
     fun `an empty corpus does not print All 0`() {
         assertEquals("All", ReviewSearch.chipLabel(ReviewLens.All, total = 0))
+    }
+
+    // ── empty-lens copy ─────────────────────────────────────────────────────
+
+    @Test
+    fun `each lens explains its own rule when it empties the list`() {
+        // The bug this pins: the blank-query empty state used to describe the
+        // Recent window whatever lens was selected, so picking "5 star" on an
+        // artist with none told the reader "none of the 121 reviews are in the
+        // last 90 days" — a false statement about the corpus, made where they
+        // cannot check it.
+        val five = ReviewSearch.lensEmpty(ReviewLens.FiveStar, total = 121)
+        assertTrue(five.body.contains("5 star"))
+        assertFalse(five.body.contains(RECENT_WINDOW_DAYS.toString()))
+
+        val recent = ReviewSearch.lensEmpty(ReviewLens.Recent, total = 121)
+        assertTrue(recent.body.contains(RECENT_WINDOW_DAYS.toString()))
+        assertFalse(recent.body.contains("5 star"))
+    }
+
+    @Test
+    fun `every lens quotes the unfiltered corpus size`() {
+        // The reader's real question is whether reviews exist at all, so the
+        // number in the sentence is always the whole corpus — never the filtered
+        // count, which would make it circular.
+        ReviewLens.entries.forEach { lens ->
+            assertTrue(
+                "$lens must state the corpus size",
+                ReviewSearch.lensEmpty(lens, total = 121).body.contains("121"),
+            )
+        }
     }
 }
