@@ -107,6 +107,61 @@ class HarnessFlagsTest {
         assertTrue(flags.seedFixtureData)
     }
 
+    // --- Seed flags ---
+
+    @Test
+    fun `the three seed flags are independent of each other and off by default`() {
+        // Each unlocks a state the app cannot be navigated into, and each is off by default
+        // so the baseline dashboard is not a support queue. Independence is the property that
+        // matters: asking for one must not smuggle in another's rows.
+        val baseline = HarnessFlags.parse("skip-signup-as-artist,seed-fixture-data")
+        assertFalse(baseline.seedOpenQuote)
+        assertFalse(baseline.seedDisputedBooking)
+        assertFalse(baseline.seedReadOnlyBooking)
+
+        val quote = HarnessFlags.parse("seed-open-quote")
+        assertTrue(quote.seedOpenQuote)
+        assertFalse(quote.seedDisputedBooking)
+        assertFalse(quote.seedReadOnlyBooking)
+
+        val disputed = HarnessFlags.parse("seed-disputed-booking")
+        assertTrue(disputed.seedDisputedBooking)
+        assertFalse(disputed.seedOpenQuote)
+        assertFalse(disputed.seedReadOnlyBooking)
+
+        val readOnly = HarnessFlags.parse("seed-read-only-booking")
+        assertTrue(readOnly.seedReadOnlyBooking)
+        assertFalse(readOnly.seedOpenQuote)
+        assertFalse(readOnly.seedDisputedBooking)
+    }
+
+    @Test
+    fun `the seed flags compose with a role boot in one command`() {
+        val flags = HarnessFlags.parse(
+            "reset,skip-signup-as-artist,seed-fixture-data,seed-pending-request," +
+                "seed-open-quote,seed-disputed-booking,seed-read-only-booking",
+        )
+        assertEquals(AppRole.Artist, flags.skipSignupAs)
+        assertTrue(flags.reset)
+        assertTrue(flags.seedFixtureData)
+        assertTrue(flags.seedPendingRequest)
+        assertTrue(flags.seedOpenQuote)
+        assertTrue(flags.seedDisputedBooking)
+        assertTrue(flags.seedReadOnlyBooking)
+    }
+
+    @Test
+    fun `a seed flag on its own activates the harness`() {
+        // `useFakes` reads seedFixtureData OR a role, so a bare seed flag activates the
+        // parser without swapping the repositories — it must not half-activate either.
+        assertTrue(HarnessFlags.parse("seed-open-quote").active)
+        assertTrue(HarnessFlags.parse("-uitest-seed-disputed-booking").active)
+        assertEquals(
+            HarnessFlags.parse("seed-read-only-booking"),
+            HarnessFlags.parse("SEED-READ-ONLY-BOOKING"),
+        )
+    }
+
     // --- iOS spelling compatibility ---
 
     @Test

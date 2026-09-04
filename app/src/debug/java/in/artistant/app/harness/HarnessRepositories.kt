@@ -126,16 +126,35 @@ object HarnessRepositories {
     }
 
     private val bookingsImpl: FakeBookingsRepository by lazy {
-        // The baseline set spans every status the dashboard buckets on. `seed-pending-request`
-        // adds ONE more pending row so the artist accept/decline surface can be driven without
-        // disturbing the baseline the other flags produce (mirrors the iOS harness's split).
+        // The baseline set spans every status the dashboard buckets on. Each seed flag adds ONE
+        // more row so the surface it unlocks can be driven without disturbing the baseline the
+        // other flags produce (mirrors the iOS harness's split).
+        //
+        //   seed-pending-request .... the artist accept/decline surface
+        //   seed-disputed-booking ... design 96, a state only support can set
+        //   seed-read-only-booking .. design 97, a state only a NEWER SERVER can set
+        //
+        // The last two are off by default for the same reason: they are terminal-ish rows that
+        // sit in every list and every counter, and a baseline carrying them would make the
+        // ordinary dashboard read as a support queue.
+        val flags = HarnessState.flags
         val rows = HarnessFixtures.bookings +
-            if (HarnessState.flags.seedPendingRequest) listOf(HarnessFixtures.pendingBooking) else emptyList()
+            listOfNotNull(
+                HarnessFixtures.pendingBooking.takeIf { flags.seedPendingRequest },
+                HarnessFixtures.disputedBooking.takeIf { flags.seedDisputedBooking },
+                HarnessFixtures.unknownStatusBooking.takeIf { flags.seedReadOnlyBooking },
+            )
         FakeBookingsRepository(seed = rows)
     }
 
     private val requestsImpl: FakeRequestsRepository by lazy {
-        FakeRequestsRepository(seed = listOf(HarnessFixtures.gigRequest))
+        // `seed-open-quote` adds the row the in-thread quote card is drawn from. It is the
+        // PAIRED one (artist_id + client_id), which is what lets `ThreadQuote.pick` claim it
+        // for the bookingless thread the same flag seeds; the baseline request is deliberately
+        // unpaired, so the two never compete for one card.
+        val rows = listOf(HarnessFixtures.gigRequest) +
+            listOfNotNull(HarnessFixtures.openQuoteRequest.takeIf { HarnessState.flags.seedOpenQuote })
+        FakeRequestsRepository(seed = rows)
     }
 
     private val scoreImpl: FakeScoreRepository by lazy {
@@ -334,10 +353,25 @@ object HarnessRepositories {
 private class HarnessMessagesRepository(viewerId: String?) : MessagesRepository {
 
     private val viewer = viewerId ?: HarnessFixtures.CLIENT_ID
-    private val threads = mutableListOf(HarnessFixtures.thread)
+
+    // `seed-open-quote` adds the pair's BOOKINGLESS conversation alongside the baseline one.
+    // Both belong to the same two people, which the server allows: `threads` is unique per
+    // (pair, booking), and the bookingless row is the negotiation while the other is the gig.
+    private val quoteSeeded = HarnessState.flags.seedOpenQuote
+
+    private val threads = mutableListOf(HarnessFixtures.thread).apply {
+        if (quoteSeeded) add(HarnessFixtures.quoteThread)
+    }
     private val messages = mutableMapOf(
         HarnessFixtures.THREAD_ID to HarnessFixtures.harnessMessages(viewer).toMutableList(),
-    )
+    ).apply {
+        if (quoteSeeded) {
+            put(
+                HarnessFixtures.QUOTE_THREAD_ID,
+                HarnessFixtures.quoteMessages(viewer).toMutableList(),
+            )
+        }
+    }
 
     override suspend fun listThreadsForUser(): List<Thread> =
         threads.sortedByDescending { it.lastMessageAtEpochMs ?: 0L }

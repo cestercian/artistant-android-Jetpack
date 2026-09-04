@@ -28,6 +28,9 @@ import `in`.artistant.app.designsystem.theme.AppRole
  *   skip-signup-as-artist ....... boot signed-in as an artist, land on the artist tabs
  *   seed-fixture-data ........... swap the Supabase repositories for seeded in-memory fakes
  *   seed-pending-request ........ additionally seed one pending_confirm booking (artist side)
+ *   seed-open-quote ............. seed a bookingless thread + the open quote standing in it
+ *   seed-disputed-booking ....... additionally seed one `disputed` booking (design 96)
+ *   seed-read-only-booking ...... additionally seed one booking with an unknown status (97)
  *   seed-blocked-user ........... boot with the fixture counterparty already blocked
  *   block-list-unavailable ...... make every blocked-list read + write fail
  *   force-update ................ show the update-required gate (design 120) instead of the app
@@ -53,6 +56,40 @@ data class HarnessFlags(
     val skipSignupAs: AppRole? = null,
     val seedFixtureData: Boolean = false,
     val seedPendingRequest: Boolean = false,
+    /**
+     * Seed the quote conversation: a SECOND, bookingless thread between the
+     * fixture pair, plus the `open` gig request standing in it.
+     *
+     * Bookingless is the whole point — `ThreadQuote.pick` refuses a thread that
+     * carries a `booking_id`, because a conversation about a booking is not a
+     * negotiation, and the baseline fixture thread carries one. So the in-thread
+     * quote card, its Accept / Counter dock and the narrated accept (design 08 /
+     * 70) had no path at all on a harness build; the flag is the only way to
+     * look at them.
+     *
+     * Seeded as a second thread rather than by dropping the baseline thread's
+     * `booking_id`: that id is what the booking's own Message path opens, and
+     * half the harness would change shape to reach one card.
+     */
+    val seedOpenQuote: Boolean = false,
+    /**
+     * Additionally seed one `disputed` booking (design 96).
+     *
+     * `disputed` is set by support, never by either client, so no sequence of
+     * taps inside the app produces one — the state is only reachable if it
+     * arrives seeded.
+     */
+    val seedDisputedBooking: Boolean = false,
+    /**
+     * Additionally seed one booking whose server status this build does not
+     * recognise, which decodes to [in.artistant.app.data.model.BookingStatus.Unknown]
+     * and renders read-only (design 97).
+     *
+     * The state means "the server is ahead of this build", so producing it needs
+     * a server ahead of this build. Seeding the decoded row is the only way to
+     * see what a future status does to the screen before there is one.
+     */
+    val seedReadOnlyBooking: Boolean = false,
     /**
      * Start with the fixture counterparty already blocked.
      *
@@ -110,6 +147,9 @@ data class HarnessFlags(
             var reset = false
             var seedFixtureData = false
             var seedPendingRequest = false
+            var seedOpenQuote = false
+            var seedDisputedBooking = false
+            var seedReadOnlyBooking = false
             var seedBlockedUser = false
             var blockListUnavailable = false
             var forceUpdate = false
@@ -131,6 +171,9 @@ data class HarnessFlags(
                     "skip-signup-as-artist" -> { sawArtist = true; seenAny = true }
                     "seed-fixture-data" -> { seedFixtureData = true; seenAny = true }
                     "seed-pending-request" -> { seedPendingRequest = true; seenAny = true }
+                    "seed-open-quote" -> { seedOpenQuote = true; seenAny = true }
+                    "seed-disputed-booking" -> { seedDisputedBooking = true; seenAny = true }
+                    "seed-read-only-booking" -> { seedReadOnlyBooking = true; seenAny = true }
                     "seed-blocked-user" -> { seedBlockedUser = true; seenAny = true }
                     "block-list-unavailable" -> { blockListUnavailable = true; seenAny = true }
                     "force-update" -> { forceUpdate = true; seenAny = true }
@@ -161,6 +204,9 @@ data class HarnessFlags(
                 skipSignupAs = role,
                 seedFixtureData = seedFixtureData,
                 seedPendingRequest = seedPendingRequest,
+                seedOpenQuote = seedOpenQuote,
+                seedDisputedBooking = seedDisputedBooking,
+                seedReadOnlyBooking = seedReadOnlyBooking,
                 seedBlockedUser = seedBlockedUser,
                 blockListUnavailable = blockListUnavailable,
                 forceUpdate = forceUpdate,

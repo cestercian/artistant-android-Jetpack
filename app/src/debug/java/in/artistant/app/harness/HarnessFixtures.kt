@@ -54,6 +54,18 @@ object HarnessFixtures {
     const val REVIEW_ID = "55555555-5555-5555-5555-555555555555"
     const val PENDING_BOOKING_ID = "66666666-6666-6666-6666-666666666666"
 
+    /** `seed-disputed-booking` (design 96). */
+    const val DISPUTED_BOOKING_ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
+    /** `seed-read-only-booking` (design 97) — a status this build cannot read. */
+    const val UNKNOWN_BOOKING_ID = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+
+    /** The bookingless negotiation thread seeded by `seed-open-quote`. */
+    const val QUOTE_THREAD_ID = "77777777-0000-4000-8000-000000000077"
+
+    /** The open gig request standing in [QUOTE_THREAD_ID]. */
+    const val QUOTE_REQUEST_ID = "88888888-0000-4000-8000-000000000088"
+
     // --- Session identity -----------------------------------------------------------------
 
     /** Which uid the synthetic session is issued for, per booted role. */
@@ -305,6 +317,46 @@ object HarnessFixtures {
     )
 
     /**
+     * The `disputed` booking seeded by `seed-disputed-booking` (design 96).
+     *
+     * Dated in the PAST, because a dispute is about a night that already
+     * happened: screen 96's own timeline is "you reported / they responded /
+     * Artistant asked for detail", which cannot be about a gig that has not
+     * taken place. Support sets this status and neither client can, so nothing
+     * an operator does in the app produces the row.
+     */
+    val disputedBooking: Booking = booking(
+        id = DISPUTED_BOOKING_ID,
+        daysFromNow = -9,
+        hour = 20,
+        venue = "Nandi Hills",
+        client = "Devika Rao",
+        status = BookingStatus.Disputed,
+        packageIndex = 2,
+    )
+
+    /**
+     * The forward-compatibility booking seeded by `seed-read-only-booking`
+     * (design 97).
+     *
+     * [BookingStatus.Unknown] is what `fromDb` returns for a status string this
+     * build predates, and everything keyed on it renders read-only and neutral
+     * (iOS #111 parity). Seeded as the DECODED value rather than as a raw
+     * string, because the fakes hold `Booking`s and never run the decoder — what
+     * matters for looking at the screen is the case the rest of the app
+     * branches on.
+     */
+    val unknownStatusBooking: Booking = booking(
+        id = UNKNOWN_BOOKING_ID,
+        daysFromNow = 17,
+        hour = 18,
+        venue = "Jayanagar 4th Block",
+        client = "Kabir Sen",
+        status = BookingStatus.Unknown,
+        packageIndex = 0,
+    )
+
+    /**
      * Build one booking. Fees follow the same 5% platform + 18% GST shape the production maths
      * uses, so the money rows add up if anyone reads them — v1 takes no payments, but a total
      * that doesn't equal its parts reads as a bug during a design review.
@@ -364,6 +416,40 @@ object HarnessFixtures {
             amount = 95_000,
             packageLabel = "60-min headline",
             timeAgo = "12m ago",
+        ),
+        status = GigRequestStatus.Open,
+    )
+
+    /**
+     * The open quote seeded by `seed-open-quote` — the row the in-thread card is
+     * drawn from (design 08).
+     *
+     * Both pair ids are set, which [gigRequest] deliberately leaves empty:
+     * `ThreadQuote.pick` identifies a conversation's quote by `artist_id` +
+     * `client_id` together, so a row missing either is a row no thread can claim
+     * — and leaving [gigRequest] unpaired is also what stops it competing for
+     * the card (two live offers for one pair resolve to no card at all).
+     *
+     * `expiresAtEpochMs` is not decoration: it is the fact that turns a number
+     * into an offer, and the card's "Valid until …" line is not drawn without
+     * it. Dated forward so the offer is standing rather than lapsed — the
+     * expired variant is the same row with the clock past it.
+     */
+    val openQuoteRequest = StoredRequest(
+        raw = GigRequest(
+            id = QUOTE_REQUEST_ID,
+            client = "Ananya Desai",
+            message = "Sundowner set for a private launch. Rooftop, ~90 guests, 75 minutes.",
+            date = dayLabel(daysFromNow(21, 19)),
+            amount = 62_000,
+            packageLabel = "75-min sundowner",
+            timeAgo = "22m ago",
+            venue = "Indiranagar rooftop",
+            crowdSize = 90,
+            updatedAgo = "22m ago",
+            artistId = ARTIST_ID,
+            clientId = CLIENT_ID,
+            expiresAtEpochMs = daysFromNow(3, 18),
         ),
         status = GigRequestStatus.Open,
     )
@@ -565,6 +651,53 @@ object HarnessFixtures {
             msg("m5", CLIENT_ID, "Perfect — see you on the day.", at(174), viewerId),
         )
     }
+
+    /**
+     * The second thread, seeded only by `seed-open-quote`: the pair NEGOTIATING
+     * rather than talking about a booking they already have.
+     *
+     * `bookingId` is null, and that is the whole reason it exists —
+     * `ThreadQuote.pick` returns null for a thread that carries one, so the
+     * baseline [thread] can never show a quote card however the requests are
+     * seeded.
+     */
+    val quoteThread = Thread(
+        id = QUOTE_THREAD_ID,
+        artistId = ARTIST_ID,
+        clientId = CLIENT_ID,
+        bookingId = null,
+        clientName = "Ananya Desai",
+        lastPreview = "Sent you the number — have a look whenever.",
+        lastMessageAtEpochMs = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(22),
+        unreadCount = 2,
+    )
+
+    /**
+     * The negotiation transcript. Two-sided for the same reason
+     * [harnessMessages] is, and it stops where the QUOTE takes over: the offer
+     * itself is an object in the thread, not a line of text somebody typed
+     * (design 08), so a bubble restating the amount would be the card's job
+     * done twice and badly.
+     */
+    fun quoteMessages(viewerId: String): List<Message> {
+        val base = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(40)
+        fun at(minutes: Long) = base + TimeUnit.MINUTES.toMillis(minutes)
+        return listOf(
+            quoteMsg("q1", CLIENT_ID, "Hi! Rooftop launch on the 21st — are you around?", at(0), viewerId),
+            quoteMsg("q2", ARTIST_ID, "I am. 75 minutes, sundowner slot?", at(6), viewerId),
+            quoteMsg("q3", CLIENT_ID, "Exactly that. Sent you the number — have a look whenever.", at(18), viewerId),
+        )
+    }
+
+    private fun quoteMsg(id: String, senderId: String, body: String, atMs: Long, viewerId: String) =
+        Message(
+            id = id,
+            threadId = QUOTE_THREAD_ID,
+            senderId = senderId,
+            body = body,
+            sentAtEpochMs = atMs,
+            isMine = senderId.equals(viewerId, ignoreCase = true),
+        )
 
     private fun msg(id: String, senderId: String, body: String, atMs: Long, viewerId: String) =
         Message(
