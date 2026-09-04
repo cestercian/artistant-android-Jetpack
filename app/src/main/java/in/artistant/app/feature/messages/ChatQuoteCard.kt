@@ -124,17 +124,40 @@ fun QuoteCard(
     }
 }
 
-/** "QUOTE" / "COUNTER OFFER" / "AGREED" — what this card IS, in one word. */
+/**
+ * What this card IS, in one or two words.
+ *
+ * An accepted quote is **TERMS AGREED**, not "AGREED" — see [standing]. The
+ * shorter word invites the reading "the booking is agreed", and it isn't: what
+ * has been agreed is a price and a date, and nothing has been booked.
+ */
 private val ThreadQuote.eyebrow: String
     get() = when {
-        frozen -> "AGREED"
+        frozen -> "TERMS AGREED"
         countered -> "COUNTER OFFER"
         else -> "QUOTE"
     }
 
-/** The line under a card nobody can act on. */
+/**
+ * The line under a card nobody can act on.
+ *
+ * **The frozen case says what accepting did NOT do.** Design 94 draws a "Match
+ * confirmed" landing after an in-chat accept, but this backend creates no
+ * booking on accept: the status PATCH's only server reaction (mig 0047,
+ * rewritten by 0076) is to open the bookingless thread the card is sitting in,
+ * and that migration says outright that a booking is deliberately not created
+ * because the client has to consent to the final amount. `bookings_insert_client`
+ * makes it structural — only the client may insert, and the seat that accepts an
+ * `open` quote is the artist.
+ *
+ * So the card is the record, and it names the one move left rather than leaving
+ * the reader on a screen that looks finished. Anything warmer here — "Accepted",
+ * "Confirmed", a tick — tells someone their date is held when nothing holds it.
+ */
 private fun ThreadQuote.standing(counterpartName: String): String = when {
-    frozen -> "Accepted — these terms are frozen."
+    frozen && viewerIsArtist ->
+        "Terms frozen. Nothing is booked yet — $counterpartName sends the booking request."
+    frozen -> "Terms frozen. Nothing is booked yet — send the booking request to hold the date."
     expired -> "This offer has lapsed."
     status == GigRequestStatus.Open -> "Waiting on $counterpartName to answer."
     else -> "Waiting on $counterpartName."

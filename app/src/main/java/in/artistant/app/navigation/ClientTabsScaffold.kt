@@ -396,7 +396,6 @@ fun ClientTabsScaffold() {
                         // Only the client seat has a counterparty with a public
                         // profile, so only this scaffold wires the participant row.
                         onArtistClick = { id -> nav.navigate("artist/$id") },
-                        onMatchConfirmed = { id -> navigateToMatchConfirmed(nav, id) },
                     )
                 }
             }

@@ -2,8 +2,11 @@ package `in`.artistant.app.feature.messages
 
 import androidx.lifecycle.SavedStateHandle
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.GigRequest
+import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
+import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeReportsRepository
@@ -1081,6 +1084,126 @@ class ChatViewModelTest {
         vm(ScriptedMessages(), flags = flags)
 
         assertTrue(flags.flags.first().markedUnread.isEmpty())
+    }
+
+    // --- the in-thread quote (design 08) -------------------------------------
+
+    private fun openQuote(id: String = "q-1", amount: Int = 48_000, clientId: String = CLIENT_ID) =
+        StoredRequest(
+            raw = GigRequest(
+                id = id,
+                client = "Rhea",
+                message = "",
+                date = "Sat 12 Oct",
+                amount = amount,
+                artistId = ARTIST_ID,
+                clientId = clientId,
+                expiresAtEpochMs = 4_102_444_800_000L,
+            ),
+            status = GigRequestStatus.Open,
+        )
+
+    /** The inquiry thread the gig-request loop actually lives in (mig 0047/0076). */
+    private fun inquiryThread() = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID)
+
+    @Test
+    fun theChatShowsTheQuoteStandingBetweenThisPair() = runTest {
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(openQuote())),
+        )
+        advanceUntilIdle()
+
+        assertEquals(48_000, model.state.value.quote?.amountInr)
+        assertTrue("open is the artist's to answer", model.state.value.quote!!.actionable)
+    }
+
+    /** The thread is about its booking; the quote loop lives in the bookingless one. */
+    @Test
+    fun aThreadWithABookingBehindItShowsNoQuoteCard() = runTest {
+        val model = vm(
+            ScriptedMessages(
+                thread = Thread(id = threadId, artistId = ARTIST_ID, clientId = CLIENT_ID, bookingId = "b-1"),
+            ),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(openQuote())),
+        )
+        advanceUntilIdle()
+
+        assertNull(model.state.value.quote)
+    }
+
+    /** Two live rows between one pair and nothing that says which: no card, no buttons. */
+    @Test
+    fun twoLiveQuotesBetweenThePairShowNoCard() = runTest {
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(openQuote("q-1"), openQuote("q-2", 12_000))),
+        )
+        advanceUntilIdle()
+
+        assertNull(model.state.value.quote)
+    }
+
+    /**
+     * Accepting completes, and completing means the card becomes the record.
+     *
+     * There is nowhere else for it to go: `accept` is a status PATCH, and its
+     * only server reaction (mig 0047, rewritten by 0076) is to open the
+     * bookingless thread it is already in — that migration deliberately creates
+     * no booking, and `bookings_insert_client` would refuse one from the artist
+     * seat anyway. So the assertions are the whole outcome: the row is accepted,
+     * the card is frozen and un-actionable, the narration has ended, and the
+     * event carries no id because there is no destination.
+     */
+    @Test
+    fun acceptingAQuoteFreezesTheCardAndEndsThere() = runTest {
+        val requests = FakeRequestsRepository(listOf(openQuote()))
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = requests,
+        )
+        advanceUntilIdle()
+        val events = mutableListOf<ChatEvent>()
+        val collector = launch { model.events.collect { events += it } }
+
+        model.acceptQuote()
+        advanceUntilIdle()
+
+        assertEquals(GigRequestStatus.Accepted, requests.listForArtist().single().status)
+        val quote = model.state.value.quote
+        assertTrue("the card is the record now", quote!!.frozen)
+        assertFalse("a record has no buttons", quote.actionable)
+        assertEquals(QuoteAction.Idle, model.state.value.quoteAction)
+        assertEquals(listOf(ChatEvent.QuoteAccepted), events)
+        collector.cancel()
+    }
+
+    /**
+     * A write that didn't land must not leave a card claiming it did — and it
+     * must not leave the narration running over a screen with no way out.
+     */
+    @Test
+    fun anAcceptThatFailsSaysSoAndLeavesTheQuoteOpen() = runTest {
+        val requests = FakeRequestsRepository(listOf(openQuote()))
+        val model = vm(
+            ScriptedMessages(thread = inquiryThread()),
+            viewerId = ARTIST_ID,
+            requests = requests,
+        )
+        advanceUntilIdle()
+        // Fails only the WRITE: the card has already loaded off the read above.
+        requests.signedIn = false
+
+        model.acceptQuote()
+        advanceUntilIdle()
+
+        assertTrue(model.state.value.quoteAction is QuoteAction.Failed)
+        assertFalse("nothing was agreed, so nothing is frozen", model.state.value.quote!!.frozen)
+        assertTrue("and it is still the viewer's to answer", model.state.value.quote!!.actionable)
     }
 
     // --- report --------------------------------------------------------------

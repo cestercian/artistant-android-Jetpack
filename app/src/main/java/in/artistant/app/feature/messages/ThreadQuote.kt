@@ -42,6 +42,15 @@ data class ThreadQuote(
     val viewerDecides: Boolean,
     /** Past its own deadline. Rendered, but never actionable. */
     val expired: Boolean,
+    /**
+     * Which seat is reading the card.
+     *
+     * Not derivable from [viewerDecides] — both seats read a `frozen` card, and
+     * nobody decides that one. It is needed because the copy on an accepted card
+     * names who has to move next, and only the CLIENT can: creating the booking
+     * is an insert `bookings_insert_client` gates on `auth.uid() = client_id`.
+     */
+    val viewerIsArtist: Boolean,
 ) {
     /** Terms line: "Custom · Sat 12 Oct", dropping whichever half is missing. */
     val terms: String
@@ -131,6 +140,7 @@ data class ThreadQuote(
                 status = stored.status,
                 viewerDecides = decidesNext(stored.status, viewerIsArtist),
                 expired = expired,
+                viewerIsArtist = viewerIsArtist,
             )
         }
 

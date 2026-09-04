@@ -96,12 +96,6 @@ fun ChatScreen(
     onBack: () -> Unit,
     onBookingClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
-    /**
-     * Where an accepted quote lands — the booking side's "Match confirmed"
-     * (design 94), owned by the booking section. Only ever called with a
-     * booking id the thread actually carries.
-     */
-    onMatchConfirmed: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
@@ -120,14 +114,12 @@ fun ChatScreen(
         viewModel.events.collect { event ->
             when (event) {
                 ChatEvent.SendFailed -> haptics.error()
-                is ChatEvent.QuoteAccepted -> {
-                    haptics.success()
-                    // A thread with no booking behind it stays put: the card has
-                    // already flipped to its frozen "AGREED" state, which IS the
-                    // record design 08 asks for. Navigating to a destination
-                    // whose id we do not have would land on nothing.
-                    event.bookingId?.let(onMatchConfirmed)
-                }
+                // Nowhere to go. Accepting a quote creates no booking on this
+                // backend (see [ChatEvent.QuoteAccepted]), so there is no
+                // "Match confirmed" landing to open and no id to open one with.
+                // The buzz confirms the write; the frozen card, which says
+                // plainly that nothing is booked yet, is the record.
+                ChatEvent.QuoteAccepted -> haptics.success()
             }
         }
     }
@@ -980,12 +972,11 @@ private fun AcceptingQuote(state: ChatUiState, phase: QuotePhase, modifier: Modi
         steps = listOf(
             NarratedStep("Terms locked", phase.stateFor(QuotePhase.Locking)),
             NarratedStep("Saving your answer", phase.stateFor(QuotePhase.Saving)),
-            NarratedStep(
-                if (state.context.bookingId != null) "Opening the booking" else "Freezing the terms",
-                phase.stateFor(QuotePhase.Confirming),
-            ),
+            // Never "Opening the booking": accepting opens none. The last phase
+            // is the re-read that turns the card into the record.
+            NarratedStep("Freezing the terms", phase.stateFor(QuotePhase.Confirming)),
         ),
-        tail = "The agreed terms stay in this conversation.",
+        tail = "The agreed terms stay in this conversation. Nothing is booked yet.",
     )
 }
 

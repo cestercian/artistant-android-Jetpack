@@ -305,7 +305,6 @@ fun ArtistTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                        onMatchConfirmed = { id -> navigateToMatchConfirmed(nav, id) },
                     )
                 }
             }
@@ -343,30 +342,6 @@ internal fun navigateToTab(nav: androidx.navigation.NavController, route: String
         launchSingleTop = true
         restoreState = true
     }
-}
-
-/**
- * Where an accepted quote goes.
- *
- * `match_confirmed/{bookingId}` (design 94) belongs to the BOOKING section and
- * is added to the graph by that section's PR. Navigating to a route the graph
- * does not contain throws, so this asks the graph first and falls back to the
- * booking's own detail screen — a true destination that answers the same
- * question ("what did I just agree to?") one screen less prettily.
- *
- * The lookup is not defensive coding for its own sake: two sections land
- * independently, and the failure mode without it is a crash on the one tap the
- * whole quote card exists for.
- */
-internal fun navigateToMatchConfirmed(nav: androidx.navigation.NavController, bookingId: String) {
-    val hasDestination = nav.graph.findNode(ClientNavRoutes.MATCH_CONFIRMED) != null
-    nav.navigate(
-        if (hasDestination) {
-            ClientNavRoutes.matchConfirmed(bookingId)
-        } else {
-            ClientNavRoutes.bookingDetail(bookingId)
-        },
-    )
 }
 
 /**

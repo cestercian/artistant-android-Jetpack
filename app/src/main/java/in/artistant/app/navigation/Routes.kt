@@ -23,11 +23,12 @@ object ClientNavRoutes {
     const val ARTIST_LIST = "artist_list/{kind}"
 
     /**
-     * Where an accepted in-thread quote lands — design 94, "Match confirmed".
+     * Where a confirmed match lands — design 94, "Match confirmed".
      *
-     * The constant lives here and the CHAT navigates to it, but the destination
-     * itself belongs to the booking section: one screen owns what a confirmed
-     * match looks like, and the thread's job ends at handing over the id.
+     * Declared here because the chat section needed the name; the destination
+     * and every route to it belong to the BOOKING section. The chat does NOT
+     * navigate here: accepting an in-thread quote creates no booking on this
+     * backend, so there is no id to open it with — see [ChatEvent.QuoteAccepted].
      */
     const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
 

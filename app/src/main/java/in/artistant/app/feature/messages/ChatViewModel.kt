@@ -37,13 +37,23 @@ sealed interface ChatEvent {
     /**
      * The in-thread quote was accepted and its terms are frozen.
      *
-     * Carries the thread's booking when there is one, because that is the only
-     * id the "Match confirmed" destination can be opened with. A quote accepted
-     * on a thread with no booking behind it emits null: the terms are still
-     * frozen and the card says so in place, which is what design 08's note means
-     * by "the record of what was agreed lives in the thread".
+     * **It carries no booking id, because accepting a quote creates no
+     * booking.** Design 94 draws a "Match confirmed" landing for this path, but
+     * this backend does not produce one: accepting a `gig_requests` row is a
+     * status PATCH, and the only server reaction (migration 0047, rewritten by
+     * 0076) is to open the bookingless chat thread the quote is already sitting
+     * in — 0047's own header says it deliberately creates no booking, because
+     * the client has to consent to the final amount. RLS agrees: the accepting
+     * seat on an `open` request is the ARTIST, and `bookings_insert_client`
+     * gates inserts on `auth.uid() = client_id`, so the write that would create
+     * the booking is not the artist's to make.
+     *
+     * So the record IS the thread, which is what design 08's note means by "the
+     * record of what was agreed lives in the thread, not in a screenshot" — and
+     * the card says what has and has not happened rather than implying a booking
+     * exists. This event is the buzz and nothing more.
      */
-    data class QuoteAccepted(val bookingId: String?) : ChatEvent
+    data object QuoteAccepted : ChatEvent
 }
 
 /**
@@ -573,11 +583,17 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Accept the standing quote: freeze the terms, then hand off to the booking.
+     * Accept the standing quote: freeze the terms, in this conversation.
      *
-     * Narrated in three phases (design 70) that each wait on real work. The
-     * navigation event fires only after the write returned, so nobody lands on
-     * "Match confirmed" for terms the server never took.
+     * Narrated in three phases (design 70) that each wait on real work, and the
+     * event fires only after the write returned — nobody is told the terms are
+     * agreed for a row the server never took.
+     *
+     * The third phase re-reads the row rather than patching the card locally.
+     * That is the whole of what accepting does: there is no booking at the end
+     * of it and no destination to land on — see [ChatEvent.QuoteAccepted] for
+     * why, and [ChatQuoteCard]'s frozen copy for what the reader is told
+     * instead.
      */
     fun acceptQuote() {
         val quote = _state.value.quote ?: return
@@ -599,7 +615,7 @@ class ChatViewModel @Inject constructor(
             // local guess would disagree with them if the write raced anything.
             loadQuote(_state.value.thread, _state.value.viewerIsArtist).join()
             _state.update { it.copy(quoteAction = QuoteAction.Idle) }
-            _events.send(ChatEvent.QuoteAccepted(_state.value.context.bookingId))
+            _events.send(ChatEvent.QuoteAccepted)
         }
     }
 
