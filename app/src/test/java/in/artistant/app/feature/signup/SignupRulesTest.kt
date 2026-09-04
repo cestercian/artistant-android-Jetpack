@@ -1,6 +1,9 @@
 package `in`.artistant.app.feature.signup
 
 import `in`.artistant.app.data.model.HandleRules
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -14,6 +17,7 @@ import org.junit.Test
  * SMS", "Resend in 0:24", four suggestion chips — so each is asserted as the string a user
  * would read, not just as the value behind it.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SignupRulesTest {
 
     // ── PhoneRules ────────────────────────────────────────────────────────────
@@ -103,6 +107,34 @@ class SignupRulesTest {
         assertTrue(OtpResend.isComplete("472913"))
         // Length alone is not enough — a pasted "4729-1" is six characters and not a code.
         assertFalse(OtpResend.isComplete("4729-1"))
+    }
+
+    @Test
+    fun `the countdown ticks every second from the cooldown down to zero`() = runTest {
+        // Virtual time: `runTest` skips the delays, so the whole thirty-second cooldown is
+        // asserted in a millisecond and the test does not have to trust a wall clock.
+        val ticks = OtpResend.countdown().toList()
+        assertEquals(OtpResend.COOLDOWN_SECONDS + 1, ticks.size)
+        assertEquals(OtpResend.COOLDOWN_SECONDS, ticks.first())
+        // The terminal zero is what flips "Resend in 0:01" into "Resend code". A countdown
+        // that stopped at one would leave the control disabled for good.
+        assertEquals(0, ticks.last())
+        assertEquals((OtpResend.COOLDOWN_SECONDS downTo 0).toList(), ticks)
+    }
+
+    @Test
+    fun `the countdown spends exactly the cooldown in virtual time`() = runTest {
+        val startedAt = testScheduler.currentTime
+        OtpResend.countdown().toList()
+        assertEquals(OtpResend.COOLDOWN_SECONDS * 1_000L, testScheduler.currentTime - startedAt)
+    }
+
+    @Test
+    fun `a short countdown still ends on the resend label`() = runTest {
+        val ticks = OtpResend.countdown(from = 2).toList()
+        assertEquals(listOf(2, 1, 0), ticks)
+        assertEquals("Resend in 0:02", OtpResend.label(ticks.first()))
+        assertEquals("Resend code", OtpResend.label(ticks.last()))
     }
 
     // ── HandleSuggestions ─────────────────────────────────────────────────────

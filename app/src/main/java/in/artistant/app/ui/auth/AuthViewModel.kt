@@ -15,7 +15,6 @@ import `in`.artistant.app.platform.auth.SessionManager
 import io.github.jan.supabase.exceptions.HttpRequestException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -201,9 +200,8 @@ class AuthViewModel @Inject constructor(
     private fun startResendCountdown() {
         countdownJob?.cancel()
         countdownJob = viewModelScope.launch {
-            for (s in OtpResend.COOLDOWN_SECONDS downTo 0) {
-                _state.update { it.copy(resendSeconds = s) }
-                if (s > 0) delay(ONE_SECOND_MS)
+            OtpResend.countdown().collect { seconds ->
+                _state.update { it.copy(resendSeconds = seconds) }
             }
         }
     }
@@ -394,9 +392,6 @@ class AuthViewModel @Inject constructor(
 
 /** Shown for any connectivity failure so the user never sees a raw Ktor timeout string. */
 internal const val NETWORK_ERROR_MESSAGE = "Couldn't reach the server. Check your connection and try again."
-
-/** One tick of the resend countdown. Named so the loop reads as seconds, not as magic. */
-private const val ONE_SECOND_MS = 1_000L
 
 /**
  * True if [error] (or anything in its cause chain) is a network / connectivity failure.

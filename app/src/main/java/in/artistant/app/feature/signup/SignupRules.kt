@@ -1,6 +1,9 @@
 package `in`.artistant.app.feature.signup
 
 import `in`.artistant.app.data.model.HandleRules
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * The pure rules the "Getting started" screens run on — phone formatting, the OTP resend
@@ -113,6 +116,25 @@ object OtpResend {
         }
 
     private const val SECONDS_PER_MINUTE = 60
+
+    /**
+     * The cooldown as a flow of seconds-remaining, [from] down to and including zero.
+     *
+     * A flow rather than a loop inside the ViewModel so the tick sequence is testable: under
+     * `runTest` the `delay` runs on virtual time, which turns a thirty-second behaviour into a
+     * millisecond assertion. The terminal zero is emitted deliberately — it is the value that
+     * flips "Resend in 0:01" to "Resend code", and a countdown that stops at one leaves the
+     * control disabled forever.
+     */
+    fun countdown(from: Int = COOLDOWN_SECONDS): Flow<Int> = flow {
+        for (second in from downTo 0) {
+            emit(second)
+            if (second > 0) delay(ONE_SECOND_MS)
+        }
+    }
+
+    /** One tick. Named so the loop above reads as seconds rather than as a magic number. */
+    private const val ONE_SECOND_MS = 1_000L
 }
 
 /**
