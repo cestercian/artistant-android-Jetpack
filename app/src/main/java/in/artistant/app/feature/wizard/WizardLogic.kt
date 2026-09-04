@@ -331,6 +331,12 @@ data class WizardPricingBand(val low: Int, val high: Int, val tiers: Int)
  * above it no longer contain.
  */
 fun pricingBandFor(category: String): WizardPricingBand? {
+    // A blank category has not seeded anything yet — `starterPackageRows` falls
+    // through to its catch-all for any name it does not know, which is right for
+    // a category the server grew before we did and wrong for "the artist has not
+    // picked one". Quoting the fallback's range on the identity step would
+    // promise tiers that do not exist until they choose.
+    if (category.isBlank()) return null
     val prices = starterPackageRows(category).mapNotNull { it.price.toIntOrNull() }.filter { it > 0 }
     if (prices.isEmpty()) return null
     return WizardPricingBand(low = prices.min(), high = prices.max(), tiers = prices.size)
@@ -367,7 +373,7 @@ fun packageAllInInr(price: String): Int? {
 val WizardTravelRadii: List<Int> = listOf(0, 25, 50, 150, 500)
 
 /** "Up to 150 km", or "City only" for the floor. */
-fun travelRadiusLabel(km: Int): String = if (km <= 0) "City only" else "Up to ${'$'}km km"
+fun travelRadiusLabel(km: Int): String = if (km <= 0) "City only" else "Up to $km km"
 
 /**
  * The event types a host can filter by.
@@ -397,7 +403,7 @@ val WizardEventTypes: List<String> get() = SearchCatalog.eventTypes
 fun availabilityBadge(days: Set<String>, slots: Set<String>): String? {
     val ordered = sortedWeekdays(days)
     if (ordered.isEmpty() || slots.isEmpty()) return null
-    return "${'$'}{weekdayRunLabel(ordered)} ${'$'}{timeOfDayLabel(slots)}"
+    return "${weekdayRunLabel(ordered)} ${timeOfDayLabel(slots)}"
 }
 
 /**
@@ -418,7 +424,7 @@ private fun weekdayRunLabel(ordered: List<String>): String {
     // Two adjacent days read better named than dashed: "Sat–Sun" and "Sat, Sun"
     // are the same length and the second is unambiguous.
     return if (contiguous && ordered.size > 2) {
-        "${'$'}{ordered.first()}–${'$'}{ordered.last()}"
+        "${ordered.first()}–${ordered.last()}"
     } else {
         ordered.joinToString(", ")
     }
@@ -657,7 +663,8 @@ fun wizardCtaLabel(state: WizardUiState): String = when (state.step) {
  * growing a `when` per job.
  */
 fun wizardFooterNote(state: WizardUiState): String? = when (state.step) {
-    WizardStep.Pricing -> "Step ${'$'}{(wizardProgressIndex(state.step) ?: 0) + 1} of ${'$'}{wizardProgressTotal()} · takes about 6 minutes"
+    WizardStep.Pricing ->
+        "Step ${(wizardProgressIndex(state.step) ?: 0) + 1} of ${wizardProgressTotal()} · takes about 6 minutes"
     WizardStep.Preview -> "You can keep editing after you publish"
     // Only when the CTA still says Continue: the label already says "Skip for
     // now" when the step is empty, and repeating it under the button reads as
@@ -668,19 +675,19 @@ fun wizardFooterNote(state: WizardUiState): String? = when (state.step) {
 }
 
 /**
- * The "01 / 11" counter on the step bar.
+ * The "01 / 10" counter on the step bar.
  *
- * Zero-padded, because the alternative jitters: "9 / 11" and "10 / 11" are
+ * Zero-padded, because the alternative jitters: "9 / 10" and "10 / 10" are
  * different widths, and the counter sits at the trailing edge of a bar whose
  * other half is a progress track that must not move under it.
  */
 fun wizardStepCounter(step: WizardStep): String? {
     val index = wizardProgressIndex(step) ?: return null
-    return "${'$'}{(index + 1).toString().padStart(2, '0')} / ${'$'}{wizardProgressTotal()}"
+    return "${(index + 1).toString().padStart(2, '0')} / ${wizardProgressTotal()}"
 }
 
 /**
- * "6 of 11" — how much of the form the Save & exit sheet is promising to keep.
+ * "6 of 10" — how much of the form the Save & exit sheet is promising to keep.
  *
  * Counts steps LEFT BEHIND, not the one being looked at, so the number agrees
  * with the filled segments on the bar above it. Claiming the current step is
@@ -700,7 +707,7 @@ fun wizardSavedSoFarLabel(step: WizardStep): String =
  * unreachable in practice.
  */
 fun wizardPublicAddress(handle: String): String? =
-    handle.trim().takeIf { it.isNotEmpty() }?.let { "artistant.in/@${'$'}it" }
+    handle.trim().takeIf { it.isNotEmpty() }?.let { "artistant.in/@$it" }
 
 /** Narration for the publish overlay — the artist should never watch a bare spinner. */
 fun wizardPublishProgressLabel(phase: WizardPublishPhase): String = when (phase) {

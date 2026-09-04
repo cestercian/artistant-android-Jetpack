@@ -61,7 +61,7 @@ import `in`.artistant.app.designsystem.theme.motionTween
  * ## Shape
  *
  * Fixed chrome top and bottom, one scrolling step between them: a back circle,
- * an eleven-cell progress track and a "03 / 11" counter across the top, the
+ * a progress track and a "03 / 10" counter across the top, the
  * step's own lazy list in the middle, and one CTA pinned at the bottom. The CTA
  * is pinned rather than scrolled because on a form the artist is typing into, a
  * Continue button that has scrolled off is indistinguishable from a Continue

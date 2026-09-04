@@ -94,11 +94,11 @@ private fun WizardStepHeader(step: WizardStep) {
 }
 
 /**
- * The segmented progress track: eleven pills, filled for the steps left behind.
+ * The segmented progress track: one pill per step, filled for the ones left behind.
  *
  * Filled means FINISHED, not "reached" — the current step's segment stays grey
  * until the artist advances off it. That is what the counter beside it says too
- * ("02 / 11" with one segment lit), and the Save & exit sheet repeats the same
+ * ("02 / 10" with one segment lit), and the Save & exit sheet repeats the same
  * arithmetic in words. Three surfaces, one rule.
  *
  * Segments are driven off the flow order rather than the enum's ordinal — see
