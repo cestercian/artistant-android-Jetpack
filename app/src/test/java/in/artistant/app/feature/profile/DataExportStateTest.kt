@@ -48,6 +48,11 @@ class DataExportStateTest {
         }
 
         fun raw(key: String): String? = values.value[key]
+
+        /** `AppPreferences.wipeAll()` — what sign-out does to this store. */
+        fun wipe() {
+            values.value = emptyMap()
+        }
     }
 
     /**
@@ -282,6 +287,80 @@ class DataExportStateTest {
             s.reset()
             assertEquals(ExportState.Idle, s.state.value)
         }
+
+    @Test
+    fun `reset during an in-flight export persists nothing afterwards`() = runTest {
+        // Review round 2. The job had not reached its timestamp write when sign-out wiped
+        // preferences; it then wrote that timestamp into the store the NEXT account inherits,
+        // and skipped its own cleanup on the stale-generation check. The next person to open
+        // the export screen had it restored as an outstanding request and a DPDP export issued
+        // in their name that nobody asked for.
+        val prefs = FakeKeyValueStore()
+        val repo = FakeAccountRepository()
+        val s = store(repo, prefs, now = { 5_000L })
+
+        s.request()
+        // Deliberately NO advanceUntilIdle: the coroutine is queued and has not run a line,
+        // which is exactly the window the finding is about.
+        prefs.wipe()
+        s.reset()
+        advanceUntilIdle()
+
+        assertEquals("nothing may be left for the next account", "", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+        assertEquals("the cancelled request never reached the server", 0, repo.exportCallCount)
+        assertEquals(ExportState.Idle, s.state.value)
+    }
+
+    @Test
+    fun `reset cancels the request rather than disowning it`() = runTest {
+        val gate = CompletableDeferred<ExportResult>()
+        val prefs = FakeKeyValueStore()
+        val s = store(GatedAccountRepository(gate), prefs, now = { 5_000L })
+        s.request()
+        advanceUntilIdle()
+        assertEquals("5000", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+
+        prefs.wipe()
+        s.reset()
+        advanceUntilIdle()
+        assertEquals("", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+
+        // Whatever the (now cancelled) call does next, it cannot write state or a timestamp.
+        gate.complete(ExportResult.Inline("{}"))
+        advanceUntilIdle()
+        assertEquals(ExportState.Idle, s.state.value)
+        assertEquals("", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+    }
+
+    @Test
+    fun `a request issued after a reset is unaffected by it`() = runTest {
+        // The guard must stop the OLD request, not the store.
+        val prefs = FakeKeyValueStore()
+        val s = store(FakeAccountRepository(), prefs, now = { 7_000L })
+        s.request()
+        s.reset()
+        advanceUntilIdle()
+
+        s.request()
+        advanceUntilIdle()
+        assertTrue(s.state.value is ExportState.Ready)
+        assertEquals("a settled request leaves nothing outstanding", "", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+    }
+
+    @Test
+    fun `stopping does not leave a timestamp that would resume it on the next launch`() = runTest {
+        val gate = CompletableDeferred<ExportResult>()
+        val prefs = FakeKeyValueStore()
+        val s = store(GatedAccountRepository(gate), prefs, now = { 5_000L })
+        s.request()
+        advanceUntilIdle()
+        s.stopWaiting()
+        advanceUntilIdle()
+        gate.complete(ExportResult.Inline("{}"))
+        advanceUntilIdle()
+        // Otherwise the next cold start restores a request the user explicitly walked away from.
+        assertEquals("", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+    }
 
     @Test
     fun `a request already in flight is not started twice`() = runTest {

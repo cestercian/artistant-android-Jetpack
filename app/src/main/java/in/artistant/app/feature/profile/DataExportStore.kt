@@ -4,7 +4,9 @@ import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.platform.storage.KeyValueStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -107,6 +109,14 @@ class DataExportStore internal constructor(
      */
     private val generation = AtomicInteger(0)
 
+    /**
+     * The request currently in flight, so [reset] can end it rather than merely disown it.
+     *
+     * `@Volatile` because it is written on whichever thread tapped and read on [scope].
+     */
+    @Volatile
+    private var inFlight: Job? = null
+
     init {
         scope.launch {
             val requestedAt = runCatching { prefs.getString(KEY_REQUESTED_AT).first() }
@@ -131,11 +141,13 @@ class DataExportStore internal constructor(
         if (_state.value is ExportState.Requested) return
         val mine = generation.incrementAndGet()
         _state.value = ExportState.Requested
-        scope.launch {
-            runCatching { prefs.setString(KEY_REQUESTED_AT, now().toString()) }
+        inFlight = scope.launch {
+            markOutstanding(mine)
             val result = runCatching { account.requestDataExport() }
             // The user stopped watching, signed out, or started a fresh request while this one
-            // was in flight. Its answer is no longer about anything on screen.
+            // was in flight. Its answer is no longer about anything on screen — and, more to
+            // the point, is no longer allowed to touch a preferences store that may now belong
+            // to somebody else.
             if (generation.get() != mine) return@launch
             clearOutstanding()
             _state.value = result.fold(
@@ -153,7 +165,11 @@ class DataExportStore internal constructor(
      */
     fun stopWaiting() {
         generation.incrementAndGet()
+        inFlight = null
         _state.value = ExportState.Idle
+        // Deliberately not cancelled — see the class note. The generation bump above is what
+        // stops the completion writing state, and `markOutstanding`'s second check is what stops
+        // a timestamp write still in flight from outliving this.
         scope.launch { clearOutstanding() }
     }
 
@@ -164,10 +180,42 @@ class DataExportStore internal constructor(
      * export — an inline JSON payload of everything Artistant stored about them, or a signed URL
      * to it. Handing that to whoever signs in next would be the worst leak in the app, so it is
      * cleared on the same teardown that clears the saved-artist ids.
+     *
+     * **This one CANCELS**, unlike [stopWaiting], and it is `suspend` so the caller can rely on
+     * that having finished. Disowning the job was not enough: `SessionManager.signOut()` calls
+     * `prefs.wipeAll()` and then this, so a request whose coroutine had not yet reached its
+     * timestamp write would write it AFTER the wipe — into a store the next account inherits —
+     * and then skip its own cleanup on the stale-generation check, leaving the record behind.
+     * The next person to open the export screen would have that timestamp restored as an
+     * outstanding request and a DPDP export issued in their name that nobody asked for.
+     *
+     * The order is load-bearing: bump the generation FIRST, so anything that survives
+     * cancellation still fails its own check, then join, then clear whatever the job managed to
+     * write before it went. Writing the empty string into a just-wiped store is harmless — it
+     * parses to "nothing outstanding", which is the truth.
      */
-    fun reset() {
+    suspend fun reset() {
         generation.incrementAndGet()
+        val job = inFlight
+        inFlight = null
         _state.value = ExportState.Idle
+        runCatching { job?.cancelAndJoin() }
+        clearOutstanding()
+    }
+
+    /**
+     * Record that a request is outstanding — but only while it is still ours.
+     *
+     * Both checks are needed and neither is sufficient alone. The first stops a job whose
+     * account ended before it ever ran; the second exists because `setString` SUSPENDS, so the
+     * session can end while the write is in flight, and a check that only happens before the
+     * write is a check with a gap in it. On the sign-out path [reset] then clears whatever did
+     * land, which is the half of this that survives the coroutine being cancelled outright.
+     */
+    private suspend fun markOutstanding(mine: Int) {
+        if (generation.get() != mine) return
+        runCatching { prefs.setString(KEY_REQUESTED_AT, now().toString()) }
+        if (generation.get() != mine) clearOutstanding()
     }
 
     private suspend fun clearOutstanding() {
