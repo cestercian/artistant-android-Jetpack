@@ -594,6 +594,88 @@ bottom save bar (spinner + "Saving…"). *APIs:* `fetchSelfAvailability` /
 
 ---
 
+## 8b. Screens — System & housekeeping (`feature/system/`, section SH)
+
+Eight app-level surfaces with no feature of their own. Routes (`SystemRoutes`)
+are registered on BOTH graphs; the two gates and the two sheets are presented
+rather than pushed.
+
+**ToastHost** (S) → `navigation/ArtistantNavHost.kt`. **Design 77, "only
+hit-testable when present".** ONE host, in a `Box` above the whole tier switch
+— above the auth gate and above the system gates — so a confirmation raised by
+a screen that is being popped still has somewhere to render. Fed by a
+`@Singleton ToastController` any feature injects. *Compose:* the P1 `ToastHost`,
+now with a `key` (the message id) so a repeat of the same string restarts the
+display timer instead of being cut short by the previous toast's. Bottom padding
+= `toastGap` + `lightTabBarHeight()` while a tab shell is on screen. Suppressed
+behind a system gate.
+
+**ActivityScreen** (S, `activity`) → `feature/system/`. **Design 123, "push
+needs a home".** *Compose:* `ScreenHeader` + "Mark all read", four `Chip`s (All /
+Bookings / Quotes / Reviews), a `LazyColumn` grouped TODAY / EARLIER with
+`GroupLabel`, 32dp icon discs (accent on the newest unread only — one accent per
+screen) and an unread dot. *Data:* a local DataStore log of pushes RECEIVED on
+this device, written from `ArtistantMessagingService.onMessageReceived` before
+the permission check, capped at 60. **There is no notifications table in the
+shared schema**, so the subtitle states the boundary. A chat push is reachable
+under All only — the design draws no Messages chip. *Routing:* rows go through
+`PushPayloadRouter`, the same function the notification tap uses.
+
+**UpdateRequiredScreen** (S) → `feature/system/`. **Design 120, "a hard gate,
+explained".** *Compose:* accent squircle, `displayHero` headline, the installed
+vs minimum version pair in mono on a `surface3` card, an `AccentNote` about the
+user's data, a footnote saying why there is no dismiss, and a pinned CTA to the
+Play listing. No back control, and `BackHandler` swallows the gesture. **Gate
+unwired:** `app_settings` (mig 0016) is RLS default-deny and mig 0037 revoked
+the `app_setting()` grant, so no client can read a minimum version — reachable
+on a debug build via the harness flag `force-update`.
+
+**ServiceOutageScreen** (S) → `feature/system/`. **Design 121, "owns the
+failure".** *Compose:* an empty-state glyph circle, "Artistant is down", the
+"This is us, not you" line, a scoped impact card with a warm dot (not danger —
+red here reads as "your booking is broken"), an `AccentNote` saying confirmed
+bookings are unaffected, "Check again", and the status-page link. Keeps its back
+control, unlike 120. **Gate unwired**, harness flag `service-outage`.
+
+**WhatsNewSheet** (S) → `feature/system/`, presented from the root over the tab
+shell. **Design 137, "shown once per version".** *Compose:* `ModalBottomSheet` +
+`SheetScaffold`; a mono version eyebrow, three accent tiles, and an "ALSO FIXED"
+bullet list omitted entirely when a release shipped no fixes. *Data:* a compiled
+`ReleaseNotes` table keyed by `BuildConfig.VERSION_NAME` — notes describe the
+binary, so they ship with it. A null seen-version records silently rather than
+greeting a fresh install with a list of things that are not new to them.
+
+**RatePromptSheet** (C) → `feature/system/`, presented from `ClientTabsScaffold`.
+**Design 138, "asked at the right moment".** *Compose:* the dark launcher mark,
+"Enjoying Artistant?", five OUTLINE stars (the rating is chosen in the Play
+sheet — tappable stars here would be a rating the user believes they already
+gave), "Rate on Google Play", "Not now". *Trigger:* a completed booking review,
+once, never on launch; resolved in the scaffold by watching the
+`ReviewSheetViewModel` the booking screen already takes as a parameter. No Play
+in-app review library (no new Gradle dependencies).
+
+**HelpCentreScreen** (S, `help_centre`) → `feature/system/`. **Design 63,
+"outstanding item goes first".** *Compose:* `BackHeader` with a greeting
+subtitle, `SearchBar`, a `SegmentedControl` over the audience, the promoted
+`ACTION REQUIRED` card (accent wash + a near-black Fix pill), then FAQ rows that
+expand in place. *Data:* the promoted item is the one blocking state the app can
+honestly detect — a blank `users.full_name`; a failed profile read promotes
+nothing. Search ranks a question hit above an answer hit and is stable across
+keystrokes.
+
+**FeedbackScreen** (S, `feedback`) → `feature/system/`. **Design 64, "honest
+about the reply".** *Compose:* Cancel / title / close row, two 50dp kind buttons
+(General · Bug, the accent-filled one selected), a growing text box with a 1.5dp
+focus stroke, "We read everything but can't reply individually." beside a live
+counter, an `AccentNote` about queueing, and a pinned Send. A pushed screen
+rather than the design's sheet: a full-height composer with a pinned action bar
+IS a screen. *APIs:* `BookingsRepository.submitFeedback` → `app_feedback` (mig
+0073, 1–2000 chars, insert-only). A failed send is queued in a DataStore outbox
+and drained by a `CONNECTED`-constrained `FeedbackWorker`, which is what makes
+the design's queue line true.
+
+---
+
 ## 9. Component inventory → Compose (`designsystem/component/`)
 
 ### Platform-bridge components (need Android APIs)
@@ -625,6 +707,14 @@ bottom save bar (spinner + "Saving…"). *APIs:* `fetchSelfAvailability` /
 | `Skeleton`(+variants) | shimmer sweep | `Modifier` shimmer (`drawWithCache` + `animateFloat`) |
 
 ### Structural / control / feedback
+
+`GroupLabel` (`SectionHeader.kt`, section SH) joins `EyebrowLabel`: the design
+sets an EYEBROW in JetBrains Mono ("ACTION REQUIRED", "VERSION 2.4.0") and a
+list's GROUP DIVIDER in the sans at 12.5/700 ("TODAY", "EARLIER", "ALSO FIXED").
+`lightTabBarHeight()` (`LightTabBar.kt`) exposes the bar's height from the bar's
+own tokens, for the app-level toast host — the one caller that has to clear the
+bar without being laid out against it.
+
 | Component | Compose |
 |---|---|
 | `PrimaryButton` (variant×size×fullWidth, press-scale) | `Button`/`Surface` + `Modifier.pressScale()` (`animateFloatAsState` 0.98) |

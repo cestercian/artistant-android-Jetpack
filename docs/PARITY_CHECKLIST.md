@@ -131,7 +131,7 @@ Android file now mirrors.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | done | Identity + settings + calendar + Help/Feedback sheet |
+| `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | done | Identity + settings + calendar + Help/Feedback sheet. **The sheet is superseded** — section SH split it into `help_centre` / `feedback` (below); the call site at `ProfileScreen.kt:456` is an integration-pass follow-up |
 | `Screens/Settings/DataExportView.swift` | `feature/profile/ProfileScreen.kt` (export row) | partial | Inline JSON share + signed URL open; no dedicated sheet |
 | `Screens/Settings/ManageAvailabilityView.swift` | `feature/availability/ManageAvailabilityScreen.kt` | done | Days/times chips + seed-failure Save guard |
 | `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistoryScreen.kt` | done | **Redesigned Sep 2026 (design 51)** — a pushed screen, not a sheet. Per-*recomputation* deltas: `score_history` stores no reason column, so no per-event cause is invented. Route `score_history` |
@@ -144,6 +144,25 @@ Android file now mirrors.
 | Root / role tabs | `ArtistantRoot` + `ClientTabsScaffold` / `ArtistTabsScaffold` | done | All primary tabs wired (no Placeholder) |
 | `State/TabRouter.swift` | nav + deep-link pending channels | done | `TabRouter` singleton + client/artist scaffold consumers |
 | `ClientRoute.ArtistProfile` / `Search` | `Routes.kt` + NavHost | done | Wired in ClientTabsScaffold |
+
+---
+
+## Screens — System & housekeeping (section SH, design 63 / 64 / 77 / 120 / 121 / 123 / 137 / 138)
+
+App-level surfaces with no feature of their own. Every route below is registered
+on BOTH graphs (`SystemRoutes`); the two gates and the two sheets are presented,
+never pushed.
+
+| Design | Android target | Status | Notes |
+|---|---|---|---|
+| 77 Toast | `feature/system/ToastController.kt` + `ToastViewModel` + the host in `navigation/ArtistantNavHost.kt` | done | ONE host, above the NavHost and above every gate tier, so a confirmation raised by a screen being popped still renders. `ToastHost` gained a `key` param: keyed on the text alone, a repeat of the same string was dismissed early by the previous toast's running timer. Never hit-tests when clear (the node is not composed). Bottom padding clears the tab bar through the new `lightTabBarHeight()` |
+| 123 Activity | `feature/system/ActivityScreen.kt` + `ActivityLog.kt` + `ActivityViewModel.kt`, route `activity` | done | Local, per-account log of pushes RECEIVED on this device (DataStore), written from `ArtistantMessagingService.onMessageReceived` before the permission check. **There is no notifications table in the shared schema** and the screen's subtitle says so. Four chips as drawn (All / Bookings / Quotes / Reviews) — a chat push is reachable under All only, because the design draws no Messages chip. Rows route through `PushPayloadRouter`, the same function the notification tap uses |
+| 120 Update required | `feature/system/UpdateRequiredScreen.kt` | **built, gate unwired** | `app_settings` (mig 0016) is RLS default-deny and mig 0037 revoked the `app_setting()` grant, so no client can read a minimum version. `LiveSystemStatusSource` reports `Normal` forever; reachable on a debug build via the harness flag `force-update`. No back control and `BackHandler` swallows the gesture — the design's own footnote says there is no dismiss |
+| 121 Service outage | `feature/system/ServiceOutageScreen.kt` | **built, gate unwired** | Same source, harness flag `service-outage`. Keeps its back control (the design draws one) and a "Check again"; `startedLabel` is null because nothing on the device knows when an outage began, so the line is omitted rather than invented |
+| 137 What's new | `feature/system/WhatsNewSheet.kt` + `ReleaseNotes.kt` + `WhatsNewViewModel.kt`, presented from the root | done | Once per `BuildConfig.VERSION_NAME` (DataStore) from a compiled notes table — there is no releases table, and notes describe the binary so they ship with it. A null seen-version records silently: greeting a fresh install with "what's new" is the worse error. Over the tab shell only |
+| 138 Rate Artistant | `feature/system/RatePromptSheet.kt` + `RatePrompt.kt`, presented from `ClientTabsScaffold` | done | Armed ONLY by a completed booking review, asked once, never on launch. The trigger is resolved in the scaffold by watching the `ReviewSheetViewModel` the booking screen already takes as a parameter, so `feature/booking` is untouched. No Play in-app review library (no new Gradle deps): the button opens the store listing and the copy says so |
+| 63 Help centre | `feature/system/HelpCentreScreen.kt` + `HelpContent.kt` + `HelpCentreViewModel.kt`, route `help_centre` | done | Promotes the one blocking item the app can honestly detect (a blank `users.full_name`) above an audience-switched FAQ with ranked search. Answers expand in place — the design's chevron means a pushed article on iOS and there is no article store, server-side or compiled |
+| 64 Feedback | `feature/system/FeedbackScreen.kt` + `FeedbackViewModel.kt` + `FeedbackOutbox.kt`, route `feedback` | done | Writes `app_feedback` through the existing `BookingsRepository.submitFeedback`; shows the column's own 1–2000 constraint (mig 0073) as a live counter; the design's "it queues on this device and sends on your next live session" is backed by a real DataStore outbox drained by a `CONNECTED`-constrained `FeedbackWorker` |
 
 ---
 
@@ -240,6 +259,7 @@ Android file now mirrors.
 | Theme tokens | `designsystem/theme/*` | **redesigned** | **Sep 2026 — the dark, dual-accent language is retired.** `docs/REDESIGN_2026-09.md` is the token sheet (§2 palette/type/geometry, §4 old→new mapping). Light surfaces, ONE lime accent for both roles (`withRole` is identity), Plus Jakarta Sans + JetBrains Mono in `res/font/`; the editorial serif is gone and `SerifFamily` is a deprecated alias of the sans. Old `AppType`/`AppColors` names survive as aliases so inherited screens compile — the eleven P2 section PRs retire them. Over-media chrome (`glass*`, `inkOnMedia*`, `ArtistGradient`) is deliberately unchanged: photos are still photos |
 | Component library v2 | `designsystem/component/*` | done (P1) | `PrimaryButton`, `SecondaryButton`, `IconCircle`, `SearchBar`/`SearchBarButton`, `Chip`/`ChipRail`, `SectionHeader`/`EyebrowLabel`, `Tile`/`MediaSlot`, `HeroCard`, `ListRow`, `Banner` (absorbs `InlineBanner`), `StatusPill`, `EmptyState`, `Skeleton*`, `Toast`/`ToastHost`, `LightTabBar`, `ScreenHeader`, `BackHeader`, `SheetScaffold`, `AppTextField`, `OtpField`. Each has a `@Preview`; none is wired into a screen yet — that is P2's job |
 | Month calendar | `designsystem/component/MonthCalendar.kt` | **redesigned (BN)** | Design 78 documents all five day states and this implements them: `MonthDayFill` (Booked · Unavailable · Open · Selected) plus today's ring, with `monthDayFill` as the pure precedence rule. Adds `MonthCalendarCard`, `MonthCalendarLegend` and `DayEventRow`. `MonthDayGrid` keeps its signature for Gigs and gains one optional `unavailableDays` |
+| Section SH primitives | `designsystem/component/{Toast,SectionHeader,LightTabBar}.kt` | **extended (SH)** | `ToastHost` takes a `key` (identity of the current message, so a repeated string restarts the timer); `GroupLabel` joins `EyebrowLabel` — the design sets an eyebrow in JetBrains Mono and a list's group divider ("TODAY", "ALSO FIXED") in the sans at 12.5/700, and a run of mono dividers makes a scrolling list read as a log file; `lightTabBarHeight()` exposes the bar's height from its own tokens for the one caller that must clear it without being laid out against it |
 | Section BN primitives | `designsystem/component/{DetailHeader,EventTimeline,BottomActionBar,AccentNote}.kt` | **new (BN)** | Left-aligned record header (18/78/83/84/95/96/97/117), the light design's 11dp-dot timeline, the pinned bottom bar (not `dockSurface` — no rounded corners on the page's own edge), and the lime-washed aside six BN screens share |
 | Global chrome | `designsystem/component/LightTabBar.kt` | done (P1) | Replaces the floating blurred pill. Opaque, hairline top, four glyphs + a raised accent action circle. Client: Home · Search · [+] · Messages · Profile. Artist: Studio · Gigs · [+] · Messages · Profile. `FloatingTabBar` and `AmbientRoleWash` are deleted |
 

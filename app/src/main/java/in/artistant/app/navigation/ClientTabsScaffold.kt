@@ -51,6 +51,7 @@ import `in`.artistant.app.feature.booking.ConfirmedScreen
 import `in`.artistant.app.feature.booking.InvoiceScreen
 import `in`.artistant.app.feature.booking.MatchConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
+import `in`.artistant.app.feature.booking.ReviewSheetViewModel
 import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.bookings.MonthCalendarScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
@@ -70,6 +71,12 @@ import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
+import `in`.artistant.app.feature.system.ActivityScreen
+import `in`.artistant.app.feature.system.FeedbackScreen
+import `in`.artistant.app.feature.system.HelpCentreScreen
+import `in`.artistant.app.feature.system.RatePromptHost
+import `in`.artistant.app.feature.system.RatePromptViewModel
+import `in`.artistant.app.feature.system.ToastViewModel
 
 /**
  * Client navigation: five top-level routes, four of which are glyphs in the bar.
@@ -117,6 +124,13 @@ fun ClientTabsScaffold() {
     val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
     val pendingBooking by tabRouter.pendingBookingDetail.collectAsStateWithLifecycle()
     val pendingTab by tabRouter.pendingClientTab.collectAsStateWithLifecycle()
+
+    // Section SH. The toast host itself lives above the NavHost (there is one,
+    // in ArtistantNavHost); this is the handle a destination raises one with.
+    val toasts: ToastViewModel = hiltViewModel()
+    // Screen 138. Scaffold-scoped so the booking-detail destination that arms it
+    // and the sheet that draws it are the same instance.
+    val ratePrompt: RatePromptViewModel = hiltViewModel()
 
     // Push deep links: flip tab then push the detail/chat route.
     //
@@ -189,6 +203,11 @@ fun ClientTabsScaffold() {
             )
         },
     ) { inner ->
+        // Screen 138 rides over the whole graph rather than over one
+        // destination: the review that arms it is submitted on booking detail,
+        // but the insert outlives the sheet AND the screen (see
+        // ReviewSheetViewModel), so the prompt has to survive a pop.
+        RatePromptHost(ratePrompt)
         NavHost(
             navController = nav,
             startDestination = ClientTab.Discover.route,
@@ -291,6 +310,44 @@ fun ClientTabsScaffold() {
                         // report is filed inside a conversation — so the remedy
                         // is the inbox, not a form with no thread behind it.
                         onReportConversation = { navigateToTab(nav, ClientTab.Messages.route) },
+                    )
+                }
+            }
+            // Section SH — design screens 63 / 64 / 123. Registered identically
+            // on the artist graph; see [SystemRoutes] for why they are one table
+            // rather than two.
+            composable(ClientNavRoutes.HELP_CENTRE) {
+                TabPane(inner) {
+                    HelpCentreScreen(
+                        role = AppRole.Client,
+                        onBack = { nav.popBackStack() },
+                        // The promoted card's only action is "add your name",
+                        // and the name lives on the profile.
+                        onFixProfile = { navigateToTab(nav, ClientTab.Profile.route) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.FEEDBACK) {
+                TabPane(inner) {
+                    FeedbackScreen(
+                        onClose = { nav.popBackStack() },
+                        onToast = toasts::show,
+                    )
+                }
+            }
+            composable(ClientNavRoutes.ACTIVITY) {
+                TabPane(inner) {
+                    ActivityScreen(
+                        role = AppRole.Client,
+                        onOpenBooking = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        onOpenThread = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                        // A chat push whose thread id never arrived still has to
+                        // reach the user's messages — the same fallback
+                        // `TabRouter.apply` makes for the notification tap.
+                        onOpenMessages = { navigateToTab(nav, ClientTab.Messages.route) },
+                        // Gig requests, Gigs and the studio are the artist's
+                        // graph. Left null so a row that would go there renders
+                        // as a record rather than as a control that eats the tap.
                     )
                 }
             }
@@ -563,6 +620,26 @@ fun ClientTabsScaffold() {
                 route = ClientNavRoutes.BOOKING_DETAIL,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) {
+                // Design 138's trigger, resolved HERE rather than inside the
+                // booking screen.
+                //
+                // The rating prompt fires "after a good outcome", and the only
+                // one this app has is a review the client chose to leave. The
+                // screen already takes its `ReviewSheetViewModel` as a
+                // parameter, so the same instance can be resolved from the
+                // scaffold and watched — no change to `feature/booking`, and no
+                // second definition of "a review landed".
+                //
+                // Watched as composition state, not by collecting the flow: the
+                // screen consumes `submitted` in its own effect immediately, and
+                // a `StateFlow` collector would be free to conflate true→false
+                // into a single false and never see it. Both effects key on the
+                // same snapshot value, so both observe the `true`.
+                val reviewVm: ReviewSheetViewModel = hiltViewModel()
+                val review by reviewVm.state.collectAsStateWithLifecycle()
+                LaunchedEffect(review.submitted) {
+                    if (review.submitted) ratePrompt.recordReviewSubmitted()
+                }
                 TabPane(inner) {
                     BookingDetailScreen(
                         isArtistViewer = false,
@@ -573,6 +650,7 @@ fun ClientTabsScaffold() {
                         onBookAgain = { artistId -> nav.navigate("artist/$artistId") },
                         // Support lives inside the inbox on both roles.
                         onOpenSupport = { navigateToTab(nav, ClientTab.Messages.route) },
+                        reviewVm = reviewVm,
                     )
                 }
             }

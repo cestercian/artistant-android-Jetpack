@@ -30,6 +30,8 @@ import `in`.artistant.app.designsystem.theme.AppRole
  *   seed-pending-request ........ additionally seed one pending_confirm booking (artist side)
  *   seed-blocked-user ........... boot with the fixture counterparty already blocked
  *   block-list-unavailable ...... make every blocked-list read + write fail
+ *   force-update ................ show the update-required gate (design 120) instead of the app
+ *   service-outage .............. show the service-outage gate (design 121) instead of the app
  *   land-in-wizard-at-<step> .... boot an artist into the EPK wizard instead of the tabs
  *
  * ON `land-in-wizard-at-<step>`: this reports the artist's EPK setup as incomplete, which is
@@ -70,6 +72,18 @@ data class HarnessFlags(
      * harness build, whose fakes never fail.
      */
     val blockListUnavailable: Boolean = false,
+    /**
+     * Show the hard update gate (design screen 120).
+     *
+     * The ONLY way to reach that screen on any build. `app_settings` is RLS
+     * default-deny and mig 0037 revoked the `app_setting()` grant, so no client
+     * can read a minimum version — the gate has no live source and would
+     * otherwise be code nobody could look at. See
+     * `in.artistant.app.feature.system.SystemStatusSource`.
+     */
+    val forceUpdate: Boolean = false,
+    /** Show the service-outage gate (design screen 121). Same reasoning as [forceUpdate]. */
+    val serviceOutage: Boolean = false,
     /** Bare wizard step name (e.g. "identity"); the wizard maps it to its own step enum. */
     val landInWizardAt: String? = null,
 ) {
@@ -98,6 +112,8 @@ data class HarnessFlags(
             var seedPendingRequest = false
             var seedBlockedUser = false
             var blockListUnavailable = false
+            var forceUpdate = false
+            var serviceOutage = false
             var wizardStep: String? = null
             // Track the two role tokens separately: iOS resolves client-before-artist when
             // both are passed, and treats a wizard flag as implying artist. Recording them
@@ -117,6 +133,8 @@ data class HarnessFlags(
                     "seed-pending-request" -> { seedPendingRequest = true; seenAny = true }
                     "seed-blocked-user" -> { seedBlockedUser = true; seenAny = true }
                     "block-list-unavailable" -> { blockListUnavailable = true; seenAny = true }
+                    "force-update" -> { forceUpdate = true; seenAny = true }
+                    "service-outage" -> { serviceOutage = true; seenAny = true }
                     else ->
                         if (t.startsWith(WIZARD_PREFIX) && t.length > WIZARD_PREFIX.length) {
                             wizardStep = t.removePrefix(WIZARD_PREFIX)
@@ -145,6 +163,8 @@ data class HarnessFlags(
                 seedPendingRequest = seedPendingRequest,
                 seedBlockedUser = seedBlockedUser,
                 blockListUnavailable = blockListUnavailable,
+                forceUpdate = forceUpdate,
+                serviceOutage = serviceOutage,
                 landInWizardAt = wizardStep,
             )
         }
