@@ -36,6 +36,11 @@ import javax.inject.Singleton
  * broadcasting for the life of the ViewModel after someone had just turned it
  * off, which is the one moment they are watching for it to stop.
  *
+ * **[enabled] may throw** — it reads DataStore, which raises on a corrupt or
+ * unreadable file. The one caller wraps it and falls back to the same `true` an
+ * absent key produces; see [ChatViewModel.markReadBestEffort], where an escaping
+ * throw would also skip the unread-flag cleanup that follows it.
+ *
  * The key is shared with `feature/signup/PrivacyPreferences.kt` on the
  * getting-started branch — same DataStore, same string — so the two reconcile to
  * one preference when those branches merge.

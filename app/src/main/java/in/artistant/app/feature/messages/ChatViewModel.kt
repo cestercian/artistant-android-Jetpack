@@ -516,7 +516,16 @@ class ChatViewModel @Inject constructor(
         // Read per call rather than cached: the switch is on another screen and
         // can be flipped while this thread is open, which is exactly the moment
         // someone is watching for it to take effect.
-        if (readReceipts.enabled()) {
+        //
+        // Wrapped, and defaulting to the documented `true`. The read goes to
+        // DataStore, which throws on a corrupt or unreadable file — and an escape
+        // from HERE is expensive out of all proportion to the preference: it
+        // aborts the rest of this coroutine, so the "mark as unread" flag below
+        // is never retired and the receipt below that is never re-read. A
+        // preference that cannot be read is not a preference to go quiet on: the
+        // default is opt-IN, so the same value an absent key produces is the one
+        // a failed read produces.
+        if (runCatching { readReceipts.enabled() }.getOrDefault(true)) {
             runCatching { messagesRepository.markThreadReadReceipt(threadId) }
         }
         // Opening the thread also retires an explicit "mark as unread" — the

@@ -320,6 +320,42 @@ class ChatViewModelTest {
         assertEquals(0, repo.receiptWrites)
     }
 
+    /**
+     * A preference that cannot be READ must not take the rest of the pass down
+     * with it.
+     *
+     * `enabled()` goes to DataStore, which throws on a corrupt or unreadable
+     * file. Unwrapped, that throw escaped `markReadBestEffort` and killed
+     * everything after it — the "mark as unread" flag was never retired and the
+     * counterparty's receipt was never re-read, so a broken preference file
+     * quietly disabled two unrelated behaviours. The documented default is
+     * `true`: an unreadable opt-OUT is not consent to go quiet.
+     */
+    @Test
+    fun anUnreadablePreferenceFallsBackToTheDefaultAndStillClearsTheFlags() = runTest {
+        val repo = ScriptedMessages()
+        val flags = FakeThreadFlagsStore(ThreadFlags(markedUnread = setOf(threadId)))
+
+        val model = vm(
+            repo,
+            flags = flags,
+            readReceipts = { error("datastore: unreadable preferences file") },
+        )
+        advanceUntilIdle()
+
+        assertTrue("the default is opt-in, so the broadcast still happens", repo.receiptWrites > 0)
+        assertTrue("the viewer's own badge must still clear", repo.markedRead > 0)
+        assertTrue(
+            "the explicit mark-as-unread must still be retired",
+            flags.flags.first().markedUnread.isEmpty(),
+        )
+        assertEquals(
+            "the counterparty's receipt must still be re-read",
+            9_000L,
+            model.state.value.counterpartLastReadAt,
+        )
+    }
+
     /** The same three paths, with the switch on, do broadcast. */
     @Test
     fun receiptsOnBroadcastsOnInboundAndOnSendToo() = runTest {
