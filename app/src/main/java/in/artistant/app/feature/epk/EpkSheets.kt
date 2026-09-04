@@ -436,7 +436,21 @@ fun AddPersonalitySheet(
     val dimens = AppTheme.dimens
     var openQuestion by rememberSaveable { mutableStateOf<String?>(null) }
     val answered = ArtistPrompts.questions.filter { ArtistPrompts.answerFor(drafts, it).isNotBlank() }
-    val unanswered = ArtistPrompts.questions - answered.toSet()
+
+    // The deck's ORDER is fixed when the sheet opens, and only the order.
+    //
+    // Answered prompts lead, because the design's note is that one filled card is
+    // what makes the empty ones read as invitations — but re-deriving that on
+    // every keystroke would move a card the moment its first character landed,
+    // out from under the cursor. Captured once, so the card the artist is typing
+    // into stays where they tapped it, and the promotion happens the next time
+    // the sheet is opened.
+    val order = remember {
+        val filled = ArtistPrompts.questions.filter {
+            ArtistPrompts.answerFor(drafts, it).isNotBlank()
+        }
+        filled + (ArtistPrompts.questions - filled.toSet())
+    }
 
     Column(
         modifier.fillMaxWidth(),
@@ -459,7 +473,7 @@ fun AddPersonalitySheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(dimens.space.md),
         ) {
-            (answered + unanswered).forEach { question ->
+            order.forEach { question ->
                 val answer = ArtistPrompts.answerFor(drafts, question)
                 val open = answer.isNotBlank() || openQuestion == question
                 if (open) {
