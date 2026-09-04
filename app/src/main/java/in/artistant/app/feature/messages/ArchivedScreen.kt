@@ -36,6 +36,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.BackHeader
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -71,6 +73,15 @@ fun ArchivedScreen(
     val dimens = AppTheme.dimens
     val items = state.archivedThreads
 
+    // The same resync the inbox does, for the same reason and against the same
+    // ViewModel method. Opening a thread from here leaves this destination alive
+    // with the payload it loaded BEFORE the conversation was read, so coming back
+    // showed the old preview, the old unread rail and the old ordering — and a
+    // thread unarchived from inside the chat's details sheet would still be
+    // sitting in this list. `onResumed` swallows the resume that arrives with the
+    // first paint, so this costs nothing on entry.
+    ResumeEffect(onResumed = viewModel::onResumed)
+
     Column(modifier.fillMaxSize().background(colors.page)) {
         BackHeader(
             title = "Archived",
@@ -85,12 +96,49 @@ fun ArchivedScreen(
             modifier = Modifier.padding(horizontal = dimens.component.gutter),
         )
 
+        // A refresh that failed over rows already on screen is a strip, not a
+        // takeover — the stale list is still the best thing to show, and the
+        // takeover below has nothing to take over.
+        if (state.error != null && items.isNotEmpty()) {
+            Banner(
+                title = "Couldn't refresh the archive",
+                detail = state.error,
+                tone = BannerTone.Failure,
+                actionLabel = "Retry",
+                onAction = viewModel::refresh,
+                modifier = Modifier
+                    .padding(horizontal = dimens.component.gutter)
+                    .padding(top = dimens.space.md),
+            )
+        }
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.isLoading && !state.hasLoaded -> Box(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator(color = colors.accentInk) }
+
+                // FAILURE IS NOT EMPTY, and this list is the place the two are
+                // easiest to confuse: a read that didn't land and an archive with
+                // nothing in it are the same empty list and opposite meanings.
+                // Told "No archived threads" after a failed load, someone
+                // reasonably concludes their archive was lost — and the screen
+                // offers them no way to find out otherwise. So the failure owns
+                // the area, says what happened, and carries the retry.
+                state.error != null && items.isEmpty() -> Box(
+                    Modifier.fillMaxSize().padding(dimens.component.gutter),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Banner(
+                        title = "Couldn't load your archive",
+                        detail = state.error,
+                        tone = BannerTone.Failure,
+                        actionLabel = "Retry",
+                        onAction = viewModel::refresh,
+                        modifier = Modifier.semantics { testTag = "archived.error" },
+                    )
+                }
 
                 items.isEmpty() -> EmptyState(
                     title = "No archived threads",
