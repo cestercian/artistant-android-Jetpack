@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
+import `in`.artistant.app.data.repository.RequestsRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -64,6 +66,7 @@ class MessagesViewModel @Inject constructor(
     private val messagesRepository: MessagesRepository,
     private val artistsRepository: ArtistsRepository,
     private val bookingsRepository: BookingsRepository,
+    private val requests: RequestsRepository,
     private val flagsStore: ThreadFlagsStore,
     private val blockedUsers: BlockedUsersStore,
     private val viewer: ViewerIdentity,
@@ -78,6 +81,13 @@ class MessagesViewModel @Inject constructor(
      */
     private var loadedThreads: List<Thread> = emptyList()
     private var bookingsById: Map<String, Booking> = emptyMap()
+
+    /**
+     * The viewer's own gig requests, newest first, so each row can show the deal
+     * it is about (design 19). ONE list call for the whole inbox — RLS already
+     * restricts it to the viewer's side, and matching happens in [project].
+     */
+    private var quotes: List<StoredRequest> = emptyList()
     private var flags: ThreadFlags = ThreadFlags()
     private var blockedIds: Set<String> = emptySet()
 
@@ -158,6 +168,7 @@ class MessagesViewModel @Inject constructor(
                 loadedThreads = threads
                 hydrateArtists(threads)
                 bookingsById = loadBookings(threads)
+                quotes = loadQuotes()
                 _state.update {
                     it.copy(threads = project(), isLoading = false, hasLoaded = true, error = null)
                 }
@@ -167,7 +178,10 @@ class MessagesViewModel @Inject constructor(
             }
     }
 
-    fun toggleStarred(threadId: String) = viewModelScope.launch { flagsStore.toggleStarred(threadId) }
+    // No `toggleStarred` here on purpose. The light inbox has ONE swipe and it
+    // archives (design 19), so the star's only control is the chat's details
+    // sheet — see [ChatViewModel.toggleStarred]. What the inbox owes the flag is
+    // display, not a second way to set it.
 
     fun toggleArchived(threadId: String) = viewModelScope.launch { flagsStore.toggleArchived(threadId) }
 
@@ -191,6 +205,12 @@ class MessagesViewModel @Inject constructor(
                     artistName = artist?.name,
                 ),
                 context = ThreadContext.resolve(thread, bookingsById, viewerIsArtist),
+                quote = ThreadQuote.pick(
+                    requests = quotes,
+                    thread = thread,
+                    viewerIsArtist = viewerIsArtist,
+                    nowMs = System.currentTimeMillis(),
+                ),
                 coverUrl = artist?.coverUrl,
                 starred = thread.id in flags.starred,
                 archived = thread.id in flags.archived,
@@ -234,6 +254,27 @@ class MessagesViewModel @Inject constructor(
      * line; it must never take the inbox down with it, so this result is
      * deliberately not routed into `state.error`.
      */
+    /**
+     * The viewer's gig requests, for the deal state on each row (design 19).
+     *
+     * ONE list call for the whole inbox — RLS already restricts it to the
+     * viewer's side, and the per-thread match happens in [project]. Degrades to
+     * empty, deliberately and silently: a quote that cannot be read costs a row
+     * its deal line and it falls back on the last message, which is not a reason
+     * to fail the inbox.
+     *
+     * Which seat to ask is decided per load rather than cached, because an
+     * account can hold both — and asking the wrong one returns an empty list
+     * rather than someone else's quotes.
+     */
+    private suspend fun loadQuotes(): List<StoredRequest> {
+        val viewerId = viewer.currentUserId() ?: return emptyList()
+        val asArtist = loadedThreads.any { it.artistId.equals(viewerId, ignoreCase = true) }
+        return runCatching {
+            if (asArtist) requests.listForArtist() else requests.listForClient()
+        }.getOrDefault(emptyList())
+    }
+
     private suspend fun loadBookings(threads: List<Thread>): Map<String, Booking> {
         val ids = threads.mapNotNull { it.bookingId }.distinct()
         if (ids.isEmpty()) return emptyMap()

@@ -52,6 +52,9 @@ const val ARTIST_ID = "11111111-1111-1111-1111-111111111111"
 const val OTHER_ARTIST_ID = "22222222-2222-2222-2222-222222222222"
 const val CLIENT_ID = "33333333-3333-3333-3333-333333333333"
 
+/** A second client, for the pair-matching rules — see [ThreadQuote.pick]. */
+const val OTHER_CLIENT_ID = "44444444-4444-4444-4444-444444444444"
+
 /** Mock receipt — the dormant payments seam still stamps razorpay_* on create. */
 val mockPayment = PaymentResult(
     orderId = "order_mock_1",

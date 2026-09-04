@@ -89,6 +89,18 @@ fun BackHeader(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     backLabel: String = "Back",
+    /**
+     * Centred title, or one that sits against the back circle.
+     *
+     * The design draws both and the split is not arbitrary: a screen that is
+     * ONE THING gets a centred title (131 "Trust & safety"), while a screen
+     * whose header also states a quantity or a state gets a left-aligned title
+     * with its subtitle under it (60 "Archived / 4 conversations", 127 "Blocked
+     * accounts / 2 blocked", 34 "Artistant Support / Booking help, safety and
+     * feedback"). Centred stays the default because that is what the existing
+     * call sites draw.
+     */
+    centered: Boolean = true,
     trailing: @Composable (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
@@ -108,7 +120,7 @@ fun BackHeader(
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = dimens.space.sm),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start,
         ) {
             Text(
                 text = title,
@@ -116,7 +128,7 @@ fun BackHeader(
                 color = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
+                textAlign = if (centered) TextAlign.Center else TextAlign.Start,
             )
             if (!subtitle.isNullOrBlank()) {
                 Text(
@@ -125,12 +137,14 @@ fun BackHeader(
                     color = colors.ink4,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
+                    textAlign = if (centered) TextAlign.Center else TextAlign.Start,
                 )
             }
         }
         // The mirror of the back circle. Without it a title with no trailing
-        // control sits half a circle to the right of centre.
+        // control sits half a circle to the right of centre. A left-aligned
+        // title has nothing to balance, but the reservation stays so a long
+        // title still stops where a trailing control would begin.
         if (trailing != null) trailing() else Spacer(Modifier.width(dimens.size.controlMin))
     }
 }

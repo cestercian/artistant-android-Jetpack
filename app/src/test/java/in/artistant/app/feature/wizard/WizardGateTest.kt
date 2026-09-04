@@ -162,7 +162,7 @@ class WizardGateTest {
     fun `the publish button narrates itself while it is working`() {
         val publishing = state(WizardStep.Preview).copy(isPublishing = true)
         assertEquals("Publishing…", wizardCtaLabel(publishing))
-        assertEquals("Looks good, publish", wizardCtaLabel(state(WizardStep.Preview)))
+        assertEquals("Publish my profile", wizardCtaLabel(state(WizardStep.Preview)))
         // A second tap during the round-trip would fire the whole sequence twice.
         assertFalse(publishing.canAdvance)
     }
@@ -189,11 +189,37 @@ class WizardGateTest {
     }
 
     @Test
-    fun `progress counts every form step and excludes done`() {
-        assertEquals(WizardFlowOrder.size - 1, wizardProgressTotal())
+    fun `progress counts the steps that draw the track and no others`() {
+        // Preview and Done are both excluded, and for the same reason: neither
+        // renders a segment. Preview swaps the whole track for its own centred
+        // title and Done has no chrome at all, so counting either one promised a
+        // cell nothing could ever fill.
+        assertEquals(WizardFlowOrder.size - 2, wizardProgressTotal())
         assertEquals(0, wizardProgressIndex(WizardStep.Identity))
-        assertEquals(wizardProgressTotal() - 1, wizardProgressIndex(WizardStep.Preview))
+        // The last step that SHOWS the counter is the last one it counts, so the
+        // bar the artist watches all the way through actually completes.
+        assertEquals(wizardProgressTotal() - 1, wizardProgressIndex(WizardStep.Samples))
+        assertNull(wizardProgressIndex(WizardStep.Preview))
         assertNull(wizardProgressIndex(WizardStep.Done))
+    }
+
+    @Test
+    fun `the steps past the form fill the track rather than emptying it`() {
+        // Save & exit is reachable from Preview and draws this same bar. Keyed
+        // on the counter's index alone it had none, returned early, and left a
+        // hole above the words "9 of 9".
+        assertEquals(0, wizardProgressFilled(WizardStep.Identity))
+        assertEquals(wizardProgressTotal() - 1, wizardProgressFilled(WizardStep.Samples))
+        assertEquals(wizardProgressTotal(), wizardProgressFilled(WizardStep.Preview))
+        assertEquals(wizardProgressTotal(), wizardProgressFilled(WizardStep.Done))
+    }
+
+    @Test
+    fun `the track narrates a position while there is one and a state after`() {
+        assertEquals("Step 1 of ${wizardProgressTotal()}", wizardProgressLabel(WizardStep.Identity))
+        // Not "Step 10 of 9". Past the form there is no position left to read
+        // out, so the label describes the bar instead of counting past its end.
+        assertEquals("All ${wizardProgressTotal()} steps done", wizardProgressLabel(WizardStep.Preview))
     }
 
     @Test

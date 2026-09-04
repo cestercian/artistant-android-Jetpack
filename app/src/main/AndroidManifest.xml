@@ -28,12 +28,24 @@
         android:supportsRtl="false"
         android:theme="@style/Theme.Artistant">
 
+        <!-- `windowSoftInputMode` is declared, not left to the framework. With nothing
+             here the mode is SOFT_INPUT_ADJUST_UNSPECIFIED, which this app resolved to
+             ADJUST_PAN (`dumpsys window` reported `sim={adjust=pan}`) — the platform
+             slides the whole window up when the keyboard opens. Every screen that ALSO
+             pads itself by `WindowInsets.ime` (chat, EPK, signup profile, the wizard)
+             then moved twice: in the chat the header, gig strip and safety banner slid
+             off the top of the screen and a keyboard-height band of bare window
+             background opened between the composer and the keyboard.
+             `adjustResize` turns panning off; under edge-to-edge
+             (decorFitsSystemWindows=false) it does not resize the window either, so the
+             IME inset Compose reads is the whole and only movement. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:screenOrientation="portrait"
-            android:theme="@style/Theme.Artistant">
+            android:theme="@style/Theme.Artistant"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

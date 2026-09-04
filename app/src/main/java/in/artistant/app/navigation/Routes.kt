@@ -22,6 +22,22 @@ object ClientNavRoutes {
     const val REQUEST_QUOTE = "request_quote/{artistId}"
     const val ARTIST_LIST = "artist_list/{kind}"
 
+    /** The archive (design 60 / 111) — reachable from the inbox header. */
+    const val ARCHIVED = "archived"
+
+    /**
+     * Trust & safety (design 131).
+     *
+     * Three ways in from this section, all inside the surfaces where the
+     * question comes up: the chat's thread-details sheet, the report form's
+     * footer, and the archive (the inbox's overflow). Account settings adds a
+     * fourth and belongs to the profile section.
+     */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** The scripted support assistant (design 34) — the inbox's permanent row. */
+    const val SUPPORT = "support"
+
     /** Every review for one artist, with search and lenses (design screen 102). */
     const val ARTIST_REVIEWS = "artist_reviews/{artistId}"
 
@@ -36,9 +52,19 @@ object ClientNavRoutes {
 
     /**
      * Screen 94 — the landing for a match reached by NEGOTIATION rather than
-     * through checkout. Messaging navigates here when an in-thread quote is
-     * accepted; [CONFIRMED] stays the funnel's own page, and the two say
+     * through checkout. [CONFIRMED] stays the funnel's own page, and the two say
      * different things because they are reached from different places.
+     *
+     * **Not reached from the chat**, despite the design's story. Accepting an
+     * in-thread quote is a `gig_requests` status PATCH; the only server reaction
+     * (mig 0047, rewritten by 0076) opens the bookingless thread the quote is
+     * already in, and that migration deliberately creates NO booking because the
+     * client has to consent to the final amount. RLS agrees —
+     * `bookings_insert_client` gates inserts on `auth.uid() = client_id` and the
+     * seat that accepts an `open` quote is the artist — so there is no id to open
+     * this with. The chat's accept ends at the frozen quote card, which says so.
+     * See [ChatEvent.QuoteAccepted]. This becomes reachable from messaging the
+     * day the backend grows a consented request→booking path.
      */
     const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
 
@@ -55,6 +81,7 @@ object ClientNavRoutes {
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
     fun artistList(kind: String) = "artist_list/$kind"
+
     fun artistReviews(artistId: String) = "artist_reviews/$artistId"
     fun bookability(artistId: String) = "bookability/$artistId"
     fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
@@ -136,6 +163,15 @@ object ArtistNavRoutes {
 
     /** See [ClientNavRoutes.BLOCKED_ACCOUNTS] — same screen, artist graph. */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /** See [ClientNavRoutes.ARCHIVED]. */
+    const val ARCHIVED = "archived"
+
+    /** See [ClientNavRoutes.SAFETY_CENTRE]. */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** See [ClientNavRoutes.SUPPORT]. */
+    const val SUPPORT = "support"
 
     /** See [ClientNavRoutes.PRIVACY] / [ClientNavRoutes.LEGAL] — same screens, artist graph. */
     const val PRIVACY = "privacy"
