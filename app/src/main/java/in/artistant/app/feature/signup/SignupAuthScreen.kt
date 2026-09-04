@@ -149,6 +149,11 @@ private fun SignupAuthContent(
             onValueChange = onPhoneChange,
             label = "Mobile number",
             hint = "98450 12345",
+            // The rejected-number reason, under the field it is about. A number this app
+            // cannot text is now REFUSED rather than trimmed to ten digits (see
+            // [PhoneRules.national]), so the refusal has to be visible: without it a pasted
+            // foreign number would sit in the field with a dead Send button and no reason.
+            error = PhoneRules.error(state.phone),
             enabled = !busy,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Phone,

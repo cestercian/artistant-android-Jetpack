@@ -36,24 +36,55 @@ object PhoneRules {
     fun digits(raw: String): String = raw.filter(Char::isDigit)
 
     /**
-     * The ten national digits of [raw], with a leading country code (91) or trunk zero
-     * removed. Returns whatever is left when the input is too short to strip from — the
-     * caller is validating, not sanitising, and silently returning "" for a half-typed number
-     * would make [isValid] and [national] disagree about the same string.
+     * The ten national digits of [raw] — but only for the three shapes this app accepts:
+     * ten digits, `91` + ten, or `+91` + ten (separators stripped by [digits]). Anything else
+     * comes back UNCHANGED, so [isValid] rejects it.
+     *
+     * It used to end with `takeLast(NATIONAL_LENGTH)`, which is the whole reason this comment
+     * exists: a pasted `+1 9845012345` is eleven digits, so the tail-take turned an American
+     * number into `9845012345` and `toE164` then texted the code to `+919845012345` — a real
+     * Indian phone belonging to someone else, with nothing on screen saying anything had been
+     * changed. A number this app cannot send to has to come back looking wrong, not looking
+     * like a different valid number.
+     *
+     * A half-typed value is returned as-is rather than as "", so [isValid] and [national] never
+     * disagree about the same string and the field can still print what is in it.
      */
     fun national(raw: String): String {
-        var d = digits(raw)
-        if (d.length > NATIONAL_LENGTH) {
-            if (d.startsWith(COUNTRY_DIGITS)) d = d.drop(COUNTRY_DIGITS.length)
-            else if (d.startsWith(TRUNK_PREFIX)) d = d.drop(TRUNK_PREFIX.length)
+        val d = digits(raw)
+        val withCountryCode = NATIONAL_LENGTH + COUNTRY_DIGITS.length
+        return if (d.length == withCountryCode && d.startsWith(COUNTRY_DIGITS)) {
+            d.drop(COUNTRY_DIGITS.length)
+        } else {
+            d
         }
-        return if (d.length > NATIONAL_LENGTH) d.takeLast(NATIONAL_LENGTH) else d
     }
 
     private const val COUNTRY_DIGITS = "91"
-    private const val TRUNK_PREFIX = "0"
 
     fun isValid(raw: String): Boolean = NATIONAL.matches(national(raw))
+
+    /**
+     * The inline reason the sign-in screen prints under the field, or null when there is
+     * nothing to say yet.
+     *
+     * Silent while the number is still shorter than a whole one — a rejection that appears on
+     * the third digit is a rejection of typing, not of a number. It speaks the moment the value
+     * is long enough to be judged and is not one of the three accepted shapes, which is what
+     * turns the disabled "Send code" from a dead control into a stated one (the same pairing
+     * design screen 118 makes for the welcome CTA).
+     */
+    fun error(raw: String): String? {
+        val d = digits(raw)
+        return when {
+            d.length < NATIONAL_LENGTH -> null
+            isValid(raw) -> null
+            else -> REJECTED
+        }
+    }
+
+    /** Said as the rule, not as a verdict: it tells the reader what WOULD be accepted. */
+    const val REJECTED = "Enter a 10-digit Indian mobile number, with or without +91."
 
     /** `+919845012345` — what GoTrue is given. Empty when [raw] is not a valid number. */
     fun toE164(raw: String): String =

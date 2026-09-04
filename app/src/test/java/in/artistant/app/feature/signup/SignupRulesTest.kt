@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -29,18 +31,21 @@ class SignupRulesTest {
     }
 
     @Test
-    fun `separators, the country code and a trunk zero are all stripped`() {
-        // Everything a person might paste out of a contact card or an SMS.
+    fun `separators and the country code are stripped, in every shape a person pastes`() {
+        // The three accepted shapes, written the way a contact card or an SMS writes them.
         listOf(
+            "9845012345",
             "98450 12345",
             "98450-12345",
             "+91 98450 12345",
+            "+91-98450-12345",
             "+919845012345",
             "919845012345",
-            "09845012345",
+            "91 98450 12345",
         ).forEach { raw ->
             assertEquals("input was $raw", "9845012345", PhoneRules.national(raw))
             assertEquals("input was $raw", "+919845012345", PhoneRules.toE164(raw))
+            assertNull("input was $raw", PhoneRules.error(raw))
         }
     }
 
@@ -54,6 +59,38 @@ class SignupRulesTest {
         assertFalse(PhoneRules.isValid(""))
         // An invalid number produces no E.164 at all — never a half-formed one.
         assertEquals("", PhoneRules.toE164("98450123"))
+    }
+
+    @Test
+    fun `a longer number is refused, never trimmed to its last ten digits`() {
+        // The regression this test exists for: `national` ended with takeLast(10), so a pasted
+        // American number became a real Indian one and the code was texted to a stranger.
+        listOf(
+            "+1 9845012345",       // US country code + the same ten digits
+            "+1 (984) 501-2345",
+            "19845012345",
+            "09845012345",         // a trunk zero is not one of the three accepted shapes
+            "+44 7700 900123",
+            "9845012345678",       // simply too many digits
+            "929845012345",        // twelve digits, but the country code is not 91
+        ).forEach { raw ->
+            assertFalse("input was $raw", PhoneRules.isValid(raw))
+            assertEquals("input was $raw", "", PhoneRules.toE164(raw))
+            assertEquals("input was $raw", PhoneRules.REJECTED, PhoneRules.error(raw))
+            // And it comes back looking like what was typed, not like a different valid number.
+            assertNotEquals("input was $raw", "9845012345", PhoneRules.national(raw))
+        }
+    }
+
+    @Test
+    fun `a half-typed number is not yet an error`() {
+        // A rejection on the third digit is a rejection of typing. The reason waits until the
+        // value is long enough to judge.
+        assertNull(PhoneRules.error(""))
+        assertNull(PhoneRules.error("98"))
+        assertNull(PhoneRules.error("98450 123"))
+        // Ten digits that still aren't a mobile DO get the reason — there is nothing more coming.
+        assertEquals(PhoneRules.REJECTED, PhoneRules.error("5845012345"))
     }
 
     @Test
