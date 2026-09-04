@@ -379,6 +379,11 @@ fun ClientTabsScaffold() {
                         isArtistViewer = false,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                        // "Book again" off a cancelled booking starts where a
+                        // booking always starts — the artist's profile.
+                        onBookAgain = { artistId -> nav.navigate("artist/$artistId") },
+                        // Support lives inside the inbox on both roles.
+                        onOpenSupport = { navigateToTab(nav, ClientTab.Messages.route) },
                     )
                 }
             }
