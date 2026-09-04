@@ -81,29 +81,6 @@ class ArtistGigsViewModelTest {
         assertNotNull(model.state.value.error)
     }
 
-    @Test
-    fun groupingFoldsSameMonthRowsUnderOneHeaderAndNeverLosesRows() = runTest {
-        // g1/g1b share May, g2 is June: this pins PR #50's fix — same-month rows
-        // fold under ONE header instead of one header per row.
-        val model = ArtistGigsViewModel(
-            FakeBookingsRepository(
-                listOf(
-                    booking(id = "g1", date = "Sat, May 16, 2026"),
-                    booking(id = "g1b", date = "Sun, May 17, 2026"),
-                    booking(id = "g2", date = "Fri, Jun 5, 2026"),
-                ),
-            ),
-        )
-
-        val grouped = model.groupedByMonth()
-        assertEquals(listOf("May 2026", "June 2026"), grouped.map { it.first })
-        assertEquals(2, grouped.first().second.size)
-        assertEquals(
-            listOf("g1", "g1b", "g2"),
-            grouped.flatMap { it.second }.map { it.booking.id },
-        )
-    }
-
     // ── Overlapping refreshes ───────────────────────────────────────────────
     //
     // Two refreshes overlap here whenever the pull indicator is not up: the

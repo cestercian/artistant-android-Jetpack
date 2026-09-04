@@ -75,6 +75,29 @@ data class GigRequest(
     val packageLabel: String = "Custom",
     val timeAgo: String = "",
     /**
+     * Where the gig is, verbatim from `gig_requests.venue` — nullable because
+     * the column is, and the client's Request-quote form leaves it blank more
+     * often than not.
+     *
+     * Already read by the repository's `select("*")`; it was decoded and then
+     * dropped on the floor until the Sep-2026 redesign, whose request detail
+     * (screen 35) prints Date / Venue / Guests as the proposal's three facts.
+     * Surfacing a column the query already returns is not a new network path.
+     */
+    val venue: String? = null,
+    /** Headcount from `gig_requests.crowd_size`; null when the host didn't say. */
+    val crowdSize: Int? = null,
+    /**
+     * "2 hours ago" for the moment the row last CHANGED, as opposed to
+     * [timeAgo], which is when it was sent.
+     *
+     * The two are the same string until someone acts on the request, and then
+     * they are the whole difference between "Sent 15 minutes ago" (screen 35)
+     * and "You countered 2 hours ago" (screen 107). Empty when `updated_at`
+     * could not be read or parsed — the header then falls back to the sent time.
+     */
+    val updatedAgo: String = "",
+    /**
      * The artist the quote is with, lowercased.
      *
      * Carried so a surface that starts from a CONVERSATION can find the quote

@@ -3,16 +3,12 @@ package `in`.artistant.app.feature.artisthome
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,83 +18,66 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Booking
-import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.designsystem.component.Avatar
+import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
-import `in`.artistant.app.designsystem.component.EmptyState
-import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.InlineBanner
-import `in`.artistant.app.designsystem.component.MiniBars
-import `in`.artistant.app.designsystem.component.RevealOnAppear
-import `in`.artistant.app.designsystem.component.ScoreRing
-import `in`.artistant.app.designsystem.component.Sparkline
-import `in`.artistant.app.designsystem.component.pressScale
+import `in`.artistant.app.designsystem.component.EyebrowLabel
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.ScreenHeader
+import `in`.artistant.app.designsystem.component.SectionHeader
+import `in`.artistant.app.designsystem.component.SkeletonPage
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.domain.score.ScoreTier
-import `in`.artistant.app.domain.score.tierColor
-import java.util.Locale
 
 /**
- * The artist's dashboard.
+ * The artist studio — design screens 09 (money), 85 (cold) and 86 (unavailable).
  *
- * Reads top-down the way the artist's own attention runs: **who am I → what came
- * in → how bookable am I → when am I busy → what needs answering**. Anything
- * demanding a decision (an unfinished profile, a failed refresh, an unanswered
- * request) surfaces near the top; the reference material sits below it.
+ * Three things drive the whole rewrite:
  *
- * ## Structure
+ * **Money first, score second, requests third.** That is the order an artist
+ * opens the app in, and it is the opposite of what this screen used to lead with
+ * (a greeting and a chart of inbound demand). The accent card at the top is the
+ * only accent on the page.
  *
- * One `LazyColumn` for the entire screen. That is a hard requirement rather than
- * a preference here: the artist is on a mid-range phone, and the emulator this
- * was tuned against had fallen back to software rendering, where composing every
- * off-screen section on every frame is the difference between a scroll and a
- * slideshow. The one nested scroller is the availability strip, which runs on the
- * other axis and is a `LazyRow` for the same reason.
+ * **The three states are three screens, not one screen with holes in it.**
+ * [DashboardMode] picks between them, and the case that matters is
+ * [DashboardMode.Unavailable]: when the bookings read fails there are no booked
+ * days to shade, and an unshaded 14-day strip renders as *fourteen open nights*.
+ * So a failed first load draws em-dashes and an inert grey strip, and says
+ * outright that it will not guess. It is the one failure on the artist side that
+ * costs real money.
  *
- * ## Surfaces
- *
- * No card chrome — sections are separated by hairlines and whitespace, and the
- * only filled surfaces are the two banner shapes. The page deliberately does NOT
- * paint an opaque background: the scaffold's ambient role wash sits behind it and
- * paints `bg` itself, so skipping the fill gets the artist-violet glow for free.
- * Painting over it would have cost the same and looked flatter.
+ * **Nothing here mutates.** The design draws Accept / Quote buttons inline on a
+ * request card; this build sends the artist to the request instead. Screen 35's
+ * own note is "three answers, one irreversible — with the clash warning surfaced
+ * before the artist commits", and the dashboard has no clash data loaded. An
+ * inline Accept would commit the one irreversible answer with the warning three
+ * taps away.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,1103 +87,870 @@ fun ArtistHomeScreen(
     onOpenWizard: () -> Unit = {},
     onScoreExplainer: () -> Unit = {},
     onManageAvailability: () -> Unit = {},
+    onOpenAvailability: () -> Unit = onManageAvailability,
+    onOpenEarnings: () -> Unit = {},
     onSubscribe: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ArtistHomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val gutter = dimens.component.gutter
+    val mode = state.mode
 
     PullToRefreshBox(
         // Only spin the pull indicator when there's already a dashboard under it.
-        // On the very first load the centred spinner below is the progress signal,
-        // and running both reads as two competing loads.
+        // On the very first load the skeleton below is the progress signal, and
+        // running both reads as two competing loads.
         isRefreshing = state.isLoading && state.hasLoaded,
         onRefresh = viewModel::refresh,
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.page)
+            .semantics { testTag = "screen.artistStudio" },
     ) {
-        when {
-            !state.hasLoaded && state.error == null -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.accentInk)
-                }
-            }
-            !state.hasLoaded -> {
-                EmptyState(
-                    title = "Couldn't load your dashboard",
-                    body = state.error,
-                    actionLabel = "Retry",
-                    onAction = viewModel::refresh,
-                    modifier = Modifier.align(Alignment.Center),
+        if (state.isLoading && !state.hasLoaded && state.error == null) {
+            SkeletonPage(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = gutter, vertical = dimens.space.md),
+            )
+            return@PullToRefreshBox
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                top = dimens.space.sm,
+                bottom = dimens.size.listTailroom,
+            ),
+            verticalArrangement = Arrangement.spacedBy(dimens.space.lg),
+        ) {
+            item(key = "header") {
+                ScreenHeader(
+                    title = "Studio",
+                    subtitle = dashboardSubtitle(mode, state.avatarName.takeIf { it != "Artist" }),
+                    modifier = Modifier.padding(horizontal = gutter),
+                    trailing = {
+                        if (mode == DashboardMode.Unavailable) {
+                            IconCircle(
+                                icon = Icons.Filled.Refresh,
+                                contentDescription = "Retry",
+                                onClick = viewModel::refresh,
+                            )
+                        } else {
+                            TakingGigsPill(
+                                daysAvailable = state.daysAvailable,
+                                onClick = onOpenAvailability,
+                            )
+                        }
+                    },
                 )
             }
-            else -> RevealOnAppear {
-                Dashboard(
+
+            // A refresh that failed OVER a working dashboard. The body below
+            // keeps its data — blanking a screen because a background poll
+            // dropped is how an artist loses the request they were reading.
+            state.error?.takeIf { mode != DashboardMode.Unavailable }?.let { message ->
+                item(key = "staleBanner") {
+                    Banner(
+                        title = "Couldn't refresh your dashboard",
+                        detail = message,
+                        tone = BannerTone.Failure,
+                        actionLabel = "Retry",
+                        onAction = viewModel::refresh,
+                        modifier = Modifier.padding(horizontal = gutter),
+                    )
+                }
+            }
+
+            when (mode) {
+                DashboardMode.Ready -> readyDashboard(
                     state = state,
-                    onRetry = viewModel::refresh,
-                    onRangeChange = viewModel::setRange,
+                    gutter = gutter,
+                    onOpenEarnings = onOpenEarnings,
+                    onScoreExplainer = onScoreExplainer,
                     onBookingClick = onBookingClick,
                     onGigRequestClick = onGigRequestClick,
+                    onOpenAvailability = onOpenAvailability,
                     onOpenWizard = onOpenWizard,
-                    onScoreExplainer = onScoreExplainer,
-                    onManageAvailability = onManageAvailability,
                     onSubscribe = onSubscribe,
                 )
+                DashboardMode.Cold -> coldDashboard(
+                    state = state,
+                    gutter = gutter,
+                    onOpenWizard = onOpenWizard,
+                    onOpenAvailability = onOpenAvailability,
+                    onSubscribe = onSubscribe,
+                )
+                DashboardMode.Unavailable -> unavailableDashboard(
+                    gutter = gutter,
+                    message = state.error,
+                    onRetry = viewModel::refresh,
+                )
             }
         }
     }
 }
 
-@Composable
-private fun Dashboard(
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen 09 — the working dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun LazyListScope.readyDashboard(
     state: ArtistHomeUiState,
-    onRetry: () -> Unit,
-    onRangeChange: (EarningsRange) -> Unit,
+    gutter: androidx.compose.ui.unit.Dp,
+    onOpenEarnings: () -> Unit,
+    onScoreExplainer: () -> Unit,
     onBookingClick: (String) -> Unit,
     onGigRequestClick: (String) -> Unit,
+    onOpenAvailability: () -> Unit,
     onOpenWizard: () -> Unit,
-    onScoreExplainer: () -> Unit,
-    onManageAvailability: () -> Unit,
     onSubscribe: () -> Unit,
 ) {
-    val space = AppTheme.dimens.space
+    profileBanner(state, gutter, onOpenWizard)
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .semantics { testTag = "screen.artistHome" },
-        contentPadding = PaddingValues(bottom = space.xxl),
-    ) {
-        item(key = "greeting") {
-            Greeting(
-                name = state.greetingName,
-                avatarName = state.avatarName,
-                dateLabel = state.todayLabel,
-            )
-        }
-
-        // ── Things asking for a decision ────────────────────────────────────
-        // Grouped at the top rather than scattered beside the data they relate
-        // to, so "is there anything I need to do?" is answered without scrolling.
-
-        if (state.error != null) {
-            item(key = "error") {
-                InlineBanner(
-                    title = "Couldn't refresh your dashboard",
-                    detail = state.error,
-                    tone = BannerTone.Failure,
-                    actionLabel = "Retry",
-                    onAction = onRetry,
-                    modifier = Modifier
-                        .padding(horizontal = space.xl)
-                        .padding(top = space.md)
-                        .semantics { testTag = "artistHome.errorBanner" },
-                )
-            }
-        }
-        state.profileGaps?.takeIf { it.needsWork }?.let { gaps ->
-            item(key = "profile-gaps") {
-                InlineBanner(
-                    title = gaps.headline,
-                    detail = gaps.detail,
-                    tone = BannerTone.Attention,
-                    onClick = onOpenWizard,
-                    modifier = Modifier
-                        .padding(horizontal = space.xl)
-                        .padding(top = space.md)
-                        .semantics { testTag = "artistHome.completionBanner" },
-                )
-            }
-        }
-        if (state.showSubscribeBanner) {
-            item(key = "subscribe") {
-                InlineBanner(
-                    title = "Start your 3 months free",
-                    detail = "Stay listed and keep getting client requests.",
-                    tone = BannerTone.Promotion,
-                    onClick = onSubscribe,
-                    modifier = Modifier
-                        .padding(horizontal = space.xl)
-                        .padding(top = space.md)
-                        .semantics { testTag = "artistHome.subscribeBanner" },
-                )
-            }
-        }
-
-        item(key = "hero") { EarningsHero(state = state, onRangeChange = onRangeChange) }
-        item(key = "stats") { StatRow(state = state) }
-        item(key = "bookability") {
-            BookabilityBlock(
-                state = state,
-                onScoreExplainer = onScoreExplainer,
-            )
-        }
-        item(key = "strip") { AvailabilityStrip(state = state, onManage = onManageAvailability) }
-
-        newRequestsSection(state.pendingRequests, onBookingClick)
-        quoteRequestsSection(state.openQuotes, onGigRequestClick)
-        upcomingSection(state.upcoming, onBookingClick)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Greeting
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * The masthead: a dateline and the artist's name, set editorially.
- *
- * Same move the client side opens on — a serif line with exactly one word in
- * italic brand accent. It is the app's signature, and the artist side had no
- * equivalent at all: it opened on the word "Home", which names a tab, not a
- * person. Setting the artist's own name as the largest thing on the screen is
- * the difference between a dashboard and a control panel.
- *
- * The avatar here is a PORTRAIT, not a control. It used to be the way into
- * account settings, which put that door on the dashboard — a screen about
- * incoming work — while the screen an artist actually opens to work on their own
- * profile had no account entry at all. The door moved to the press-kit editor's
- * title bar, where it is the only one, and this avatar went back to doing what it
- * looks like it does: showing whose dashboard this is.
- */
-@Composable
-private fun Greeting(
-    name: String,
-    avatarName: String,
-    dateLabel: String,
-) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = space.xl)
-            .padding(top = space.lg, bottom = space.md)
-            .semantics { testTag = "artistHome.greeting" },
-        verticalAlignment = Alignment.Top,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                dateLabel.uppercase(Locale.US),
-                style = AppTheme.type.monoMicro,
-                color = colors.ink3,
-            )
-            Spacer(Modifier.height(space.xs))
-            Text(
-                buildAnnotatedString {
-                    append("Hey, ")
-                    withStyle(SpanStyle(color = colors.accentInk, fontStyle = FontStyle.Italic)) {
-                        append(name)
-                    }
-                    append(".")
-                },
-                style = AppTheme.type.masthead,
-                color = colors.ink,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Avatar(
-            name = avatarName,
-            size = AppTheme.dimens.hero.avatarSize,
-            ring = true,
-            // No contentDescription: the greeting beside it already says whose
-            // dashboard this is, so announcing the monogram again would make a
-            // screen reader read the name twice for no added meaning.
+    item(key = "money") {
+        MonthMoneyCard(
+            money = state.money,
+            onClick = onOpenEarnings,
+            modifier = Modifier.padding(horizontal = gutter),
         )
     }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Hero — inbound work
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * How much work came in over the selected window.
- *
- * The number is a **count of bookings, not a rupee total**. No money moves
- * through the app in the matchmaker model, so a ₹ figure here would be money the
- * product never handled — and the artist would reasonably read it as earnings.
- * The fees further down the screen are real: those are what the two sides agreed
- * on, per gig.
- */
-@Composable
-private fun EarningsHero(
-    state: ArtistHomeUiState,
-    onRangeChange: (EarningsRange) -> Unit,
-) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val range = state.range
-    val hero = state.hero
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = space.xl)
-            .padding(top = space.lg, bottom = space.xl),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when (range) {
-                    EarningsRange.All -> "BOOKINGS · ALL TIME"
-                    EarningsRange.SevenDays -> "BOOKINGS · LAST 7 DAYS"
-                    EarningsRange.ThirtyDays -> "BOOKINGS · LAST 30 DAYS"
-                },
-                style = AppTheme.type.monoMicro,
-                color = colors.ink3,
-                maxLines = 1,
-                modifier = Modifier
-                    .weight(1f)
-                    .semantics { testTag = "artistHome.earningsRangeLabel" },
-            )
-            RangePicker(selected = range, onSelect = onRangeChange)
-        }
-        Spacer(Modifier.height(space.sm))
-
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(space.sm),
-            modifier = Modifier.semantics { testTag = "artistHome.earningsHeadline" },
-        ) {
-            Text(
-                "${hero.headline}",
-                style = AppTheme.type.monoHero,
-                color = colors.ink,
-                maxLines = 1,
-            )
-            // An honest zero states its unit at full size. A new artist's "0" is
-            // never hidden and never swapped for an upsell — the subscribe
-            // banner is a separate element above, it does not stand in for this.
-            if (hero.headline == 0) {
-                Text("bookings", style = AppTheme.type.callout, color = colors.ink3)
-            }
-            // Meaningless in all-time mode: there is no prior period to compare
-            // against, so the pill would always read +100%.
-            if (range != EarningsRange.All) {
-                DeltaPill(percent = hero.deltaPercent, up = hero.deltaUp)
-            }
-        }
-
-        Text(
-            when {
-                range == EarningsRange.All && hero.headline > 0 -> "All time"
-                range == EarningsRange.All -> "No bookings yet"
-                range == EarningsRange.SevenDays -> "vs ${hero.prior} prior 7 days"
-                else -> "vs ${hero.prior} prior 30 days"
-            },
-            style = AppTheme.type.footnote,
-            color = colors.ink3,
-        )
-
-        Spacer(Modifier.height(space.lg))
-        if (state.hasChartData) {
-            Sparkline(
-                values = state.series,
-                height = AppTheme.dimens.dashboard.chartHeight,
-                modifier = Modifier.semantics {
-                    testTag = "artistHome.earningsSparkline"
-                    contentDescription = "Bookings trend over the selected window"
-                },
-            )
-            Spacer(Modifier.height(space.sm))
-            AxisLabels(range = range, dayKey = state.todayLabel)
-        } else {
-            Text(
-                // Two different truths. An all-time artist whose only work
-                // predates the chart's 90-bucket cap has a real headline number
-                // and an empty chart; telling them "your chart appears here as
-                // bookings come in" would contradict the count right above it.
-                if (state.hasCountsOutsideChart) {
-                    "All of these landed before the 90-day chart window."
-                } else {
-                    "Your bookings chart appears here as they come in."
-                },
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
-                modifier = Modifier.semantics { testTag = "artistHome.earningsEmpty" },
-            )
-        }
-    }
-}
-
-/**
- * Start / middle / end dates of the chart window.
- *
- * [dayKey] is the state's own dateline — a value, not a clock read, and
- * recomputed by the same refresh that rebuilds `series`. Keying the cache on
- * `range` alone froze these three dates at the day the card was first composed,
- * so a dashboard left open across IST midnight and then refreshed printed
- * yesterday's date under today's bar.
- */
-@Composable
-private fun AxisLabels(range: EarningsRange, dayKey: String) {
-    val colors = AppTheme.colors
-    // Recomputed only when the window or the day changes — three date formats
-    // per recomposition would otherwise ride along on every scroll frame.
-    val labels = remember(range, dayKey) {
-        val last = range.bucketCount - 1
-        Triple(windowLabel(last), windowLabel(last / 2), windowLabel(0))
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        listOf(labels.first, labels.second, labels.third).forEach {
-            Text(it, style = AppTheme.type.monoMicro, color = colors.ink3)
-        }
-    }
-}
-
-@Composable
-private fun RangePicker(selected: EarningsRange, onSelect: (EarningsRange) -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val size = AppTheme.dimens.size
-    Row(horizontalArrangement = Arrangement.spacedBy(space.xs)) {
-        EarningsRange.entries.forEach { range ->
-            val active = range == selected
-            // A 9sp chip inside a 44dp tap target rather than grown to one — the
-            // touch floor is a hit area, not a size. The selected state is a
-            // property rather than a suffix on the description, so a screen
-            // reader hears it the way it hears every other picker.
-            Box(
-                Modifier
-                    .defaultMinSize(minWidth = size.rowMin, minHeight = size.rowMin)
-                    .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                    .clickable { onSelect(range) }
-                    .semantics {
-                        testTag = "artistHome.range.${range.label}"
-                        contentDescription = "${range.label} window"
-                        this.selected = active
-                        role = Role.Button
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    range.label,
-                    style = AppTheme.type.monoMicro,
-                    color = if (active) colors.brandInk else colors.ink3,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                        .background(if (active) colors.brand else colors.bgSoft)
-                        .padding(horizontal = space.sm, vertical = space.xs),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeltaPill(percent: Int, up: Boolean) {
-    val colors = AppTheme.colors
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
-        modifier = Modifier.semantics {
-            contentDescription = if (up) "Up $percent percent" else "Down $percent percent"
-        },
-    ) {
-        Icon(
-            if (up) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
-            contentDescription = null,
-            tint = if (up) colors.good else colors.hot,
-            modifier = Modifier.size(AppTheme.dimens.size.iconSm),
-        )
-        Text(
-            "$percent%",
-            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Bold),
-            color = if (up) colors.good else colors.hot,
-        )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Stat row — what's committed
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Two cells, ruled above and below: the schedule on the left, recent momentum on
- * the right.
- *
- * The right cell is a FIXED 7-day window and ignores the range picker on
- * purpose. It answers "has anything come in lately", which is not a question
- * about whichever window the hero happens to be showing.
- */
-@Composable
-private fun StatRow(state: ArtistHomeUiState) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val dashboard = AppTheme.dimens.dashboard
-    val upcoming = state.upcomingSnapshot
-
-    Column {
-        HRule()
+    item(key = "standing") {
         Row(
             Modifier
-                .height(IntrinsicSize.Min)
-                .padding(horizontal = space.xl, vertical = space.lg),
+                .fillMaxWidth()
+                .padding(horizontal = gutter),
+            horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.md),
         ) {
-            Column(
-                Modifier
-                    .weight(1f)
-                    .padding(end = space.md)
-                    .semantics { testTag = "artistHome.upcomingCard" },
-                verticalArrangement = Arrangement.spacedBy(space.sm),
+            BookabilityCard(
+                state = state,
+                onClick = onScoreExplainer,
+                modifier = Modifier.weight(1f),
+            )
+            ReplySpeedCard(
+                state = state,
+                onClick = onScoreExplainer,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+
+    val waiting = state.pendingRequests.size + state.openQuotes.size
+    if (waiting > 0) {
+        item(key = "requestsHeader") {
+            SectionHeader(
+                title = "Requests",
+                modifier = Modifier.padding(horizontal = gutter),
+            )
+            Text(
+                text = if (waiting == 1) "1 waiting" else "$waiting waiting",
+                style = AppTheme.type.subtitle,
+                color = AppTheme.colors.ink4,
+                modifier = Modifier.padding(horizontal = gutter),
+            )
+        }
+        items(state.pendingRequests, key = { "booking-${it.id}" }) { booking ->
+            RequestCard(
+                name = artistClientDisplayName(booking),
+                title = requestTitle(booking),
+                meta = requestMeta(booking),
+                amountInr = booking.fee,
+                onClick = { onBookingClick(booking.id) },
+                modifier = Modifier.padding(horizontal = gutter),
+            )
+        }
+        items(state.openQuotes, key = { "quote-${it.id}" }) { quote ->
+            RequestCard(
+                name = quote.requesterName ?: "Gig request",
+                title = quoteTitle(quote),
+                meta = quoteMeta(quote),
+                amountInr = quote.counterAmount ?: quote.raw.amount,
+                onClick = { onGigRequestClick(quote.id) },
+                modifier = Modifier.padding(horizontal = gutter),
+            )
+        }
+    }
+
+    availabilityStrip(state, gutter, onOpenAvailability)
+
+    if (state.upcoming.isNotEmpty()) {
+        item(key = "upcomingHeader") {
+            SectionHeader(
+                title = "Upcoming",
+                modifier = Modifier.padding(horizontal = gutter),
+            )
+        }
+        items(state.upcoming, key = { "upcoming-${it.id}" }) { booking ->
+            UpcomingRow(
+                booking = booking,
+                onClick = { onBookingClick(booking.id) },
+                modifier = Modifier.padding(horizontal = gutter),
+            )
+        }
+    }
+
+    subscribeBanner(state, gutter, onSubscribe)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen 85 — cold
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun LazyListScope.coldDashboard(
+    state: ArtistHomeUiState,
+    gutter: androidx.compose.ui.unit.Dp,
+    onOpenWizard: () -> Unit,
+    onOpenAvailability: () -> Unit,
+    onSubscribe: () -> Unit,
+) {
+    profileBanner(state, gutter, onOpenWizard)
+
+    item(key = "coldGrid") {
+        StatGrid(
+            cells = listOf(
+                StatCell("Upcoming gigs", "0"),
+                StatCell("Bookings / 7d", "0"),
+                StatCell("Bookability", "New", emphasised = true),
+                StatCell("Open requests", "0"),
+            ),
+            modifier = Modifier.padding(horizontal = gutter),
+        )
+    }
+
+    availabilityStrip(state, gutter, onOpenAvailability)
+
+    item(key = "coldEmpty") {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = gutter)
+                .clip(RoundedCornerShape(AppTheme.dimens.radii.card))
+                .background(AppTheme.colors.surface3)
+                .padding(
+                    horizontal = AppTheme.dimens.space.lg,
+                    vertical = AppTheme.dimens.space.xl,
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.sm),
+        ) {
+            Text(
+                "No upcoming gigs yet",
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = AppTheme.colors.ink,
+            )
+            Text(
+                "Requests land here the moment a host sends one.",
+                style = AppTheme.type.subtitle,
+                color = AppTheme.colors.ink4,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+
+    subscribeBanner(state, gutter, onSubscribe)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen 86 — unavailable
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun LazyListScope.unavailableDashboard(
+    gutter: androidx.compose.ui.unit.Dp,
+    message: String?,
+    onRetry: () -> Unit,
+) {
+    item(key = "failBanner") {
+        Banner(
+            title = "Couldn't refresh your dashboard",
+            detail = message ?: "Availability and requests may be stale.",
+            tone = BannerTone.Failure,
+            actionLabel = "Retry",
+            onAction = onRetry,
+            modifier = Modifier.padding(horizontal = gutter),
+        )
+    }
+    item(key = "failGrid") {
+        // Every figure is an em-dash, INCLUDING the score. The design shows a
+        // cached 86 there; this build has nothing cached to show, because
+        // Unavailable is by definition the state where no read has ever landed.
+        // An em-dash is that fact written down.
+        StatGrid(
+            cells = listOf(
+                StatCell("Upcoming gigs", "—"),
+                StatCell("Bookings / 7d", "—"),
+                StatCell("Bookability", "—"),
+                StatCell("Open requests", "—"),
+            ),
+            modifier = Modifier.padding(horizontal = gutter),
+        )
+    }
+    item(key = "failStrip") {
+        Column(
+            Modifier.padding(horizontal = gutter),
+            verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.md),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("UPCOMING", style = AppTheme.type.monoMicro, color = colors.ink3)
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        "${upcoming.count}",
-                        style = AppTheme.type.monoStat,
-                        // Warm, not lime: this is a commitment the artist owes,
-                        // not a positive signal. Lime stays reserved for the latter.
-                        color = colors.warm,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        if (upcoming.count == 1) "gig" else "gigs",
-                        style = AppTheme.type.footnote,
-                        color = colors.ink3,
+                Text("Next 14 days", style = AppTheme.type.sectionTitle, color = AppTheme.colors.ink)
+                Text("unavailable", style = AppTheme.type.subtitle, color = AppTheme.colors.ink4)
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = "Availability for the next 14 days is unavailable"
+                    },
+                horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
+            ) {
+                repeat(STRIP_DAYS) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(AppTheme.dimens.component.stripCellH)
+                            .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
+                            .background(AppTheme.colors.placeholder),
                     )
                 }
-                Text(upcoming.copy, style = AppTheme.type.footnote, color = colors.ink3)
             }
+        }
+    }
+    item(key = "failNote") {
+        Banner(
+            title = "We won't draw these days as open. Showing an unknown day as " +
+                "free is how an artist gets double-booked.",
+            tone = BannerTone.Attention,
+            modifier = Modifier.padding(horizontal = gutter),
+        )
+    }
+}
 
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .width(AppTheme.dimens.size.hairline)
-                    .background(colors.lineSoft),
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared sections
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun LazyListScope.profileBanner(
+    state: ArtistHomeUiState,
+    gutter: androidx.compose.ui.unit.Dp,
+    onOpenWizard: () -> Unit,
+) {
+    val gaps = state.profileGaps?.takeIf { it.needsWork } ?: return
+    item(key = "profileGaps") {
+        Column(
+            Modifier.padding(horizontal = gutter),
+            verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.sm),
+        ) {
+            EyebrowLabel("Action required", color = AppTheme.colors.accentDeep)
+            Banner(
+                title = gaps.headline,
+                detail = gaps.detail,
+                // Note, not Promotion: a solid lime block at the top of the
+                // dashboard would spend the screen's one accent on a nag and
+                // out-shout the money card it sits above.
+                tone = BannerTone.Note,
+                actionLabel = "Finish",
+                onAction = onOpenWizard,
             )
+        }
+    }
+}
 
-            Column(
-                Modifier
-                    .weight(1f)
-                    .padding(start = space.md)
-                    .semantics { testTag = "artistHome.bookings7dCard" },
-                verticalArrangement = Arrangement.spacedBy(space.sm),
+private fun LazyListScope.subscribeBanner(
+    state: ArtistHomeUiState,
+    gutter: androidx.compose.ui.unit.Dp,
+    onSubscribe: () -> Unit,
+) {
+    if (!state.showSubscribeBanner) return
+    item(key = "subscribe") {
+        Banner(
+            title = "Get seen first",
+            detail = "Artistant Pro lifts your listing in search.",
+            tone = BannerTone.Info,
+            onClick = onSubscribe,
+            modifier = Modifier.padding(horizontal = gutter),
+        )
+    }
+}
+
+private fun LazyListScope.availabilityStrip(
+    state: ArtistHomeUiState,
+    gutter: androidx.compose.ui.unit.Dp,
+    onOpenAvailability: () -> Unit,
+) {
+    item(key = "strip") {
+        Column(
+            Modifier.padding(horizontal = gutter),
+            verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.md),
+        ) {
+            SectionHeader(
+                title = "Next 14 days",
+                actionLabel = "Manage",
+                onAction = onOpenAvailability,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
             ) {
-                Text("BOOKINGS / 7D", style = AppTheme.type.monoMicro, color = colors.ink3)
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        "${state.bookings7dCount}",
-                        style = AppTheme.type.monoStat,
-                        color = colors.ink,
+                state.strip.forEach { day ->
+                    StripCell(
+                        day = day,
+                        booked = day.key in state.bookedDayKeys,
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.weight(1f))
-                    // An empty week shows the honest 0 without a flat row of
-                    // zero bars beside it, which reads as a broken chart.
-                    if (state.bookings7dCount > 0) {
-                        MiniBars(
-                            values = state.bookings7d,
-                            width = dashboard.barsWidth,
-                            height = dashboard.barsHeight,
-                            modifier = Modifier.semantics {
-                                contentDescription =
-                                    "Bookings over the last 7 days: ${state.bookings7dCount} total"
-                            },
+                }
+            }
+            Text(
+                stripOpenDaysCopy(state.strip.size, state.bookedDayKeys.size),
+                style = AppTheme.type.subtitle,
+                color = AppTheme.colors.ink4,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pieces
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The header's standing pill.
+ *
+ * Two states, and neither of them is a guess: with days picked it reads "Taking
+ * gigs" in the accent register, with none it says so plainly and routes to the
+ * editor. It is only rendered once a read has landed (see [DashboardMode]), so
+ * an empty [daysAvailable] here really does mean "none picked".
+ */
+@Composable
+private fun TakingGigsPill(daysAvailable: List<String>, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val taking = daysAvailable.isNotEmpty()
+    Row(
+        Modifier
+            .heightIn(min = dimens.size.rowMin)
+            .clip(CircleShape)
+            .background(if (taking) colors.accent.copy(alpha = PILL_FILL) else colors.surface2)
+            .then(
+                if (taking) {
+                    Modifier.border(
+                        dimens.size.hairline,
+                        colors.accent.copy(alpha = PILL_LINE),
+                        CircleShape,
+                    )
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = dimens.component.pillPadH, vertical = dimens.component.pillPadV),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        Box(
+            Modifier
+                .size(dimens.component.statusDot)
+                .clip(CircleShape)
+                .background(if (taking) colors.accentInk else colors.ink4),
+        )
+        Text(
+            text = if (taking) "Taking gigs" else "No days set",
+            style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+            color = if (taking) colors.accentDeep else colors.ink2,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * Screen 09's accent card — the only accent on the page.
+ *
+ * The headline is what the month has already PLAYED, because that is the only
+ * figure that is finished. The design's second line reads "₹48,000 awaiting
+ * settlement"; nothing is in custody here and nothing is being settled, so the
+ * honest version names the same money as agreed-and-not-yet-played, and only
+ * when there is some.
+ */
+@Composable
+private fun MonthMoneyCard(
+    money: MonthMoney,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.xl))
+            .background(colors.accent)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(dimens.component.heroPad),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        EyebrowLabel("Earned this month", color = colors.onAccent.copy(alpha = ON_ACCENT_SOFT))
+        Text(
+            formatInr(money.playedInr),
+            style = AppTheme.type.monoHero,
+            color = colors.onAccent,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = dimens.space.xs),
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.lg),
+        ) {
+            Text(
+                text = when (money.showsPlayed) {
+                    0 -> "No shows played yet"
+                    1 -> "1 show played"
+                    else -> "${money.showsPlayed} shows played"
+                },
+                style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.onAccent,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (money.aheadInr > 0) {
+                Text(
+                    "${formatInr(money.aheadInr)} agreed, still to play",
+                    style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.onAccent.copy(alpha = ON_ACCENT_SOFT),
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookabilityCard(
+    state: ArtistHomeUiState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val score = state.breakdown.numericScore
+    StatCardFrame(modifier = modifier, onClick = onClick) {
+        Text("Bookability", style = AppTheme.type.caption, color = colors.ink4)
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.xs + dimens.space.xs / 2),
+            modifier = Modifier.padding(top = dimens.space.sm),
+        ) {
+            Text(
+                text = score?.toString() ?: "New",
+                style = AppTheme.type.displaySub,
+                color = colors.ink,
+            )
+            state.scoreDelta?.takeIf { score != null && it != 0 }?.let { delta ->
+                Text(
+                    text = if (delta > 0) "+$delta" else "$delta",
+                    style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (delta > 0) colors.accentInk else colors.danger,
+                    modifier = Modifier.padding(bottom = dimens.space.xs),
+                )
+            }
+        }
+        // The track only draws under a real score. A full-width empty rail under
+        // "New" reads as a zero rather than as an absence.
+        Box(
+            Modifier
+                .padding(top = dimens.space.md)
+                .fillMaxWidth()
+                .height(dimens.dashboard.meterHeight + dimens.dashboard.meterHeight / 2)
+                .clip(CircleShape)
+                .background(colors.hairline),
+        ) {
+            if (score != null) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(score.coerceIn(0, 100) / 100f)
+                        .fillMaxSize()
+                        .background(colors.accent),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The second standing cell.
+ *
+ * The design says "Reply time · 1h avg · Top 10% in Bengaluru". None of those
+ * three is knowable here: the server keeps reply speed as a 0–100 metric, not a
+ * duration, and a city-relative percentile would need a comparison across
+ * artists that no client-side read can make. So the cell reports the metric the
+ * score is actually built from, and says what it does.
+ */
+@Composable
+private fun ReplySpeedCard(
+    state: ArtistHomeUiState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    // Same gate the score explainer uses: with no completed gigs behind it every
+    // metric is a meaningless zero, and a zero here reads as a penalty.
+    val speed = state.breakdown.replySpeed.takeIf { state.breakdown.totalGigs > 0 }
+    StatCardFrame(modifier = modifier, onClick = onClick) {
+        Text("Reply speed", style = AppTheme.type.caption, color = colors.ink4)
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.xs + dimens.space.xs / 2),
+            modifier = Modifier.padding(top = dimens.space.sm),
+        ) {
+            Text(
+                text = speed?.toString() ?: "—",
+                style = AppTheme.type.displaySub,
+                color = colors.ink,
+            )
+            Text(
+                text = if (speed != null) "/100" else "no gigs yet",
+                style = AppTheme.type.caption,
+                color = colors.ink4,
+                modifier = Modifier.padding(bottom = dimens.space.xs),
+            )
+        }
+        Text(
+            "Answering faster lifts your score.",
+            style = AppTheme.type.caption,
+            color = colors.ink3,
+            modifier = Modifier.padding(top = dimens.space.md),
+        )
+    }
+}
+
+@Composable
+private fun StatCardFrame(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val dimens = AppTheme.dimens
+    Column(
+        modifier
+            .clip(RoundedCornerShape(dimens.radii.card))
+            .background(AppTheme.colors.surface3)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(dimens.space.lg),
+    ) { content() }
+}
+
+/** One cell of the 2×2 grid on screens 85 and 86. */
+private data class StatCell(val label: String, val value: String, val emphasised: Boolean = false)
+
+@Composable
+private fun StatGrid(cells: List<StatCell>, modifier: Modifier = Modifier) {
+    val dimens = AppTheme.dimens
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(dimens.space.md)) {
+        cells.chunked(2).forEach { pair ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+            ) {
+                pair.forEach { cell ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(dimens.radii.lg))
+                            .background(AppTheme.colors.surface3)
+                            .padding(dimens.component.cardPad),
+                    ) {
+                        Text(
+                            cell.value,
+                            style = AppTheme.type.displaySub,
+                            // A zero and an em-dash both sit a rung down the ink
+                            // ladder: neither is news. Only a real value is ink.
+                            color = if (cell.emphasised) AppTheme.colors.ink else AppTheme.colors.ink3,
+                        )
+                        Text(
+                            cell.label,
+                            style = AppTheme.type.caption,
+                            color = AppTheme.colors.ink4,
+                            modifier = Modifier.padding(top = dimens.space.xs),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
-        HRule()
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Bookability
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * The artist's standing in the marketplace: the ring, the tier, and the four
- * components behind the number.
- *
- * The whole block is the tap target into the explainer — a score with no way to
- * ask "why that number" is just a judgement.
- */
 @Composable
-private fun BookabilityBlock(state: ArtistHomeUiState, onScoreExplainer: () -> Unit) {
+private fun StripCell(day: StripDay, booked: Boolean, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val breakdown = state.breakdown
-    val score = breakdown.numericScore
-    val tier = breakdown.tier
-    val tint = if (score == null) colors.ink3 else tierColor(tier, colors)
-    val interaction = remember { MutableInteractionSource() }
-
+    val dimens = AppTheme.dimens
     Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = space.xl, vertical = space.xl),
-        verticalArrangement = Arrangement.spacedBy(space.lg),
-    ) {
-        // An incomplete profile is precisely what suppresses being booked, so
-        // the flag belongs on the standing card. Non-interactive — the banner at
-        // the top carries the route to the fix.
-        if (state.profileGaps?.needsWork == true) {
-            ActionRequiredPill()
-        }
-
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .pressScale(interaction)
-                .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
-                .clickable(interactionSource = interaction, indication = null, onClick = onScoreExplainer)
-                .semantics { testTag = "artistHome.bookabilityCard" },
-            horizontalArrangement = Arrangement.spacedBy(space.lg),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ScoreRing(
-                value = score,
-                size = AppTheme.dimens.dashboard.scoreRing,
-                showLabel = false,
-                totalGigs = breakdown.totalGigs,
-            )
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(space.xs)) {
-                Text("BOOKABILITY", style = AppTheme.type.monoMicro, color = colors.ink3)
-                Row(
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(space.sm),
-                ) {
-                    Text(score?.toString() ?: "—", style = AppTheme.type.monoLarge, color = tint)
-                    Text(
-                        (if (score == null) ScoreTier.New.label else tier.label).uppercase(Locale.US),
-                        style = AppTheme.type.monoMicro,
-                        color = tint,
-                    )
-                }
-            }
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colors.ink3,
-                modifier = Modifier.size(AppTheme.dimens.size.iconLg),
-            )
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-            breakdownRows(breakdown).forEach { MetricRow(it) }
-        }
-    }
-}
-
-@Composable
-private fun ActionRequiredPill() {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        Modifier
-            .clip(CircleShape)
-            .background(colors.warm.copy(alpha = PILL_TINT))
-            .padding(horizontal = space.md, vertical = space.xs)
-            .semantics { testTag = "artistHome.actionRequiredPill" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.xs),
-    ) {
-        Box(
-            Modifier
-                .size(AppTheme.dimens.size.dot)
-                .clip(CircleShape)
-                .background(colors.warm),
-        )
-        Text("ACTION REQUIRED", style = AppTheme.type.monoMicro, color = colors.warm)
-    }
-}
-
-/**
- * One score component as a label, meter and value.
- *
- * A null value renders an em-dash and an EMPTY track rather than a zero-width
- * bar at 0%, because those two look identical and mean opposite things ("we have
- * no data" vs "you scored nothing").
- */
-@Composable
-private fun MetricRow(row: BreakdownRow) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val dashboard = AppTheme.dimens.dashboard
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.md),
-        modifier = Modifier.semantics {
-            contentDescription = "${row.label}: ${row.value?.let { "$it out of 100" } ?: "no data yet"}"
-        },
-    ) {
-        Text(
-            row.label,
-            style = AppTheme.type.footnote,
-            color = colors.ink2,
-            modifier = Modifier.width(dashboard.meterLabelWidth),
-        )
-        Box(
-            Modifier
-                .weight(1f)
-                .height(dashboard.meterHeight)
-                .clip(CircleShape)
-                .background(colors.bgSoft),
-        ) {
-            row.value?.let { pct ->
-                Box(
-                    Modifier
-                        .fillMaxWidth(pct.coerceIn(0, 100) / 100f)
-                        .fillMaxHeight()
-                        .clip(CircleShape)
-                        .background(colors.brand),
-                )
-            }
-        }
-        Text(
-            row.value?.toString() ?: "—",
-            style = AppTheme.type.monoSmall,
-            color = colors.ink2,
-        )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Availability strip
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * The next fortnight at a glance, and the way to change what's offered.
- *
- * Only two states, not three. The reference build also shades days that carry an
- * event on the artist's own device calendar; that read direction does not exist
- * on this platform yet (calendar sync here only WRITES confirmed gigs out to the
- * device), so inventing a third legend entry would label days that nothing can
- * ever fill.
- */
-@Composable
-private fun AvailabilityStrip(state: ArtistHomeUiState, onManage: () -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-
-    Column(Modifier.padding(vertical = space.lg)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = space.xl),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "NEXT 14 DAYS",
-                style = AppTheme.type.monoMicro,
-                color = colors.ink3,
-                modifier = Modifier.weight(1f),
-            )
-            Row(
-                Modifier
-                    // The label stays micro; the row it is tapped through clears
-                    // the 44dp floor.
-                    .heightIn(min = AppTheme.dimens.size.rowMin)
-                    .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                    .clickable(onClick = onManage)
-                    .padding(horizontal = space.sm, vertical = space.xs)
-                    .semantics {
-                        testTag = "artistHome.manageAvailability"
-                        contentDescription = "Manage availability"
-                        role = Role.Button
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("MANAGE", style = AppTheme.type.monoMicro, color = colors.accentInk)
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = colors.accentInk,
-                    modifier = Modifier.size(AppTheme.dimens.size.iconSm),
-                )
-            }
-        }
-        Spacer(Modifier.height(space.md))
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = space.xl),
-            horizontalArrangement = Arrangement.spacedBy(space.sm),
-        ) {
-            items(state.strip, key = { it.key }) { day ->
-                DayCell(day = day, booked = day.key in state.bookedDayKeys)
-            }
-        }
-        Spacer(Modifier.height(space.md))
-
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = space.xl),
-            horizontalArrangement = Arrangement.spacedBy(space.lg),
-        ) {
-            Legend(label = "Booked", filled = true)
-            Legend(label = "Open", filled = false)
-        }
-    }
-}
-
-@Composable
-private fun DayCell(day: StripDay, booked: Boolean) {
-    val colors = AppTheme.colors
-    val dashboard = AppTheme.dimens.dashboard
-    val space = AppTheme.dimens.space
-    val shape = RoundedCornerShape(AppTheme.dimens.radii.md)
-
-    Column(
+        modifier
+            .height(dimens.component.stripCellH)
+            .clip(RoundedCornerShape(dimens.radii.sm))
+            .background(if (booked) colors.accent else colors.surface3)
+            .semantics {
+                contentDescription = "${day.weekday} ${day.dayOfMonth}" +
+                    if (booked) ", booked" else ", open"
+            },
+        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(space.xs),
-        modifier = Modifier.semantics {
-            contentDescription =
-                "${day.weekday} ${day.dayOfMonth}, ${if (booked) "booked" else "open"}"
-        },
-    ) {
-        Text(day.weekday, style = AppTheme.type.monoMicro, color = colors.ink3)
-        Column(
-            Modifier
-                .size(dashboard.dayCellW, dashboard.dayCellH)
-                .clip(shape)
-                .background(if (booked) colors.brand else colors.bg)
-                .then(
-                    if (booked) Modifier
-                    else Modifier.border(AppTheme.dimens.size.hairline, colors.line, shape),
-                )
-                .padding(vertical = space.sm),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                "${day.dayOfMonth}",
-                style = AppTheme.type.monoStat,
-                color = if (booked) colors.brandInk else colors.ink,
-                textAlign = TextAlign.Center,
-            )
-            if (booked) {
-                Spacer(Modifier.height(space.xs))
-                Box(
-                    Modifier
-                        .size(dashboard.dayDot)
-                        .clip(CircleShape)
-                        .background(colors.brandInk),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun Legend(label: String, filled: Boolean) {
-    val colors = AppTheme.colors
-    val shape = RoundedCornerShape(AppTheme.dimens.radii.sm)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.xs),
-    ) {
-        Box(
-            Modifier
-                .size(AppTheme.dimens.size.dot)
-                .clip(shape)
-                .background(if (filled) colors.brand else colors.bg)
-                .then(
-                    if (filled) Modifier
-                    else Modifier.border(AppTheme.dimens.size.hairline, colors.line, shape),
-                ),
-        )
-        Text(label, style = AppTheme.type.footnote, color = colors.ink3)
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Rails
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Bookings the artist hasn't answered. Self-hiding — an empty rail here would be
- * a heading over nothing, and the dashboard already tells them work is quiet.
- */
-private fun LazyListScope.newRequestsSection(
-    pending: List<Booking>,
-    onBookingClick: (String) -> Unit,
-) {
-    if (pending.isEmpty()) return
-    item(key = "new-requests-header") {
-        SectionHeader(
-            title = "New requests",
-            trailing = "${pending.size} new",
-            testTagId = "artistHome.newRequests",
-        )
-    }
-    items(pending, key = { "new-${it.id}" }) { booking ->
-        PendingRequestRow(booking = booking, onClick = { onBookingClick(booking.id) })
-        HRule(Modifier.padding(horizontal = AppTheme.dimens.space.xl))
-    }
-}
-
-/**
- * The quote negotiation inbox. A DIFFERENT funnel from the one above — a client
- * proposing their own amount, versus a client requesting a published package —
- * so it gets its own title. Two rails sharing one heading read as a rendering
- * bug.
- */
-private fun LazyListScope.quoteRequestsSection(
-    quotes: List<StoredRequest>,
-    onGigRequestClick: (String) -> Unit,
-) {
-    if (quotes.isEmpty()) return
-    item(key = "quotes-header") {
-        SectionHeader(
-            title = "Quote requests",
-            trailing = "${quotes.size} open",
-            testTagId = "artistHome.quoteRequests",
-        )
-    }
-    items(quotes, key = { "quote-${it.id}" }) { request ->
-        QuoteRequestRow(request = request, onClick = { onGigRequestClick(request.id) })
-        HRule(Modifier.padding(horizontal = AppTheme.dimens.space.xl))
-    }
-}
-
-/**
- * Confirmed future gigs, soonest first — always rendered, with an empty state.
- *
- * Unlike the two rails above this one is NOT self-hiding: "what's next" is the
- * question the artist opens the app with, and a screen that silently omits the
- * answer is indistinguishable from one that failed to load it.
- */
-private fun LazyListScope.upcomingSection(
-    upcoming: List<Booking>,
-    onBookingClick: (String) -> Unit,
-) {
-    item(key = "upcoming-header") {
-        SectionHeader(title = "Upcoming gigs", testTagId = "artistHome.upcomingSection")
-    }
-    if (upcoming.isEmpty()) {
-        item(key = "upcoming-empty") {
-            Text(
-                "No upcoming gigs yet",
-                style = AppTheme.type.footnote,
-                color = AppTheme.colors.ink3,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = AppTheme.dimens.space.xl),
-            )
-        }
-        return
-    }
-    items(upcoming, key = { "gig-${it.id}" }) { booking ->
-        UpcomingRow(booking = booking, onClick = { onBookingClick(booking.id) })
-        HRule(Modifier.padding(horizontal = AppTheme.dimens.space.xl))
-    }
-}
-
-@Composable
-private fun SectionHeader(title: String, trailing: String? = null, testTagId: String? = null) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = space.xl)
-            .padding(top = space.xl, bottom = space.sm)
-            .then(
-                if (testTagId != null) Modifier.semantics { testTag = testTagId } else Modifier,
-            ),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            title,
-            style = AppTheme.type.headline.copy(fontWeight = FontWeight.Bold),
-            color = colors.ink,
-            modifier = Modifier.weight(1f),
+            day.dayOfMonth.toString(),
+            style = AppTheme.type.monoCount,
+            color = if (booked) colors.onAccent else colors.ink4,
         )
-        if (trailing != null) {
-            Text(trailing, style = AppTheme.type.footnote, color = colors.ink3)
-        }
     }
 }
 
+/**
+ * One inbound request.
+ *
+ * Deliberately has no Accept button on it — see the note on [ArtistHomeScreen].
+ * The whole card is the target, and it opens the screen where the decision is
+ * made with the clash warning in front of it.
+ */
 @Composable
-private fun PendingRequestRow(booking: Booking, onClick: () -> Unit) {
+private fun RequestCard(
+    name: String,
+    title: String,
+    meta: String?,
+    amountInr: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val interaction = remember { MutableInteractionSource() }
+    val dimens = AppTheme.dimens
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .pressScale(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = space.xl, vertical = space.md),
+            .clip(RoundedCornerShape(dimens.radii.card))
+            .background(colors.surface3)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(dimens.component.cardPad),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
-        // Warm, not lime — this is waiting on the artist, not a win.
-        Box(
-            Modifier
-                .size(AppTheme.dimens.dashboard.bannerDot)
-                .clip(CircleShape)
-                .background(colors.warm),
-        )
+        Avatar(name = name, size = dimens.component.rowAvatar)
         Column(Modifier.weight(1f)) {
             Text(
-                artistClientDisplayName(booking),
-                style = AppTheme.type.callout,
+                title,
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
                 color = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                "${booking.date} · ${booking.time}",
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(formatInr(booking.fee), style = AppTheme.type.monoPrice, color = colors.ink)
-    }
-}
-
-@Composable
-private fun QuoteRequestRow(request: StoredRequest, onClick: () -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val interaction = remember { MutableInteractionSource() }
-    // Null when the server can't name the requester — `users` is self-only under
-    // RLS, so the artist never reads the client's row. Printing "Client" here put
-    // the same name and the same "C" monogram on every inbound quote; the row is
-    // told apart by its date, offer and message below, which are its own.
-    val client = request.requesterName
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .pressScale(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = space.xl, vertical = space.md)
-            .semantics { testTag = "artistHome.request.${request.id}" },
-        verticalArrangement = Arrangement.spacedBy(space.sm),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(space.md),
-        ) {
-            // Avatar draws its neutral placeholder on an empty name — the right
-            // look for someone we can't identify.
-            Avatar(name = client.orEmpty(), size = AppTheme.dimens.size.avatarSm)
-            Column(Modifier.weight(1f)) {
+            if (!meta.isNullOrBlank()) {
                 Text(
-                    client ?: "Gig request",
-                    style = AppTheme.type.callout,
-                    color = if (client != null) colors.ink else colors.ink2,
+                    meta,
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    listOfNotNull(
-                        // No " ago" suffix here: the repository's `relativeTimeAgo`
-                        // already returns whole phrases ("just now", "3h ago"), so
-                        // appending one rendered "3h ago ago" / "just now ago".
-                        request.raw.timeAgo.takeIf { it.isNotBlank() },
-                        request.raw.packageLabel.takeIf { it.isNotBlank() },
-                    ).joinToString(" · "),
-                    style = AppTheme.type.footnote,
-                    color = colors.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = dimens.space.xs / 2),
                 )
             }
-            Text(
-                request.status.label.uppercase(Locale.US),
-                style = AppTheme.type.monoMicro,
-                color = statusTint(request),
-            )
         }
-        if (request.raw.message.isNotBlank()) {
-            Text(
-                request.raw.message,
-                style = AppTheme.type.footnote,
-                color = colors.ink2,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                request.raw.date,
-                style = AppTheme.type.monoSmall,
-                color = colors.ink3,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                formatInr(request.counterAmount ?: request.raw.amount),
-                style = AppTheme.type.monoPrice,
-                color = colors.ink,
-            )
-        }
+        Text(
+            formatInr(amountInr),
+            style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
-private fun statusTint(request: StoredRequest) = when (request.status) {
-    GigRequestStatus.Open -> AppTheme.colors.brand
-    GigRequestStatus.Countered -> AppTheme.colors.warm
-    GigRequestStatus.Accepted -> AppTheme.colors.good
-    else -> AppTheme.colors.ink3
-}
-
-@Composable
-private fun UpcomingRow(booking: Booking, onClick: () -> Unit) {
+private fun UpcomingRow(booking: Booking, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val interaction = remember { MutableInteractionSource() }
-    // Keyed on the whole immutable row, not on id/date/time: `gigDateParts`
-    // resolves through `resolvedStartEpochMs()`, which PREFERS `startDatetimeIso`
-    // and only falls back to those labels. The list keys its items by id, so the
-    // slot survives a refresh — and a corrected `start_datetime` that left the
-    // display labels alone would have left a stale day/weekday block behind it.
-    val parts = remember(booking) { gigDateParts(booking) }
-
+    val dimens = AppTheme.dimens
+    val parts = gigDateParts(booking)
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .pressScale(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = space.xl, vertical = space.md),
+            .clip(RoundedCornerShape(dimens.radii.card))
+            .background(colors.surface3)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(dimens.component.cardPad),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(AppTheme.dimens.size.avatarMd),
-        ) {
-            Text(parts.day, style = AppTheme.type.monoStat, color = colors.ink)
-            Text(parts.weekday, style = AppTheme.type.monoMicro, color = colors.ink3)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(parts.day, style = AppTheme.type.monoDay, color = colors.ink)
+            Text(parts.weekday, style = AppTheme.type.monoWeekday, color = colors.ink4)
         }
+        Box(
+            Modifier
+                .width(dimens.size.stroke)
+                .height(dimens.component.rowAvatar)
+                .clip(CircleShape)
+                .background(colors.accent),
+        )
         Column(Modifier.weight(1f)) {
             Text(
                 artistClientDisplayName(booking),
-                style = AppTheme.type.callout,
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
                 color = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                // Venue rather than a package name: the bookings read doesn't
-                // carry the package's label, only its position, and "Package #2"
-                // tells the artist nothing about the gig they're preparing for.
-                listOf(booking.time, booking.venue)
-                    .filter { it.isNotBlank() && it != "TBD" }
-                    .joinToString(" · "),
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
+                listOfNotNull(
+                    booking.time.takeIf { it.isNotBlank() },
+                    booking.venue.takeIf { it.isNotBlank() && it != "TBD" },
+                ).joinToString(" · "),
+                style = AppTheme.type.caption,
+                color = colors.ink4,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        // The artist's FEE, never `total` — total carries the platform cut and
-        // GST from the dormant payments model, which nobody pays and which would
-        // overstate what the artist takes home.
-        Text(formatInr(booking.fee), style = AppTheme.type.monoPrice, color = colors.ink)
+        Text(
+            formatInr(booking.fee),
+            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+        )
     }
 }
 
-/** Warm fill behind the action-required pill — a tint, not a surface. */
-private const val PILL_TINT = 0.12f
+// ─────────────────────────────────────────────────────────────────────────────
+// Row copy
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun requestTitle(booking: Booking): String {
+    val who = artistClientDisplayName(booking)
+    val pkg = booking.packageName?.trim()?.takeIf { it.isNotEmpty() && it != "Custom" }
+    return if (pkg != null) "$who · $pkg" else who
+}
+
+private fun requestMeta(booking: Booking): String = listOfNotNull(
+    booking.date.takeIf { it.isNotBlank() && it != "TBD" },
+    booking.guests.takeIf { it > 0 }?.let { "$it guests" },
+    booking.venue.takeIf { it.isNotBlank() && it != "TBD" },
+).joinToString(" · ")
+
+private fun quoteTitle(quote: StoredRequest): String =
+    quote.requesterName ?: "Gig request"
+
+private fun quoteMeta(quote: StoredRequest): String = listOfNotNull(
+    quote.raw.date.takeIf { it.isNotBlank() },
+    quote.raw.crowdSize?.takeIf { it > 0 }?.let { "$it guests" },
+    quote.raw.venue,
+).joinToString(" · ")
+
+/** 14, matching [ArtistHomeViewModel]'s strip window — the grey cells on 86. */
+private const val STRIP_DAYS = 14
+
+/** The eyebrow and the secondary line on the accent card, at reading weight. */
+private const val ON_ACCENT_SOFT = 0.6f
+
+/** The header pill's accent fill and its rim (screens 09 / 22). */
+private const val PILL_FILL = 0.3f
+private const val PILL_LINE = 0.6f
