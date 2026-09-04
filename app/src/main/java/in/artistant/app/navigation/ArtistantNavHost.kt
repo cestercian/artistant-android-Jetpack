@@ -171,6 +171,12 @@ fun ArtistantNavHost() {
             // of the signup flow interrupts the one walk that must not be
             // interrupted, and a brand-new account has nothing to be told what's
             // new about.
+            //
+            // This IS the launch trigger — the decision runs in `WhatsNewViewModel`'s
+            // init, which is the first composition of this host. The account list's
+            // "What's new" row re-opens the same sheet through the same ViewModel:
+            // both scaffolds sit above any NavHost, so `hiltViewModel()` there
+            // resolves the activity's instance, which is this one.
             if (!blocked && gate is RootGate.Tabs) WhatsNewHost()
 
             // Screen 77 — the ONE host. Suppressed behind a system gate, where a
