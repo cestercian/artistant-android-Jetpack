@@ -7,6 +7,7 @@ import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeReportsRepository
+import `in`.artistant.app.data.repository.FakeRequestsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
@@ -166,12 +167,14 @@ class ChatViewModelTest {
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
+        requests: FakeRequestsRepository = FakeRequestsRepository(),
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
         artistsRepository = artists,
         bookingsRepository = bookings,
         reports = FakeReportsRepository(),
+        requests = requests,
         flagsStore = flags,
         blockedUsers = blockedUsers,
         viewer = { viewerId },
@@ -775,6 +778,7 @@ class ChatViewModelTest {
             artistsRepository = FakeArtistsRepository(),
             bookingsRepository = StubBookings(),
             reports = reports,
+            requests = FakeRequestsRepository(),
             flagsStore = FakeThreadFlagsStore(),
             blockedUsers = FakeBlockedUsersStore(),
             viewer = { CLIENT_ID },
@@ -967,6 +971,7 @@ class ChatViewModelTest {
             artistsRepository = FakeArtistsRepository(),
             bookingsRepository = StubBookings(),
             reports = reports,
+            requests = FakeRequestsRepository(),
             flagsStore = FakeThreadFlagsStore(),
             blockedUsers = FakeBlockedUsersStore(),
             viewer = { CLIENT_ID },

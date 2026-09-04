@@ -7,18 +7,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,11 +29,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -44,13 +44,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -58,29 +58,32 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.MessageDelivery
 import `in`.artistant.app.data.model.MessageKind
+import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.PillTone
-import `in`.artistant.app.designsystem.component.bookingStatusTone
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.NarratedStep
+import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.SendingNarration
+import `in`.artistant.app.designsystem.component.StepState
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.feature.booking.CircleIconButton
 import kotlinx.coroutines.delay
 import java.util.Date
 
 /**
- * One conversation.
+ * One conversation (designs 08, 70, 88).
  *
- * Three things wrap the transcript, and each answers a question the bare bubble
- * list left open: the strip at the top says *which gig* this is (a name alone
- * meant bouncing out to Bookings to find out), the caption above the composer
- * says *how soon*, and the CTA below it offers the one move that is actually the
- * reader's to make. The safety notice sits between them and says only what is
- * true — chat is not analysed, but the report flow behind it is real.
+ * The chrome around the transcript answers the questions a bare bubble list
+ * leaves open, and the light design moved each answer to where it belongs: the
+ * HEADER says who and which gig (a name alone meant bouncing out to Bookings to
+ * find out), a centred status pill at the head of the transcript says what state
+ * that gig is in, and decisions are OBJECTS in the thread rather than chrome
+ * bolted above the keyboard — a quote is a card with Accept and Counter on it,
+ * not a number someone typed.
  *
  * The transcript is a single lazy list and stays one: it is realtime and
  * unbounded, and every decoration (day rules, sender captions, read receipt)
@@ -93,15 +96,21 @@ fun ChatScreen(
     onBack: () -> Unit,
     onBookingClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
+    /**
+     * Where an accepted quote lands — the booking side's "Match confirmed"
+     * (design 94), owned by the booking section. Only ever called with a
+     * booking id the thread actually carries.
+     */
+    onMatchConfirmed: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     // One clock for the whole screen. The transcript's day separators and the
-    // composer's "how soon" caption both describe the same day, so they read the
-    // same "now" — and one midnight timer / lifecycle observer serves both
-    // instead of a pair per screen (see rememberDayClock).
+    // quote card's expiry both describe the same day, so they read the same
+    // "now" — and one midnight timer / lifecycle observer serves both instead of
+    // a pair per screen (see rememberDayClock).
     val now = rememberDayClock()
     val haptics = rememberHaptics()
 
@@ -111,37 +120,62 @@ fun ChatScreen(
         viewModel.events.collect { event ->
             when (event) {
                 ChatEvent.SendFailed -> haptics.error()
+                is ChatEvent.QuoteAccepted -> {
+                    haptics.success()
+                    // A thread with no booking behind it stays put: the card has
+                    // already flipped to its frozen "AGREED" state, which IS the
+                    // record design 08 asks for. Navigating to a destination
+                    // whose id we do not have would land on nothing.
+                    event.bookingId?.let(onMatchConfirmed)
+                }
             }
         }
     }
 
-    // The report receipt is the moment the reference build buzzes. Its picker
-    // stages a reason and files on a second tap, so it buzzes select-then-success
-    // over two taps; ours files on the reason tap, so one tap gets one buzz — the
-    // outcome one. `reportSubmitted` resets when the sheet closes, so this can't
-    // re-fire on a later recomposition.
+    // The report receipt is the moment the reference build buzzes.
     LaunchedEffect(state.reportSubmitted) {
         if (state.reportSubmitted) haptics.success()
+    }
+
+    // Accepting takes over the whole screen (design 70): it is a decision with a
+    // round trip behind it, and narrating the three phases in place — under a
+    // transcript that is still scrollable — would invite a second tap on a card
+    // whose write is already in flight.
+    val accepting = state.quoteAction as? QuoteAction.Accepting
+    if (accepting != null) {
+        AcceptingQuote(state = state, phase = accepting.phase, modifier = modifier)
+        return
     }
 
     Column(
         modifier
             .fillMaxSize()
-            .background(colors.bg)
-            // The composer and the funnel CTA both have to clear the keyboard, so
-            // the inset goes on the whole screen rather than on the input.
+            .background(colors.page)
+            // The composer has to clear the keyboard, so the inset goes on the
+            // whole screen rather than on the input.
             //
-            // `exclude(navigationBars)` rather than a bare `imePadding()`: the tab
-            // scaffold already pads its content by the system bars, and the IME
-            // inset is measured from the screen edge — so padding by the full IME
-            // height would count the navigation bar twice and leave the composer
-            // floating a bar's height above the keyboard.
+            // `exclude(navigationBars)` rather than a bare `imePadding()`: the
+            // tab scaffold already pads its content by the system bars, and the
+            // IME inset is measured from the screen edge — so padding by the
+            // full IME height would count the navigation bar twice and leave the
+            // composer floating a bar's height above the keyboard.
+            //
+            // This is the ONLY thing that moves for the keyboard. The activity
+            // declares `windowSoftInputMode="adjustResize"` precisely so the
+            // platform does not also pan the window: with the default
+            // (UNSPECIFIED → PAN) the screen moved twice and the header slid off
+            // the top. Do not remove that attribute.
             .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
     ) {
-        ChatTopBar(title = state.title, onBack = onBack, onDetails = viewModel::openDetails)
-        ThreadContextStrip(context = state.context, onOpenBooking = onBookingClick)
+        ChatHeader(
+            title = state.title,
+            subtitle = headerSubtitle(state.context, now),
+            onBack = onBack,
+            onDetails = viewModel::openDetails,
+        )
+        HRule()
         if (state.safetyBannerVisible) {
-            SafetyBanner(onDismiss = viewModel::dismissSafetyBanner)
+            SafetyNotice(onDismiss = viewModel::dismissSafetyBanner)
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -159,7 +193,7 @@ fun ChatScreen(
                     modifier = Modifier.align(Alignment.Center),
                 )
 
-                state.messages.isEmpty() -> EmptyState(
+                state.messages.isEmpty() && state.quote == null -> EmptyState(
                     title = "No messages yet",
                     body = "Say hello — this is the start of the conversation.",
                     modifier = Modifier.align(Alignment.Center),
@@ -171,13 +205,13 @@ fun ChatScreen(
                     onBookingClick = onBookingClick,
                     onRetry = viewModel::retryFailedMessage,
                     onLoadOlder = viewModel::loadOlder,
+                    onAcceptQuote = viewModel::acceptQuote,
+                    onCounterQuote = viewModel::openCounter,
                 )
             }
         }
 
-        ComposerStack(
-            state = state,
-            nowMs = now,
+        ComposerBar(
             onSend = { body ->
                 // Light tap on send, matching iOS. Fired on the tap, not on the
                 // delivery: the optimistic bubble is already on screen, and the
@@ -185,9 +219,25 @@ fun ChatScreen(
                 haptics.tap()
                 viewModel.send(body)
             },
-            onRetryRefresh = viewModel::refresh,
-            onOpenBooking = onBookingClick,
+            above = {
+                ComposerNotices(
+                    state = state,
+                    onRetryRefresh = viewModel::refresh,
+                    onOpenBooking = onBookingClick,
+                    onDismissQuoteError = viewModel::dismissQuoteError,
+                )
+            },
         )
+    }
+
+    state.quote?.let { quote ->
+        if (state.countering) {
+            CounterQuoteSheet(
+                currentAmountInr = quote.amountInr,
+                onSubmit = viewModel::counterQuote,
+                onDismiss = viewModel::dismissCounter,
+            )
+        }
     }
 
     if (state.showDetails) {
@@ -238,113 +288,90 @@ fun ChatScreen(
 // Chrome
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Back · avatar · name over the gig line · Details (design 88).
+ *
+ * The name is left-aligned against the avatar rather than centred in the bar.
+ * Centring is for a screen that is one thing; this header is a person plus what
+ * you are talking to them about, and the two have to read as a stack.
+ *
+ * "Details" is a word, not a pill or a bare avatar. The avatar exposed none of
+ * the thread's context and for an artist viewer it was inert — their counterpart
+ * is a client with no profile to open, so tapping their own face did nothing.
+ */
 @Composable
-private fun ChatTopBar(title: String, onBack: () -> Unit, onDetails: () -> Unit) {
+private fun ChatHeader(
+    title: String,
+    subtitle: String?,
+    onBack: () -> Unit,
+    onDetails: () -> Unit,
+) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
     val dimens = AppTheme.dimens
-    // Box, not Row: the counterpart's name is centred against the BAR, the way
-    // the funnel header and the reference's inline nav bar centre theirs. Laid
-    // out as a Row child it would centre in the space left over beside the back
-    // button and visibly sit off-axis. The reservations either side are the two
-    // controls' own widths, so a long name ellipsises before it reaches either.
-    Box(
+    Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = space.xs, end = space.lg, top = space.xs)
-            .height(dimens.size.rowMin),
-        contentAlignment = Alignment.Center,
+            .background(colors.surface)
+            .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
-        Text(
-            title,
-            style = AppTheme.type.headline,
-            color = colors.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = dimens.size.barTitleReserve),
-        )
-        CircleIconButton(
+        IconCircle(
             icon = Icons.AutoMirrored.Filled.ArrowBack,
             contentDescription = "Back",
             onClick = onBack,
-            modifier = Modifier.align(Alignment.CenterStart),
+            size = dimens.component.iconCircleSm,
         )
-        // A labelled pill rather than a bare avatar: the avatar exposed none of
-        // the thread's context, and for an artist viewer it was inert — their
-        // counterpart is a client with no profile to open, so tapping their own
-        // face did nothing.
+        Avatar(name = title, size = dimens.component.iconCircleSm)
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = colors.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    subtitle,
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         Text(
             "Details",
-            style = AppTheme.type.footnote,
-            color = colors.ink,
+            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Bold),
+            color = colors.accentInk,
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .clip(CircleShape)
-                .background(colors.bgElev)
-                .border(dimens.size.hairline, colors.line, CircleShape)
+                .clip(RoundedCornerShape(dimens.radii.sm))
                 .clickable(onClick = onDetails)
-                .padding(horizontal = space.md, vertical = space.sm)
+                .padding(horizontal = dimens.space.sm, vertical = dimens.space.md)
                 .semantics { testTag = "chat.details" },
         )
     }
 }
 
 /**
- * The always-on gig line: status, date, venue, fee.
+ * "Sangeet · Sat 12 Oct · 12 days out" — the gig, under the name.
  *
- * Tappable straight through to the booking when there is one, because the most
- * common reason to want this information is to go and act on it.
+ * Null for an inquiry (nothing has been agreed) and null when no part resolves,
+ * so it never renders a dangling separator.
  */
-@Composable
-private fun ThreadContextStrip(context: ThreadContext, onOpenBooking: (String) -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val tone = context.status?.let(::bookingStatusTone) ?: PillTone.Neutral
-    val bookingId = context.bookingId
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(colors.bgElev)
-            .then(
-                if (bookingId != null) Modifier.clickable { onOpenBooking(bookingId) } else Modifier,
-            )
-            .padding(horizontal = space.lg, vertical = space.sm)
-            .semantics(mergeDescendants = true) {
-                contentDescription = context.summary
-                testTag = "chat.contextStrip"
-            },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.xs),
-    ) {
-        Box(
-            Modifier
-                .size(AppTheme.dimens.size.dot)
-                .clip(CircleShape)
-                .background(toneColor(tone)),
-        )
-        Text(context.statusLabel, style = AppTheme.type.monoSmall, color = colors.ink2)
-        context.detailLine?.let {
-            Text(
-                "· $it",
-                style = AppTheme.type.monoSmall,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-        }
-        Spacer(Modifier.weight(1f))
-        context.fee?.let {
-            Text(formatInr(it), style = AppTheme.type.monoSmall, color = colors.accentInk)
-        }
-    }
-    HRule()
+private fun headerSubtitle(context: ThreadContext, nowMs: Long): String? {
+    if (context.bookingId == null) return null
+    val parts = listOfNotNull(
+        context.dateLabel,
+        context.venue,
+        ThreadContext.timeUntil(context.startEpochMs, nowMs),
+    )
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(ThreadContext.SEPARATOR)
 }
 
 /**
- * The trust notice.
+ * The trust notice (design 88).
  *
  * It says exactly two true things: keep the conversation here, and report
  * anything that feels wrong. It deliberately does NOT claim messages are
@@ -354,45 +381,46 @@ private fun ThreadContextStrip(context: ThreadContext, onOpenBooking: (String) -
  * against whoever you are talking to.
  */
 @Composable
-private fun SafetyBanner(onDismiss: () -> Unit) {
+private fun SafetyNotice(onDismiss: () -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     Row(
         Modifier
             .fillMaxWidth()
-            .background(colors.bgElev)
-            .padding(start = space.lg, end = space.xs, top = space.xs, bottom = space.xs),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.sm),
+            .padding(
+                start = dimens.component.gutter,
+                end = dimens.component.gutter,
+                top = dimens.space.md,
+            )
+            .clip(RoundedCornerShape(dimens.radii.buttonLg))
+            .background(colors.surface3)
+            .padding(horizontal = dimens.space.md, vertical = dimens.space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
         Icon(
-            Icons.Filled.Shield,
+            Icons.Outlined.Info,
             contentDescription = null,
-            tint = colors.ink3,
-            modifier = Modifier.size(AppTheme.dimens.size.iconMd),
+            tint = colors.ink4,
+            modifier = Modifier.size(dimens.size.iconLg),
         )
         Text(
             "Keep chats on Artistant. Don't move payments or contact off-platform — " +
                 "report anything that feels off.",
             style = AppTheme.type.caption,
             color = colors.ink2,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        IconButton(
-            onClick = onDismiss,
-            modifier = Modifier.semantics { testTag = "chat.safetyBanner.dismiss" },
-        ) {
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = "Dismiss safety notice",
-                tint = colors.ink3,
-                modifier = Modifier.size(AppTheme.dimens.size.iconMd),
-            )
-        }
+        Icon(
+            Icons.Filled.Close,
+            contentDescription = "Dismiss safety notice",
+            tint = colors.ink4,
+            modifier = Modifier
+                .clip(CircleShape)
+                .clickable(onClick = onDismiss)
+                .size(dimens.size.iconLg)
+                .semantics { testTag = "chat.safetyBanner.dismiss" },
+        )
     }
-    HRule()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -406,8 +434,10 @@ private fun Transcript(
     onBookingClick: (String) -> Unit,
     onRetry: (String) -> Unit,
     onLoadOlder: () -> Unit,
+    onAcceptQuote: () -> Unit,
+    onCounterQuote: () -> Unit,
 ) {
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     val messages = state.messages
     val listState = rememberLazyListState()
 
@@ -426,15 +456,31 @@ private fun Transcript(
     LoadOlderAtTop(listState = listState, onLoadOlder = onLoadOlder)
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = space.lg),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = dimens.component.gutter)
+            .semantics { testTag = "chat.transcript" },
         state = listState,
         // Bottom-anchored. A conversation grows upward from the composer, so a
         // two-message thread should sit just above where you type, not pinned
         // under the safety banner with a screenful of nothing below it. Once the
         // transcript is taller than the viewport the alignment is a no-op and
         // this behaves like any other list.
-        verticalArrangement = Arrangement.spacedBy(space.xs, Alignment.Bottom),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm, Alignment.Bottom),
     ) {
+        // The gig's state, centred, at the head of the transcript (design 88).
+        // It replaces the old always-visible strip: the same fact, read once
+        // where the conversation starts rather than parked over it forever.
+        state.context.bookingId?.let { bookingId ->
+            item(key = "chat.status") {
+                StatusChip(
+                    label = listOfNotNull(state.context.statusLabel, state.context.dateLabel)
+                        .joinToString(ThreadContext.SEPARATOR),
+                    onClick = { onBookingClick(bookingId) },
+                )
+            }
+        }
+
         items(messages, key = { it.id }) { message ->
             // Every decoration renders inside its message's item so the list's
             // item count stays equal to the message count.
@@ -458,20 +504,67 @@ private fun Transcript(
                     onBookingClick = onBookingClick,
                     onRetry = { onRetry(message.id) },
                 )
-                if (message.id in outgoingEnds) {
+                if (message.id in outgoingEnds &&
+                    message.delivery == MessageDelivery.Sent &&
+                    message.id != state.lastReadOwnMessageId
+                ) {
                     TrailingCaption(timeFormat.format(Date(message.sentAtEpochMs)))
                 }
                 if (message.id == state.lastReadOwnMessageId) {
                     TrailingCaption(
-                        text = state.counterpartLastReadAt
-                            ?.let { "Read · ${timeFormat.format(Date(it))}" }
-                            ?: "Read",
+                        text = "Read by ${state.title}",
                         readable = "Read by ${state.title}",
                         tag = "chat.readReceipt",
                     )
                 }
             }
         }
+
+        // The quote lives at the tail: it is the live decision, and burying it
+        // in date order would put the most actionable thing in the thread behind
+        // a scroll.
+        state.quote?.let { quote ->
+            item(key = "chat.quote") {
+                Box(
+                    Modifier.fillMaxWidth(),
+                    contentAlignment = if (quote.viewerDecides) {
+                        Alignment.CenterStart
+                    } else {
+                        Alignment.CenterEnd
+                    },
+                ) {
+                    QuoteCard(
+                        quote = quote,
+                        validUntil = quote.expiresAtEpochMs?.let { expiry ->
+                            "${dateFormat.format(Date(expiry))}, ${timeFormat.format(Date(expiry))}"
+                        },
+                        counterpartName = state.title,
+                        onAccept = onAcceptQuote,
+                        onCounter = onCounterQuote,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The centred state capsule at the head of a thread (design 88). */
+@Composable
+private fun StatusChip(label: String, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Box(Modifier.fillMaxWidth().padding(vertical = dimens.space.sm), Alignment.Center) {
+        Text(
+            label,
+            style = AppTheme.type.badge,
+            color = colors.ink2,
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(colors.surface2)
+                .clickable(onClick = onClick)
+                .padding(horizontal = dimens.space.md, vertical = dimens.space.sm)
+                .semantics { testTag = "chat.contextStrip" },
+        )
     }
 }
 
@@ -520,12 +613,14 @@ private fun FollowTail(
         val ownSend = messages.last().isMine
         if (ownSend) followTail.value = true
         if (!followTail.value) return@LaunchedEffect
+        val lastIndex = listState.layoutInfo.totalItemsCount - 1
+        if (lastIndex < 0) return@LaunchedEffect
         // First paint lands directly at the bottom; later arrivals animate, so
         // the movement reads as "a message came in" rather than a jump cut.
         if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
-            listState.scrollToItem(messages.lastIndex)
+            listState.scrollToItem(lastIndex)
         } else {
-            listState.animateScrollToItem(messages.lastIndex)
+            listState.animateScrollToItem(lastIndex)
         }
     }
 }
@@ -557,6 +652,17 @@ private fun LoadOlderAtTop(
     }
 }
 
+/**
+ * One message (design 88 — "three message states visible").
+ *
+ * Sent, read and failed-with-retry are three different objects, not one object
+ * with three opacities. A failed bubble is drawn in `surface` behind a danger
+ * rim with its text stepped back to `ink2` — it is a draft the server never took
+ * — and the retry underneath it is a real tap target with the only `danger`
+ * colour in the thread on it. It is deliberately not a toast: a toast for a
+ * failed send disappears while the message it belongs to stays on screen looking
+ * fine.
+ */
 @Composable
 private fun MessageRow(
     message: Message,
@@ -564,7 +670,7 @@ private fun MessageRow(
     onRetry: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
 
     if (message.kind == MessageKind.System) {
         SystemRow(message = message, onBookingClick = onBookingClick)
@@ -572,48 +678,85 @@ private fun MessageRow(
     }
 
     val mine = message.isMine
+    val failed = mine && message.delivery == MessageDelivery.Failed
+    val sending = mine && message.delivery == MessageDelivery.Sending
+    // Asymmetric corners: the corner nearest the speaker is clipped, which is
+    // what makes a run of bubbles read as coming from one side.
+    val shape = RoundedCornerShape(
+        topStart = dimens.radii.lg,
+        topEnd = dimens.radii.lg,
+        bottomEnd = if (mine) dimens.radii.sm else dimens.radii.lg,
+        bottomStart = if (mine) dimens.radii.lg else dimens.radii.sm,
+    )
+
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
     ) {
         Text(
             message.body,
-            style = AppTheme.type.callout,
-            color = if (mine) colors.brandInk else colors.ink,
+            style = AppTheme.type.body,
+            color = when {
+                failed -> colors.ink2
+                mine -> colors.onAccent
+                else -> colors.ink
+            },
             modifier = Modifier
                 // A gutter on the far side rather than a width fraction: it keeps
                 // the bubble hugging its own content while guaranteeing the
                 // opposite edge always shows, which is what makes a thread read
                 // as two columns.
-                .padding(start = if (mine) space.sm * BUBBLE_GUTTER_STEPS else space.xs)
-                .padding(end = if (mine) space.xs else space.sm * BUBBLE_GUTTER_STEPS)
-                // In-flight sends read as dimmed until the server confirms; a
-                // failed one dims too, with the retry chip below carrying the
-                // actionable signal.
-                .alpha(if (message.delivery == MessageDelivery.Sent) 1f else IN_FLIGHT_ALPHA)
-                .clip(RoundedCornerShape(AppTheme.dimens.radii.lg))
-                .background(if (mine) colors.brand else colors.bgCard)
-                .padding(horizontal = space.md, vertical = space.sm),
+                .padding(start = if (mine) dimens.space.xxl else dimens.space.xs)
+                .padding(end = if (mine) dimens.space.xs else dimens.space.xxl)
+                .clip(shape)
+                .background(
+                    when {
+                        failed -> colors.surface
+                        // An in-flight bubble is the accent stepped back to its
+                        // own tint rather than a dimmed copy: it is a real
+                        // state, so it gets a real fill (screen 118's rule).
+                        sending -> colors.brandSoft
+                        mine -> colors.accent
+                        else -> colors.surface3
+                    },
+                )
+                .then(
+                    if (failed) {
+                        Modifier.border(
+                            dimens.component.focusStroke,
+                            colors.danger.copy(alpha = FAILED_RIM),
+                            shape,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(horizontal = dimens.space.md, vertical = dimens.space.md),
         )
-        if (mine && message.delivery == MessageDelivery.Failed) {
-            // The only place `hot` appears in a thread, so a failed send is
-            // unmistakable against a wall of lime and card grey.
+        if (failed) {
             Row(
                 Modifier
                     .clip(CircleShape)
                     .clickable(onClick = onRetry)
-                    .padding(horizontal = space.xs, vertical = space.xs)
-                    .semantics { testTag = "chat.retry" },
+                    .padding(horizontal = dimens.space.xs, vertical = dimens.space.xs)
+                    .semantics {
+                        testTag = "chat.retry"
+                        contentDescription = "Not sent. Tap to retry."
+                    },
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(space.xs),
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
             ) {
                 Icon(
-                    Icons.Filled.ErrorOutline,
+                    Icons.Filled.WarningAmber,
                     contentDescription = null,
-                    tint = colors.hot,
-                    modifier = Modifier.size(AppTheme.dimens.size.iconSm),
+                    tint = colors.danger,
+                    modifier = Modifier.size(dimens.size.iconSm),
                 )
-                Text("Not sent · Tap to retry", style = AppTheme.type.caption, color = colors.hot)
+                Text(
+                    "Not sent · Tap to retry",
+                    style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.danger,
+                )
             }
         }
     }
@@ -623,39 +766,39 @@ private fun MessageRow(
  * A state change, not a person: centred caption text with no bubble chrome.
  *
  * When the row carries an `action_route` it gets exactly one action, routed
- * through the same booking destination the funnel CTA uses — so a system notice
- * and the CTA above it can never send you to two different places. An
+ * through the same booking destination the status chip uses — so a system notice
+ * and the chip above it can never send you to two different places. An
  * unrecognised or malformed route renders as a plain notice rather than a
  * dangling link.
  */
 @Composable
 private fun SystemRow(message: Message, onBookingClick: (String) -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     val bookingId = message.actionRoute
         ?.removePrefix(BOOKING_ROUTE_PREFIX)
         ?.takeIf { it.isNotBlank() && it != message.actionRoute }
 
     Column(
-        Modifier.fillMaxWidth().padding(vertical = space.sm),
+        Modifier.fillMaxWidth().padding(vertical = dimens.space.sm),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             message.body,
             style = AppTheme.type.caption,
-            color = colors.ink3,
+            color = colors.ink4,
             textAlign = TextAlign.Center,
         )
         bookingId?.let {
             Text(
                 "View booking",
-                style = AppTheme.type.caption,
-                color = colors.ink2,
+                style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.accentInk,
                 modifier = Modifier
-                    .padding(top = space.xs)
+                    .padding(top = dimens.space.xs)
                     .clip(CircleShape)
                     .clickable { onBookingClick(it) }
-                    .padding(horizontal = space.sm, vertical = space.xs)
+                    .padding(horizontal = dimens.space.sm, vertical = dimens.space.xs)
                     .semantics { testTag = "chat.systemAction" },
             )
         }
@@ -669,7 +812,6 @@ private fun SystemRow(message: Message, onBookingClick: (String) -> Unit) {
  */
 @Composable
 private fun DaySeparatorRow(sentAtEpochMs: Long, nowMs: Long, dateFormat: java.text.DateFormat) {
-    val colors = AppTheme.colors
     val label = when (ChatTimestamps.daySeparator(sentAtEpochMs, nowMs)) {
         DaySeparator.Today -> "Today"
         DaySeparator.Yesterday -> "Yesterday"
@@ -677,8 +819,8 @@ private fun DaySeparatorRow(sentAtEpochMs: Long, nowMs: Long, dateFormat: java.t
     }
     Text(
         label,
-        style = AppTheme.type.monoSmall,
-        color = colors.ink3,
+        style = AppTheme.type.caption,
+        color = AppTheme.colors.ink4,
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(vertical = AppTheme.dimens.space.sm),
     )
@@ -688,19 +830,13 @@ private fun DaySeparatorRow(sentAtEpochMs: Long, nowMs: Long, dateFormat: java.t
  * "Asha Rao · Client · 9:14 am" above the first bubble of an incoming run.
  * Marked decorative for a11y: the bubble itself carries the readable content, so
  * a screen reader shouldn't announce the attribution twice.
- *
- * The role is NOT upper-cased here, though it is in the participant rows of the
- * details sheet — and the reference makes the same split. Small caps in the
- * sheet is a label on a row; inside the transcript the same treatment shouts a
- * word that is only there to disambiguate who is speaking, and it sat louder
- * than the sender's own name beside it.
  */
 @Composable
 private fun SenderCaption(name: String, role: String, time: String) {
     Text(
         "$name · $role · $time",
-        style = AppTheme.type.monoSmall,
-        color = AppTheme.colors.ink3,
+        style = AppTheme.type.caption,
+        color = AppTheme.colors.ink4,
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = AppTheme.dimens.space.xs)
@@ -710,15 +846,16 @@ private fun SenderCaption(name: String, role: String, time: String) {
 
 /**
  * Trailing-aligned caption under an outgoing run — the bare send time, or the
- * read receipt. Only the receipt is announced; the time is already implied by
- * the day rule above and would otherwise be read out after every burst.
+ * read receipt (design 88's "Read by Aarav"). Only the receipt is announced; the
+ * time is already implied by the day rule above and would otherwise be read out
+ * after every burst.
  */
 @Composable
 private fun TrailingCaption(text: String, readable: String? = null, tag: String? = null) {
     Text(
         text,
-        style = AppTheme.type.monoSmall,
-        color = AppTheme.colors.ink3,
+        style = AppTheme.type.caption,
+        color = AppTheme.colors.ink4,
         textAlign = TextAlign.End,
         modifier = Modifier
             .fillMaxWidth()
@@ -741,108 +878,122 @@ private fun TrailingCaption(text: String, readable: String? = null, tag: String?
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Everything pinned below the transcript: the how-soon caption, the input, and
- * the funnel CTA. All three sit inside the keyboard inset so the action stays
- * reachable while typing — the reason it is here rather than in the header.
+ * What has to be said between the transcript and the input.
+ *
+ * All of it rides inside the composer bar so it stays above the keyboard: a
+ * failed-refresh strip under the keyboard reports nothing, and a CTA under the
+ * keyboard cannot be pressed.
  */
 @Composable
-private fun ComposerStack(
+private fun ComposerNotices(
     state: ChatUiState,
-    nowMs: Long,
-    onSend: (String) -> Unit,
     onRetryRefresh: () -> Unit,
     onOpenBooking: (String) -> Unit,
+    onDismissQuoteError: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
 
-    Column(Modifier.fillMaxWidth()) {
-        // A failed SEND already carries its own retry on the bubble, and that is
-        // the more precise report — so the strip only speaks for the failures
-        // nothing else is reporting.
-        val hasFailedSend = state.messages.any { it.delivery == MessageDelivery.Failed }
-        if (state.error != null && state.messages.isNotEmpty() && !hasFailedSend) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(colors.bgElev)
-                    .padding(horizontal = space.lg, vertical = space.sm),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(space.sm),
-            ) {
-                Text(
-                    "Couldn't refresh this conversation.",
-                    style = AppTheme.type.caption,
-                    color = colors.ink2,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "RETRY",
-                    style = AppTheme.type.caption,
-                    color = colors.accentInk,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable(onClick = onRetryRefresh)
-                        .padding(horizontal = space.sm, vertical = space.xs),
-                )
-            }
+    (state.quoteAction as? QuoteAction.Failed)?.let { failure ->
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onDismissQuoteError)
+                .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm)
+                .semantics { testTag = "chat.quoteError" },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        ) {
+            Icon(
+                Icons.Filled.WarningAmber,
+                contentDescription = null,
+                tint = colors.danger,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
+            Text(failure.message, style = AppTheme.type.caption, color = colors.danger)
         }
+    }
 
-        gigCaption(state.context, nowMs)?.let {
+    // A failed SEND already carries its own retry on the bubble, and that is the
+    // more precise report — so the strip only speaks for the failures nothing
+    // else is reporting.
+    val hasFailedSend = state.messages.any { it.delivery == MessageDelivery.Failed }
+    if (state.error != null && state.messages.isNotEmpty() && !hasFailedSend) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        ) {
             Text(
-                it,
-                style = AppTheme.type.monoSmall,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                "Couldn't refresh this conversation.",
+                style = AppTheme.type.caption,
+                color = colors.ink2,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Retry",
+                style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                color = colors.accentInk,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = space.lg)
-                    .semantics { testTag = "chat.gigCaption" },
+                    .clip(CircleShape)
+                    .clickable(onClick = onRetryRefresh)
+                    .padding(horizontal = dimens.space.sm, vertical = dimens.space.xs),
             )
         }
+    }
 
-        MessageComposer(onSend = onSend)
-
-        // Shown only when the next move is genuinely the reader's. It routes to
-        // the booking rather than mutating anything here — one place owns the
-        // accept/decline decision.
-        val bookingId = state.context.bookingId
-        if (state.context.awaitingViewer && bookingId != null) {
-            Text(
-                "Review request",
-                style = AppTheme.type.ctaLabel,
-                color = colors.brandInk,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = space.lg)
-                    .padding(bottom = space.sm)
-                    .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
-                    .background(colors.brand)
-                    .clickable { onOpenBooking(bookingId) }
-                    .padding(vertical = space.md)
-                    .semantics { testTag = "chat.funnelCta" },
-            )
-        }
+    // Shown only when the next move is genuinely the reader's AND the thread has
+    // no quote card offering the same decision. It routes to the booking rather
+    // than mutating anything here — one place owns the accept/decline decision.
+    val bookingId = state.context.bookingId
+    if (state.context.awaitingViewer && bookingId != null && state.quote?.actionable != true) {
+        PrimaryButton(
+            text = "Review request",
+            onClick = { onOpenBooking(bookingId) },
+            fullWidth = true,
+            modifier = Modifier
+                .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm)
+                .semantics { testTag = "chat.funnelCta" },
+        )
     }
 }
 
 /**
- * "Sat, May 16 · Rooftop · 2 weeks out" — one line of gig context right above
- * the input, where the thing being negotiated is most likely to be needed.
+ * Accepting a quote, narrated (design 70).
  *
- * Null for an inquiry (nothing has been agreed) and null when no part resolves,
- * so it never renders a dangling separator.
+ * Three phases, each waiting on real work — see [ChatViewModel.acceptQuote]. The
+ * tail says what happens next without claiming a delivery the app cannot
+ * confirm.
  */
-private fun gigCaption(context: ThreadContext, nowMs: Long): String? {
-    if (context.bookingId == null) return null
-    val parts = listOfNotNull(
-        context.dateLabel,
-        context.venue,
-        ThreadContext.timeUntil(context.startEpochMs, nowMs),
+@Composable
+private fun AcceptingQuote(state: ChatUiState, phase: QuotePhase, modifier: Modifier = Modifier) {
+    val amount = state.quote?.amountInr
+    SendingNarration(
+        modifier = modifier,
+        title = "Accepting the quote…",
+        body = listOfNotNull(
+            amount?.let { "Locking " + `in`.artistant.app.common.util.formatInr(it) },
+            state.title.takeIf { it.isNotBlank() }?.let { "with $it" },
+        ).joinToString(" ").ifBlank { "Confirming the terms." } + ".",
+        steps = listOf(
+            NarratedStep("Terms locked", phase.stateFor(QuotePhase.Locking)),
+            NarratedStep("Saving your answer", phase.stateFor(QuotePhase.Saving)),
+            NarratedStep(
+                if (state.context.bookingId != null) "Opening the booking" else "Freezing the terms",
+                phase.stateFor(QuotePhase.Confirming),
+            ),
+        ),
+        tail = "The agreed terms stay in this conversation.",
     )
-    return parts.takeIf { it.isNotEmpty() }?.joinToString(ThreadContext.SEPARATOR)
+}
+
+/** Where [step] sits relative to the phase currently running. */
+private fun QuotePhase.stateFor(step: QuotePhase): StepState = when {
+    step.ordinal < ordinal -> StepState.Done
+    step.ordinal == ordinal -> StepState.Running
+    else -> StepState.Pending
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -904,10 +1055,6 @@ internal fun ResumeEffect(onResumed: () -> Unit) {
  *
  * Both write the same state, and re-reading the clock is idempotent, so the two
  * firing together is harmless.
- *
- * Called ONCE, by [ChatScreen], and the value handed down to everything that
- * needs it: each call site would otherwise own a separate timer and a separate
- * lifecycle observer for a value the whole screen shares.
  */
 @Composable
 private fun rememberDayClock(): Long {
@@ -932,8 +1079,7 @@ private fun rememberDayClock(): Long {
     return now
 }
 
-/** Multiples of `space.sm` reserved on a bubble's far side (5 × 8dp = 40dp). */
-private const val BUBBLE_GUTTER_STEPS = 5
+/** The danger colour softened to a rim (design 88 draws `rgba(164,64,44,.4)`). */
+private const val FAILED_RIM = 0.4f
 
-private const val IN_FLIGHT_ALPHA = 0.55f
 private const val BOOKING_ROUTE_PREFIX = "booking:"

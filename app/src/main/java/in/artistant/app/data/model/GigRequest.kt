@@ -74,6 +74,27 @@ data class GigRequest(
     val amount: Int,
     val packageLabel: String = "Custom",
     val timeAgo: String = "",
+    /**
+     * The artist the quote is with, lowercased.
+     *
+     * Carried so a surface that starts from a CONVERSATION can find the quote
+     * belonging to it: `threads` has no `request_id`, and the only thing a
+     * thread and a gig request share is the pair of people in them. The chat
+     * matches on this (design 08 — "quotes are objects, not text").
+     *
+     * Empty only for a row minted locally by a fake; the server column is NOT
+     * NULL.
+     */
+    val artistId: String = "",
+    /**
+     * When the offer lapses (`gig_requests.expires_at`), or null if it could not
+     * be parsed.
+     *
+     * The one fact that turns a number into an offer — the inbox preview says
+     * "holds till Fri" and the in-thread card "Valid until Fri 6 pm" (screens 19
+     * and 08), and neither line may be drawn without this.
+     */
+    val expiresAtEpochMs: Long? = null,
 )
 
 data class StoredRequest(

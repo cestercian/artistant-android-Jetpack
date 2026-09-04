@@ -22,12 +22,31 @@ object ClientNavRoutes {
     const val REQUEST_QUOTE = "request_quote/{artistId}"
     const val ARTIST_LIST = "artist_list/{kind}"
 
+    /**
+     * Where an accepted in-thread quote lands — design 94, "Match confirmed".
+     *
+     * The constant lives here and the CHAT navigates to it, but the destination
+     * itself belongs to the booking section: one screen owns what a confirmed
+     * match looks like, and the thread's job ends at handing over the id.
+     */
+    const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
+
+    /** The archive (design 60 / 111) — reachable from the inbox header. */
+    const val ARCHIVED = "archived"
+
+    /** Trust & safety (design 131) — from account settings and from the archive. */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** The scripted support assistant (design 34) — the inbox's permanent row. */
+    const val SUPPORT = "support"
+
     fun bookingCompose(artistId: String) = "booking/$artistId"
     fun chat(threadId: String) = "chat/$threadId"
     fun confirmed(bookingId: String) = "confirmed/$bookingId"
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
     fun artistList(kind: String) = "artist_list/$kind"
+    fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
     const val PAYWALL = "paywall"
 
     /**
@@ -48,6 +67,7 @@ object ArtistNavRoutes {
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun gigRequest(requestId: String) = "gig_request/$requestId"
     fun chat(threadId: String) = "chat/$threadId"
+    fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
     const val PROFILE = "profile"
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"
@@ -56,4 +76,16 @@ object ArtistNavRoutes {
 
     /** See [ClientNavRoutes.BLOCKED_ACCOUNTS] — same screen, artist graph. */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /** See [ClientNavRoutes.MATCH_CONFIRMED] — same destination, artist graph. */
+    const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
+
+    /** See [ClientNavRoutes.ARCHIVED]. */
+    const val ARCHIVED = "archived"
+
+    /** See [ClientNavRoutes.SAFETY_CENTRE]. */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** See [ClientNavRoutes.SUPPORT]. */
+    const val SUPPORT = "support"
 }

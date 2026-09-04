@@ -12,6 +12,7 @@ import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.data.repository.ReportsRepository
+import `in`.artistant.app.data.repository.RequestsRepository
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,35 @@ import javax.inject.Inject
 sealed interface ChatEvent {
     /** A message flipped to `Failed` — first attempt or retry. */
     data object SendFailed : ChatEvent
+
+    /**
+     * The in-thread quote was accepted and its terms are frozen.
+     *
+     * Carries the thread's booking when there is one, because that is the only
+     * id the "Match confirmed" destination can be opened with. A quote accepted
+     * on a thread with no booking behind it emits null: the terms are still
+     * frozen and the card says so in place, which is what design 08's note means
+     * by "the record of what was agreed lives in the thread".
+     */
+    data class QuoteAccepted(val bookingId: String?) : ChatEvent
+}
+
+/**
+ * The three named phases of accepting a quote (design 70 — "narrated, not a
+ * spinner").
+ *
+ * Each one advances on real work finishing, never on a timer: [Locking] is done
+ * the moment the amount is captured, [Saving] while the status PATCH is in
+ * flight, [Confirming] while the thread re-reads what it just changed. A phase
+ * that lied about progress would be worse than the spinner it replaces.
+ */
+enum class QuotePhase { Locking, Saving, Confirming }
+
+/** What the quote card is doing. */
+sealed interface QuoteAction {
+    data object Idle : QuoteAction
+    data class Accepting(val phase: QuotePhase) : QuoteAction
+    data class Failed(val message: String) : QuoteAction
 }
 
 data class ChatUiState(
@@ -98,6 +128,16 @@ data class ChatUiState(
     val counterpartId: String? = null,
     /** Whether the viewer has blocked [counterpartId]. */
     val blocked: Boolean = false,
+    /**
+     * The offer standing in this conversation, as an object (design 08).
+     *
+     * Null when there is no live or accepted `gig_requests` row between these
+     * two people — which is most threads. Never invented: no request, no card.
+     */
+    val quote: ThreadQuote? = null,
+    val quoteAction: QuoteAction = QuoteAction.Idle,
+    /** True while the counter-amount sheet is open. */
+    val countering: Boolean = false,
 ) {
     /**
      * The last of the viewer's own messages the counterparty has read. Only
@@ -123,6 +163,7 @@ class ChatViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val bookingsRepository: BookingsRepository,
     private val reports: ReportsRepository,
+    private val requests: RequestsRepository,
     private val flagsStore: ThreadFlagsStore,
     private val blockedUsers: BlockedUsersStore,
     private val viewer: ViewerIdentity,
@@ -228,6 +269,7 @@ class ChatViewModel @Inject constructor(
             }
             hydrateArtist(thread, viewerIsArtist)
             loadGigContext(thread, viewerIsArtist)
+            loadQuote(thread?.artistId, viewerIsArtist)
             markReadBestEffort()
         }.onFailure { e -> _state.update { it.copy(isLoading = false, error = e.message) } }
     }
@@ -477,6 +519,91 @@ class ChatViewModel @Inject constructor(
         if (readAt != null) _state.update { it.copy(counterpartLastReadAt = readAt) }
     }
 
+    /**
+     * The quote standing between these two people, if any.
+     *
+     * Reads the viewer's OWN request list — RLS restricts it to their side, so
+     * this is the same query the requests screens make and needs no seat
+     * argument beyond choosing which list to ask for. Failure is silent and
+     * leaves the card absent: a quote that cannot be read is not a quote that
+     * can be accepted, and a card with dead buttons is worse than no card.
+     */
+    private fun loadQuote(artistId: String?, viewerIsArtist: Boolean) = viewModelScope.launch {
+        if (artistId.isNullOrBlank()) {
+            _state.update { it.copy(quote = null) }
+            return@launch
+        }
+        val rows = runCatching {
+            if (viewerIsArtist) requests.listForArtist() else requests.listForClient()
+        }.getOrNull() ?: return@launch
+        val quote = ThreadQuote.pick(
+            requests = rows,
+            artistId = artistId,
+            viewerIsArtist = viewerIsArtist,
+            nowMs = System.currentTimeMillis(),
+        )
+        _state.update { it.copy(quote = quote) }
+    }
+
+    /**
+     * Accept the standing quote: freeze the terms, then hand off to the booking.
+     *
+     * Narrated in three phases (design 70) that each wait on real work. The
+     * navigation event fires only after the write returned, so nobody lands on
+     * "Match confirmed" for terms the server never took.
+     */
+    fun acceptQuote() {
+        val quote = _state.value.quote ?: return
+        if (!quote.actionable) return
+        if (_state.value.quoteAction is QuoteAction.Accepting) return
+        // Phase 1 is genuinely complete at this point: the amount is captured
+        // and cannot change under the write.
+        _state.update { it.copy(quoteAction = QuoteAction.Accepting(QuotePhase.Locking)) }
+        viewModelScope.launch {
+            _state.update { it.copy(quoteAction = QuoteAction.Accepting(QuotePhase.Saving)) }
+            val saved = runCatching { requests.accept(quote.requestId) }
+            if (saved.isFailure) {
+                _state.update { it.copy(quoteAction = QuoteAction.Failed(ACCEPT_FAILED)) }
+                return@launch
+            }
+            _state.update { it.copy(quoteAction = QuoteAction.Accepting(QuotePhase.Confirming)) }
+            // Re-read rather than patching the card locally: the same row is what
+            // the bookings surfaces read, and a card that says "accepted" off a
+            // local guess would disagree with them if the write raced anything.
+            loadQuote(_state.value.thread?.artistId, _state.value.viewerIsArtist).join()
+            _state.update { it.copy(quoteAction = QuoteAction.Idle) }
+            _events.send(ChatEvent.QuoteAccepted(_state.value.context.bookingId))
+        }
+    }
+
+    fun openCounter() = _state.update { it.copy(countering = true, quoteAction = QuoteAction.Idle) }
+
+    fun dismissCounter() = _state.update { it.copy(countering = false) }
+
+    fun dismissQuoteError() = _state.update { it.copy(quoteAction = QuoteAction.Idle) }
+
+    /**
+     * Counter the standing quote with a different amount.
+     *
+     * A counter flips the row to `countered` and, by [ThreadQuote.decidesNext],
+     * hands the decision to the OTHER seat — so the card the counter-er sees
+     * afterwards has no buttons on it. That is the point: you don't get to
+     * answer your own offer.
+     */
+    fun counterQuote(amountInr: Int) {
+        val quote = _state.value.quote ?: return
+        if (!quote.actionable || amountInr <= 0) return
+        _state.update { it.copy(countering = false) }
+        viewModelScope.launch {
+            runCatching { requests.counter(quote.requestId, amountInr) }
+                .onFailure {
+                    _state.update { s -> s.copy(quoteAction = QuoteAction.Failed(COUNTER_FAILED)) }
+                    return@launch
+                }
+            loadQuote(_state.value.thread?.artistId, _state.value.viewerIsArtist)
+        }
+    }
+
     fun openDetails() = _state.update { it.copy(showDetails = true) }
 
     /** Closing takes the sheet's own failure line with it — see [ChatUiState.actionError]. */
@@ -574,6 +701,8 @@ class ChatViewModel @Inject constructor(
     private companion object {
         const val FALLBACK_TITLE = "Chat"
         const val MUTE_FAILED = "Couldn't update notifications for this conversation."
+        const val ACCEPT_FAILED = "Couldn't accept this quote. Nothing changed — try again."
+        const val COUNTER_FAILED = "Couldn't send your counter. Nothing changed — try again."
         const val BLOCK_FAILED = "Couldn't update your block list. Nothing changed."
 
         /**
