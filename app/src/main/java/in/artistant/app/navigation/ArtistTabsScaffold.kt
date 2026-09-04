@@ -181,7 +181,13 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
-                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                    BlockedAccountsScreen(
+                        onBack = { nav.popBackStack() },
+                        // "Block is not report" needs somewhere to go, and a
+                        // report is filed inside a conversation — so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                    )
                 }
             }
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {

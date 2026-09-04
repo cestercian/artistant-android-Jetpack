@@ -24,6 +24,25 @@ interface ReportsRepository {
     suspend fun reportArtist(artistId: String, reason: String, details: String? = null)
 }
 
+/**
+ * Why someone reports a CONVERSATION (design 73).
+ *
+ * A separate list from [ReportReasons] because the two surfaces are reporting
+ * different things: a profile can be fake or offensive, a conversation is where
+ * pressure and off-platform payment requests happen. Sharing one list would have
+ * offered "Inaccurate profile" as a reason to report a chat.
+ *
+ * The strings go to `reports.reason` verbatim, so they are also the moderation
+ * team's taxonomy — change them only with that team.
+ */
+val ConversationReportReasons = listOf(
+    "Asked to move payment off-platform",
+    "Pressuring or aggressive messages",
+    "Spam or a scam",
+    "Impersonating someone",
+    "Something else",
+)
+
 val ReportReasons = listOf(
     "Inaccurate profile",
     "Not a real artist",

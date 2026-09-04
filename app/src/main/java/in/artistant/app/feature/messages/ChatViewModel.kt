@@ -686,8 +686,8 @@ class ChatViewModel @Inject constructor(
      * cannot tell delivered from queued. The confirmation copy is worded to be
      * true either way rather than promising a delivery it can't confirm.
      */
-    fun reportConversation(reason: String) = viewModelScope.launch {
-        runCatching { reports.reportConversation(threadId, reason) }
+    fun reportConversation(reason: String, details: String? = null) = viewModelScope.launch {
+        runCatching { reports.reportConversation(threadId, reason, details) }
         _state.update { it.copy(reportSubmitted = true) }
     }
 
