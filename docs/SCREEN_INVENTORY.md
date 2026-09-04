@@ -65,57 +65,84 @@ circle. Android has no analogue → make Search a normal 5th bottom-nav destinat
 
 ---
 
-## 3. Screens — Signup flow (`feature/signup/`, all **S**, step-driven)
+## 3. Screens — Getting started (`feature/signup/`, all **S**, step-driven)
 
-All share one `SignupViewModel` (the `OnboardingStore` port: step machine +
-handle-availability debounce + returning-user hydration). Reached when not
-signed in. No back stack — `AnimatedContent` on `step`.
+Re-cut Sep 2026 against the light design's **GS** section (screens 01 · 11 · 12 ·
+13 · 27 · 28 · 29 · 30 · 31 · 62 · 71 · 90 · 114 · 118 · 119). All share one
+`SignupViewModel` (the `OnboardingStore` port: step machine + handle-availability
+debounce + returning-user hydration) and one `AuthViewModel` (session calls + the
+one-time-code state). No back stack — `AnimatedContent` on `step`.
 
-**SignupFlow** (S) → `SignupFlow.kt` (container). *Purpose:* switch on `step`,
-show hydration-error banner + Retry. *State:* `step`, `mode`, `authNotice`,
-`profileHydrationError`. *Lifecycle:* syncs role on change. *Anim:* `AnimatedContent`
-crossfade (iOS `.easeInOut(0.25)`). Ships shared chrome: progress dots, primary
-button (press-scale), ghost button, back button, underline input.
+Shared chrome lives in `SignupChrome.kt`: `SignupScaffold` (header band, gutter
+body, pinned CTA bar that owns the navigation and IME insets), `SignupHeader`,
+`SignupProgressStrip`, `ConsentCheckbox`, `AppMark`, `InlineLink`,
+`SignupEyebrow`, `HydrationErrorBanner`.
 
-**WelcomeScreen** (S). *Purpose:* hero + terms gate. *Compose:* radial-gradient
-`Box`, wordmark, editorial headline, custom checkbox. *State:* `termsAccepted`.
-*APIs:* none. *Gesture:* checkbox tap + selection haptic. *Nav:* "Get started"→signup
-order, "I have an account"→login order; terms/privacy `ModalBottomSheet`→Legal.
+**SplashScreen** (01). *Purpose:* the one dark room. *Compose:* accent wordmark,
+media well under the standard bottom scrim, headline. *Colour:* `darkest` — the
+same value the launch window is painted in, so the pre-Compose hand-off has no
+seam. *Nav:* rendered by `ArtistantNavHost` on `RootGate.Loading`; carries no
+actions, because the gate has not yet decided which surface follows.
 
-**RoleScreen** (S). *Purpose:* pick client/artist. *Compose:* two full-bleed
-tappable `RolePanel`s (lime/violet gradients, 150dp glyph). *Gesture:* **tap =
-commit** → set role, 0.34s delay, advance; a 0.45s appear-debounce blocks
-carry-over touches (skip for tests/a11y). *Anim:* `.easeOut(0.24)` select
-border/shadow/check, sibling dims. Selection haptic.
+**WelcomeScreen** (118). *Purpose:* consent gate. *Compose:* `AppMark`, headline,
+consent card with `ConsentCheckbox`, inline reason under the disabled CTA.
+*State:* `termsAccepted`, plus an optional caller-supplied `blockedReason`.
+*Nav:* "Get started"→signup order, "I already have an account"→login order;
+Terms/Privacy→`LegalScreen` in a `ModalBottomSheet`.
 
-**AuthScreen** (S) → Apple/Google/Email. *Purpose:* auth entry. *Compose:* 3 buttons
-over an animated `LineupBackground` (two columns scrolling opposite,
-`repeatForever`, motion-gated). Apple=solid-white custom button; Google/Email=glass.
-*ViewModel/Service:* `SessionManager` (`signInWithApple`/`signInWithGoogle`), Email
-opens `EmailAuthScreen` sheet. *State:* `isAuthenticating` overlay, `authNotice`
-pill. *Lifecycle:* motion off under reduce-motion.
+**CommunityCommitmentScreen** (27). *Purpose:* the pledge, shown once. *Compose:*
+four numbered `surface3` cards, a required tick, "Shown once" footnote.
+*State:* `SignupConsentStore.communityAgreed` gates the role step.
 
-**EmailAuthScreen** (S). *Purpose:* email/password sign-in/up sheet. *Compose:*
-`TextField`/password field, hairline underlines, focus order, submit labels.
-*APIs:* `EmailAuth.signIn/signUp`. *State:* client validation; outcomes
-signedIn/confirmationRequired/failed. *Anim:* toggle sign-up↔in `0.15`.
+**RoleScreen** (11 · 71). *Purpose:* pick client/artist. *Compose:* two cards —
+accent tint + ring + filled radio when selected — a `BannerTone.Note` aside, and
+a pinned Continue. *Gesture:* **select on tap, move on Continue**. 71 is the same
+screen with `HydrationErrorBanner` above the title.
 
-**ProfileScreen (signup)** (S). *Purpose:* handle + name + city. *Compose:*
-auto-focus handle, live handle indicator (spinner/tick/xmark, underline tint), city
-`DropdownMenu`, mono kicker, italic-accent headline, progress segments. *APIs:*
-`UsersRepository.handleIsAvailable` (350ms debounce), `upsertSelfProfile`. *State:*
-`handleStatus`; handles `.handleTaken`/`.notSignedIn`.
+**SignupAuthScreen** (12). *Purpose:* sign in. *Compose:* phone field (`+91`
+leading, `IN +91` trailing), "Or use email" field, "Send code", an `or` rule,
+then Apple / Google / password rows. *APIs:* `SessionManager.sendPhoneOtp` /
+`sendEmailOtp`, `signInWithApple` / `signInWithGoogle`. Phone wins when both
+fields hold something valid.
 
-**NotifPermissionScreen** (S). *Purpose:* ask for notifications. *APIs:*
-`PermissionsController` → `POST_NOTIFICATIONS` (API 33+) then register FCM.
-Both buttons advance.
+**EnterCodeScreen** (119). *Purpose:* verify. *Compose:* `OtpField` (one real
+field behind six drawn boxes, so SMS autofill has somewhere to land), resend
+countdown, "Change number", autofill note, "NOT ARRIVING?" block. *State:*
+`OtpResend` — 30s cooldown, email escape after two sends. *APIs:*
+`verifyPhoneOtp` / `verifyEmailOtp`; the gate advances the flow from the session.
 
-**DoneScreen** (S). *Purpose:* celebration. *Compose:* `ScoreRing(94)`, serif
-"You're in, {firstName}.". *Anim:* spring pop-in checkmark (scale 0.6→1.0).
-*APIs:* `Analytics.capture("signup_complete")` → finish. Success haptic.
+**EmailSignUpScreen** (28). *Purpose:* the reviewable path. *Compose:* name /
+email / password with Show, an 8-character rule that is stated AND enforced, the
+"already have an account" note, "Forgot password?". *APIs:*
+`SessionManager.signUpWithEmail`, `sendPasswordReset`. A modal over the auth step
+(`emailSignUp`), not a step of its own.
 
-**LegalScreen** (S). *Purpose:* terms/privacy modal. *Compose:* scrolling
-title+body sections, footer link to hosted URL. `enum LegalDoc{terms,privacy}`.
+**ProfileScreen** (29 · 90). *Purpose:* handle + name + city. *Compose:* handle
+field with a status ring and a four-state chip, `HandleSuggestions` chips when
+taken, name, city picker, the live-check note; the header carries the only
+progress strip in the flow ("04 / 06"). *APIs:*
+`UsersRepository.handleIsAvailable` (350ms debounce), `upsertSelfProfile`.
+*State:* `Empty/Invalid/Checking/Available/Taken/Error` — `Error` reads
+"Couldn't check" and never the tick.
+
+**NotifPermissionScreen** (13). *Purpose:* ask with a reason. *Compose:* accent
+glyph tile, "Quotes expire. We'll tell you first.", three kinds. *APIs:*
+`POST_NOTIFICATIONS` (API 33+) then register FCM. Both buttons advance.
+
+**DoneScreen** (30). *Purpose:* end on the score. *Compose:* accent check, "You're
+in, {city}.", the Bookability Score primer. *Anim:* spring pop-in (0.6→1.0).
+*APIs:* `Analytics.capture("signup_complete")` → finish. Success haptic. *Gap:*
+the design's "412 acts play your city" has no count endpoint, so the number is
+omitted rather than invented.
+
+**LegalScreen** (31 · 114). *Purpose:* one viewer, two documents. *Compose:*
+segmented Terms/Privacy, eyebrow-and-body sections, footer row out to the hosted
+copy (which is the authoritative one). `enum LegalDoc { Terms, Privacy }`.
+
+**PrivacyScreen** (62). *Purpose:* two toggles, both explained. *Compose:* two
+switch rows (M3 `Switch` repainted in tokens), Privacy-policy and Data-export
+rows, the "that isn't a setting" footer. *State:* `PrivacyPreferences` — DataStore,
+because neither switch has a column in the canonical schema.
 
 ---
 
@@ -230,7 +257,8 @@ consume `pendingReviewSheet` (auto-present). *Deps:* BookingStore, MessageStore.
 
 **ProfileScreen** (C, tab root) → `feature/profile/`. *Compose:* header card
 (`Avatar` 64, "City · Role since YYYY"), 3-col stats, saved carousel→`ArtistProfile`,
-settings hairline rows: Notifications (system settings), Privacy (`LegalScreen`),
+settings hairline rows: Notifications (system settings), Privacy (`PrivacyScreen` —
+route registered on both graphs; the row that pushes it is section AC's to add),
 **Export data** (`DataExportScreen`, DPDP), **Calendar sync** (toggle + target
 `DropdownMenu`, `CalendarSyncService`), Help (mailto), **Sign out** (`AlertDialog`→
 `signOut` + wipe prefs + reset stores + role→client), **Delete account** ("DELETE"

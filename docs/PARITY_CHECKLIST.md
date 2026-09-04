@@ -20,19 +20,28 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 
 ## Screens — Signup / Auth
 
-| iOS path | Android target | Status | Notes |
-|---|---|---|---|
-| `Screens/Signup/SignupWelcomeView.swift` | `feature/signup/WelcomeScreen.kt` | done | M1 |
-| `Screens/Signup/SignupRoleView.swift` | `feature/signup/RoleScreen.kt` | done | M1 |
-| `Screens/Signup/SignupAuthView.swift` | `feature/signup/SignupAuthScreen.kt` | done | M1 |
-| `Screens/Signup/EmailAuthView.swift` | `ui/auth/AuthScreen.kt` (email branch) | done | M1 |
-| `Screens/Signup/SignupProfileView.swift` | `feature/signup/ProfileScreen.kt` | done | M1 |
-| `Screens/Signup/SignupNotifPermissionView.swift` | `feature/signup/NotifPermissionScreen.kt` | done | M1; FCM register via PushService (soft without google-services.json) |
-| `Screens/Signup/SignupDoneView.swift` | `feature/signup/DoneScreen.kt` | done | M1 |
-| `Screens/Signup/LegalView.swift` | `feature/signup/LegalScreen.kt` | done | M1 |
-| `Screens/Signup/SignupFlowView.swift` | `feature/signup/SignupFlow.kt` + `SignupViewModel` | done | M1 |
-| `Services/AuthService.swift` / Root gate | `SessionManager` + `ArtistantNavHost` / `RootViewModel` | done | M1 |
-| `Services/AppleSignInController.swift` | `SessionManager` Custom Tabs + deep link | done | #12 deepLinkError surface on OAuth denial |
+Re-implemented against the Sep-2026 light design (section **GS**, screens 01 · 11 ·
+12 · 13 · 27 · 28 · 29 · 30 · 31 · 62 · 71 · 90 · 114 · 118 · 119) —
+`docs/REDESIGN_2026-09.md` §P2. The "design" column is the extracted screen the
+Android file now mirrors.
+
+| iOS path | Design | Android target | Status | Notes |
+|---|---|---|---|---|
+| — (launch window) | 01 Onboarding | `feature/signup/SplashScreen.kt` | done | "The one dark room" — the only dark surface in the app, rendered on `RootGate.Loading` in `darkest` so the pre-Compose launch window hands off with no seam. Carries no actions: the markup's two CTAs belong to 118 |
+| `Screens/Signup/SignupWelcomeView.swift` | 118 Welcome — blocked | `feature/signup/WelcomeScreen.kt` | done | Disabled CTA always paired with an inline reason ("Tick this to continue"). Only real conditions gate it — the terms tick, plus a caller-supplied connectivity reason. No "signups paused" state: `app_settings` is server-only, so it cannot be stated truthfully |
+| `Screens/Signup/CommunityCommitmentView` | 27 Community pledge | `feature/signup/CommunityCommitmentScreen.kt` | done | Four numbered rules, a required tick, "Shown once — you won't see this again". The Decline dead-end screen is gone; back is the decline |
+| `Screens/Signup/SignupRoleView.swift` | 11 Role picker · 71 Hydration error | `feature/signup/RoleScreen.kt` | done | Select on tap, move on Continue (was: commit-and-self-advance). 71 is the same screen with a failure banner + Retry, which also renders on the handle step — the one the gate actually enters on |
+| `Screens/Signup/SignupAuthView.swift` | 12 Sign in | `feature/signup/SignupAuthScreen.kt` | done | Phone OTP first, then Apple / Google / password. Apple and Google marks not bundled yet, so those rows are labelled buttons |
+| — (new) | 119 Enter code | `feature/signup/EnterCodeScreen.kt` | done | `SignupStep.Code`, 6-box `OtpField`, 30s resend, "Change number", email escape after two sends |
+| `Screens/Signup/EmailAuthView.swift` | 28 Email sign-up | `feature/signup/EmailSignUpScreen.kt` | done | A modal over the auth step (`emailSignUp` flag), not a step. Enforces the 8-character rule it states, which is stricter than GoTrue's 6. "Forgot password?" calls `resetPasswordForEmail` |
+| `Screens/Signup/SignupProfileView.swift` | 29 Handle & city · 90 Handle taken | `feature/signup/ProfileScreen.kt` | done | Four live states; "Couldn't check" never borrows the available tick, while still leaving Continue tappable (the unique constraint is the backstop). Taken offers `HandleSuggestions`. 90's "THE OTHER THREE STATES" panel is design documentation, not a control, and is deliberately not drawn |
+| `Screens/Signup/SignupNotifPermissionView.swift` | 13 Notifications | `feature/signup/NotifPermissionScreen.kt` | done | Names the loss ("Quotes expire. We'll tell you first."), three kinds. FCM register via PushService (soft without google-services.json) |
+| `Screens/Signup/SignupDoneView.swift` | 30 You're in | `feature/signup/DoneScreen.kt` | partial | Ends on the score. The design's "412 acts play your city" has no count endpoint behind it, so the sentence keeps its shape and drops its number |
+| `Screens/Signup/LegalView.swift` | 31 Terms · 114 Privacy policy | `feature/signup/LegalScreen.kt` | done | One segmented viewer, both documents one tap apart. Copy rewritten to the redesign's — the old 11-section terms described platform fees and refunds on a product that takes no payment |
+| — (new) | 62 Privacy | `feature/signup/PrivacyScreen.kt` | partial | Two switches, stored in `PrivacyPreferences` (DataStore) because neither has a column in the 107 canonical migrations, and the screen says so. Nothing reads them yet: enforcement is `feature/messages` (receipts) and `feature/artist`/`feature/profile` (city). The account-settings row that pushes this screen is section AC's file |
+| `Screens/Signup/SignupFlowView.swift` | — | `feature/signup/SignupFlow.kt` + `SignupViewModel` | done | Step machine gains `.Code`, retired by a live session exactly like `.Auth`. The floating hydration strip is gone — the banner lives in the screens now |
+| `Services/AuthService.swift` / Root gate | — | `SessionManager` + `ArtistantNavHost` / `RootViewModel` | done | `sendPhoneOtp` / `verifyPhoneOtp` / `sendEmailOtp` / `verifyEmailOtp` / `sendPasswordReset` added; every prior method unchanged |
+| `Services/AppleSignInController.swift` | — | `SessionManager` Custom Tabs + deep link | done | #12 deepLinkError surface on OAuth denial |
 
 ## Screens — Browse (M2)
 
@@ -47,7 +56,6 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | Self metrics + history; Home → Score |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | Client real-world rows from profile chip |
 | `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | done | Profile stats destination |
-| `Screens/Signup/CommunityCommitmentView` (in SignupFlowView) | `feature/signup/CommunityCommitmentScreen.kt` | done | ACCT-05 pledge gate |
 
 ## Screens — Booking (M3)
 
