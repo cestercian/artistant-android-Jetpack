@@ -195,78 +195,78 @@ internal fun ReportArtistSheet(
         // then grows past the sheet and is clipped rather than scrolled, which
         // is exactly what happens to this form at a large font scale.
         Column(Modifier.verticalScroll(rememberScrollState())) {
-        SheetScaffold {
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = space.md),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            SheetScaffold {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = space.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Report this artist",
+                        style = AppTheme.type.sectionTitle,
+                        color = colors.ink,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconCircle(
+                        icon = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        onClick = onDismiss,
+                        size = dimens.component.iconCircleSm,
+                    )
+                }
                 Text(
-                    "Report this artist",
-                    style = AppTheme.type.sectionTitle,
-                    color = colors.ink,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    "Why are you reporting $artistName?",
+                    style = AppTheme.type.body,
+                    color = colors.ink2,
                 )
-                IconCircle(
-                    icon = Icons.Filled.Close,
-                    contentDescription = "Close",
-                    onClick = onDismiss,
-                    size = dimens.component.iconCircleSm,
-                )
-            }
-            Text(
-                "Why are you reporting $artistName?",
-                style = AppTheme.type.body,
-                color = colors.ink2,
-            )
-            Spacer(Modifier.height(space.md))
-            Column {
-                ArtistReportReasons.forEachIndexed { index, option ->
-                    ReasonRow(
-                        label = option,
-                        selected = option == reason,
-                        showHairline = index != ArtistReportReasons.lastIndex,
-                        onClick = {
-                            haptics.tap()
-                            reason = option
-                        },
+                Spacer(Modifier.height(space.md))
+                Column {
+                    ArtistReportReasons.forEachIndexed { index, option ->
+                        ReasonRow(
+                            label = option,
+                            selected = option == reason,
+                            showHairline = index != ArtistReportReasons.lastIndex,
+                            onClick = {
+                                haptics.tap()
+                                reason = option
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(space.lg))
+                    AppTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = "Add a note — optional",
+                        hint = "This won't be shared with them",
+                        singleLine = false,
+                        minHeight = dimens.component.skeletonTile,
                     )
                 }
                 Spacer(Modifier.height(space.lg))
-                AppTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = "Add a note — optional",
-                    hint = "This won't be shared with them",
-                    singleLine = false,
-                    minHeight = dimens.component.skeletonTile,
+                PrimaryButton(
+                    text = "Submit report",
+                    onClick = {
+                        reason?.let {
+                            haptics.warning()
+                            onSubmit(it, note.trim().ifBlank { null })
+                        }
+                    },
+                    // A report with no reason is a row a moderator cannot triage, so
+                    // the button waits rather than filing "Something else" on the
+                    // reporter's behalf.
+                    enabled = reason != null,
+                    fullWidth = true,
+                )
+                Spacer(Modifier.height(space.md))
+                Text(
+                    "Queued on this device if you're offline.",
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Spacer(Modifier.height(space.lg))
-            PrimaryButton(
-                text = "Submit report",
-                onClick = {
-                    reason?.let {
-                        haptics.warning()
-                        onSubmit(it, note.trim().ifBlank { null })
-                    }
-                },
-                // A report with no reason is a row a moderator cannot triage, so
-                // the button waits rather than filing "Something else" on the
-                // reporter's behalf.
-                enabled = reason != null,
-                fullWidth = true,
-            )
-            Spacer(Modifier.height(space.md))
-            Text(
-                "Queued on this device if you're offline.",
-                style = AppTheme.type.caption,
-                color = colors.ink4,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
         }
     }
 }

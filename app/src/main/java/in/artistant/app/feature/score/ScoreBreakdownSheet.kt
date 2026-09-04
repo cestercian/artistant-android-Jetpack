@@ -89,154 +89,154 @@ fun ScoreBreakdownSheet(
         // wrap-content Column measures with infinite height and grows past the
         // sheet instead of scrolling inside it.
         Column(Modifier.verticalScroll(rememberScrollState())) {
-        SheetScaffold {
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = space.lg),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Score details",
-                    style = AppTheme.type.sectionTitle,
-                    color = colors.ink,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                IconCircle(
-                    icon = Icons.Filled.Close,
-                    contentDescription = "Close",
-                    onClick = onDismiss,
-                    size = dimens.component.iconCircleSm,
-                )
-            }
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(space.lg),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ScoreDisc(
-                    score = if (isNew) null else artist.score,
-                    size = dimens.size.ringMd,
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
+            SheetScaffold {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = space.lg),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        artist.name,
-                        style = AppTheme.type.rowTitle,
+                        "Score details",
+                        style = AppTheme.type.sectionTitle,
                         color = colors.ink,
+                        modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        // The tier, not a percentile: nothing in the schema
-                        // ranks an artist against their city, and "top 18% in
-                        // Bengaluru" would be a number this client invented.
-                        if (isNew) "New on Artistant" else "${tier.label} tier",
-                        style = AppTheme.type.subtitle,
-                        color = colors.ink4,
-                        maxLines = 1,
-                    )
-                }
-            }
-            Spacer(Modifier.height(space.lg))
-
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                if (breakdownFailed) {
-                    Banner(
-                        title = "Couldn't itemise this score",
-                        detail = "Showing what this artist's record can back on its " +
-                            "own. The rest needs a fetch we couldn't complete.",
-                        tone = BannerTone.Attention,
-                    )
-                }
-                if (isNew) {
-                    Text(
-                        "Under ${ScoreBands.MIN_GIGS_FOR_RANK} completed gigs, so " +
-                            "there is no ranked score yet. That is not a low score — " +
-                            "it is no score.",
-                        style = AppTheme.type.body,
-                        color = colors.ink2,
+                    IconCircle(
+                        icon = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        onClick = onDismiss,
+                        size = dimens.component.iconCircleSm,
                     )
                 }
 
-                if (breakdown != null) {
-                    EyebrowLabel("What moves it")
-                    ScoreFactors.of(breakdown).forEach { factor ->
-                        Meter(
-                            label = factor.label,
-                            fraction = factor.fraction,
-                            value = factor.display,
-                        )
-                    }
-                } else {
-                    // Degraded (99): only the facts the artist row itself carries.
-                    EyebrowLabel("What we can show")
-                    Meter(
-                        label = "Shows completed",
-                        // No denominator exists for a career total, so the bar is
-                        // full and the figure carries the meaning.
-                        fraction = if (artist.gigs > 0) 1f else 0f,
-                        value = "${artist.gigs}",
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(space.lg),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ScoreDisc(
+                        score = if (isNew) null else artist.score,
+                        size = dimens.size.ringMd,
                     )
-                    if (artist.onTime > 0) {
-                        Meter(
-                            label = ScoreFactors.SHOW_UP,
-                            fraction = artist.onTime.coerceIn(0, PERCENT) / PERCENT.toFloat(),
-                            value = "${artist.onTime}%",
+                    Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
+                        Text(
+                            artist.name,
+                            style = AppTheme.type.rowTitle,
+                            color = colors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            // The tier, not a percentile: nothing in the schema
+                            // ranks an artist against their city, and "top 18% in
+                            // Bengaluru" would be a number this client invented.
+                            if (isNew) "New on Artistant" else "${tier.label} tier",
+                            style = AppTheme.type.subtitle,
+                            color = colors.ink4,
+                            maxLines = 1,
                         )
                     }
-                    reviewAverage(reviews)?.let { average ->
-                        Meter(
-                            label = ScoreFactors.REVIEWS,
-                            fraction = (average / MAX_RATING).toFloat(),
-                            value = String.format(Locale.US, "%.1f / %d", average, MAX_RATING),
-                        )
-                    }
-                    Spacer(Modifier.height(space.xs))
-                    EyebrowLabel("Not loaded")
-                    ScoreFactors.labels
-                        .filterNot { it == ScoreFactors.SHOW_UP && artist.onTime > 0 }
-                        .filterNot { it == ScoreFactors.REVIEWS && reviewAverage(reviews) != null }
-                        .forEach { UnavailableRow(it) }
                 }
+                Spacer(Modifier.height(space.lg))
 
-                if (reviewsFailed) {
+                Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+                    if (breakdownFailed) {
+                        Banner(
+                            title = "Couldn't itemise this score",
+                            detail = "Showing what this artist's record can back on its " +
+                                "own. The rest needs a fetch we couldn't complete.",
+                            tone = BannerTone.Attention,
+                        )
+                    }
+                    if (isNew) {
+                        Text(
+                            "Under ${ScoreBands.MIN_GIGS_FOR_RANK} completed gigs, so " +
+                                "there is no ranked score yet. That is not a low score — " +
+                                "it is no score.",
+                            style = AppTheme.type.body,
+                            color = colors.ink2,
+                        )
+                    }
+
+                    if (breakdown != null) {
+                        EyebrowLabel("What moves it")
+                        ScoreFactors.of(breakdown).forEach { factor ->
+                            Meter(
+                                label = factor.label,
+                                fraction = factor.fraction,
+                                value = factor.display,
+                            )
+                        }
+                    } else {
+                        // Degraded (99): only the facts the artist row itself carries.
+                        EyebrowLabel("What we can show")
+                        Meter(
+                            label = "Shows completed",
+                            // No denominator exists for a career total, so the bar is
+                            // full and the figure carries the meaning.
+                            fraction = if (artist.gigs > 0) 1f else 0f,
+                            value = "${artist.gigs}",
+                        )
+                        if (artist.onTime > 0) {
+                            Meter(
+                                label = ScoreFactors.SHOW_UP,
+                                fraction = artist.onTime.coerceIn(0, PERCENT) / PERCENT.toFloat(),
+                                value = "${artist.onTime}%",
+                            )
+                        }
+                        reviewAverage(reviews)?.let { average ->
+                            Meter(
+                                label = ScoreFactors.REVIEWS,
+                                fraction = (average / MAX_RATING).toFloat(),
+                                value = String.format(Locale.US, "%.1f / %d", average, MAX_RATING),
+                            )
+                        }
+                        Spacer(Modifier.height(space.xs))
+                        EyebrowLabel("Not loaded")
+                        ScoreFactors.labels
+                            .filterNot { it == ScoreFactors.SHOW_UP && artist.onTime > 0 }
+                            .filterNot { it == ScoreFactors.REVIEWS && reviewAverage(reviews) != null }
+                            .forEach { UnavailableRow(it) }
+                    }
+
+                    if (reviewsFailed) {
+                        Text(
+                            "Reviews couldn't be loaded, so they aren't counted in what " +
+                                "you see here.",
+                            style = AppTheme.type.caption,
+                            color = colors.ink4,
+                        )
+                    }
                     Text(
-                        "Reviews couldn't be loaded, so they aren't counted in what " +
-                            "you see here.",
+                        if (breakdown != null) {
+                            "Computed from completed bookings, verified reviews and " +
+                                "response times on Artistant. Nothing here can be bought."
+                        } else {
+                            "The total is still the server's number. We just can't " +
+                                "itemise all of it right now."
+                        },
                         style = AppTheme.type.caption,
                         color = colors.ink4,
                     )
-                }
-                Text(
-                    if (breakdown != null) {
-                        "Computed from completed bookings, verified reviews and " +
-                            "response times on Artistant. Nothing here can be bought."
-                    } else {
-                        "The total is still the server's number. We just can't " +
-                            "itemise all of it right now."
-                    },
-                    style = AppTheme.type.caption,
-                    color = colors.ink4,
-                )
-                Spacer(Modifier.height(space.sm))
-                if (breakdownFailed) {
-                    PrimaryButton(text = "Retry", onClick = onRetry, fullWidth = true)
                     Spacer(Modifier.height(space.sm))
-                    SecondaryButton(
-                        text = "See the full breakdown",
-                        onClick = onSeeBookability,
-                        fullWidth = true,
-                    )
-                } else {
-                    PrimaryButton(
-                        text = "See the full breakdown",
-                        onClick = onSeeBookability,
-                        fullWidth = true,
-                    )
+                    if (breakdownFailed) {
+                        PrimaryButton(text = "Retry", onClick = onRetry, fullWidth = true)
+                        Spacer(Modifier.height(space.sm))
+                        SecondaryButton(
+                            text = "See the full breakdown",
+                            onClick = onSeeBookability,
+                            fullWidth = true,
+                        )
+                    } else {
+                        PrimaryButton(
+                            text = "See the full breakdown",
+                            onClick = onSeeBookability,
+                            fullWidth = true,
+                        )
+                    }
                 }
             }
-        }
         }
     }
 }
