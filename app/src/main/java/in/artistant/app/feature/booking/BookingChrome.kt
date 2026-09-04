@@ -248,7 +248,10 @@ fun FunnelBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = dimens.component.gutter),
+            // The design's own 10px above the bar. Without it a two-line
+            // subtitle pushes the title up against the status bar, which reads
+            // as the page having been cropped.
+            .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
@@ -306,7 +309,7 @@ fun FunnelStepBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = dimens.component.gutter),
+            .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconCircle(
