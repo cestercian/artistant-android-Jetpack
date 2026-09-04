@@ -62,7 +62,25 @@ fun Tile(
             .then(
                 if (onClick != null) {
                     Modifier
-                        .clip(RoundedCornerShape(dimens.radii.lg))
+                        // TOP corners only. This clip exists solely to shape the
+                        // ripple, and rounding all four ATE THE TEXT: the meta
+                        // line is the last thing in the column, so it sits inside
+                        // the bottom corner arc — an 18dp radius cut the first
+                        // glyph clean off every second line on Discover ("Singer
+                        // · from ₹38,000" rendered as "inger · from ₹38,000").
+                        // The name line above it cleared the arc, which is why
+                        // only one of the two looked wrong.
+                        //
+                        // Rounding the top matches the image band's own clip
+                        // exactly where the ripple is visible over media; the
+                        // bottom half is a rectangle of text on the page, and a
+                        // square ripple there is correct.
+                        .clip(
+                            RoundedCornerShape(
+                                topStart = dimens.radii.lg,
+                                topEnd = dimens.radii.lg,
+                            ),
+                        )
                         .clickable(
                             interactionSource = interaction,
                             indication = ripple(),

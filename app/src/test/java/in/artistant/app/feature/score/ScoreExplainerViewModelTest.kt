@@ -1,14 +1,15 @@
 package `in`.artistant.app.feature.score
 
+import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeScoreRepository
 import `in`.artistant.app.data.repository.ScoreBreakdown
 import `in`.artistant.app.data.repository.ScoreHistoryPoint
 import `in`.artistant.app.domain.score.ScoreTier
+import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -25,6 +26,18 @@ class ScoreExplainerViewModelTest {
 
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
 
+    /**
+     * The explainer now also reads the artist's own record (for the
+     * Opportunities tab) through [ViewerIdentity]. Both are subordinate: a
+     * signed-out viewer and an empty artist repository are ordinary states, and
+     * neither may change what the score half of the screen says.
+     */
+    private fun model(
+        scores: FakeScoreRepository,
+        artists: FakeArtistsRepository = FakeArtistsRepository(),
+        viewerId: String? = null,
+    ) = ScoreExplainerViewModel(scores, artists, ViewerIdentity { viewerId })
+
     private fun breakdown(score: Int, gigs: Int) = ScoreBreakdown(
         score = score,
         showUpRate = 96,
@@ -37,7 +50,7 @@ class ScoreExplainerViewModelTest {
 
     @Test
     fun loadsTheBreakdownAndHistory() = runTest {
-        val model = ScoreExplainerViewModel(
+        val model = model(
             FakeScoreRepository(
                 self = breakdown(score = 82, gigs = 12),
                 history = listOf(ScoreHistoryPoint(score = 79, computedAtIso = "2026-05-01T00:00:00Z")),
@@ -49,7 +62,7 @@ class ScoreExplainerViewModelTest {
         assertEquals(1, s.history.size)
         assertFalse(s.isLoading)
         assertFalse(s.historyFailed)
-        assertNull(s.error)
+        assertFalse(s.failed)
     }
 
     @Test
@@ -59,7 +72,7 @@ class ScoreExplainerViewModelTest {
         // — and the sheet behind it says "No history yet — score updates after
         // gigs land", which we hadn't earned. Same distinction iOS draws with
         // `ScoreHistorySheet.fetchError`.
-        val model = ScoreExplainerViewModel(
+        val model = model(
             FakeScoreRepository(self = breakdown(score = 82, gigs = 12), failHistory = true),
         )
 
@@ -67,14 +80,14 @@ class ScoreExplainerViewModelTest {
         assertTrue("the UI must be able to say history didn't load", s.historyFailed)
         assertTrue(s.history.isEmpty())
         // The ring is the screen; a dead sparkline must not take it down with it.
-        assertNull(s.error)
+        assertFalse(s.failed)
         assertEquals(82, s.breakdown.score)
         assertFalse(s.isLoading)
     }
 
     @Test
     fun `an artist with genuinely no history is not flagged as failed`() = runTest {
-        val model = ScoreExplainerViewModel(FakeScoreRepository(self = breakdown(score = 82, gigs = 12)))
+        val model = model(FakeScoreRepository(self = breakdown(score = 82, gigs = 12)))
 
         val s = model.state.value
         assertFalse("no rows yet is not a failure", s.historyFailed)
@@ -88,7 +101,7 @@ class ScoreExplainerViewModelTest {
             history = listOf(ScoreHistoryPoint(score = 79, computedAtIso = "2026-05-01T00:00:00Z")),
             failHistory = true,
         )
-        val model = ScoreExplainerViewModel(repo)
+        val model = model(repo)
         assertTrue(model.state.value.historyFailed)
 
         repo.failHistory = false
@@ -100,23 +113,23 @@ class ScoreExplainerViewModelTest {
 
     @Test
     fun aThrownBreakdownBecomesAnExplicitError_notAFakeZero() = runTest {
-        val model = ScoreExplainerViewModel(FakeScoreRepository(failSelf = true))
+        val model = model(FakeScoreRepository(failSelf = true))
 
         val s = model.state.value
-        assertNotNull("the UI must be able to say the score didn't load", s.error)
+        assertTrue("the UI must be able to say the score didn't load", s.failed)
         assertFalse(s.isLoading)
     }
 
     @Test
     fun refreshRecoversAfterATransientFailure() = runTest {
         val repo = FakeScoreRepository(self = breakdown(score = 82, gigs = 12), failSelf = true)
-        val model = ScoreExplainerViewModel(repo)
-        assertNotNull(model.state.value.error)
+        val model = model(repo)
+        assertTrue(model.state.value.failed)
 
         repo.failSelf = false
         model.refresh()
 
-        assertNull(model.state.value.error)
+        assertFalse(model.state.value.failed)
         assertEquals(82, model.state.value.breakdown.score)
     }
 
