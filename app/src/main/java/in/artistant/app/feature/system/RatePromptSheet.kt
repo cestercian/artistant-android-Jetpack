@@ -109,7 +109,11 @@ fun RatePromptSheet(
             ) {
                 Text(
                     text = "A",
-                    style = AppTheme.type.monoNumber,
+                    // `monoHero`, not `monoNumber`: the design sets this "A" at
+                    // 30 in a 62 box, and at the 18sp numeral step the mark reads
+                    // as a letter that happens to be on a square rather than as
+                    // the app's icon.
+                    style = AppTheme.type.monoHero,
                     color = colors.accent,
                 )
             }
