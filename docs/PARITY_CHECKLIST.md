@@ -38,18 +38,18 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/DiscoverView.swift` | `feature/discover/DiscoverScreen.kt` | done | M2 — rails via concurrent `search_artists` |
-| `State/DiscoverFeedStore.swift` | `feature/discover/DiscoverViewModel.kt` | done | M2 |
-| `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | done | Query + facets + sort + filter sheet badge |
-| `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` | done | Accordion + histogram + 0073 dims |
-| `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | done | Debounce + pagination + filter/histogram |
+| `Screens/DiscoverView.swift` | `feature/discover/DiscoverScreen.kt` | **redesigned (DS)** | Sep-2026 light design, screens 02 + 59. Header (city + today) · `SearchBarButton` · category chips · one 262dp `HeroCard` · titled two-up `Tile` rails · `SkeletonPage`. Hero carousel and full-bleed insets retired; "See all" seeds Search via `SearchSeed` |
+| `State/DiscoverFeedStore.swift` | `feature/discover/DiscoverViewModel.kt` | **redesigned (DS)** | Hero + 4 rails via 5 concurrent `search_artists`; the availability rail is date-scoped through the 0073 `p_date` AND re-filtered on `days_available` (the repo silently retries without the 0073 dims on an old server). Empty rails are dropped, not drawn |
+| `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | **redesigned (DS)** | Screens 14 / 03 / 57 / 58 in one destination. Browse-vs-results is `hasActiveQuery` × a local `editing` flag. Suggestions carry `search_facets`' real counts; "Notify me when one joins" omitted (no alert store); "Map view" omitted (no coordinates) |
+| `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` + `CompareByServiceSheet.kt` | **redesigned (DS)** | Screens 15 / 104 (one sheet, two states: chip summary + disclosure rows + histogram + pinned CTA) and 53 (radio compare-by-service). "Must have" toggles omitted — no PA / verification / travel columns |
+| `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | **redesigned (DS)** | Debounce + pagination + filter/histogram, plus `selectService` (radio), `dropFilter(kind)` and the `SearchSeed` collector. Every computed string is a pure function in `SearchLabels.kt`, unit-tested |
 | `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | **Redesigned Sep 2026 (AP, design 04/54/55/101/103).** Round portrait + rating pill + three-cell stat strip; packages replace the rate card and the price rides the CTA; skeleton with no nav bar (54); named not-found with a route to Discover (55); no-audio redirect (101); self view swaps the verbs and drops the booking controls (103). Hero pager (PROF-10) still open |
 | `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | **Redesigned Sep 2026 (design 50/79/80).** Score · Stats · Opportunities segments; New is a gig counter and says "not a low score, no score"; a failed read leads with "This isn't your real score"; every opportunity opens the press kit or the wizard |
 | `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | **Redesigned Sep 2026 (design 99).** Degraded state keeps the server's number and itemises only what the artist row can back (`total_gigs`, `on_time_rate`, the loaded reviews); the rest go under NOT LOADED with no bar to misread as a zero |
 | — (new, design 16) | `feature/score/BookabilityScreen.kt` | done | Client-facing audit of one artist's score, pushed from the breakdown sheet. Route `bookability/{artistId}` |
 | — (new, design 102) | `feature/artist/ArtistReviewsScreen.kt` | done | Every review for one artist + search + All/5 star/Recent lenses. Three distinct empties: no corpus, nothing in this lens, no match for a query (which quotes the corpus size). Route `artist_reviews/{artistId}` |
 | iOS `ReportArtistSheet` | `feature/artist/ArtistProfileSheets.kt` (`ReportArtistSheet`) | done | Design 56. Real `reports` insert via `ReportsRepository.reportArtist`; five profile-specific reasons + optional note; the toast says Sent or Queued and never "received" |
-| `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | done | Profile stats destination |
+| `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | **redesigned (DS)** | Screens 32 + 112. Kind chips are permanent navigation (switching replaces the destination); a within-list category rail derived from the rows; rows carry the accent score chip and "from ₹x". Failure ≠ empty |
 | `Screens/Signup/CommunityCommitmentView` (in SignupFlowView) | `feature/signup/CommunityCommitmentScreen.kt` | done | ACCT-05 pledge gate |
 
 ## Screens — Booking (M3)
@@ -153,7 +153,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `State/RoleStore.swift` | `AppPreferences` + RootViewModel | partial | Role persisted; store shape differs |
 | `State/DiscoverFeedStore.swift` | `DiscoverViewModel` | done | M2 |
 | `State/SearchStore.swift` | `SearchViewModel` | partial | M2 |
-| `State/SavedStore.swift` | `feature/saved/SavedStore.kt` | done | Optimistic toggle + prefs + sign-out reset |
+| `State/SavedStore.swift` | `feature/saved/SavedStore.kt` | done | Optimistic toggle + prefs + sign-out reset. `refreshFromServer()` returns whether the SERVER copy was read (DS) — loaded-and-empty and couldn't-load are the same empty set and the opposite meaning |
 | `State/BookingStore.swift` | `BookingViewModel` + `BookingDraftStore` | partial | Draft store + VM; no global booking list cache yet |
 | `State/RequestStore.swift` | `ArtistHomeViewModel` (+ RequestsRepository) | done | Open quotes rail on Artist Home |
 | `State/MessageStore.swift` | `MessagesViewModel` / `ChatViewModel` | done | Inbox filters + Chat Realtime/optimistic + scroll-back cursor (`loadOlder`); no global MessageStore needed |

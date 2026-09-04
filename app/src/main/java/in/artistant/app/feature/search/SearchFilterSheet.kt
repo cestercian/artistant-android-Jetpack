@@ -1,13 +1,16 @@
 package `in`.artistant.app.feature.search
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,16 +19,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,186 +38,206 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.common.util.formatInrShort
 import `in`.artistant.app.data.model.PriceBucket
-import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.Chip
+import `in`.artistant.app.designsystem.component.IconCircle
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.SheetScaffold
 import `in`.artistant.app.designsystem.theme.AppTheme
-
-private enum class FilterSection { City, Date, What, Budget, Score }
+import java.time.LocalDate
 
 /**
- * Accordion filter sheet — port of iOS `SearchFilterSheet`.
- * City / Date / What (event+services) / Budget (histogram+range) / Bookability.
+ * How much of the screen a filter sheet takes.
+ *
+ * The design's sheet starts 132 units down an 844-unit frame, which is 84%. A
+ * fraction rather than a height because the thing being reproduced is the
+ * PROPORTION — a fixed height would swallow the scrim strip on a short phone and
+ * float on a tall one — and it has to be bounded rather than `fillMaxHeight()`
+ * because the pinned CTA below the scroll needs a `weight(1f)` to push against.
+ */
+private const val SHEET_FRACTION = 0.84f
+
+/** The design's `rgba(20,21,15,.36)` scrim, expressed on the ink token. */
+private const val SCRIM_ALPHA = 0.36f
+
+/**
+ * Filters (screens 15 and 104).
+ *
+ * The two screens are one sheet in two states: 104 is 15 with filters on. The
+ * active-filter chip row at the top is what makes that work — the design's note
+ * is that it "makes six accordions legible at a glance and each chip is its own
+ * undo", so the sheet answers "what am I filtering by" without opening anything.
+ *
+ * **What is not here, and why.** The design's "Must have" block (own PA and
+ * lights / verified ID / travels outside city) has no counterpart in
+ * `search_artists`: there is no PA column, no verification flag, and no travel
+ * radius on `artists`. Three switches that changed nothing would be worse than
+ * three that are absent, so the block is omitted and the sheet carries only
+ * filters that reach the RPC.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchFilterSheet(
     state: SearchUiState,
     cityOptions: List<String>,
+    categoryOptions: List<String>,
     onDismiss: () -> Unit,
     onSelectCity: (String?) -> Unit,
+    onToggleCategory: (String) -> Unit,
     onSetDate: (String?) -> Unit,
     onSetFlex: (Int) -> Unit,
     onSetEventType: (String?) -> Unit,
-    onToggleService: (String) -> Unit,
     onSetPrice: (Int, Int) -> Unit,
     onSetScore: (Int) -> Unit,
+    onDropFilter: (SearchFilterKind) -> Unit,
+    onCompareServices: () -> Unit,
     onClear: () -> Unit,
     onApply: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    var open by remember { mutableStateOf(FilterSection.City) }
+    val dimens = AppTheme.dimens
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var open by remember { mutableStateOf<FilterSection?>(null) }
+    val chips = searchFilterChips(state)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = colors.bg,
+        // SheetScaffold draws the container — fill, radius, gutter, nav inset —
+        // so Material must draw none of it, or the two stack into a double card
+        // with an M3 surface tint underneath.
+        containerColor = Color.Transparent,
+        contentColor = colors.ink,
+        scrimColor = colors.ink.copy(alpha = SCRIM_ALPHA),
+        dragHandle = null,
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = space.lg)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        SheetScaffold(modifier = Modifier.fillMaxHeight(SHEET_FRACTION)) {
+            SheetHeaderRow(
+                leadingLabel = if (chips.isEmpty()) "Reset" else "Clear",
+                leadingEnabled = chips.isNotEmpty(),
+                title = "Filters",
+                onLeading = onClear,
+                onClose = onDismiss,
+            )
+
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
             ) {
-                Text("Filters", style = AppTheme.type.headline, color = colors.ink)
-                Text(
-                    "Clear",
-                    style = AppTheme.type.callout,
-                    color = colors.ink2,
-                    modifier = Modifier.clickable(onClick = onClear).padding(space.sm),
-                )
-            }
-            Spacer(Modifier.height(space.md))
-
-            AccordionHeader("City", open == FilterSection.City, state.city ?: "Any") { open = FilterSection.City }
-            if (open == FilterSection.City) {
-                ChipRow(
-                    options = listOf(null to "Any") + cityOptions.map { it to it },
-                    selected = state.city,
-                    onSelect = { onSelectCity(it) },
-                )
-            }
-
-            AccordionHeader("Date", open == FilterSection.Date, state.dateIso ?: "Any date") { open = FilterSection.Date }
-            if (open == FilterSection.Date) {
-                Text(
-                    "ISO date (yyyy-MM-dd) — tap Clear to unset",
-                    style = AppTheme.type.caption,
-                    color = colors.ink3,
-                )
-                Spacer(Modifier.height(space.sm))
-                // Lightweight date entry: preset chips for today-ish + clear.
-                // Full Calendar picker can replace this without changing the VM contract.
-                Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                    listOf(
-                        null to "Any day",
-                        java.time.LocalDate.now().toString() to "Today",
-                        java.time.LocalDate.now().plusDays(7).toString() to "+7d",
-                    ).forEach { (iso, label) ->
-                        FilterChip(
-                            label = label,
-                            selected = state.dateIso == iso,
-                            onClick = { onSetDate(iso) },
-                        )
-                    }
+                if (chips.isNotEmpty()) {
+                    FilterChipRail(
+                        chips = chips,
+                        onDrop = onDropFilter,
+                        modifier = Modifier.padding(top = dimens.space.lg),
+                    )
+                    Text(
+                        text = searchFilterSummaryLine(chips.size),
+                        style = AppTheme.type.caption,
+                        color = colors.ink3,
+                        modifier = Modifier.padding(top = dimens.space.md),
+                    )
+                    SheetRule()
                 }
-                if (state.dateIso != null) {
-                    Spacer(Modifier.height(space.sm))
-                    Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                        SearchViewModel.flexOptions.forEach { (days, label) ->
-                            FilterChip(
-                                label = label,
-                                selected = state.flexDays == days,
-                                onClick = { onSetFlex(days) },
+
+                DisclosureRow(
+                    title = "City",
+                    value = state.city ?: "Any",
+                    expanded = open == FilterSection.City,
+                    onClick = { open = open.toggle(FilterSection.City) },
+                )
+                if (open == FilterSection.City) {
+                    OptionChips(
+                        options = listOf(null to "Any") + cityOptions.map { it to it },
+                        selected = state.city,
+                        onSelect = onSelectCity,
+                    )
+                }
+
+                DisclosureRow(
+                    title = "Date",
+                    value = state.dateIso?.let { searchDateLabel(it) } ?: "Any date",
+                    expanded = open == FilterSection.Date,
+                    onClick = { open = open.toggle(FilterSection.Date) },
+                )
+                if (open == FilterSection.Date) {
+                    DateSection(state = state, onSetDate = onSetDate, onSetFlex = onSetFlex)
+                }
+
+                DisclosureRow(
+                    title = "Occasion",
+                    value = state.eventType ?: "Any",
+                    expanded = open == FilterSection.Occasion,
+                    onClick = { open = open.toggle(FilterSection.Occasion) },
+                )
+                if (open == FilterSection.Occasion) {
+                    OptionChips(
+                        options = listOf(null to "Any") +
+                            SearchViewModel.eventTypes.map { it to it },
+                        selected = state.eventType,
+                        onSelect = onSetEventType,
+                    )
+                }
+
+                // Service is a PUSH, not an expansion: it is screen 53, a radio
+                // list with its own count on its own button, and comparing means
+                // one lens at a time rather than a chip grid you can multi-select.
+                NavRow(
+                    title = "Service",
+                    value = state.services.firstOrNull()?.let(::serviceLabel) ?: "Any",
+                    onClick = onCompareServices,
+                )
+
+                SectionTitle("Act type", top = dimens.space.xl)
+                if (categoryOptions.isEmpty()) {
+                    Text(
+                        text = "Act types load with the roster.",
+                        style = AppTheme.type.caption,
+                        color = colors.ink4,
+                        modifier = Modifier.padding(top = dimens.space.sm),
+                    )
+                } else {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = dimens.space.md),
+                        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+                        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+                    ) {
+                        categoryOptions.forEach { category ->
+                            Chip(
+                                label = category,
+                                selected = category in state.categories,
+                                onClick = { onToggleCategory(category) },
                             )
                         }
                     }
                 }
+
+                // NOT "Budget, all-in", which is the design's label. The
+                // number this slider bounds is `min_price` — the artist's own
+                // fee — and `BookingMath` adds 5% platform + 18% GST on top of
+                // it at checkout. Under an all-inclusive label the range would
+                // understate what a booking costs by ~24%, and the caption two
+                // lines down would contradict its own heading.
+                SectionTitle("Budget · artist fee", top = dimens.space.xl)
+                BudgetSection(state = state, onSetPrice = onSetPrice)
+
+                SectionTitle("Bookability", top = dimens.space.xl)
+                ScoreSection(state = state, onSetScore = onSetScore)
+
+                Spacer(Modifier.height(dimens.space.xl))
             }
 
-            AccordionHeader(
-                "What",
-                open == FilterSection.What,
-                // Count, not the slugs: the set holds server slugs, and a
-                // summary that printed one of them would show a different
-                // string than the chip the user actually tapped.
-                if (state.services.isEmpty()) "Anything" else "${state.services.size} selected",
-            ) { open = FilterSection.What }
-            if (open == FilterSection.What) {
-                Text("Event type", style = AppTheme.type.caption, color = colors.ink3)
-                Spacer(Modifier.height(space.xs))
-                ChipRow(
-                    options = listOf(null to "Any") + SearchViewModel.eventTypes.map { it to it },
-                    selected = state.eventType,
-                    onSelect = onSetEventType,
-                )
-                Spacer(Modifier.height(space.sm))
-                Text("Services", style = AppTheme.type.caption, color = colors.ink3)
-                Spacer(Modifier.height(space.xs))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                    // Wrap via Column of rows would be nicer; FlowRow needs foundation-layout.
-                    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                        SearchViewModel.services.chunked(2).forEach { row ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                                row.forEach { (slug, label) ->
-                                    FilterChip(
-                                        label = label,
-                                        selected = slug in state.services,
-                                        onClick = { onToggleService(slug) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            AccordionHeader(
-                "Budget",
-                open == FilterSection.Budget,
-                searchBudgetSummary(state),
-            ) { open = FilterSection.Budget }
-            if (open == FilterSection.Budget) {
-                if (state.histogram.isNotEmpty()) {
-                    PriceHistogram(state.histogram, state.minPrice, state.maxPrice)
-                    Spacer(Modifier.height(space.sm))
-                }
-                Text(
-                    "${formatInr(state.minPrice)} – ${formatInr(state.maxPrice)}",
-                    style = AppTheme.type.monoSmall,
-                    color = colors.ink2,
-                )
-                RangeSlider(
-                    value = state.minPrice.toFloat()..state.maxPrice.toFloat(),
-                    onValueChange = { onSetPrice(it.start.toInt(), it.endInclusive.toInt()) },
-                    valueRange = state.priceDataMin.toFloat()..state.priceDataMax.toFloat(),
-                )
-            }
-
-            AccordionHeader(
-                "Bookability",
-                open == FilterSection.Score,
-                if (state.minScore <= 0) "Any" else "${state.minScore}+",
-            ) { open = FilterSection.Score }
-            if (open == FilterSection.Score) {
-                Text("Min score ${state.minScore}", style = AppTheme.type.caption, color = colors.ink2)
-                Slider(
-                    value = state.minScore.toFloat(),
-                    onValueChange = { onSetScore(it.toInt()) },
-                    valueRange = 0f..100f,
-                )
-            }
-
-            Spacer(Modifier.height(space.xl))
+            SheetRule()
             PrimaryButton(
                 text = searchApplyLabel(
                     resultCount = state.results.size,
@@ -222,183 +247,403 @@ fun SearchFilterSheet(
                 ),
                 onClick = onApply,
                 fullWidth = true,
+                modifier = Modifier.padding(top = dimens.space.lg),
             )
-            Spacer(Modifier.height(space.xxl))
         }
     }
 }
 
-/**
- * The Budget row's collapsed summary.
- *
- * Reads [SearchUiState.isPriceNarrowed] — the same predicate the filter badge and
- * the `search_artists` price arguments read — instead of comparing the selection
- * against the `SearchTuning` ₹10k/₹80k constants. Those constants describe no
- * roster: once `price_histogram` lands, an untouched selection SNAPS onto the
- * learned span, so on any roster that isn't exactly ₹10k–₹80k the old comparison
- * failed and a cold sheet announced a price range nobody had set, sitting under a
- * badge that correctly read 0. Third source of truth for the one thing
- * [SearchUiState.activePriceFloor] is documented as owning.
- *
- * Internal so it can be tested, same as [searchApplyLabel]. Takes the whole state
- * rather than loose numbers on purpose — the bug WAS an inconsistent triple, and
- * a signature that can express one proves nothing.
- */
-internal fun searchBudgetSummary(state: SearchUiState): String =
-    if (!state.isPriceNarrowed) {
-        "Any"
-    } else {
-        "${formatInr(state.minPrice)}–${formatInr(state.maxPrice)}"
-    }
+/** Which section is expanded. One at a time — the sheet is a list, not a form. */
+private enum class FilterSection { City, Date, Occasion }
 
-/**
- * What the sheet's primary CTA claims it will show — a straight port of iOS
- * `SearchFilterSheet.applyLabel`.
- *
- * Internal rather than private so it can be tested, same as the results header's
- * [searchResultCountLabel]: the branching is small and every branch is one a
- * user sees. It replaces a `coerceAtLeast(1)` that had been added to dodge
- * "Show 0 artists" and instead turned a zero into a claim — a cold Search tab
- * (nothing typed, no filter, so [hasActiveQuery] false and the "No matches"
- * branch skipped) opened the sheet on "Show 1 artist".
- *
- * Nothing set at all is its own answer: closing the sheet then goes back to the
- * browse rails, so the honest label is the unnumbered one.
- *
- * The trailing "+" carries the same caveat as the header's count — the list
- * pages, so the number is a floor rather than a total.
- */
-internal fun searchApplyLabel(
-    resultCount: Int,
-    hasActiveQuery: Boolean,
-    isLoading: Boolean,
-    canLoadMore: Boolean,
-): String = when {
-    isLoading -> "Searching…"
-    !hasActiveQuery -> "Show artists"
-    resultCount == 0 -> "No matches"
-    canLoadMore -> "Show $resultCount+ artists"
-    resultCount == 1 -> "Show 1 artist"
-    else -> "Show $resultCount artists"
-}
+private fun FilterSection?.toggle(section: FilterSection): FilterSection? =
+    if (this == section) null else section
 
-/**
- * One filter section's header row.
- *
- * A collapsed section states what it is currently set to, on the trailing edge.
- * Without that the sheet could tell you nothing about four of its five filters
- * without opening each one in turn — and since only one section is open at a
- * time, "what am I filtering by" took four taps to answer. The reference puts
- * the same summary in the same place, and it is the reason its rows are taller
- * than ours were (56 against 48.8).
- *
- * The disclosure marker moved from a text glyph on the LEADING edge to a real
- * chevron on the trailing one: a leading marker pushed the section titles off
- * the sheet's own gutter, so they no longer lined up with the chips underneath
- * them.
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Sections
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-private fun AccordionHeader(
-    title: String,
-    open: Boolean,
-    summary: String? = null,
-    onClick: () -> Unit,
+private fun ColumnScope.DateSection(
+    state: SearchUiState,
+    onSetDate: (String?) -> Unit,
+    onSetFlex: (Int) -> Unit,
 ) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        Modifier
+    val dimens = AppTheme.dimens
+    val today = remember { LocalDate.now() }
+    val presets = remember(today) { searchDatePresets(today) }
+    FlowRow(
+        modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            // `lg`, not `md`: with the summary and the rule in place the row
-            // measured 48.8 against the reference's 56, and the ramp step up
-            // lands it at 56.2. A filter row is a setting you read, not a
-            // heading you skim past.
-            .padding(vertical = space.lg),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(top = dimens.space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
     ) {
-        Text(title, style = AppTheme.type.headline, color = colors.ink, modifier = Modifier.weight(1f))
-        if (!open && summary != null) {
-            Text(summary, style = AppTheme.type.callout, color = colors.ink3)
-            Spacer(Modifier.width(space.sm))
+        presets.forEach { (iso, label) ->
+            Chip(label = label, selected = state.dateIso == iso, onClick = { onSetDate(iso) })
         }
-        Icon(
-            imageVector = if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-            contentDescription = null,
-            tint = colors.ink3,
-            modifier = Modifier.size(AppTheme.dimens.size.iconSm),
-        )
     }
-    // A rule under every section, so the sheet reads as a list of settings rather
-    // than as five headings floating on the page.
-    HRule()
-}
-
-@Composable
-private fun ChipRow(
-    options: List<Pair<String?, String>>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
-) {
-    val space = AppTheme.dimens.space
-    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-        options.chunked(3).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
-                row.forEach { (value, label) ->
-                    FilterChip(label, selected == value) { onSelect(value) }
-                }
+    if (state.dateIso != null) {
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = dimens.space.sm),
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+            verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        ) {
+            SearchViewModel.flexOptions.forEach { (days, label) ->
+                Chip(
+                    label = label,
+                    selected = state.flexDays == days,
+                    onClick = { onSetFlex(days) },
+                )
             }
         }
     }
 }
 
+/**
+ * Budget — the histogram, the range, and the slider (screens 15 and 104).
+ *
+ * The histogram is `price_histogram`'s own 16 buckets, so the caption under it is
+ * a fact rather than flavour. When the facet did not load there is nothing
+ * truthful to draw and the section says so: a slider whose ends are the
+ * `SearchTuning` placeholders would let a user "narrow" against a span that
+ * describes no roster, which is the bug `priceBoundsLoaded` exists to stop.
+ */
 @Composable
-private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun ColumnScope.BudgetSection(state: SearchUiState, onSetPrice: (Int, Int) -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+
+    if (!state.priceBoundsLoaded) {
+        Text(
+            text = "Prices for this search haven't loaded yet.",
+            style = AppTheme.type.caption,
+            color = colors.ink4,
+            modifier = Modifier.padding(top = dimens.space.sm),
+        )
+        return
+    }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = dimens.space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = formatInrShort(state.priceDataMin),
+            style = AppTheme.type.subtitle,
+            color = colors.ink4,
+        )
+        Text(
+            text = "${formatInr(state.minPrice)} – ${formatInr(state.maxPrice)}",
+            style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = formatInrShort(state.priceDataMax),
+            style = AppTheme.type.subtitle,
+            color = colors.ink4,
+        )
+    }
+
+    val hasBars = state.histogram.isNotEmpty()
+    if (hasBars) {
+        PriceHistogram(state.histogram, state.minPrice, state.maxPrice)
+    }
+    RangeSlider(
+        value = state.minPrice.toFloat()..state.maxPrice.toFloat(),
+        onValueChange = { onSetPrice(it.start.toInt(), it.endInclusive.toInt()) },
+        valueRange = state.priceDataMin.toFloat()..state.priceDataMax.toFloat(),
+        colors = SliderDefaults.colors(
+            thumbColor = colors.surface,
+            // The accent is spent on the BARS when there are bars (screen 104),
+            // so the track drops to ink — one signal per screen, and the lit
+            // bars are the more informative half of the pair. With no histogram
+            // (screen 15) the track is the only thing to look at, so it takes it.
+            activeTrackColor = if (hasBars) colors.ink else colors.accent,
+            inactiveTrackColor = colors.hairline,
+            activeTickColor = Color.Transparent,
+            inactiveTickColor = Color.Transparent,
+        ),
+    )
+    // The fee disclosure rides on BOTH branches. It is the sentence that makes
+    // the section heading true, so it cannot be the thing that drops out when
+    // the histogram happens to load.
     Text(
-        label,
+        text = if (hasBars) {
+            "Bars show real market prices for this search — the lit range is what " +
+                "you'd see. The platform fee and GST are added at checkout."
+        } else {
+            "Quotes are the artist's own; the platform fee and GST are added at checkout."
+        },
         style = AppTheme.type.caption,
-        color = if (selected) colors.brandInk else colors.ink2,
-        modifier = Modifier
-            .background(
-                if (selected) colors.brand else colors.bgElev,
-                RoundedCornerShape(AppTheme.dimens.radii.xl),
-            )
-            .border(
-                width = if (selected) 0.dp else AppTheme.dimens.size.hairline,
-                color = colors.line,
-                shape = RoundedCornerShape(AppTheme.dimens.radii.xl),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = space.md, vertical = space.sm),
+        color = colors.ink4,
     )
 }
 
 @Composable
-private fun PriceHistogram(buckets: List<PriceBucket>, min: Int, max: Int) {
+private fun ColumnScope.ScoreSection(state: SearchUiState, onSetScore: (Int) -> Unit) {
     val colors = AppTheme.colors
-    val dashboard = AppTheme.dimens.dashboard
+    val dimens = AppTheme.dimens
+    Text(
+        text = if (state.minScore <= 0) {
+            "Any Bookability Score"
+        } else {
+            "Score ${state.minScore} and above"
+        },
+        style = AppTheme.type.subtitle,
+        color = colors.ink2,
+        modifier = Modifier.padding(top = dimens.space.sm),
+    )
+    Slider(
+        value = state.minScore.toFloat(),
+        onValueChange = { onSetScore(it.toInt()) },
+        valueRange = 0f..SCORE_MAX,
+        colors = SliderDefaults.colors(
+            thumbColor = colors.surface,
+            activeTrackColor = colors.accent,
+            inactiveTrackColor = colors.hairline,
+            activeTickColor = Color.Transparent,
+            inactiveTickColor = Color.Transparent,
+        ),
+    )
+}
+
+/** The score's own ceiling, matching `search_artists`' `p_min_score` domain. */
+private const val SCORE_MAX = 100f
+
+/**
+ * The price facet, drawn as bars.
+ *
+ * A bucket is lit when it overlaps the selection, so the lit run IS the range the
+ * slider posts — the caption under it says exactly that, and a bar that lit on a
+ * different rule would make the sentence false.
+ */
+@Composable
+private fun ColumnScope.PriceHistogram(buckets: List<PriceBucket>, min: Int, max: Int) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
     val peak = buckets.maxOf { it.count }.coerceAtLeast(1)
     // One source for the drawing box. Written twice — once as the row's height,
-    // once as a bare Float in the bar math — the two drift apart the moment
+    // once as a bare number in the bar math — the two drift apart the moment
     // either is retuned, and the tallest bar stops reaching its own ceiling.
-    val barBox = 48.dp
+    val barBox = dimens.dashboard.chartHeight
     Row(
         Modifier
             .fillMaxWidth()
-            .height(barBox),
-        horizontalArrangement = Arrangement.spacedBy(dashboard.barGap),
+            .height(barBox)
+            .padding(top = dimens.space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.dashboard.barGap),
         verticalAlignment = Alignment.Bottom,
     ) {
-        buckets.forEach { b ->
-            val inRange = b.bucketMax >= min && b.bucketMin <= max
+        buckets.forEach { bucket ->
+            val lit = bucket.bucketMax >= min && bucket.bucketMin <= max
             Box(
                 Modifier
                     .weight(1f)
-                    .height((barBox * b.count / peak).coerceAtLeast(dashboard.barGap))
-                    .background(if (inRange) colors.brand else colors.ink4),
+                    .height((barBox * bucket.count / peak).coerceAtLeast(dimens.dashboard.barGap))
+                    .clip(RoundedCornerShape(topStart = dimens.radii.sm, topEnd = dimens.radii.sm))
+                    .background(if (lit) colors.accent else colors.hairline),
             )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rows and chrome shared with the Compare-by-service sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A sheet's top row: a text action, a centred title, a close circle.
+ *
+ * The leading label and the close circle reserve the same width so the title is
+ * centred against the BAR rather than against the space left between them —
+ * asymmetric reservation reads as almost-centred, which is worse than either
+ * extreme.
+ */
+@Composable
+internal fun SheetHeaderRow(
+    leadingLabel: String,
+    leadingEnabled: Boolean,
+    title: String,
+    onLeading: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = dimens.space.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = leadingLabel,
+            style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+            color = if (leadingEnabled) colors.ink2 else colors.ink4,
+            maxLines = 1,
+            modifier = Modifier
+                .width(dimens.component.iconCircleSm)
+                .then(if (leadingEnabled) Modifier.clickable(onClick = onLeading) else Modifier),
+        )
+        Text(
+            text = title,
+            style = AppTheme.type.sectionTitle,
+            color = colors.ink,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = dimens.space.sm),
+        )
+        IconCircle(
+            icon = Icons.Filled.Close,
+            contentDescription = "Close",
+            onClick = onClose,
+            size = dimens.component.iconCircleSm,
+        )
+    }
+}
+
+/** A hairline the width of the sheet's content. */
+@Composable
+internal fun SheetRule() {
+    val dimens = AppTheme.dimens
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = dimens.space.lg)
+            .height(dimens.size.hairline)
+            .background(AppTheme.colors.hairline),
+    )
+}
+
+@Composable
+private fun SectionTitle(text: String, top: androidx.compose.ui.unit.Dp) {
+    Text(
+        text = text,
+        style = AppTheme.type.sectionTitle,
+        color = AppTheme.colors.ink,
+        modifier = Modifier.padding(top = top),
+    )
+}
+
+/**
+ * A filter row that expands in place.
+ *
+ * Its collapsed state states what it is currently set to, on the trailing edge.
+ * Without that the sheet could tell you nothing about four of its filters without
+ * opening each one in turn — and since only one section is open at a time, "what
+ * am I filtering by" took four taps to answer.
+ */
+@Composable
+private fun DisclosureRow(
+    title: String,
+    value: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 0f else CHEVRON_COLLAPSED_DEGREES,
+        label = "disclosure",
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = dimens.space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = AppTheme.type.subtitle,
+            color = colors.ink2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Icon(
+            imageVector = Icons.Filled.KeyboardArrowDown,
+            contentDescription = null,
+            tint = colors.ink3,
+            modifier = Modifier
+                .padding(start = dimens.space.sm)
+                .size(dimens.size.iconMd)
+                .rotate(rotation),
+        )
+    }
+}
+
+/** How far the disclosure chevron turns when its section is shut. */
+private const val CHEVRON_COLLAPSED_DEGREES = -90f
+
+/** A row that opens another sheet — chevron, not a disclosure triangle. */
+@Composable
+private fun NavRow(title: String, value: String, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = dimens.space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+            color = colors.ink,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = AppTheme.type.subtitle,
+            color = colors.ink2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = colors.ink3,
+            modifier = Modifier
+                .padding(start = dimens.space.sm)
+                .size(dimens.size.iconMd),
+        )
+    }
+}
+
+/** A wrapped grid of single-choice chips, with "Any" modelled as null. */
+@Composable
+private fun ColumnScope.OptionChips(
+    options: List<Pair<String?, String>>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    val dimens = AppTheme.dimens
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = dimens.space.md),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+    ) {
+        options.forEach { (value, label) ->
+            Chip(label = label, selected = selected == value, onClick = { onSelect(value) })
         }
     }
 }

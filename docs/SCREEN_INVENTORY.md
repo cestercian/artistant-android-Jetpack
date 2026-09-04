@@ -158,29 +158,54 @@ validation:
 
 ## 5. Screens — Client-facing (`feature/…`)
 
-**DiscoverScreen** (C, tab root) → `feature/discover/`. *ViewModel:*
-`DiscoverViewModel` (`DiscoverFeedStore` port; 6 rails via 4 concurrent
-`search_artists`). *Compose:* auto-scrolling hero carousel (75% height, 6s
-rotation) + horizontal `LazyRow` `ArtistTile` rails; `LazyColumn` outer. *Models:*
-`Artist`. *APIs:* `SearchRepository.search`, `ArtistsRepository.cache`. *State:*
-rails, isLoading, loadError. *Nav:* tile→`ArtistProfile(id)`, profile chip→Profile
-tab. *Lifecycle:* pull-to-refresh; pop-to-root event. *Anim:* carousel
-`animateContentSize`/crossfade, reduce-motion aware. *Deps:* SavedStore.
+**DiscoverScreen** (C, tab root) → `feature/discover/`. **Redesigned Sep 2026
+(design screens 02 / 59).** *ViewModel:* `DiscoverViewModel` (`DiscoverFeedStore`
+port; hero + 4 rails via 5 concurrent `search_artists`, one of them date-scoped
+through the 0073 `p_date`). *Compose:* `ScreenHeader` ("Discover" + "City ·
+today"), `SearchBarButton`, category `Chip` rail, one 262dp `HeroCard`, then
+titled rails of two-up `Tile`s inside a `LazyColumn`; loading is `SkeletonPage`.
+The auto-advancing hero pager and the full-bleed status-bar treatment are GONE —
+the destination takes the ordinary scaffold insets. *Models:* `Artist`. *APIs:*
+`SearchRepository.search` / `.facets`, `ArtistsRepository.cache`. *State:* hero,
+rails (each carrying its "See all" `SearchSeedRequest`), categories,
+selectedCategory, today, isLoading, loadError. *Nav:* tile/hero→`ArtistProfile(id)`,
+search bar and "See all"→Search tab (seeded via `SearchSeed`), header heart→
+`artist_list/saved`. *Lifecycle:* pull-to-refresh; the day is re-read per refresh
+so an overnight session cannot caption today's roster with yesterday. *Deps:*
+SavedStore, SearchSeed.
 
-**SearchScreen** (C, tab root) → `feature/search/`. *ViewModel:* `SearchViewModel`
-(`SearchStore` port). *Compose:* hairline search bar (magnifier/clear/filter +
-active-count badge), empty=`FlowRow` chips (recents/categories/cities),
-results=`LazyVerticalGrid` 2-col `ArtistTile`, infinite scroll, sort menu,
-skeleton grid, no-results state. *APIs:* `search_artists`/`search_facets` RPCs.
-*State:* filters (query/city/price/score/categories/eventType/sort), results,
-pagination cursor+generation, recents (DataStore). *Lifecycle:* debounced
-`snapshotFlow`/`LaunchedEffect(queryKey)` (~280ms), auto-focus. *Nav:* tile→
-`ArtistProfile`; filter→`SearchFilterSheet`.
+**SearchScreen** (C, tab root) → `feature/search/`. **Redesigned Sep 2026
+(design screens 14 / 03 / 57 / 58).** *ViewModel:* `SearchViewModel` (`SearchStore`
+port). *Compose:* `SearchBar` (ink rim while focused) + filter `IconCircle` with an
+accent count badge, then ONE of four surfaces. Which one is a two-axis decision:
+`hasActiveQuery` says whether there is a search, a local `editing` flag says
+whether the cursor is in the field — without the second, screen 14 is unreachable
+the moment a character is typed. 14 browse = Suggestions (facet terms with their
+real counts, interleaved with acts from the live page) + Recent `FlowRow` chips +
+Browse-by-occasion cards; 03 results = derived title/subtitle + active-filter chip
+rail + result cards; 57 = `EmptyState` with a guaranteed action; 58 = warm `Banner`
+over an `EmptyState`, failure stated twice. *APIs:* `search_artists` /
+`search_facets` / `price_histogram`. *State:* filters
+(query/city/date+flex/price/score/categories/eventType/services/sort), results,
+pagination cursor+generation, recents (DataStore). *Lifecycle:* 280ms debounce;
+`SearchSeed` collected so Discover's "See all" can arrive before this VM exists.
+*Nav:* card→`ArtistProfile`; filter→`SearchFilterSheet`→`CompareByServiceSheet`.
+Every computed string is a pure function in `SearchLabels.kt`, each unit-tested.
 
-**SearchFilterSheet** (C) → `feature/search/`. *Compose:* `ModalBottomSheet`:
-city chips, budget dual-slider (₹ header), min-score slider (tier-colored),
-category multi-chips, occasion single-chips; Clear/Apply. Applies immediately to
-parent `SearchViewModel`.
+**SearchFilterSheet** (C) → `feature/search/`. **Redesigned Sep 2026 (design
+screens 15 / 104 — one sheet in two states).** *Compose:* `ModalBottomSheet`
+(transparent container, `dragHandle = null`) wrapping `SheetScaffold`: header row
+(Clear / title / close circle), the active-filter chip summary with its "N filters
+active" line, City / Date / Occasion disclosure rows, a Service row that pushes
+`CompareByServiceSheet`, act-type chips, Budget (histogram + range slider) and
+Bookability, over a PINNED CTA carrying the count. Closing IS applying, however it
+closes. The design's "Must have" toggles are omitted — no PA, verification or
+travel columns on `artists`.
+
+**CompareByServiceSheet** (C) → `feature/search/`. **New, design screen 53.**
+*Compose:* radio list of `SearchCatalog.services` over a pinned CTA. Radio, not
+checkbox: `p_services` is an array-overlap test, so two selections widen the feed.
+No per-row counts — `search_facets` publishes none for service tags.
 
 **ArtistProfileScreen** (C, pushed) → `feature/artist/`. **Redesigned Sep 2026 —
 section AP, design screens 04 / 54 / 55 / 101 / 103.** *ViewModel:*
@@ -238,6 +263,18 @@ consume `pendingBookingDetail` deep link; pull-to-refresh.
 `HRule`, bold fee, action row: Message→`Chat`, Add to calendar (confirmed),
 Cancel (`AlertDialog`→`cancel`), Leave review (completed→`ReviewSheet`). *Lifecycle:*
 consume `pendingReviewSheet` (auto-present). *Deps:* BookingStore, MessageStore.
+
+**ArtistListScreen** (C, pushed, `artist_list/{kind}`) → `feature/profile/`.
+**Redesigned Sep 2026 (design screens 32 / 112).** One screen, three row sources
+— Bookings / Saved / Completed — with the kind chips as permanent navigation
+(switching REPLACES the destination rather than stacking it). *ViewModel:*
+`ArtistListViewModel`. *Compose:* `BackHeader` with a counted subtitle, the kind
+rail, a within-list category rail derived from the rows themselves, then rows
+(56dp cover, name + `TrustedTick`, act line, accent score chip, "from ₹x").
+*State:* rows, selectedCategory (dropped when a reload no longer contains it),
+isLoading, error. `SavedStore.refreshFromServer()` now reports whether the SERVER
+copy was read, so a dropped connection renders as "couldn't load" rather than as
+"Nothing saved yet". *Deps:* SavedStore, BookingsRepository, ArtistsRepository.
 
 **ProfileScreen** (C, tab root) → `feature/profile/`. *Compose:* header card
 (`Avatar` 64, "City · Role since YYYY"), 3-col stats, saved carousel→`ArtistProfile`,

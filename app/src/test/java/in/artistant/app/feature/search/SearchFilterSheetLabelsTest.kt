@@ -28,7 +28,7 @@ import org.junit.Test
  *  - The CTA ran `results.size.coerceAtLeast(1)`, added to dodge "Show 0
  *    artists", which turned the zero into a claim: with nothing set there are no
  *    results AND no active query, so the "No matches" branch was skipped and the
- *    button read "Show 1 artist".
+ *    button read "Show 1 act".
  *
  * Both now read the same predicates the badge and the RPC arguments read.
  */
@@ -134,7 +134,7 @@ class SearchFilterSheetLabelsTest {
     @Test
     fun `one result is singular`() {
         assertEquals(
-            "Show 1 artist",
+            "Show 1 act",
             searchApplyLabel(
                 resultCount = 1,
                 hasActiveQuery = true,
@@ -147,7 +147,7 @@ class SearchFilterSheetLabelsTest {
     @Test
     fun `a full page marks the count as a floor`() {
         assertEquals(
-            "Show 20+ artists",
+            "Show 20+ acts",
             searchApplyLabel(
                 resultCount = 20,
                 hasActiveQuery = true,
@@ -160,7 +160,7 @@ class SearchFilterSheetLabelsTest {
     @Test
     fun `a complete result set carries no plus`() {
         assertEquals(
-            "Show 12 artists",
+            "Show 12 acts",
             searchApplyLabel(
                 resultCount = 12,
                 hasActiveQuery = true,
