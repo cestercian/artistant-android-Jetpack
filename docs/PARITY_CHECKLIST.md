@@ -65,9 +65,14 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | done | Server inbox + All/Bookings/Inquiries filters + push deep link; rows resync on resume (iOS uses an all-threads Realtime sub for the same job) |
-| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | done | Realtime + optimistic send/retry; system rows + trust banner + details/report |
-| `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | done | Gig summary + report reasons → `reports` |
+| `Screens/MessagesView.swift` | `feature/messages/MessagesScreen.kt` | done | **Redesign 19/110.** Server inbox + All/Bookings/Inquiries/Support chips + push deep link; rows resync on resume (iOS uses an all-threads Realtime sub for the same job). Rows carry DEAL STATE — a live `gig_requests` quote replaces the preview with amount + expiry. Permanent Artistant Support row in every state |
+| `Screens/ChatView.swift` | `feature/messages/ChatScreen.kt` | done | **Redesign 08/70/88.** Realtime + optimistic send/retry; three message states (sent / read / failed-with-retry); trust banner; quote-as-object with Accept/Counter → `match_confirmed/{bookingId}`; accept narrated in three phases |
+| `Screens/ThreadDetailsSheet.swift` | `feature/messages/ThreadDetailsSheet.kt` | done | **Redesign 33.** Booking card (status/date/venue/fee/score) or the inquiry banner; archive/mute/mark-unread/star/block rows; report opens the picker |
+| — (iOS files reports from the thread sheet) | `feature/messages/ReportConversationSheet.kt` | done | **Redesign 73.** Reason → optional note → Submit, same shape as report-artist. `ConversationReportReasons`; the note reaches `reports.details` |
+| — (no iOS equivalent) | `feature/messages/ArchivedScreen.kt` | done | **Redesign 60/111.** Archive is a route, not a sheet. Device-local flag (`threads` has no archived column); the badge rule is printed on the screen and pinned by a test |
+| — (no iOS equivalent) | `feature/messages/SafetyCentreScreen.kt` | done | **Redesign 131.** Three rules + one-tap remedies. The design's "Emergency help · local numbers by city" row is NOT drawn — no per-city data exists |
+| `Screens/SupportView.swift` (n/a) | `feature/messages/SupportChat.kt` | done | **Redesign 34.** Scripted on-device branch tree that says it is one; full screen, option cards, hand-off to the bookings tab; typed notes → `app_feedback` |
+| — (0087 has no iOS screen) | `feature/profile/BlockedAccountsScreen.kt` | done | **Redesign 127.** Copy states what a v1 block actually does (client-side filtering); the design's stronger claim is deliberately not shipped. "Block ≠ report" carries a live link to the inbox |
 
 ## Screens — Artist home / gigs (M3/M5)
 

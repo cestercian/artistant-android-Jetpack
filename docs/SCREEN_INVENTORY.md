@@ -277,26 +277,53 @@ on `UploadQueue.batchCompleted`. *Deps:* EPKStore, UploadQueue.
 
 ## 7. Screens — Shared / cross-role
 
-**MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *ViewModel:*
-`MessagesViewModel` (`MessageStore` port). *Compose:* `LazyColumn` thread rows→
-`Chat(id)`: `Avatar` 44, role-resolved counterpart name, BOOKING pill, timeAgo,
-2-line preview (verbatim body — **no** redaction), unread dot. *APIs:* `listThreadsForUser`. *State:*
-threads (badge = Σ unread). *Lifecycle:* two-stage hydrate (artists, then names);
-`pendingThreadId` deep link; pull-to-refresh; skeleton/empty/error. *Deps:*
-SessionManager, RoleStore, BookingStore, ArtistsRepository.
+**MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *Design:* 19
+(loaded) / 110 (empty). *ViewModel:* `MessagesViewModel` (`MessageStore` port).
+*Compose:* `ScreenHeader` + archive `IconCircle` (dot when non-empty), v2
+`SearchBar`, v2 `Chip` rail with live counts, the **permanent Artistant Support
+row** (dark disc + lime "A", every segment and every state), then `LazyColumn`
+thread rows→`Chat(id)`: `Avatar` 48, role-resolved counterpart name, star marker,
+timeAgo, **deal state** (a live `gig_requests` quote renders "QUOTE ₹48,000 ·
+holds till Fri" in place of the preview; lapsed says so) and an accent unread
+count badge. Swipe archives. *APIs:* `listThreadsForUser`, `fetchMany`,
+`listForClient`/`listForArtist`. *State:* threads; `activeThreads` (archived
+excluded) is the ONLY source of every count. *Lifecycle:* two-stage hydrate
+(artists, then names); `pendingThreadId` deep link; pull-to-refresh;
+skeleton/empty/error. *Deps:* SessionManager, RoleStore, BookingStore,
+ArtistsRepository, RequestsRepository.
 
-**ChatScreen** (S, `Chat`) → `feature/messages/`. *ViewModel:* `ChatViewModel`.
-*Compose:* `LazyColumn` (reverse) with `rememberLazyListState` auto-scroll to
-bottom on new message; bubbles system(centered)/me(brand)/other(card), **Airbnb
-trust banner** (not redaction), failed-send retry chip + haptic; **composer**
-multiline field + send,
-glass floating bar (`Scaffold` bottomBar). *APIs:* `MessagesRepository`
-(listMessages explicit columns, send, **realtime** `subscribeMessages`,
-markThreadRead, findOrCreateThread). *Lifecycle:* `LaunchedEffect(threadId,userId)`
-= ensure/refresh/resolve-name/markRead/**subscribe realtime** (gated), foreground
-reconnect (`lifecycle`/scenePhase), teardown on dispose + generation bump. *Nav:*
-client's toolbar avatar→`ArtistProfile`. *Deps:* SessionManager, RoleStore,
-BookingStore.
+**ChatScreen** (S, `Chat`) → `feature/messages/`. *Design:* 08 / 70 / 88.
+*ViewModel:* `ChatViewModel`. *Compose:* header = back circle + avatar + name over
+the gig line + "Details"; **Airbnb trust banner** (not redaction) as a `surface3`
+card; centred status capsule at the head of the transcript, tapping through to
+the booking; `LazyColumn` with day rules, sender captions, asymmetric bubbles and
+**three message states** — sent, "Read by …", and failed drawn in `surface`
+behind a danger rim with a tappable "Not sent · Tap to retry"; **quote card**
+(QUOTE / COUNTER OFFER / AGREED, amount, terms, validity) with Accept + Counter
+on the seat whose move it is; `ComposerBar` = `AppTextField` + an always-present
+send disc. Accepting takes the screen as a three-phase `SendingNarration` (70) and
+routes to `match_confirmed/{bookingId}`. *APIs:* `MessagesRepository` (listMessages
+explicit columns, send, **realtime** `subscribeMessages`, markThreadRead,
+findOrCreateThread), `RequestsRepository` (accept/counter). *Lifecycle:*
+`ResumeEffect` → refresh + re-subscribe (gated), teardown on dispose + generation
+bump. *Nav:* details sheet participant → `ArtistProfile`. *Deps:* SessionManager,
+RoleStore, BookingStore, ReadReceiptsPreference.
+
+**ArchivedScreen** (S, `archived`, both roles) → `feature/messages/`. *Design:* 60
+/ 111. *ViewModel:* `MessagesViewModel`. *Compose:* left-aligned `BackHeader` with
+the count, rows with a labelled Unarchive, and the badge rule printed on the
+screen. Empty state teaches the gesture. Archiving is a DataStore flag —
+`threads` has no archived column.
+
+**SafetyCentreScreen** (S, `safety_centre`, both roles) → `feature/messages/`.
+*Design:* 131. One dark hero card, three numbered rules, and a `ListRow` per
+remedy (report a conversation, blocked accounts). No emergency-numbers row: no
+per-city data exists.
+
+**SupportScreen** (S, `support`, both roles) → `feature/messages/`. *Design:* 34.
+*ViewModel:* `SupportChatViewModel` over the pure `SupportScript`. Two opening
+bubbles (what it is, then what it wants), outlined option cards with detail lines,
+one real deep link into the bookings tab, and a typed note → `app_feedback`.
 
 **PaywallScreen** (S, sheet) → `feature/paywall/`. *ViewModel:* uses
 `EntitlementStore`. *Compose:* close-x, role hero + editorial headline, perks,
