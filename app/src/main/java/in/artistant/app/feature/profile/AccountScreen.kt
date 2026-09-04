@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.BuildConfig
 import `in`.artistant.app.designsystem.component.BackHeader
 import `in`.artistant.app.designsystem.component.EyebrowLabel
 import `in`.artistant.app.designsystem.component.ListRow
@@ -57,10 +58,13 @@ import `in`.artistant.app.platform.calendar.CalendarSyncService
  *   the other; on Android the row also has to say WHERE it is writing once it is on, because
  *   the device can have several writable calendars and picking the Google-account one is how
  *   "sync to Google Calendar" works with no Google API.
- * - Four rows the design does not draw — Notifications, Language & region, Accessibility,
- *   Devices — live here, because their screens exist (124 / 130 / 129 / 128) and the design
- *   gives them no other entry point. §5.4 of the redesign plan requires every new screen to be
- *   reachable; the settings list is where a setting is reachable from.
+ * - Rows the design does not draw — Notifications, Language & region, Accessibility, Devices
+ *   (124 / 130 / 129 / 128), and the System section's Activity, Send feedback, What's new and
+ *   Rate Artistant (123 / 64 / 137 / 138) — live here, because their screens exist and the
+ *   design gives them no other entry point. §5.4 of the redesign plan requires every new screen
+ *   to be reachable; the settings list is where a setting is reachable from. Activity is drawn
+ *   in the client's Discover header too (the bell on 02); the artist's Studio header (09) has a
+ *   "Taking gigs" pill in that slot and no bell, so for an artist this row is the only way in.
  */
 @Composable
 fun AccountScreen(
@@ -88,6 +92,19 @@ fun AccountScreen(
      * sheet is gone and the row pushes SH's screen.
      */
     onHelpCentre: () -> Unit,
+    /** Design 64 — the feedback form, which had no entry point on either graph until now. */
+    onFeedback: () -> Unit,
+    /** Design 123 — the activity log. The artist's only way in; see the class note. */
+    onActivity: () -> Unit,
+    /**
+     * Design 137 — a REQUEST to present the release-notes sheet, not a route.
+     *
+     * The sheet is hosted at the root (`ArtistantNavHost`), so this row cannot push it; the
+     * scaffold hands over the root-scoped `WhatsNewViewModel`'s own trigger instead.
+     */
+    onWhatsNew: () -> Unit,
+    /** Design 138 — leaves the app for the Play listing. */
+    onRateApp: () -> Unit,
     onNotifications: () -> Unit,
     onLanguage: () -> Unit,
     onAccessibility: () -> Unit,
@@ -117,6 +134,10 @@ fun AccountScreen(
             onBlockedAccounts = onBlockedAccounts,
             onPrivacy = onPrivacy,
             onSafetyCentre = onSafetyCentre,
+            onFeedback = onFeedback,
+            onActivity = onActivity,
+            onWhatsNew = onWhatsNew,
+            onRateApp = onRateApp,
             onNotifications = onNotifications,
             onLanguage = onLanguage,
             onAccessibility = onAccessibility,
@@ -182,6 +203,10 @@ private fun AccountContent(
     onBlockedAccounts: () -> Unit,
     onPrivacy: () -> Unit,
     onSafetyCentre: () -> Unit,
+    onFeedback: () -> Unit,
+    onActivity: () -> Unit,
+    onWhatsNew: () -> Unit,
+    onRateApp: () -> Unit,
     onNotifications: () -> Unit,
     onLanguage: () -> Unit,
     onAccessibility: () -> Unit,
@@ -275,6 +300,13 @@ private fun AccountContent(
                 onSelect = onSelectCalendar,
             )
         }
+        // The log above the setting: Activity is what arrived, Notifications is what may.
+        ListRow(
+            title = "Activity",
+            subtitle = "Notifications received on this device",
+            onClick = onActivity,
+            modifier = Modifier.semantics { testTag = "account.activity" },
+        )
         ListRow(title = "Notifications", onClick = onNotifications)
         ListRow(title = "Language & region", onClick = onLanguage)
         ListRow(title = "Accessibility", onClick = onAccessibility)
@@ -291,7 +323,32 @@ private fun AccountContent(
         // a block is a row people scroll past rather than hunt for.
         ListRow(title = "Trust & safety", onClick = onSafetyCentre)
         ListRow(title = "Blocked accounts", onClick = onBlockedAccounts)
+        // The support tail. `Help centre` is the row the design draws (47); the three under it
+        // are section SH's remaining screens, which the design gives no entry point of its own
+        // and which are otherwise unreachable.
         ListRow(title = "Help centre", onClick = onHelp)
+        ListRow(
+            title = "Send feedback",
+            subtitle = "We read everything but can't reply individually",
+            onClick = onFeedback,
+            modifier = Modifier.semantics { testTag = "account.feedback" },
+        )
+        // No chevron on either of these two: one raises a sheet in place, the other leaves the
+        // app for the Play listing, and a chevron on either promises a screen that never comes.
+        ListRow(
+            title = "What's new",
+            subtitle = "Version ${BuildConfig.VERSION_NAME}",
+            onClick = onWhatsNew,
+            trailing = {},
+            modifier = Modifier.semantics { testTag = "account.whatsNew" },
+        )
+        ListRow(
+            title = "Rate Artistant",
+            subtitle = "Opens the Play Store listing",
+            onClick = onRateApp,
+            trailing = {},
+            modifier = Modifier.semantics { testTag = "account.rate" },
+        )
         // No chevron on either: they are terminal actions that raise a confirmation or a flow
         // in place, and a chevron on them promises a screen that never comes. `ListRow` draws
         // the chevron off `onClick`, so the trailing slot is filled with nothing instead.
@@ -411,6 +468,10 @@ private fun AccountPreview() {
             onBlockedAccounts = {},
             onPrivacy = {},
             onSafetyCentre = {},
+            onFeedback = {},
+            onActivity = {},
+            onWhatsNew = {},
+            onRateApp = {},
             onNotifications = {},
             onLanguage = {},
             onAccessibility = {},

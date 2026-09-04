@@ -21,7 +21,7 @@ data class ActivityUiState(
     /** The rows the chosen chip admits. */
     val visible: List<ActivityEntry> get() = all.filter { matchesFilter(it, filter) }
 
-    val hasUnread: Boolean get() = all.any { !it.read }
+    val hasUnread: Boolean get() = unreadActivityCount(all) > 0
 
     /**
      * The one row that gets the accent disc — the newest unread.

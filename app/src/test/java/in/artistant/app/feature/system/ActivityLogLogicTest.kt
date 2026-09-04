@@ -46,6 +46,27 @@ class ActivityLogLogicTest {
         assertEquals(listOf("first"), appendActivity(emptyList(), entry("first")).map { it.id })
     }
 
+    // ── unread ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun `unread counts only the rows nobody has read`() {
+        val log = listOf(
+            entry("a", read = false),
+            entry("b", read = true),
+            entry("c", read = false),
+        )
+        assertEquals(2, unreadActivityCount(log))
+    }
+
+    @Test
+    fun `an empty or fully read log has nothing unread`() {
+        // The bell on Discover draws its dot off this: a signed-out session
+        // reads as an empty log, and "read everything" must look the same as
+        // "nothing arrived" — neither is news.
+        assertEquals(0, unreadActivityCount(emptyList()))
+        assertEquals(0, unreadActivityCount(listOf(entry("a", read = true))))
+    }
+
     // ── categories ───────────────────────────────────────────────────────────
 
     @Test

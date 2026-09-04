@@ -248,8 +248,10 @@ the destination takes the ordinary scaffold insets. *Models:* `Artist`. *APIs:*
 `SearchRepository.search` / `.facets`, `ArtistsRepository.cache`. *State:* hero,
 rails (each carrying its "See all" `SearchSeedRequest`), categories,
 selectedCategory, today, isLoading, loadError. *Nav:* tile/hero→`ArtistProfile(id)`,
-search bar and "See all"→Search tab (seeded via `SearchSeed`), header heart→
-`artist_list/saved`. *Lifecycle:* pull-to-refresh; the day is re-read per refresh
+search bar and "See all"→Search tab (seeded via `SearchSeed`), header bell→
+`activity` (design 123) with an accent dot while `ActivityLog` holds an unread
+row — the heart that borrowed this slot is gone, and Saved keeps its own row on
+Profile (26). *Lifecycle:* pull-to-refresh; the day is re-read per refresh
 so an overnight session cannot caption today's roster with yesterday. *Deps:*
 SavedStore, SearchSeed.
 
@@ -409,7 +411,9 @@ existing host becomes an artist without signing up again; `AccountStatBand`
 (Upcoming · Saved · Completed, each column tappable into `artist_list/{kind}` and
 each printing an em dash rather than a zero it never read); rows: **Your
 bookings** (the light bar dropped the calendar glyph, so this is Bookings' front
-door), Saved artists, Notifications, Help and safety, Legal and privacy. The
+door), Saved artists (the ONLY entry to `artist_list/saved` since Discover's
+header took the design's bell), Notifications, Help and safety, Legal and
+privacy. The
 design's "Payment and billing" and "Invoices and GST" are NOT drawn — v1 takes no
 money and neither has anything to open. *States:* first-load skeleton / failed
 banner + retry / loaded. *Deps:* `ProfileViewModel`.
@@ -421,11 +425,16 @@ availability with a real availability summary · Subscription) is **injected by
 role, never forked** — the fork is what left artist deletion unreachable. Stat
 band swaps columns per role (Gigs · Bookability · Completed). ACCOUNT group:
 calendar sync (`SwitchRow` + target picker when the device has more than one
-writable calendar), Notifications, Language & region, Accessibility, Devices,
-Data export, Privacy, Trust & safety (only when the destination is registered —
-`rememberRouteIfRegistered`), Blocked accounts, Help centre, Sign out
-(`AlertDialog`), Delete account. Route `account` on both graphs. *Deps:*
-`ProfileViewModel`, `CalendarSyncService`, `HelpFeedbackSheet`.
+writable calendar), **Activity** (123 — the log, above the setting for it),
+Notifications, Language & region, Accessibility, Devices, Data export, Privacy,
+Trust & safety (131), Blocked accounts, then the support tail — Help centre (63),
+**Send feedback** (64), **What's new** (137) and **Rate Artistant** (138) — then
+Sign out (`AlertDialog`) and Delete account. The four bold rows are this list's
+only entry to those screens; What's new is a REQUEST to the root's
+`WhatsNewViewModel` (the sheet is presented, never pushed) and Rate Artistant
+leaves for the Play listing, so neither draws a chevron. Route `account` on both
+graphs. *Deps:* `ProfileViewModel`, `CalendarSyncService`, `AppStore`,
+`WhatsNewViewModel` (hoisted in the scaffold).
 
 **NotificationSettingsScreen** (S) → `feature/profile/`. **New Sep 2026 — design
 124.** Eight `SwitchRow`s in two groups plus quiet hours, persisted in
@@ -683,7 +692,11 @@ this device, written from `ArtistantMessagingService.onMessageReceived` before
 the permission check, capped at 60. **There is no notifications table in the
 shared schema**, so the subtitle states the boundary. A chat push is reachable
 under All only — the design draws no Messages chip. *Routing:* rows go through
-`PushPayloadRouter`, the same function the notification tap uses.
+`PushPayloadRouter`, the same function the notification tap uses. *Reached
+from:* the Discover header's bell (design 02, dot = unread) on the client, and
+the account list's "Activity" row on both roles — the artist's Studio header (09)
+draws a "Taking gigs" pill in that slot, not a bell, so the row is the artist's
+only way in.
 
 **UpdateRequiredScreen** (S) → `feature/system/`. **Design 120, "a hard gate,
 explained".** *Compose:* accent squircle, `displayHero` headline, the installed
@@ -708,6 +721,13 @@ bullet list omitted entirely when a release shipped no fixes. *Data:* a compiled
 `ReleaseNotes` table keyed by `BuildConfig.VERSION_NAME` — notes describe the
 binary, so they ship with it. A null seen-version records silently rather than
 greeting a fresh install with a list of things that are not new to them.
+*Trigger:* `WhatsNewHost()` in `ArtistantNavHost`, composed whenever the root
+gate is `Tabs` and nothing is blocking — the sheet is never raised over the
+signup walk. *On demand:* the account list's "What's new" row calls
+`showOnDemand()` on the SAME root-scoped ViewModel (a tabs scaffold sits above
+any NavHost, so `hiltViewModel()` there is still the activity's); it ignores the
+seen-version record and falls back to the most recent authored note when the
+running build shipped without one.
 
 **RatePromptSheet** (C) → `feature/system/`, presented from `ClientTabsScaffold`.
 **Design 138, "asked at the right moment".** *Compose:* the dark launcher mark,
@@ -716,7 +736,10 @@ sheet — tappable stars here would be a rating the user believes they already
 gave), "Rate on Google Play", "Not now". *Trigger:* a completed booking review,
 once, never on launch; resolved in the scaffold by watching the
 `ReviewSheetViewModel` the booking screen already takes as a parameter. No Play
-in-app review library (no new Gradle dependencies).
+in-app review library (no new Gradle dependencies). The account list's "Rate
+Artistant" row is the deliberate way in for somebody who wants to rate without
+waiting to be asked — it opens the same `AppStore.openListing`, not the sheet,
+because the sheet's whole point is the moment it is shown.
 
 **HelpCentreScreen** (S, `help_centre`) → `feature/system/`. **Design 63,
 "outstanding item goes first".** *Compose:* `BackHeader` with a greeting
@@ -736,7 +759,8 @@ rather than the design's sheet: a full-height composer with a pinned action bar
 IS a screen. *APIs:* `BookingsRepository.submitFeedback` → `app_feedback` (mig
 0073, 1–2000 chars, insert-only). A failed send is queued in a DataStore outbox
 and drained by a `CONNECTED`-constrained `FeedbackWorker`, which is what makes
-the design's queue line true.
+the design's queue line true. *Reached from:* the account list's "Send feedback"
+row on both graphs — the design gives 64 no entry point of its own.
 
 ---
 

@@ -78,6 +78,22 @@ class WhatsNewDecisionTest {
     }
 
     @Test
+    fun `there is always something for the account list's row to open`() {
+        // "What's new" is a settings row now, tappable on any build. A patch
+        // release with no entry of its own falls back to `mostRecent`, so an
+        // empty table would turn that row into a tap that does nothing.
+        assertNotNull(ReleaseNotes.mostRecent())
+    }
+
+    @Test
+    fun `mostRecent is the newest authored note`() {
+        // The table is appended in release order — see the object's note. Pinned
+        // so a future entry prepended by habit is caught here rather than by a
+        // user reading last year's notes.
+        assertEquals(`in`.artistant.app.BuildConfig.VERSION_NAME, ReleaseNotes.mostRecent()?.version)
+    }
+
+    @Test
     fun `every highlight carries copy on both lines`() {
         ReleaseNotes.forVersion(`in`.artistant.app.BuildConfig.VERSION_NAME)!!.highlights
             .forEach {
