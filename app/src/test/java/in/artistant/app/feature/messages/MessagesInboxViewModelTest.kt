@@ -5,6 +5,7 @@ import `in`.artistant.app.data.model.Message
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeMessagesRepository
+import `in`.artistant.app.data.repository.FakeRequestsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
@@ -82,10 +83,12 @@ class MessagesInboxViewModelTest {
         bookings: StubBookings = StubBookings(),
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
+        requests: FakeRequestsRepository = FakeRequestsRepository(),
     ) = MessagesViewModel(
         messagesRepository = messages,
         artistsRepository = artists,
         bookingsRepository = bookings,
+        requests = requests,
         flagsStore = flags,
         blockedUsers = blockedUsers,
         viewer = { viewerId },

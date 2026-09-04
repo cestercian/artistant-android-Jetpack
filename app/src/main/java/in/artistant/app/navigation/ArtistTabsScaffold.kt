@@ -40,8 +40,11 @@ import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.epk.EpkScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
@@ -203,12 +206,39 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
-                        // The inbox's inline accelerator and Support's one deep
-                        // link both land in the artist's own funnel — which this
-                        // role calls Gigs, not Bookings.
+                        // The inbox's inline accelerator lands in the artist's
+                        // own funnel — which this role calls Gigs, not Bookings.
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ArtistTab.Gigs.route) },
+                        onOpenArchive = { nav.navigate(ArtistNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
+                        // Support's one real deep link lands in the artist's own
+                        // funnel, which this role calls Gigs.
                         bookingsLabel = ArtistTab.Gigs.label,
+                        onOpenBookings = { navigateToTab(nav, ArtistTab.Gigs.route) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }

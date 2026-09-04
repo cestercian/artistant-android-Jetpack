@@ -49,9 +49,12 @@ import `in`.artistant.app.feature.booking.ConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ArtistListScreen
@@ -205,8 +208,36 @@ fun ClientTabsScaffold() {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ClientTab.Bookings.route) },
+                        onOpenArchive = { nav.navigate(ClientNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
                         bookingsLabel = ClientTab.Bookings.label,
+                        onOpenBookings = { navigateToTab(nav, ClientTab.Bookings.route) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        // Reporting happens inside a conversation, so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ClientTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }
