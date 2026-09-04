@@ -1,8 +1,6 @@
 package `in`.artistant.app.feature.signup
 
-import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,219 +8,261 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role as A11yRole
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
-import androidx.core.content.getSystemService
-import kotlinx.coroutines.delay
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.designsystem.theme.accent
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.motionTween
 
 /**
- * Role picker (iOS `SignupRoleView`): two full-bleed "worlds" — booking (lime) and being an
- * artist (violet) — each previewing that role's accent. **Tap = commit**: set the role, show a
- * brief selected state (border + glow + check, sibling dims), then advance. A short appear-
- * debounce blocks a touch carried over from the welcome transition from auto-committing.
+ * Screens 11 and 71 — the role picker, and the role picker with a hydration failure on top of it.
+ *
+ * **11: two doors, no lock.** The design's note is "role changes the nav, never the account —
+ * so nobody signs up twice", and the layout says the same thing: two cards of equal weight, one
+ * selected, one Continue. The old picker committed on tap and self-advanced after a 340ms hold,
+ * which made the choice feel like a trapdoor; this one selects on tap and moves on Continue,
+ * because that is what the design draws and because a role is a thing you should be able to
+ * look at before you take it.
+ *
+ * **71: a blip is not a new account.** When the root gate's profile hydration fails it can no
+ * longer tell a returning artist from a brand-new client, and its fallback is to show this
+ * screen. Left alone that is a silent demotion — a returning artist lands in the client tabs
+ * with nothing on screen explaining why they were asked a question they answered months ago.
+ * [hydrationError] puts the failure at the top of the screen with the Retry that undoes it,
+ * which is the whole content of design screen 71.
  */
 @Composable
 fun RoleScreen(
+    selected: AppRole,
     onPick: (AppRole) -> Unit,
     onAdvance: () -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+    hydrationError: String? = null,
+    onRetryHydration: () -> Unit = {},
 ) {
-    val space = AppTheme.dimens.space
-    val context = LocalContext.current
-    // Arm immediately under touch exploration: a TalkBack double-tap is always deliberate, so
-    // there is no carry-over to debounce — the window only swallowed the tap, silently. This is
-    // the VoiceOver half of the iOS `UITestSupport.isUITest || VoiceOver` rule; the UITest half
-    // has no Android counterpart (there is no androidTest source set), so it isn't ported.
-    val touchExploration = remember(context) {
-        context.getSystemService<AccessibilityManager>()?.isTouchExplorationEnabled == true
-    }
-    // The committing role (null until a panel is tapped): drives the selected/dimmed visuals and
-    // blocks a second commit during the hand-off.
-    var committing by remember { mutableStateOf<AppRole?>(null) }
-    // Arm a beat after appearing so a carried-over touch can't auto-commit.
-    var armed by remember { mutableStateOf(touchExploration) }
-    LaunchedEffect(Unit) {
-        if (!armed) { delay(450); armed = true }
-    }
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
 
-    fun pick(role: AppRole) {
-        if (!armed || committing != null) return // guard the double-tap / carry-over
-        committing = role
-        onPick(role) // sets role + fires the selection haptic + syncs prefs/theme
-        // Hold the selected state visible for a beat, then advance (iOS 0.34s).
-        // The advance runs from a LaunchedEffect keyed on `committing` below so it survives
-        // recomposition without a raw handler thread.
-    }
-
-    LaunchedEffect(committing) {
-        if (committing != null) { delay(340); onAdvance() }
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AppTheme.colors.bg)
-            .statusBarsPadding()
-            .padding(top = space.sm, bottom = space.lg),
-        verticalArrangement = Arrangement.spacedBy(space.lg),
+    SignupScaffold(
+        modifier = modifier.semantics { testTag = "screen.role" },
+        header = { SignupHeader(onBack = onBack) },
+        footer = {
+            PrimaryButton(
+                text = "Continue",
+                onClick = onAdvance,
+                fullWidth = true,
+                modifier = Modifier.semantics { testTag = "role.continue" },
+            )
+        },
     ) {
-        SignupProgressDots(bar = ProgressBar(0, 5))
-
-        // Neutral editorial headline — the panels carry the color, so "stage" is the only
-        // accent (italic, but ink not brand, so it implies no side).
-        Text(
-            text = androidx.compose.ui.text.buildAnnotatedString {
-                append("Which side of\nthe ")
-                withStyle(androidx.compose.ui.text.SpanStyle(fontStyle = FontStyle.Italic)) { append("stage") }
-                append("?")
-            },
-            style = AppTheme.type.displayHero,
-            color = AppTheme.colors.ink,
-            modifier = Modifier.padding(horizontal = space.xl),
-        )
-
-        Column(
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.md),
-        ) {
-            RolePanel(
-                role = AppRole.Client,
-                title = "I'm booking artists",
-                sub = "For a fest, club, brand event, wedding or private gig.",
-                glyph = Icons.Filled.ConfirmationNumber,
-                committing = committing,
-                testTag = "role.client",
-                modifier = Modifier.weight(1f),
-            ) { pick(AppRole.Client) }
-            RolePanel(
-                role = AppRole.Artist,
-                title = "I'm an artist",
-                sub = "Set up your booking-ready profile in 4 minutes.",
-                glyph = Icons.Filled.Mic,
-                committing = committing,
-                testTag = "role.artist",
-                modifier = Modifier.weight(1f),
-            ) { pick(AppRole.Artist) }
+        if (hydrationError != null) {
+            Spacer(Modifier.height(space.sm))
+            HydrationErrorBanner(detail = hydrationError, onRetry = onRetryHydration)
         }
+
+        Spacer(Modifier.height(space.lg))
+        Text(
+            "Which side of the\nstage are you on?",
+            style = AppTheme.type.screenTitle,
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(space.sm))
+        Text(
+            "You can switch anytime — plenty of people do both.",
+            style = AppTheme.type.subtitle,
+            color = colors.ink4,
+        )
+        Spacer(Modifier.height(space.xl))
+
+        RoleCard(
+            title = "I'm hosting",
+            body = "A wedding, a brand night, a living room. Find an act and agree a price.",
+            glyph = Icons.Filled.Equalizer,
+            selected = selected == AppRole.Client,
+            testTag = "role.client",
+            onClick = { onPick(AppRole.Client) },
+        )
+        Spacer(Modifier.height(space.md))
+        RoleCard(
+            title = "I'm performing",
+            body = "Set your rate, hold your calendar, get paid after the set.",
+            glyph = Icons.Filled.Mic,
+            selected = selected == AppRole.Artist,
+            testTag = "role.artist",
+            onClick = { onPick(AppRole.Artist) },
+        )
+        Spacer(Modifier.height(space.lg))
+
+        Banner(
+            title = "Agencies and wedding planners choose hosting — team seats live in settings.",
+            tone = BannerTone.Note,
+        )
+        Spacer(Modifier.height(space.lg))
     }
 }
 
+/**
+ * One of the two doors.
+ *
+ * Selection is a TINT plus a ring plus a filled radio, not one of the three. The design uses
+ * all three because each one fails on its own for someone: the tint is the whole card and
+ * carries at a glance, the ring survives a colour-blind reading, and the radio is what a
+ * screen reader has to be told about. The unselected card is `surface3` with a hairline, so
+ * the pair reads as two options rather than as one option and one warning.
+ */
 @Composable
-private fun RolePanel(
-    role: AppRole,
+private fun RoleCard(
     title: String,
-    sub: String,
+    body: String,
     glyph: ImageVector,
-    committing: AppRole?,
+    selected: Boolean,
     testTag: String,
-    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val accent = role.accent().brand
-    val selected = committing == role
-    val dimmed = committing != null && committing != role
-    val shape = RoundedCornerShape(28.dp)
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    val shape = RoundedCornerShape(dimens.radii.xl)
+    val interaction = remember { MutableInteractionSource() }
 
-    // Animate the select/dim transition (iOS `.easeOut(0.24)`) through `motionTween`: the
-    // framework default spring animates even when the user has asked the system to stop, and
-    // the helper is the one place that branch lives.
-    val fade = motionTween<Float>(AppTheme.motion.tabSwitch)
-    val panelAlpha by animateFloatAsState(if (dimmed) 0.45f else 1f, animationSpec = fade, label = "roleAlpha")
-    val panelScale by animateFloatAsState(if (dimmed) 0.97f else 1f, animationSpec = fade, label = "roleScale")
-    val borderColor by animateColorAsState(
-        if (selected) accent else colors.line,
+    val fill by animateColorAsState(
+        targetValue = if (selected) colors.accent.copy(alpha = SELECTED_TINT) else colors.surface3,
         animationSpec = motionTween<Color>(AppTheme.motion.tabSwitch),
-        label = "roleBorder",
+        label = "roleFill",
+    )
+    val stroke by animateColorAsState(
+        targetValue = if (selected) colors.accent else colors.hairline,
+        animationSpec = motionTween<Color>(AppTheme.motion.tabSwitch),
+        label = "roleStroke",
     )
 
-    Box(
-        modifier = modifier
+    Column(
+        modifier = Modifier
             .fillMaxWidth()
-            .scale(panelScale)
-            .alpha(panelAlpha)
             .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    listOf(accent.copy(alpha = 0.24f), colors.bg.copy(alpha = 0.15f), colors.bg.copy(alpha = 0.05f)),
-                ),
-            )
-            .border(
-                if (selected) AppTheme.dimens.size.stroke else AppTheme.dimens.size.hairline,
-                borderColor,
-                shape,
-            )
+            .background(fill)
+            .border(dimens.component.focusStroke, stroke, shape)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = null,
+                role = A11yRole.RadioButton,
                 onClick = onClick,
             )
+            .padding(space.lg)
             .semantics(mergeDescendants = true) {
                 this.testTag = testTag
-                contentDescription = "$title. Selects this role and continues"
+                this.selected = selected
+                contentDescription = "$title. $body"
             },
     ) {
-        // Faint oversized glyph bleeding off the top-right corner.
-        Icon(
-            glyph,
-            contentDescription = null,
-            tint = accent.copy(alpha = 0.13f),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = AppTheme.dimens.space.sm)
-                .size(150.dp),
-        )
-        // Bottom-left label block.
-        Column(
-            modifier = Modifier.align(Alignment.BottomStart).padding(AppTheme.dimens.space.xl),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, style = AppTheme.type.displayTitle, color = colors.ink)
-            Text(sub, style = AppTheme.type.callout, color = colors.ink2)
+            Box(
+                Modifier
+                    .size(dimens.component.iconCircle)
+                    .clip(RoundedCornerShape(dimens.radii.md))
+                    .background(if (selected) colors.accent else colors.hairline),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    glyph,
+                    contentDescription = null,
+                    tint = if (selected) colors.onAccent else colors.ink2,
+                    modifier = Modifier.size(dimens.size.iconLg),
+                )
+            }
+            Box(
+                Modifier
+                    .size(dimens.size.radio)
+                    .clip(CircleShape)
+                    .then(
+                        if (selected) {
+                            Modifier.background(colors.accent)
+                        } else {
+                            Modifier.border(dimens.component.checkboxStroke, colors.lineStrong, CircleShape)
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = colors.onAccent,
+                        modifier = Modifier.size(dimens.size.iconSm),
+                    )
+                }
+            }
         }
-        if (selected) {
-            Icon(
-                Icons.Filled.CheckCircle,
-                contentDescription = null,
-                tint = accent,
-                modifier = Modifier.align(Alignment.TopStart).padding(AppTheme.dimens.space.lg).size(30.dp),
-            )
-        }
+        Spacer(Modifier.height(space.md))
+        Text(
+            title,
+            style = AppTheme.type.sectionTitle.copy(fontSize = AppTheme.type.cardTitle.fontSize),
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(space.xs))
+        Text(body, style = AppTheme.type.subtitle, color = colors.ink2)
+    }
+}
+
+/** The selected card's tint — the accent at ~26%, which is what the markup draws. */
+private const val SELECTED_TINT = 0.26f
+
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 800)
+@Composable
+private fun RolePickerPreview() {
+    ArtistantTheme {
+        RoleScreen(selected = AppRole.Client, onPick = {}, onAdvance = {}, onBack = {})
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 800)
+@Composable
+private fun RolePickerHydrationErrorPreview() {
+    ArtistantTheme {
+        RoleScreen(
+            selected = AppRole.Client,
+            onPick = {},
+            onAdvance = {},
+            onBack = {},
+            hydrationError = "We signed you in but your details are missing.",
+        )
     }
 }

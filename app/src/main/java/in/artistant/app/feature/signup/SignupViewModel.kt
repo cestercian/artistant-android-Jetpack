@@ -48,6 +48,16 @@ data class SignupUiState(
     val authNotice: String? = null,
     /** ACCT-05 — community pledge agreed (persisted). Gates Role → RoleScreen. */
     val communityAgreed: Boolean = false,
+    /**
+     * The password form (design screen 28) is open over the auth step.
+     *
+     * A flag rather than a seventh step: screen 28 is a MODAL over the sign-in screen — its
+     * header carries a Cancel, its footer says "or go back for Apple and Google", and back
+     * from it returns to the same sign-in screen with the same number still typed. A step
+     * would have to be inserted into both orders, retired by a live session, and skipped by
+     * every other path, all to express "the user opened a form and can close it again".
+     */
+    val emailSignUp: Boolean = false,
     /** A live session exists. Owned by the gate (RootViewModel) and fed in by [SignupFlow] —
      *  the flow itself never reads supabase-kt. Retires the two pre-auth steps so nothing can
      *  park a signed-in user on `.Auth` (or send them back to `.Welcome`, whose "Sign in"
@@ -194,15 +204,37 @@ class SignupViewModel @Inject constructor(
     fun startSignup() = _state.update { it.copy(mode = SignupMode.Signup, step = SignupStep.Role) }
     fun startLogin() = _state.update { it.copy(mode = SignupMode.Login, step = SignupStep.Auth) }
 
+    /**
+     * A code was texted (or emailed) — show the six boxes.
+     *
+     * Called by the auth screen only after [in.artistant.app.ui.auth.AuthViewModel.sendCode]
+     * reports a SUCCESSFUL send. A send that failed leaves the user on the sign-in screen with
+     * the reason under the field, rather than on a code screen waiting for a message that is
+     * not coming.
+     */
+    fun goToCode() = _state.update {
+        if (it.step == SignupStep.Auth) it.copy(step = SignupStep.Code, emailSignUp = false) else it
+    }
+
+    /** Open the password form over the auth step (screen 28), from either 12 or 119. */
+    fun openEmailSignUp() = _state.update { it.copy(step = SignupStep.Auth, emailSignUp = true) }
+
+    /** Close it and return to the sign-in screen underneath. */
+    fun closeEmailSignUp() = _state.update { it.copy(emailSignUp = false) }
+
     fun advance() = _state.update { it.copy(step = nextStep(it.step, it.mode, it.signedIn)) }
     fun back() = _state.update { it.copy(step = prevStep(it.step, it.mode, it.signedIn)) }
 
     /**
-     * Role picker commit: set the role + fire the haptic. The container themes off this state
-     * (`signupState.role` in ArtistantNavHost), so the next screen renders in the picked accent;
-     * persistence to prefs isn't needed here — the role is written to the server by the profile
-     * upsert and re-read into prefs by the gate's routing when it lands on Tabs. The 0.34s
-     * visual-hold before advance lives in the screen.
+     * Role picker selection: set the role + fire the selection haptic.
+     *
+     * Selection only — the step does NOT advance here any more. The old picker committed on
+     * tap and self-advanced after a 340ms hold, so the two cards were really two buttons that
+     * left the screen; design screen 11 draws a selected card and a separate Continue, which
+     * is what lets someone read the second option after tapping the first.
+     *
+     * Persistence to prefs isn't needed here — the role is written to the server by the
+     * profile upsert and re-read into prefs by the gate's routing when it lands on Tabs.
      */
     fun pickRole(role: AppRole) {
         _state.update { it.copy(role = role) }
@@ -247,8 +279,18 @@ class SignupViewModel @Inject constructor(
      * flow's — see RootViewModel.routeSignedIn).
      */
     fun onAuthCompleted() = _state.update {
-        if (it.step == SignupStep.Auth) it.copy(step = nextStep(it.step, it.mode, it.signedIn), authNotice = null)
-        else it.copy(authNotice = null)
+        // `.Code` as well as `.Auth`: the code screen is where the phone path's session
+        // actually lands, and leaving it out stranded a verified user on six filled boxes
+        // with a Verify button that had already done its job.
+        if (it.step == SignupStep.Auth || it.step == SignupStep.Code) {
+            it.copy(
+                step = nextStep(it.step, it.mode, signedIn = true),
+                authNotice = null,
+                emailSignUp = false,
+            )
+        } else {
+            it.copy(authNotice = null, emailSignUp = false)
+        }
     }
 
     /** Seed the flow at a specific step (the gate presents the container at welcome for

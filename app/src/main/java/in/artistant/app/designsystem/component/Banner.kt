@@ -50,8 +50,16 @@ import `in`.artistant.app.designsystem.theme.ArtistantTheme
  * the palette (`warmSoft`/`warmLine`, `dangerSoft`/`dangerLine`). On a light
  * page a tinted fill on its own is nearly invisible at banner size, and a line
  * on its own reads as a table cell; the pair is what makes the block a block.
+ *
+ * [Note] is the accent's QUIET register — the same lime at a fifth of its weight,
+ * behind a line at a little over half. It is what the design uses for the aside
+ * that sits under a form and explains the machinery ("Checked live against the
+ * server", "Autofill works", "Agencies and wedding planners choose hosting"). It
+ * is not [Promotion]: a solid lime block on a signup step out-shouts the field
+ * the step is actually about, and it is not [Info] either, because `surface3` on
+ * `surface` is nearly the same colour and the aside disappears.
  */
-enum class BannerTone { Info, Attention, Failure, Promotion }
+enum class BannerTone { Info, Note, Attention, Failure, Promotion }
 
 /**
  * A full-width notice that lives inline in a scroll, not over it.
@@ -88,24 +96,27 @@ fun Banner(
     val promotion = tone == BannerTone.Promotion
     val fill = when (tone) {
         BannerTone.Info -> colors.surface3
+        BannerTone.Note -> colors.accent.copy(alpha = NOTE_FILL)
         BannerTone.Attention -> colors.warmSoft
         BannerTone.Failure -> colors.dangerSoft
         BannerTone.Promotion -> colors.accent
     }
     val stroke = when (tone) {
         BannerTone.Info -> colors.hairline
+        BannerTone.Note -> colors.accent.copy(alpha = NOTE_LINE)
         BannerTone.Attention -> colors.warmLine
         BannerTone.Failure -> colors.dangerLine
         BannerTone.Promotion -> Color.Transparent
     }
     val glyphTint = when (tone) {
         BannerTone.Info -> colors.ink3
+        BannerTone.Note -> colors.accentDeep
         BannerTone.Attention -> colors.warm
         BannerTone.Failure -> colors.danger
         BannerTone.Promotion -> colors.onAccent
     }
     val glyph = icon ?: when (tone) {
-        BannerTone.Info, BannerTone.Promotion -> Icons.Outlined.Info
+        BannerTone.Info, BannerTone.Note, BannerTone.Promotion -> Icons.Outlined.Info
         BannerTone.Attention -> Icons.Filled.WarningAmber
         BannerTone.Failure -> Icons.Filled.ErrorOutline
     }
@@ -148,9 +159,17 @@ fun Banner(
         Column(Modifier.weight(1f)) {
             Text(
                 title,
-                style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.Bold),
-                color = titleInk,
-                maxLines = 2,
+                // A [BannerTone.Note] is an aside, not a headline: the design sets it
+                // as one running sentence at body weight, and bolding it would make the
+                // explanation out-rank the field it is explaining. Every other tone
+                // announces a state, which is what the bold step is for.
+                style = if (tone == BannerTone.Note) {
+                    AppTheme.type.subtitle
+                } else {
+                    AppTheme.type.subtitle.copy(fontWeight = FontWeight.Bold)
+                },
+                color = if (tone == BannerTone.Note) colors.ink2 else titleInk,
+                maxLines = if (tone == BannerTone.Note) NOTE_MAX_LINES else 2,
                 overflow = TextOverflow.Ellipsis,
             )
             if (!detail.isNullOrBlank()) {
@@ -225,6 +244,21 @@ fun InlineBanner(
  * would be muddy on lime.
  */
 private const val DETAIL_ON_ACCENT = 0.72f
+
+/**
+ * The [BannerTone.Note] tint and its rim, measured off the markup
+ * (`rgba(214,248,75,.22)` behind `rgba(214,248,75,.6)`).
+ *
+ * Expressed as alphas over the surface rather than as two new opaque tokens
+ * because that is what the design is: one accent at two weights. Baking them
+ * into the palette would produce a pair that only works on white, and this
+ * banner also appears on `page`.
+ */
+private const val NOTE_FILL = 0.22f
+private const val NOTE_LINE = 0.60f
+
+/** A note is a sentence, so it gets a sentence's worth of room before it clips. */
+private const val NOTE_MAX_LINES = 4
 
 @Preview(showBackground = true, backgroundColor = 0xFFFAFAF6)
 @Composable

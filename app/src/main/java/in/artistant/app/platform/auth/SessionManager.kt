@@ -11,11 +11,13 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.handleDeeplinks
 import io.github.jan.supabase.auth.providers.Apple
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import `in`.artistant.app.BuildConfig
@@ -196,6 +198,68 @@ class SessionManager @Inject constructor(
         client.auth.signInWith(Apple)
     }
 
+    // MARK: - One-time code (the primary path)
+
+    /**
+     * Text a six-digit code to [phoneE164] (design screen 12 → 119).
+     *
+     * Phone is the identity in India, which is why the redesign makes this the first control on
+     * the sign-in screen and the password path a fallback. The dev Supabase project has an SMS
+     * provider configured, so this is a real send, not a stub.
+     *
+     * `createUser = true` on purpose: this one call is BOTH "sign up" and "sign in". A number
+     * that has never been seen becomes an account; a number that has signs in. The alternative
+     * — a false here plus a separate sign-up call — would make a first-time user tap "Send
+     * code", get "user not found", and have to work out which of two buttons they were supposed
+     * to press, for a screen whose entire premise is that there is only one.
+     *
+     * Throws on a send failure (no SMS provider, a rejected number, no network); the caller
+     * shows it inline and the code screen is never reached.
+     */
+    suspend fun sendPhoneOtp(phoneE164: String) {
+        client.auth.signInWith(OTP) {
+            phone = phoneE164
+            createUser = true
+        }
+    }
+
+    /**
+     * Exchange a texted code for a session. Bumps the generation on success, exactly like the
+     * password and Google paths, so the router advances a returning user whose uuid has not
+     * changed (see [completedSignIn]).
+     */
+    suspend fun verifyPhoneOtp(phoneE164: String, token: String) {
+        client.auth.verifyPhoneOtp(type = OtpType.Phone.SMS, phone = phoneE164, token = token)
+        completedSignIn()
+    }
+
+    /**
+     * The same one-time-code flow over email.
+     *
+     * Offered because the design's sign-in screen has an "Or use email" field beside the phone
+     * one, and because App Review needs a path that does not require an Indian SIM. Whether it
+     * WORKS is a project setting we cannot read from here: GoTrue only mails a code when the
+     * project has SMTP configured, and on a project without it this call throws. That failure
+     * surfaces inline on the sign-in screen with the password path beside it, rather than
+     * being swallowed into a code screen for a mail that is never coming.
+     */
+    suspend fun sendEmailOtp(email: String) {
+        client.auth.signInWith(OTP) {
+            this.email = normalizeEmail(email)
+            createUser = true
+        }
+    }
+
+    /** Exchange an emailed code for a session. */
+    suspend fun verifyEmailOtp(email: String, token: String) {
+        client.auth.verifyEmailOtp(
+            type = OtpType.Email.EMAIL,
+            email = normalizeEmail(email),
+            token = token,
+        )
+        completedSignIn()
+    }
+
     // MARK: - Email / password
 
     /** Email + password sign-in. On success the session lands in sessionStatus; we bump the
@@ -231,6 +295,20 @@ class SessionManager @Inject constructor(
         } else {
             EmailAuthOutcome.ConfirmationRequired
         }
+    }
+
+    /**
+     * Mail a password-reset link (design screen 28's "Forgot password?").
+     *
+     * Real, not decorative: GoTrue sends the mail when the project has SMTP configured, and
+     * throws when it does not — which the screen reports where the link was tapped. No
+     * redirect URL is passed, so the link lands on the project's configured Site URL (the web
+     * client's reset page) rather than on a deep link this app has no screen for. The password
+     * this app collects is a fallback path for App Review and for anyone without a platform
+     * account; the recovery for it living on the web is the honest shape of that.
+     */
+    suspend fun sendPasswordReset(email: String) {
+        client.auth.resetPasswordForEmail(normalizeEmail(email))
     }
 
     // MARK: - Sign out

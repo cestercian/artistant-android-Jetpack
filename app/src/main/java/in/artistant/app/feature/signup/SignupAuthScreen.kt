@@ -9,228 +9,356 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.Email
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import `in`.artistant.app.ui.auth.AuthViewModel
-import `in`.artistant.app.ui.auth.EmailAuthSheet
+import `in`.artistant.app.designsystem.component.AppTextField
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
+import `in`.artistant.app.ui.auth.AuthUiState
+import `in`.artistant.app.ui.auth.AuthViewModel
 
 /**
- * The auth entry, polished to the iOS `SignupAuthView` "Marquee" design: an animated festival-
- * lineup background behind an editorial headline, a session-lost notice pill, and the three auth
- * buttons (Apple solid → Google glass → Email glass) in a tray. Reuses the M1a [AuthViewModel]
- * (SessionManager wiring intact) + [EmailAuthSheet] — this only restyles the presentation.
+ * Screen 12 — **OTP first, password never**.
  *
- * @param mode drives the headline/subhead copy (welcome vs sign-in) + the progress bar.
- * @param authNotice the "sign in again" banner shown after a session-lost bounce, or null.
- * @param reduceMotion true to freeze the lineup (a11y) — parity with iOS `motionDisabled`.
+ * The design's note says it plainly: "phone is the identity in India; the privacy promise sits
+ * in the legal line." So the first control on the screen is a mobile number and the primary
+ * action texts a code. Apple and Google stay, below a rule, because they are one tap for
+ * anyone who already has one. The password form is not on this screen at all — it is a
+ * separate one (screen 28) reachable from the code step's escape hatch, which is where the
+ * design puts it.
+ *
+ * There are two fields and one button, which is deliberate: "Or use email" is the alternative
+ * ADDRESS for the same code, not a second kind of sign-in. Which one gets used is decided by
+ * which one holds something valid (phone wins), so the button never has to ask.
+ *
+ * @param mode only changes the headline. Everything else about signing in is identical for a
+ *   new account and a returning one — that is the point of a one-tap code.
  */
 @Composable
 fun SignupAuthScreen(
     mode: SignupMode,
     authNotice: String?,
+    onCodeSent: () -> Unit,
+    onOpenEmailSignUp: () -> Unit,
     modifier: Modifier = Modifier,
-    reduceMotion: Boolean = false,
+    onBack: (() -> Unit)? = null,
+    onOpenLegal: (LegalDoc) -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel(),
 ) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var showEmailSheet by remember { mutableStateOf(false) }
+    SignupAuthContent(
+        mode = mode,
+        state = state,
+        authNotice = authNotice,
+        onPhoneChange = viewModel::setPhone,
+        onEmailChange = viewModel::setEmail,
+        onSendCode = { viewModel.sendCode(onCodeSent) },
+        onApple = viewModel::signInWithApple,
+        onGoogle = viewModel::signInWithGoogle,
+        onOpenEmailSignUp = onOpenEmailSignUp,
+        onOpenLegal = onOpenLegal,
+        onBack = onBack,
+        modifier = modifier,
+    )
+}
 
-    Box(modifier = modifier.fillMaxSize().background(colors.bg)) {
-        // Immersive lineup + a legibility scrim (dark top/bottom, readable middle).
-        LineupBackground(animated = !reduceMotion)
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0.00f to colors.bg.copy(alpha = 0.98f),
-                    0.28f to colors.bg.copy(alpha = 0.74f),
-                    0.50f to colors.bg.copy(alpha = 0.62f),
-                    0.76f to colors.bg.copy(alpha = 0.93f),
-                    1.00f to colors.bg,
-                ),
-            ),
+/** The stateless half, so the previews (and a future screenshot test) can drive every state. */
+@Composable
+private fun SignupAuthContent(
+    mode: SignupMode,
+    state: AuthUiState,
+    authNotice: String?,
+    onPhoneChange: (String) -> Unit,
+    onEmailChange: (String) -> Unit,
+    onSendCode: () -> Unit,
+    onApple: () -> Unit,
+    onGoogle: (android.content.Context) -> Unit,
+    onOpenEmailSignUp: () -> Unit,
+    onOpenLegal: (LegalDoc) -> Unit,
+    onBack: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val busy = state.isAuthenticating || state.isSendingCode
+
+    SignupScaffold(
+        modifier = modifier.semantics { testTag = "screen.auth" },
+        header = { SignupHeader(onBack = onBack) },
+    ) {
+        Spacer(Modifier.height(space.md))
+        Text(
+            if (mode == SignupMode.Login) "Welcome back" else "Let's get you in",
+            style = AppTheme.type.screenTitle,
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(space.sm))
+        Text(
+            "We'll text a code — nothing to remember.",
+            style = AppTheme.type.subtitle,
+            color = colors.ink4,
         )
 
-        Column(
-            modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = space.xl).padding(bottom = space.xxl),
-        ) {
-            // The bar comes from the step machine, not from a literal. Login has its own
-            // 2-segment ramp that starts here; hiding it meant a returning user first saw the
-            // bar — already full — on the notification step. `SignupProgressDots` no-ops on the
-            // null `progressIndex` returns for a step that carries no bar.
-            SignupProgressDots(bar = progressIndex(SignupStep.Auth, mode), modifier = Modifier.padding(top = space.sm))
-
-            Spacer(Modifier.height(space.xl))
-            // Editorial headline — signup leans into the marquee, login is warm.
-            if (mode == SignupMode.Login) {
-                EditorialHeadline("Welcome\n", "back", ".", style = AppTheme.type.displayHero)
-            } else {
-                EditorialHeadline("The lineup\nis ", "live", ".", style = AppTheme.type.displayHero)
-            }
-            Spacer(Modifier.height(space.md))
-            Text(
-                if (mode == SignupMode.Login) "Pick the account you signed up with."
-                else "Pick how you want to sign in. We'll never post anything on your behalf.",
-                style = AppTheme.type.callout,
-                color = colors.ink2,
+        if (authNotice != null) {
+            Spacer(Modifier.height(space.lg))
+            Banner(
+                title = authNotice,
+                tone = BannerTone.Note,
+                modifier = Modifier.semantics { testTag = "auth.notice" },
             )
+        }
 
-            // Session-lost explainer pill.
-            if (authNotice != null) {
-                Spacer(Modifier.height(space.lg))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(AppTheme.dimens.radii.md))
-                        .background(colors.brandSoft)
-                        .padding(horizontal = space.md, vertical = space.sm)
-                        .semantics { testTag = "auth.notice" },
-                    horizontalArrangement = Arrangement.spacedBy(space.sm),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(Icons.Filled.Autorenew, contentDescription = null, tint = colors.accentInk, modifier = Modifier.size(AppTheme.dimens.size.iconMd))
-                    Text(authNotice, style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold), color = colors.accentInk)
-                }
+        Spacer(Modifier.height(space.xl))
+        AppTextField(
+            value = state.phone,
+            onValueChange = onPhoneChange,
+            label = "Mobile number",
+            hint = "98450 12345",
+            enabled = !busy,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Phone,
+                imeAction = ImeAction.Next,
+            ),
+            leading = {
+                Text(
+                    PhoneRules.DIAL_CODE,
+                    style = AppTheme.type.body.copy(fontWeight = FontWeight.Medium),
+                    color = colors.ink2,
+                )
+            },
+            trailing = {
+                Text("IN ${PhoneRules.DIAL_CODE}", style = AppTheme.type.caption, color = colors.ink4)
+            },
+            modifier = Modifier.semantics { testTag = "auth.phone" },
+        )
+        Spacer(Modifier.height(space.md))
+        AppTextField(
+            value = state.email,
+            onValueChange = onEmailChange,
+            label = "Or use email",
+            hint = "you@studio.in",
+            enabled = !busy,
+            error = state.error,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                keyboardType = KeyboardType.Email,
+                imeAction = ImeAction.Go,
+            ),
+            keyboardActions = KeyboardActions(onGo = { if (state.canSendCode) { keyboard?.hide(); onSendCode() } }),
+            modifier = Modifier.semantics { testTag = "auth.email" },
+        )
+
+        Spacer(Modifier.height(space.lg))
+        PrimaryButton(
+            text = if (state.isSendingCode) "Sending…" else "Send code",
+            onClick = { keyboard?.hide(); onSendCode() },
+            fullWidth = true,
+            enabled = state.canSendCode && !busy,
+            modifier = Modifier.semantics { testTag = "auth.sendCode" },
+        )
+
+        Spacer(Modifier.height(space.xl))
+        OrRule()
+        Spacer(Modifier.height(space.xl))
+
+        Box {
+            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+                // No Apple or Google mark ships with the app yet (see the PR's follow-ups),
+                // and an approximate one is worse than none: both brands publish exact
+                // guidelines, and a hand-drawn logo on a sign-in screen reads as phishing.
+                // The rows are labelled buttons until the assets land.
+                ProviderButton(
+                    title = "Continue with Apple",
+                    enabled = !busy,
+                    testTag = "auth.apple",
+                    onClick = onApple,
+                )
+                ProviderButton(
+                    title = "Continue with Google",
+                    enabled = !busy,
+                    testTag = "auth.google",
+                    onClick = { onGoogle(context) },
+                )
+                ProviderButton(
+                    title = "Sign up with email and password",
+                    enabled = !busy,
+                    testTag = "auth.emailPassword",
+                    onClick = onOpenEmailSignUp,
+                )
             }
-
-            Spacer(Modifier.weight(1f))
-
-            // Auth tray. Contract: Apple (solid) → Google → Email. Dim + block hits while a call
-            // is in flight; a spinner overlays.
-            Box {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .alpha(if (state.isAuthenticating) 0.5f else 1f),
-                    verticalArrangement = Arrangement.spacedBy(space.md),
-                ) {
-                    AuthButton("Continue with Apple", solid = true, testTag = "auth.apple", enabled = !state.isAuthenticating) {
-                        viewModel.signInWithApple()
-                    }
-                    AuthButton("Continue with Google", solid = false, testTag = "auth.google", enabled = !state.isAuthenticating) {
-                        viewModel.signInWithGoogle(context)
-                    }
-                    AuthButton("Continue with Email", solid = false, glyph = { Icon(Icons.Filled.Email, contentDescription = null, tint = colors.ink, modifier = Modifier.size(AppTheme.dimens.size.iconLg)) }, testTag = "auth.email", enabled = !state.isAuthenticating) {
-                        showEmailSheet = true
-                    }
-
-                    state.error?.let { err ->
-                        Text(err, style = AppTheme.type.footnote, color = colors.hot, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                    }
-                    Text(
-                        "By continuing you agree to our Terms and Privacy Policy.",
-                        style = AppTheme.type.caption,
-                        color = colors.ink3,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                if (state.isAuthenticating) {
-                    CircularProgressIndicator(color = colors.accentInk, modifier = Modifier.align(Alignment.Center))
-                }
+            if (busy) {
+                CircularProgressIndicator(
+                    color = colors.accentInk,
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
         }
-    }
 
-    if (showEmailSheet) {
-        EmailAuthSheet(
-            state = state,
-            startInSignUp = mode != SignupMode.Login,
-            onSignIn = viewModel::signInWithEmail,
-            onSignUp = { email, pw, name -> viewModel.signUpWithEmail(email, pw, name) },
-            onDismiss = {
-                showEmailSheet = false
-                viewModel.clearError()
-            },
-        )
+        Spacer(Modifier.height(space.xl))
+        LegalLine(onOpenLegal = onOpenLegal)
+        Spacer(Modifier.height(space.xl))
+    }
+}
+
+/** The "or" rule between the code path and the platform buttons. */
+@Composable
+private fun OrRule() {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+    ) {
+        Box(Modifier.weight(1f).height(dimens.size.hairline).background(colors.hairline))
+        Text("or", style = AppTheme.type.caption, color = colors.ink4)
+        Box(Modifier.weight(1f).height(dimens.size.hairline).background(colors.hairline))
     }
 }
 
 /**
- * Uniform auth button (iOS `authLabel`): centred icon+title group, one height. Apple is the
- * single solid-white button (App Store 4.8 — first + most prominent); Google/Email are hairline
- * "glass" (a frosted look isn't a Compose primitive, so a translucent card + hairline border is
- * the faithful approximation). Press feedback comes from the shared [pressScale] modifier, so
- * these buttons settle exactly like every other pressable and go still under reduce-motion.
+ * A platform sign-in row: hairline outline, centred glyph + label, `control` tall.
+ *
+ * Both providers are ink-on-light. The dark design gave the primary one a WHITE fill and the
+ * secondary a translucent card with a white rim, which on a `#fafaf6` page is a white button
+ * on off-white behind an invisible border — two controls you cannot find. Screen 12 draws both
+ * as outlined rows, so the difference between them is the glyph, not the weight.
  */
 @Composable
-private fun AuthButton(
+private fun ProviderButton(
     title: String,
-    solid: Boolean,
-    testTag: String,
     enabled: Boolean,
-    glyph: (@Composable () -> Unit)? = null,
+    testTag: String,
     onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val shape = RoundedCornerShape(dimens.radii.buttonLg)
+    val shape = RoundedCornerShape(dimens.radii.control)
     val interaction = remember { MutableInteractionSource() }
-    // Both providers are ink on light now. The dark design gave the primary one a
-    // WHITE fill and the secondary a translucent card with a white 18% rim —
-    // which on a `#fafaf6` page is a white button on off-white behind an
-    // invisible border, i.e. two controls you cannot find. Screen 12 draws both
-    // as outlined rows instead; [solid] survives as the weight difference
-    // between them rather than as a colour inversion.
-    val fg = colors.ink
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(dimens.size.ctaTall)
             .pressScale(interaction)
             .clip(shape)
-            .background(if (solid) colors.surface2 else colors.surface)
+            .background(colors.surface)
             .border(dimens.size.hairline, colors.hairline, shape)
-            .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick)
-            .semantics(mergeDescendants = true) { this.testTag = testTag; contentDescription = title },
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics(mergeDescendants = true) {
+                this.testTag = testTag
+                contentDescription = title
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(dimens.space.md), verticalAlignment = Alignment.CenterVertically) {
-            // The Apple/Google brand glyphs aren't bundled yet (see follow-ups); use a tinted
-            // initial box as a stand-in so the layout + a11y are correct until the assets drop.
-            glyph?.invoke() ?: Box(
-                Modifier.size(dimens.size.iconLg).clearAndSetSemantics {},
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(title.substringAfter("with ").trim().take(1), color = fg, fontWeight = FontWeight.Bold)
-            }
-            Text(title, style = AppTheme.type.callout.copy(fontWeight = FontWeight.SemiBold), color = fg)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                style = AppTheme.type.rowTitle.copy(fontSize = AppTheme.type.body.fontSize),
+                color = if (enabled) colors.ink else colors.ink4,
+            )
         }
+    }
+}
+
+/**
+ * The legal line, and the privacy promise inside it.
+ *
+ * "Your number is never shown to an artist before a booking is confirmed" is not marketing —
+ * it is how the platform works, and screen 62 repeats it word for word under the privacy
+ * toggles precisely because it is the one thing there that is NOT a setting.
+ */
+@Composable
+private fun LegalLine(onOpenLegal: (LegalDoc) -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column {
+        Text(
+            buildAnnotatedString {
+                append("By continuing you agree to the ")
+                withAccent(colors.accentInk) { append("Terms") }
+                append(" and ")
+                withAccent(colors.accentInk) { append("Privacy Policy") }
+                append(". Your number is never shown to an artist before a booking is confirmed.")
+            },
+            style = AppTheme.type.caption,
+            color = colors.ink4,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(dimens.space.md)) {
+            InlineLink("Read the Terms", { onOpenLegal(LegalDoc.Terms) }, style = AppTheme.type.caption)
+            InlineLink("Read the Privacy Policy", { onOpenLegal(LegalDoc.Privacy) }, style = AppTheme.type.caption)
+        }
+    }
+}
+
+/** The accent-ink run inside a sentence. Local because two call sites here need it. */
+private inline fun androidx.compose.ui.text.AnnotatedString.Builder.withAccent(
+    color: androidx.compose.ui.graphics.Color,
+    block: androidx.compose.ui.text.AnnotatedString.Builder.() -> Unit,
+) {
+    pushStyle(SpanStyle(color = color, fontWeight = FontWeight.SemiBold))
+    block()
+    pop()
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 900)
+@Composable
+private fun SignInPreview() {
+    ArtistantTheme {
+        SignupAuthContent(
+            mode = SignupMode.Login,
+            state = AuthUiState(phone = "9845012345"),
+            authNotice = null,
+            onPhoneChange = {},
+            onEmailChange = {},
+            onSendCode = {},
+            onApple = {},
+            onGoogle = {},
+            onOpenEmailSignUp = {},
+            onOpenLegal = {},
+            onBack = {},
+        )
     }
 }
