@@ -1,16 +1,21 @@
 package `in`.artistant.app.feature.messages
 
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.GigRequest
+import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.Message
+import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.model.Thread
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeMessagesRepository
+import `in`.artistant.app.data.repository.FakeRequestsRepository
 import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
+import `in`.artistant.app.testsupport.OTHER_CLIENT_ID
 import `in`.artistant.app.testsupport.artist
 import `in`.artistant.app.testsupport.booking
 import kotlinx.coroutines.CompletableDeferred
@@ -82,10 +87,12 @@ class MessagesInboxViewModelTest {
         bookings: StubBookings = StubBookings(),
         flags: FakeThreadFlagsStore = FakeThreadFlagsStore(),
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
+        requests: FakeRequestsRepository = FakeRequestsRepository(),
     ) = MessagesViewModel(
         messagesRepository = messages,
         artistsRepository = artists,
         bookingsRepository = bookings,
+        requests = requests,
         flagsStore = flags,
         blockedUsers = blockedUsers,
         viewer = { viewerId },
@@ -495,13 +502,137 @@ class MessagesInboxViewModelTest {
         assertEquals(1, model.state.value.counts[MessagesFilter.Bookings])
     }
 
-    /** Toggling a flag re-projects the loaded rows; it must not refetch. */
+    /**
+     * THE BADGE RULE, the one design 60 prints on the screen that could break it:
+     * "archived threads are excluded from the Messages badge, so the count can
+     * never exceed what the inbox shows."
+     *
+     * An UNREAD archived thread is the only case that can break it, because it is
+     * the only one with something to count. Everything the inbox counts derives
+     * from `activeThreads`, so the rule holds by construction — this pins that it
+     * stays that way, since the tempting future change ("count all unread") is a
+     * one-word edit that silently makes the badge lie.
+     */
     @Test
-    fun starringReProjectsWithoutRefetching() = runTest {
-        val repo = StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID)))
-        val model = vm(repo, bookings = StubBookings())
+    fun anUnreadArchivedThreadIsCountedNowhereTheInboxCounts() = runTest {
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, bookingId = "b-1"),
+                    Thread(id = "t-2", artistId = ARTIST_ID, bookingId = "b-2", unreadCount = 4),
+                ),
+            ),
+            flags = FakeThreadFlagsStore(ThreadFlags(archived = setOf("t-2"))),
+        )
 
-        model.toggleStarred("t-1")
+        val state = model.state.value
+        assertTrue("the archived thread is the unread one", state.archivedThreads.single().unread)
+        assertEquals(0, state.activeThreads.count { it.unread })
+        assertEquals(1, state.counts[MessagesFilter.All])
+        assertEquals(listOf("t-1"), state.visibleThreads.map { it.thread.id })
+    }
+
+    // --- deal state on the row (design 19) ----------------------------------
+
+    /**
+     * A live quote reaches the row it belongs to, and only that row.
+     *
+     * This is what makes the inbox read as a pipeline instead of a contact list
+     * (design 19). `threads` has no `request_id`, so the match is on BOTH halves
+     * of the pair — and on the artist's own seat the client half is the only one
+     * doing any work: `listForArtist()` returns every client's requests and
+     * `artist_id` is the viewer's own id on all of them. Matching on the artist
+     * alone printed one client's number on every artist row at once.
+     */
+    @Test
+    fun aLiveQuoteLandsOnItsOwnThreadAndNoOther() = runTest {
+        fun quote(id: String, clientId: String, amount: Int) = StoredRequest(
+            raw = GigRequest(
+                id = id,
+                client = "Rhea",
+                message = "",
+                date = "Sat 12 Oct",
+                amount = amount,
+                artistId = ARTIST_ID,
+                clientId = clientId,
+                expiresAtEpochMs = 4_102_444_800_000L,
+            ),
+            status = GigRequestStatus.Open,
+        )
+        val model = vm(
+            StaticThreads(
+                listOf(
+                    Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID),
+                    Thread(id = "t-2", artistId = ARTIST_ID, clientId = OTHER_CLIENT_ID),
+                    Thread(id = "t-3", artistId = OTHER_ARTIST_ID, clientId = CLIENT_ID),
+                ),
+            ),
+            // The seat is the artist's, so `open` is theirs to answer.
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(
+                listOf(quote("q-1", CLIENT_ID, 48_000), quote("q-2", OTHER_CLIENT_ID, 12_000)),
+            ),
+        )
+
+        val rows = model.state.value.threads.associateBy { it.thread.id }
+        assertEquals(48_000, rows.getValue("t-1").quote?.amountInr)
+        assertEquals(
+            "the other client's thread carries the other client's number",
+            12_000,
+            rows.getValue("t-2").quote?.amountInr,
+        )
+        assertNull(rows.getValue("t-3").quote)
+    }
+
+    /** A thread about a booking is about its booking — the capsule, not a quote card. */
+    @Test
+    fun aBookingThreadCarriesNoQuoteEvenWithALiveRequestBetweenTheSamePair() = runTest {
+        val live = StoredRequest(
+            raw = GigRequest(
+                id = "q-1",
+                client = "Rhea",
+                message = "",
+                date = "Sat 12 Oct",
+                amount = 48_000,
+                artistId = ARTIST_ID,
+                clientId = CLIENT_ID,
+                expiresAtEpochMs = 4_102_444_800_000L,
+            ),
+            status = GigRequestStatus.Open,
+        )
+        val model = vm(
+            StaticThreads(
+                listOf(Thread(id = "t-1", artistId = ARTIST_ID, clientId = CLIENT_ID, bookingId = "b-1")),
+            ),
+            viewerId = ARTIST_ID,
+            requests = FakeRequestsRepository(listOf(live)),
+        )
+
+        assertNull(model.state.value.threads.single().quote)
+    }
+
+    /** No request between these two people means no deal line — never a fake one. */
+    @Test
+    fun aThreadWithNoQuoteCarriesNone() = runTest {
+        val model = vm(StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))))
+
+        assertNull(model.state.value.threads.single().quote)
+    }
+
+    /**
+     * A star set elsewhere reaches the row.
+     *
+     * Starring is toggled in the chat's details sheet, not here — the light
+     * inbox has one swipe and it archives — so what the inbox owes the flag is
+     * DISPLAY: the projection has to carry it through so the row can mark
+     * itself. Without this, starring is state nothing ever shows.
+     */
+    @Test
+    fun aStarredThreadProjectsAsStarred() = runTest {
+        val model = vm(
+            StaticThreads(listOf(Thread(id = "t-1", artistId = ARTIST_ID))),
+            flags = FakeThreadFlagsStore(ThreadFlags(starred = setOf("t-1"))),
+        )
 
         assertTrue(model.state.value.threads.single().starred)
     }

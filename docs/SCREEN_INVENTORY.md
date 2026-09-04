@@ -308,40 +308,85 @@ controls rather than letting them fail against the self-booking guard.
 `ReportOutcome`. *APIs:* Artists/Reviews/Score/Reports repos. *Deps:* SavedStore,
 ViewerIdentity, BookingDraftStore.
 
-**BookingScreen** (C, `Booking`) → `feature/booking/`. *ViewModel:* `BookingViewModel`
-(`BookingStore.draft`). *Compose:* package radio picker, `DateScroller` (real
-`daysAvailable`, busy dims), time `LazyVerticalGrid` 3-col (preferred slots),
-venue field + guests stepper (10–5000/10), summary (fee only — v1 hides fees).
-CTA→`Checkout`. *Lifecycle:* `LaunchedEffect(artistId)` ensures artist + `startDraft`.
+**BookingScreen** (C, `Booking`) → `feature/booking/`. **Redesigned — screen 05
+"When's the show?" (BC).** *ViewModel:* `BookingViewModel`. *Compose:*
+`FunnelStepBar` "Step 1 of 2", 26sp question, `FunnelCalendar` month grid (opens
+on the first month with an open day; closed days dim and inert; back-step floors
+at the current month), `PackageChoiceRow` list, start-time chips, venue field +
+guests stepper (10–5000/10), bounded notes with a live counter. Dock: summary
+line + fee, CTA "Request this date"→`Checkout`. *Pure logic:* `funnelMonthDays`,
+`monthSelectableDays`, `firstOpenMonth`, `steppedMonth`, `dayOfMonthIfIn`,
+`isAfterCurrentMonth`, `bookingSummaryLine`.
 
-**RequestQuoteScreen** (C, `RequestQuote`) → `feature/booking/`. *Compose:*
-`DateScroller`, budget (mono ₹, numeric, required), optional message/venue/guests.
-CTA (gated amount>0)→`RequestsRepository.create` (7-day expiry). Inline error;
-success state→dismiss.
+**RequestQuoteScreen** (C, `RequestQuote`) → `feature/booking/`. **Redesigned —
+screen 17 "the brief, prefilled" (BC).** *Compose:* occasion chips, Date/Start
+picker fields opening `FunnelCalendar` / slot sheets, guests + venue, budget
+(numeric ₹, required), 500-char note with counter. CTA (gated amount>0)
+→`RequestsRepository.create` (7-day expiry). *Data:* occasion and start time have
+no `gig_requests` column and are composed into the message by `quoteBriefMessage`;
+budget is one amount, not the design's range.
 
-**CheckoutScreen** (C, `Checkout`) → `feature/booking/`. *ViewModel:*
-`CheckoutViewModel`. *Compose:* summary card, confirm-match button →
-`SubscriptionService`/`Payments` seam → `confirmDraftAsBooking` →`Confirmed`.
-v1 quota gate → `PaywallScreen` sheet. *APIs:* create-booking path. *State:*
-retry banner on payment-ok/write-fail. Analytics `booking_created`/`booking_paid`.
-Success/error haptics. *Deps:* EntitlementStore.
+**CheckoutScreen** (C, `Checkout`) → `feature/booking/`. **Redesigned — screen 06
+"no money in v1" (BC).** *ViewModel:* `CheckoutViewModel`. *Compose:* act card
+(`checkoutActMeta` carries date/time/venue), "Your request" term rows, artist-fee
+row, accent `NoteBlock` on the no-payment terms, "What happens next" card. CTA
+→`SubscriptionService`/`Payments` seam → create → `Confirmed`. v1 quota gate →
+`PaywallScreen`. *State:* retry banner on payment-ok/write-fail; narrated wait
+covers the two-hop submit. Success/error haptics. *Deps:* EntitlementStore.
 
-**ConfirmedScreen** (C, `Confirmed`) → `feature/booking/`. *Compose:* spring halo +
-checkmark, italic "Match confirmed", details card, `StatusTimeline`, actions:
-View booking (pop-to-root + `pendingBookingDetail` + switch tab), `AddToCalendar`,
-Back to discover. *Anim:* `LaunchedEffect` spring scale.
+**ConfirmedScreen** (C, `Confirmed`) → `feature/booking/`. **Redesigned — screen 07
+"say the outcome, not 'success'" (BC).** *Compose:* `OutcomeMark` (spring tick),
+headline branching on status (`confirmedHeadline`), terms card (`confirmedTerms`),
+"See the record"→`Invoice`. Actions: pending → View booking / Back to discover;
+confirmed → Message the artist (`ChatOpenViewModel`) / Add to calendar.
 
-**BookingsScreen** (C, tab root) → `feature/bookings/`. *ViewModel:*
-`BookingsViewModel`. *Compose:* `MonthCalendar` (booked=lime, `eventsForDay`,
-`onSelectEvent`→`BookingDetail`) + per-day schedule rows tinted by status; error
-banner. *APIs:* `BookingsRepository.listForClient`. *Lifecycle:* refresh on user id;
-consume `pendingBookingDetail` deep link; pull-to-refresh.
+**MatchConfirmedScreen** (C, `MatchConfirmed`) → `feature/booking/`. **New — screen
+94 (BC).** Route `match_confirmed/{bookingId}`; the landing for a match reached
+by chat negotiation. Outcome mark, "It's a match. You're both in.", act card with
+a `Confirmed` badge, package + fee, frozen-terms note (mig 0096). CTA "View the
+booking" + "Back to discover".
 
-**BookingDetailScreen** (S, client primary / artist via injected booking) →
-`feature/bookings/`. *Compose:* artist header, `StatusTimeline`, KV rows +
-`HRule`, bold fee, action row: Message→`Chat`, Add to calendar (confirmed),
-Cancel (`AlertDialog`→`cancel`), Leave review (completed→`ReviewSheet`). *Lifecycle:*
-consume `pendingReviewSheet` (auto-present). *Deps:* BookingStore, MessageStore.
+**InvoiceScreen** (C, `Invoice`) → `feature/booking/`. **New — screen 132 (BC).**
+Route `invoice/{bookingId}`; reachable from Confirmed, and from Booking detail
+once BN wires it. "A record, not a tax invoice": billed-to card + status pill,
+booking terms, fee / Artistant's ₹0 / total = fee (`invoiceLines` never prints
+the persisted `platform_fee_inr` or `gst_inr` as charges), disclaimer note. CTA
+shares plain text, not a PDF.
+
+**CounterOfferScreen** (A, `CounterOffer`) → `feature/booking/`. **New — screen 61
+(BC).** Route `counter_offer/{requestId}` on the ARTIST graph — `gig_requests`
+has one UPDATE policy (`gig_requests_update_artist`, mig 0002), so a client-side
+counter is blocked on the backend. Sheet-styled destination: their offer above,
+a 60dp amount well below, `counterDeltaLine` under it, note, "Send counter"
+→`RequestsRepository.counter`.
+
+**BookingsScreen** (C, tab root) → `feature/bookings/`. **Redesigned Sep 2026 —
+designs 10 / 89 / 122.** *ViewModel:* `BookingsViewModel`. *Compose:*
+`ScreenHeader` + a calendar circle → `month_calendar`; an Upcoming ⁄ Past
+segmented control; then one of three affordances per row (`affordanceFor`) —
+a confirmed picture card with a countdown badge and Message ⁄ Tech rider, an
+awaiting row that names what it is waiting on, a played row carrying "Leave a
+review". Empty (89) puts a dismissible "Add your name" nudge ABOVE the empty
+state. Offline (122) renders a DataStore snapshot of the night's essentials.
+*APIs:* `BookingsRepository.listForClient`, `UsersRepository.fetchSelfProfile`
+(the nudge's only trigger). *Lifecycle:* refresh on init; every success writes
+the snapshot, every failure reads it back.
+
+**MonthCalendarScreen** (C, pushed — design 78) → `feature/bookings/`. The
+shared calendar as its own destination, off the Bookings header. `MonthCalendarCard`
+(header + weekday row + grid + legend) over the selected day's `DayEventRow`s.
+Cancelled bookings keep their place in the day list but take no lime tile.
+
+**BookingDetailScreen** (S, client primary / artist via the same route in its own
+graph) → `feature/booking/`. **Redesigned Sep 2026 — designs 18 / 83 / 84 / 95 /
+96 / 97 plus the cancel flow 117 → 52.** Five variants (`variantFor`), each a
+different page: confirmed (run of show → getting there → the fee → Tech rider ⁄
+Share ⁄ Cancel), awaiting (progress → what you asked for → Withdraw ⁄ Message),
+cancelled (who and when → frozen terms → Message ⁄ Book again), disputed (the
+policy, plus an honest "not in the app" for the event history), read-only
+(everything visible, every action disabled, Update Artistant). Not-found offers
+both explanations. *Deps:* `BookingDetailViewModel`, `ChatOpenViewModel`,
+`ReviewSheetViewModel`.
 
 **ArtistListScreen** (C, pushed, `artist_list/{kind}`) → `feature/profile/`.
 **Redesigned Sep 2026 (design screens 32 / 112).** One screen, three row sources
@@ -406,26 +451,53 @@ on `UploadQueue.batchCompleted`. *Deps:* EPKStore, UploadQueue.
 
 ## 7. Screens — Shared / cross-role
 
-**MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *ViewModel:*
-`MessagesViewModel` (`MessageStore` port). *Compose:* `LazyColumn` thread rows→
-`Chat(id)`: `Avatar` 44, role-resolved counterpart name, BOOKING pill, timeAgo,
-2-line preview (verbatim body — **no** redaction), unread dot. *APIs:* `listThreadsForUser`. *State:*
-threads (badge = Σ unread). *Lifecycle:* two-stage hydrate (artists, then names);
-`pendingThreadId` deep link; pull-to-refresh; skeleton/empty/error. *Deps:*
-SessionManager, RoleStore, BookingStore, ArtistsRepository.
+**MessagesScreen** (S, tab root, both roles) → `feature/messages/`. *Design:* 19
+(loaded) / 110 (empty). *ViewModel:* `MessagesViewModel` (`MessageStore` port).
+*Compose:* `ScreenHeader` + archive `IconCircle` (dot when non-empty), v2
+`SearchBar`, v2 `Chip` rail with live counts, the **permanent Artistant Support
+row** (dark disc + lime "A", every segment and every state), then `LazyColumn`
+thread rows→`Chat(id)`: `Avatar` 48, role-resolved counterpart name, star marker,
+timeAgo, **deal state** (a live `gig_requests` quote renders "QUOTE ₹48,000 ·
+holds till Fri" in place of the preview; lapsed says so) and an accent unread
+count badge. Swipe archives. *APIs:* `listThreadsForUser`, `fetchMany`,
+`listForClient`/`listForArtist`. *State:* threads; `activeThreads` (archived
+excluded) is the ONLY source of every count. *Lifecycle:* two-stage hydrate
+(artists, then names); `pendingThreadId` deep link; pull-to-refresh;
+skeleton/empty/error. *Deps:* SessionManager, RoleStore, BookingStore,
+ArtistsRepository, RequestsRepository.
 
-**ChatScreen** (S, `Chat`) → `feature/messages/`. *ViewModel:* `ChatViewModel`.
-*Compose:* `LazyColumn` (reverse) with `rememberLazyListState` auto-scroll to
-bottom on new message; bubbles system(centered)/me(brand)/other(card), **Airbnb
-trust banner** (not redaction), failed-send retry chip + haptic; **composer**
-multiline field + send,
-glass floating bar (`Scaffold` bottomBar). *APIs:* `MessagesRepository`
-(listMessages explicit columns, send, **realtime** `subscribeMessages`,
-markThreadRead, findOrCreateThread). *Lifecycle:* `LaunchedEffect(threadId,userId)`
-= ensure/refresh/resolve-name/markRead/**subscribe realtime** (gated), foreground
-reconnect (`lifecycle`/scenePhase), teardown on dispose + generation bump. *Nav:*
-client's toolbar avatar→`ArtistProfile`. *Deps:* SessionManager, RoleStore,
-BookingStore.
+**ChatScreen** (S, `Chat`) → `feature/messages/`. *Design:* 08 / 70 / 88.
+*ViewModel:* `ChatViewModel`. *Compose:* header = back circle + avatar + name over
+the gig line + "Details"; **Airbnb trust banner** (not redaction) as a `surface3`
+card; centred status capsule at the head of the transcript, tapping through to
+the booking; `LazyColumn` with day rules, sender captions, asymmetric bubbles and
+**three message states** — sent, "Read by …", and failed drawn in `surface`
+behind a danger rim with a tappable "Not sent · Tap to retry"; **quote card**
+(QUOTE / COUNTER OFFER / AGREED, amount, terms, validity) with Accept + Counter
+on the seat whose move it is; `ComposerBar` = `AppTextField` + an always-present
+send disc. Accepting takes the screen as a three-phase `SendingNarration` (70) and
+routes to `match_confirmed/{bookingId}`. *APIs:* `MessagesRepository` (listMessages
+explicit columns, send, **realtime** `subscribeMessages`, markThreadRead,
+findOrCreateThread), `RequestsRepository` (accept/counter). *Lifecycle:*
+`ResumeEffect` → refresh + re-subscribe (gated), teardown on dispose + generation
+bump. *Nav:* details sheet participant → `ArtistProfile`. *Deps:* SessionManager,
+RoleStore, BookingStore, ReadReceiptsPreference.
+
+**ArchivedScreen** (S, `archived`, both roles) → `feature/messages/`. *Design:* 60
+/ 111. *ViewModel:* `MessagesViewModel`. *Compose:* left-aligned `BackHeader` with
+the count, rows with a labelled Unarchive, and the badge rule printed on the
+screen. Empty state teaches the gesture. Archiving is a DataStore flag —
+`threads` has no archived column.
+
+**SafetyCentreScreen** (S, `safety_centre`, both roles) → `feature/messages/`.
+*Design:* 131. One dark hero card, three numbered rules, and a `ListRow` per
+remedy (report a conversation, blocked accounts). No emergency-numbers row: no
+per-city data exists.
+
+**SupportScreen** (S, `support`, both roles) → `feature/messages/`. *Design:* 34.
+*ViewModel:* `SupportChatViewModel` over the pure `SupportScript`. Two opening
+bubbles (what it is, then what it wants), outlined option cards with detail lines,
+one real deep link into the bookings tab, and a typed note → `app_feedback`.
 
 **PaywallScreen** (S, sheet) → `feature/paywall/`. *ViewModel:* uses
 `EntitlementStore`. *Compose:* close-x, role hero + editorial headline, perks,
@@ -474,10 +546,14 @@ Queued and never "received".
 
 ## 8. Screens — Sheets & settings
 
-**ReviewSheet** (C) → `feature/score/` or `feature/bookings/`. *Compose:*
-`ModalBottomSheet`, 1–5 star rating (tap + haptic), `TextField` ≤200 counter,
-Cancel/Submit (disabled until rating≥1, spinner, dismiss-guard). *APIs:*
-`ReviewsRepository.insert`. Success haptic.
+**ReviewSheet** (C) → `feature/booking/`. **Redesigned Sep 2026 — designs 20 /
+98.** *Compose:* `ModalBottomSheet` over `SheetScaffold`; a 72dp glyph circle,
+"How was {artist}?" (or "How was the set?" when the name never loaded), five
+36dp stars with a word under them, four `Chip` tags onto the real
+`reviews.categories` keys, optional prose, "Post review". Design 98 is the same
+sheet with no name: the booking reference stands in and a warm banner says why.
+*APIs:* `ReviewsRepository.insert` (from a `viewModelScope` that outlives the
+sheet). Success haptic fires on the HOST.
 
 **ScoreBreakdownSheet** (C) → `feature/score/`. **Redesigned Sep 2026 — design
 99, "renders only what it can back".** *Compose:* `ModalBottomSheet` +
@@ -529,7 +605,11 @@ bottom save bar (spinner + "Saving…"). *APIs:* `fetchSelfAvailability` /
 |---|---|---|
 | `ScoreRing`(+`ScoreNum`) | progress arc + track + mono numeral/NEW | `Canvas` `drawArc` (start top, round cap) + `Text`; `animateFloatAsState` |
 | `Sparkline`(+`MiniBars`) | line path + gradient area + endpoint | `Canvas` `Path` + `drawPath` fill + marker |
-| `MonthCalendar` | Apple-style month grid + schedule | `LazyVerticalGrid`/custom + `RoundedRect` tiles + status dots; month `DropdownMenu` |
+| `MonthCalendar` | month grid + legend + schedule (design 78) | `Column` of 7-wide `Row`s; four fills via `monthDayFill` (booked ⁄ unavailable ⁄ open ⁄ selected) + today's ring; `MonthCalendarCard`, `MonthCalendarLegend`, `DayEventRow`; month `DropdownMenu` |
+| `DetailHeader` | back circle + LEFT-aligned record title | `Row` + `IconCircle` + 2-line `Column` + mirrored trailing slot |
+| `EventTimeline` | 11dp dot, 2dp rule, no glyphs | `Row(IntrinsicSize.Min)` + weighted connector |
+| `BottomActionBar` | pinned bar, hairline top, nav-bar inset | `Column` + `hairlineTop()` |
+| `AccentNote` | lime-washed aside (52 ⁄ 83 ⁄ 89 ⁄ 95 ⁄ 117 ⁄ 122) | `accent` at 22% + a 60% rim |
 | `MiniMonthCalendar` | 7-col grid, today ring | custom grid (kept for tests) |
 | `DateScroller` | horizontal date cells + availability dot | `LazyRow` cells + `spring` select |
 | `StatusTimeline`(+step) | 4-step vertical timeline | `Column` of circle+connector `Canvas` |

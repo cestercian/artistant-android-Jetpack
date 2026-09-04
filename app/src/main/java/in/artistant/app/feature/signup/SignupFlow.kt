@@ -31,7 +31,8 @@ import `in`.artistant.app.ui.auth.AuthViewModel
  * The signup container (iOS `SignupFlowView`): switches on `step` with a crossfade and routes
  * one-shot events (haptics + finish). The gate presents this at the right entry step — welcome
  * for a not-signed-in user, profile for a signed-in-but-incomplete one — via
- * [startStep]/[startMode]/[resume].
+ * [startStep]/[startMode]/[resume], and [entryStep] holds that entry at the community pledge
+ * until the pledge is paid.
  *
  * **The hydration banner moved.** It used to be a strip this container drew over whatever step
  * was on screen. Design screen 71 puts it INSIDE the role picker — the screen a failed
@@ -74,9 +75,16 @@ fun SignupFlow(
         viewModel.back()
     }
 
-    // Seed the flow at the gate's entry step once. resumeAt is idempotent, so a recomposition or
-    // a gate re-render (NotSignedIn → Onboarding) won't clobber the user's in-flow progress.
-    LaunchedEffect(startStep, startMode) { viewModel.resumeAt(startStep, startMode) }
+    // Seed the flow at the gate's entry step once. The step the gate ASKS for is not always the
+    // one to land on: the community pledge is not a step of its own — it is what `.Role` renders
+    // while the pledge flag is unset — so [entryStep] stands it in front of any entry that would
+    // otherwise skip it (the Onboarding tier's `.Profile` did, which meant a signed-in user with
+    // an incomplete row finished onboarding having never been asked). Keyed on the RESOLVED step,
+    // so agreeing re-seeds the flow at the step the gate wanted and nothing else re-fires.
+    // resumeAt is idempotent, so a recomposition or a gate re-render (NotSignedIn → Onboarding)
+    // won't clobber the user's in-flow progress.
+    val entry = entryStep(startStep, startMode, state.communityAgreed)
+    LaunchedEffect(entry, startMode) { viewModel.resumeAt(entry, startMode) }
 
     // Report the gate's session bit into the flow (iOS RootView.handleAuthChange →
     // didCompleteAuth). Keyed on the STEP as well as the bit, so a landing on `.Auth`/`.Code`

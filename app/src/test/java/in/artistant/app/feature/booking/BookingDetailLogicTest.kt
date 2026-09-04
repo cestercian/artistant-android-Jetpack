@@ -4,6 +4,7 @@ import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.testsupport.booking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -296,13 +297,171 @@ class BookingDetailLogicTest {
 
     @Test
     fun cancelConsequences_areWrittenForTheSideReadingThem() {
-        assertTrue(cancelConsequences(BookingViewer.Client).any { it.contains("artist's upcoming gigs") })
-        assertTrue(cancelConsequences(BookingViewer.Artist).any { it.contains("your upcoming schedule") })
+        val client = cancelConsequences(BookingViewer.Client, "Nova Beats", daysBefore = 24)
+        val artist = cancelConsequences(BookingViewer.Artist, "Riya", daysBefore = 24)
+
+        // Each side is told what it costs THEM. Only an artist's cancellation
+        // moves a score metric, and the client's is the one where nothing is
+        // refunded because nothing was ever held.
+        assertTrue(artist.any { it.title.contains("cancellation rate") })
+        assertFalse(client.any { it.title.contains("cancellation rate") })
+        assertTrue(client.any { it.title == "No money moves" })
+
+        // The counterparty is named, not called "the artist".
+        assertTrue(client.any { it.title.startsWith("Nova Beats") })
+        assertTrue(artist.any { it.title.startsWith("Riya") })
+
         // The thread survives a cancellation on both sides — the copy has to say
         // so, because it is the one thing people assume they lose.
-        for (viewer in BookingViewer.entries) {
-            assertTrue(cancelConsequences(viewer).any { it.contains("chat") })
+        for (list in listOf(client, artist)) {
+            assertTrue(list.any { it.title == "Your thread stays open" })
         }
+    }
+
+    @Test
+    fun theThirdConsequenceIsSpecificToThisDate() {
+        // Screen 52's note: "the second one is specific to this date". What it
+        // does NOT say is anything about a 7-day scoring window — that window is
+        // the Edge Function's REFUND ladder, and v1 holds no money for it to
+        // apply to.
+        val far = cancelConsequences(BookingViewer.Client, "Nova", daysBefore = 24)
+        assertTrue(far.any { it.title == "This is 24 days before the date" })
+        assertFalse(far.any { it.detail.contains("score") })
+
+        assertTrue(
+            cancelConsequences(BookingViewer.Client, "Nova", daysBefore = 0)
+                .any { it.title == "This is today" },
+        )
+        assertTrue(
+            cancelConsequences(BookingViewer.Client, "Nova", daysBefore = 1)
+                .any { it.title == "This is tomorrow" },
+        )
+        // Short notice changes the wording, never the outcome.
+        assertTrue(
+            cancelConsequences(BookingViewer.Client, "Nova", daysBefore = 2)
+                .any { it.detail.contains("Short notice") },
+        )
+    }
+
+    @Test
+    fun aBookingWithNoReadableDateDropsTheDateSpecificLine() {
+        // Guessing at "this is 0 days before the date" would be worse than
+        // saying three things instead of four.
+        val list = cancelConsequences(BookingViewer.Client, "Nova", daysBefore = null)
+        assertEquals(3, list.size)
+        assertFalse(list.any { it.title.startsWith("This is") })
+    }
+
+    // --- which page is being drawn -------------------------------------------
+
+    @Test
+    fun everyStatusMapsToExactlyOneDetailVariant() {
+        assertEquals(BookingDetailVariant.Awaiting, variantFor(BookingStatus.PendingConfirm))
+        assertEquals(BookingDetailVariant.Confirmed, variantFor(BookingStatus.Confirmed))
+        // Completed shares the confirmed page: the night is the same schedule,
+        // read afterwards.
+        assertEquals(BookingDetailVariant.Confirmed, variantFor(BookingStatus.Completed))
+        assertEquals(BookingDetailVariant.Cancelled, variantFor(BookingStatus.Cancelled))
+        assertEquals(BookingDetailVariant.Disputed, variantFor(BookingStatus.Disputed))
+        // A status this build cannot read degrades to read-only rather than
+        // guessing at an action — the same rule `isActionable` encodes.
+        assertEquals(BookingDetailVariant.ReadOnly, variantFor(BookingStatus.Unknown))
+    }
+
+    @Test
+    fun theHeaderQuotesTheSharedBookingReference() {
+        // The same reference the invoice and the confirmed screen print, derived
+        // from the row's own UUID — one booking reads identically wherever it
+        // appears, and support can resolve it by prefix.
+        assertEquals(
+            "Booking #AR-4F2A11",
+            bookingTitle("4f2a1111-2222-3333-4444-5555556666bb"),
+        )
+    }
+
+    @Test
+    fun anIdWithNoReferenceInItDropsTheHash() {
+        // "Booking #" with nothing after it reads as a rendering fault.
+        assertEquals("Booking", bookingTitle(""))
+        assertEquals("Booking", bookingTitle("----"))
+    }
+
+    // --- the night, and the wait ---------------------------------------------
+
+    @Test
+    fun theRunOfShowIsBuiltOnlyFromWhatTheRowHolds() {
+        // No invented load-in or soundcheck: `bookings` carries a start, an end,
+        // the labels and one free-text note, and nothing else.
+        val b = booking(id = "b-1", startIso = "2026-10-12T14:30:00Z").copy(
+            endDatetimeIso = "2026-10-12T16:30:00Z",
+            venueNotes = "Gate 3, load in from the lane",
+        )
+        val moments = runOfShow(b, nowMs = 0L)
+
+        assertEquals(2, moments.size)
+        assertTrue(moments[0].title.endsWith("Set starts"))
+        assertEquals("Gate 3, load in from the lane", moments[0].detail)
+        assertTrue(moments[1].title.endsWith("Set ends"))
+    }
+
+    @Test
+    fun aRowWithNoClockHasNoRunOfShow() {
+        val b = booking(id = "b-1", date = "TBD", time = "")
+        assertTrue(runOfShow(b, nowMs = 0L).isEmpty())
+    }
+
+    @Test
+    fun momentsAlreadyPastAreMarkedDone() {
+        val b = booking(id = "b-1", startIso = "2026-10-12T14:30:00Z")
+        val before = runOfShow(b, nowMs = 1_000L).first()
+        val after = runOfShow(b, nowMs = Long.MAX_VALUE / 2).first()
+        assertFalse(before.done)
+        assertTrue(after.done)
+    }
+
+    @Test
+    fun theRequestProgressNeverMarksAnAnswerThatHasNotCome() {
+        val steps = requestProgress(booking(id = "b-1", createdAtEpochMs = 1_000L), nowMs = 61_000L)
+        assertEquals(listOf(true, false, false), steps.map { it.done })
+        assertEquals("1 minute ago", steps.first().detail)
+    }
+
+    @Test
+    fun aTimestampWeDoNotHaveDropsTheLineRatherThanFillingIt() {
+        // `created_at` absent from a projection decodes to 0. "in -1 minutes" and
+        // a date in 1970 are both worse than no line at all.
+        assertNull(relativeSince(0L, nowMs = 1_000L))
+        assertNull(relativeSince(5_000L, nowMs = 1_000L))
+        assertEquals("Just now", relativeSince(1_000L, nowMs = 1_030L))
+        assertEquals("2 hours ago", relativeSince(1_000L, nowMs = 1_000L + 2 * 3_600_000L))
+        assertEquals("3 days ago", relativeSince(1_000L, nowMs = 1_000L + 3 * 86_400_000L))
+    }
+
+    // --- the cancelled record ------------------------------------------------
+
+    @Test
+    fun theCancelledPageNamesWhoPulledOut_inTheSecondPersonWhereItWasYou() {
+        val byClient = booking(id = "b-1", status = BookingStatus.Cancelled)
+            .copy(cancelledBy = "client")
+        assertEquals(
+            "You cancelled this booking",
+            cancelledByLine(byClient, BookingViewer.Client, "Nova Beats"),
+        )
+        assertEquals(
+            "Nova Beats cancelled this booking",
+            cancelledByLine(byClient, BookingViewer.Artist, "Nova Beats"),
+        )
+    }
+
+    @Test
+    fun aRowWithNoCancellationStampClaimsNothingAboutWho() {
+        val b = booking(id = "b-1", status = BookingStatus.Cancelled)
+        assertEquals(
+            "This booking was cancelled",
+            cancelledByLine(b, BookingViewer.Client, "Nova Beats"),
+        )
+        // …and the header degrades to the bare word rather than a 1970 date.
+        assertEquals("Cancelled", cancelledOnLabel(b))
     }
 
     // --- terms ---------------------------------------------------------------

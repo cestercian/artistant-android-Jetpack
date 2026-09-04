@@ -38,10 +38,14 @@ import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
 import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.epk.EpkScreen
+import `in`.artistant.app.feature.booking.CounterOfferScreen
 import `in`.artistant.app.feature.gigs.ArtistGigsScreen
 import `in`.artistant.app.feature.gigs.GigRequestDetailScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.signup.LegalDoc
@@ -184,7 +188,13 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
-                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                    BlockedAccountsScreen(
+                        onBack = { nav.popBackStack() },
+                        // "Block is not report" needs somewhere to go, and a
+                        // report is filed inside a conversation — so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                    )
                 }
             }
             // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
@@ -259,12 +269,40 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
-                        // The inbox's inline accelerator and Support's one deep
-                        // link both land in the artist's own funnel — which this
-                        // role calls Gigs, not Bookings.
+                        // The inbox's inline accelerator lands in the artist's
+                        // own funnel — which this role calls Gigs, not Bookings.
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ArtistTab.Gigs.route) },
+                        onOpenArchive = { nav.navigate(ArtistNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
+                        // Support's one real deep link lands in the artist's own
+                        // funnel, which this role calls Gigs.
                         bookingsLabel = ArtistTab.Gigs.label,
+                        onOpenBookings = { navigateToTab(nav, ArtistTab.Gigs.route) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        onReportConversation = { navigateToTab(nav, ArtistTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }
@@ -299,6 +337,7 @@ fun ArtistTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -311,6 +350,9 @@ fun ArtistTabsScaffold() {
                         isArtistViewer = true,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
+                        // Support lives inside the inbox on both roles — the
+                        // disputed page's only live action leads there.
+                        onOpenSupport = { navigateToTab(nav, ArtistTab.Messages.route) },
                     )
                 }
             }
@@ -320,6 +362,25 @@ fun ArtistTabsScaffold() {
             ) {
                 TabPane(inner) {
                     GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            // Screen 61. Its own destination rather than a sheet inside the gig
+            // detail, because it is a page in the design with its own header and
+            // its own dock. The gig detail's inline counter sheet stays until the
+            // artist-studio section is rewritten; both go through the same
+            // `RequestsRepository.counter`, so they cannot disagree.
+            composable(
+                route = ArtistNavRoutes.COUNTER_OFFER,
+                arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
+            ) {
+                TabPane(inner) {
+                    CounterOfferScreen(
+                        onDismiss = { nav.popBackStack() },
+                        // A sent counter takes the request out of the
+                        // Accept/Decline state, so the detail underneath is
+                        // stale — popping back to it re-reads on resume.
+                        onSent = { nav.popBackStack() },
+                    )
                 }
             }
         }

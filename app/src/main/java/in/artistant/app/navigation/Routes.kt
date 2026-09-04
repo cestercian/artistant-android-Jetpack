@@ -22,6 +22,22 @@ object ClientNavRoutes {
     const val REQUEST_QUOTE = "request_quote/{artistId}"
     const val ARTIST_LIST = "artist_list/{kind}"
 
+    /** The archive (design 60 / 111) — reachable from the inbox header. */
+    const val ARCHIVED = "archived"
+
+    /**
+     * Trust & safety (design 131).
+     *
+     * Three ways in from this section, all inside the surfaces where the
+     * question comes up: the chat's thread-details sheet, the report form's
+     * footer, and the archive (the inbox's overflow). Account settings adds a
+     * fourth and belongs to the profile section.
+     */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** The scripted support assistant (design 34) — the inbox's permanent row. */
+    const val SUPPORT = "support"
+
     /** Every review for one artist, with search and lenses (design screen 102). */
     const val ARTIST_REVIEWS = "artist_reviews/{artistId}"
 
@@ -34,14 +50,42 @@ object ClientNavRoutes {
      */
     const val BOOKABILITY = "bookability/{artistId}"
 
+    /**
+     * Screen 94 — the landing for a match reached by NEGOTIATION rather than
+     * through checkout. [CONFIRMED] stays the funnel's own page, and the two say
+     * different things because they are reached from different places.
+     *
+     * **Not reached from the chat**, despite the design's story. Accepting an
+     * in-thread quote is a `gig_requests` status PATCH; the only server reaction
+     * (mig 0047, rewritten by 0076) opens the bookingless thread the quote is
+     * already in, and that migration deliberately creates NO booking because the
+     * client has to consent to the final amount. RLS agrees —
+     * `bookings_insert_client` gates inserts on `auth.uid() = client_id` and the
+     * seat that accepts an `open` quote is the artist — so there is no id to open
+     * this with. The chat's accept ends at the frozen quote card, which says so.
+     * See [ChatEvent.QuoteAccepted]. This becomes reachable from messaging the
+     * day the backend grows a consented request→booking path.
+     */
+    const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
+
+    /**
+     * Screen 132 — the booking record. Reachable from Confirmed today and, once
+     * the bookings section is rewritten, from Booking detail: it takes the same
+     * booking id both would hand it.
+     */
+    const val INVOICE = "invoice/{bookingId}"
+
     fun bookingCompose(artistId: String) = "booking/$artistId"
     fun chat(threadId: String) = "chat/$threadId"
     fun confirmed(bookingId: String) = "confirmed/$bookingId"
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
     fun artistList(kind: String) = "artist_list/$kind"
+
     fun artistReviews(artistId: String) = "artist_reviews/$artistId"
     fun bookability(artistId: String) = "bookability/$artistId"
+    fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
+    fun invoice(bookingId: String) = "invoice/$bookingId"
     const val PAYWALL = "paywall"
 
     /**
@@ -51,6 +95,16 @@ object ClientNavRoutes {
      * identical way back.
      */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /**
+     * Bookings → the month calendar (design screen 78).
+     *
+     * Its own destination rather than a block on the Bookings tab: the design
+     * makes it a screen because it is the shared component's documentation, and
+     * the artist's Gigs tab will push the identical literal in its own graph for
+     * the same reason [BLOCKED_ACCOUNTS] is spelled twice.
+     */
+    const val MONTH_CALENDAR = "month_calendar"
 
     /**
      * Account settings → privacy (design screen 62) and the legal viewer
@@ -76,8 +130,18 @@ object ArtistNavRoutes {
     const val GIG_REQUEST = "gig_request/{requestId}"
     const val CHAT = "chat/{threadId}"
 
+    /**
+     * Screen 61 — the counter offer, on the artist graph and only there.
+     *
+     * `gig_requests` has exactly one UPDATE policy (`gig_requests_update_artist`,
+     * mig 0002), so the artist is the only party the server lets counter. A
+     * client-side route would be a form RLS refuses at submit.
+     */
+    const val COUNTER_OFFER = "counter_offer/{requestId}"
+
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun gigRequest(requestId: String) = "gig_request/$requestId"
+    fun counterOffer(requestId: String) = "counter_offer/$requestId"
     fun chat(threadId: String) = "chat/$threadId"
     const val PROFILE = "profile"
     const val PAYWALL = "paywall"
@@ -96,6 +160,15 @@ object ArtistNavRoutes {
 
     /** See [ClientNavRoutes.BLOCKED_ACCOUNTS] — same screen, artist graph. */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /** See [ClientNavRoutes.ARCHIVED]. */
+    const val ARCHIVED = "archived"
+
+    /** See [ClientNavRoutes.SAFETY_CENTRE]. */
+    const val SAFETY_CENTRE = "safety_centre"
+
+    /** See [ClientNavRoutes.SUPPORT]. */
+    const val SUPPORT = "support"
 
     /** See [ClientNavRoutes.PRIVACY] / [ClientNavRoutes.LEGAL] — same screens, artist graph. */
     const val PRIVACY = "privacy"

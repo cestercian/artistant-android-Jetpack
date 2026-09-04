@@ -301,6 +301,27 @@ data class Components(
     val toastIcon: Dp = 24.dp,
     /** Air between a toast and whatever chrome is under it. */
     val toastGap: Dp = 22.dp,
+
+    // ── Section BN ────────────────────────────────────────────────────────
+    /**
+     * The picture band on a confirmed booking's card (screen 10).
+     *
+     * Its own number rather than a [tileImage] reuse: that one is a rail tile's
+     * band, sized so five artists fit across a scroll, and this is a full-width
+     * card that has to hold a 16:9-ish crop of a stage without becoming the
+     * whole screen. Measured off the markup, where the band is 140 against a
+     * 350-wide card.
+     */
+    val bookingCardImage: Dp = 140.dp,
+    /**
+     * One star in the review rating (screens 20 / 98).
+     *
+     * Deliberately off the [Size] icon ladder, whose top step is 28: the stars
+     * ARE the review — everything else on that screen is optional — and at icon
+     * size a row of five reads as a legend rather than as the control. The tap
+     * target is grown to the 44dp floor around it at the call site.
+     */
+    val reviewStar: Dp = 36.dp,
 )
 
 /**
@@ -485,6 +506,34 @@ data class AspectRatios(
     val square: Float = 1f,
 )
 
+/**
+ * The booking funnel's own geometry — screens 05 / 06 / 07 / 17 / 61 / 94 / 132.
+ *
+ * Its own group rather than more fields on [Components] for the reason that
+ * group's own note gives: these are not steps on a ladder anybody else climbs.
+ * A check disc that fills a quarter of the confirmation screen and a 62dp act
+ * thumbnail are facts about the "you asked / they said yes" pages, and nothing
+ * outside `feature/booking` draws either of them.
+ *
+ * Every value is measured off the extracted markup, not derived.
+ */
+data class Funnel(
+    /** The lime disc that opens screens 07 and 94. */
+    val outcomeDisc: Dp = 74.dp,
+    /** The tick inside it — half the disc, so the mark reads at arm's length. */
+    val outcomeGlyph: Dp = 38.dp,
+    /** The act's cover thumbnail on the confirm and confirmed cards. */
+    val actThumb: Dp = 62.dp,
+    /** Inset of a grouped card (the act card, the calendar card, the invoice). */
+    val cardPad: Dp = 18.dp,
+    /** Inset of an accent-washed note block — tighter than a card on purpose. */
+    val notePad: Dp = 13.dp,
+    /** The counter sheet's amount well: taller than a field, it IS the screen. */
+    val amountField: Dp = 60.dp,
+    /** The brief's free-text box — three lines before it has to scroll. */
+    val notesField: Dp = 92.dp,
+)
+
 /** Bundle handed to the theme so composables read `AppTheme.dimens.space.lg`. */
 data class Dimens(
     val space: Space = Space(),
@@ -496,4 +545,5 @@ data class Dimens(
     val chrome: Chrome = Chrome(),
     val hero: Hero = Hero(),
     val dashboard: Dashboard = Dashboard(),
+    val funnel: Funnel = Funnel(),
 )
