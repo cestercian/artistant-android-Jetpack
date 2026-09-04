@@ -103,22 +103,34 @@ a pinned Continue. *Gesture:* **select on tap, move on Continue**. 71 is the sam
 screen with `HydrationErrorBanner` above the title.
 
 **SignupAuthScreen** (12). *Purpose:* sign in. *Compose:* phone field (`+91`
-leading, `IN +91` trailing), "Or use email" field, "Send code", an `or` rule,
-then Apple / Google / password rows. *APIs:* `SessionManager.sendPhoneOtp` /
-`sendEmailOtp`, `signInWithApple` / `signInWithGoogle`. Phone wins when both
-fields hold something valid.
+leading, `IN +91` trailing, `PhoneRules.error` inline underneath), "Or use email"
+field, "Send code", an `or` rule, then Apple / Google / password rows. *APIs:*
+`AuthGateway.sendPhoneOtp` / `sendEmailOtp`, `signInWithApple` /
+`signInWithGoogle`. Phone wins when both fields hold something valid. *Rules:*
+`PhoneRules` accepts three shapes only — 10 digits, `91`+10, `+91`+10 — and
+refuses anything longer instead of taking its last ten digits. On LOGIN the send
+passes `createUser = false`; the refusal that comes back is rendered as an offer
+("No account for this number — create one?") landing on the welcome screen, which
+is where the terms tick is.
 
 **EnterCodeScreen** (119). *Purpose:* verify. *Compose:* `OtpField` (one real
 field behind six drawn boxes, so SMS autofill has somewhere to land), resend
 countdown, "Change number", autofill note, "NOT ARRIVING?" block. *State:*
 `OtpResend` — 30s cooldown, email escape after two sends. *APIs:*
 `verifyPhoneOtp` / `verifyEmailOtp`; the gate advances the flow from the session.
+Every exit calls `AuthViewModel.clearOtp()` — the two on this screen, plus the
+system back gesture, which `SignupFlow` takes because it never reaches a callback
+here. The VM is activity-scoped, so without it the spent send count, the running
+cooldown and the typed digits followed the user to the next number.
 
 **EmailSignUpScreen** (28). *Purpose:* the reviewable path. *Compose:* name /
-email / password with Show, an 8-character rule that is stated AND enforced, the
-"already have an account" note, "Forgot password?". *APIs:*
-`SessionManager.signUpWithEmail`, `sendPasswordReset`. A modal over the auth step
-(`emailSignUp`), not a step of its own.
+email / password with Show, the 8-character new-account rule stated with a tick,
+the "already have an account" note, "Forgot password?". *APIs:*
+`AuthViewModel.submitEmailAuth` → `signInWithEmail`, falling through to
+`signUpWithEmail` only when nothing matched the credentials; `sendPasswordReset`.
+Submit opens at GoTrue's 6 characters so an older account can still be opened
+with its own password, and the 8 is enforced on the create branch. A modal over
+the auth step (`emailSignUp`), not a step of its own.
 
 **ProfileScreen** (29 · 90). *Purpose:* handle + name + city. *Compose:* handle
 field with a status ring and a four-state chip, `HandleSuggestions` chips when
@@ -142,10 +154,17 @@ omitted rather than invented.
 segmented Terms/Privacy, eyebrow-and-body sections, footer row out to the hosted
 copy (which is the authoritative one). `enum LegalDoc { Terms, Privacy }`.
 
-**PrivacyScreen** (62). *Purpose:* two toggles, both explained. *Compose:* two
-switch rows (M3 `Switch` repainted in tokens), Privacy-policy and Data-export
-rows, the "that isn't a setting" footer. *State:* `PrivacyPreferences` — DataStore,
-because neither switch has a column in the canonical schema.
+**PrivacyScreen** (62). *Purpose:* the switches that are switches, and the lines
+that aren't. *Compose:* one switch row (read receipts; M3 `Switch` repainted in
+tokens), a switch-shaped row of plain text for the city, Privacy-policy and
+Data-export rows, the "that isn't a setting" footer. *State:* `PrivacyPreferences`
+— DataStore under `privacy.read_receipts`, because the setting has no column in
+the canonical schema; `feature/messages` reads it before `mark_thread_read`.
+*Gap:* the design's city switch is not drawn as a control. `users.city` has no
+visibility column, and a device flag cannot hide a value the server hands to
+everyone who opens the profile — so the row states who sees it and that this
+version does not adjust it. A visibility column is a schema change and starts in
+the iOS repo.
 
 ---
 
@@ -305,8 +324,9 @@ copy was read, so a dropped connection renders as "couldn't load" rather than as
 
 **ProfileScreen** (C, tab root) → `feature/profile/`. *Compose:* header card
 (`Avatar` 64, "City · Role since YYYY"), 3-col stats, saved carousel→`ArtistProfile`,
-settings hairline rows: Notifications (system settings), Privacy (`PrivacyScreen` —
-route registered on both graphs; the row that pushes it is section AC's to add),
+settings hairline rows: Notifications (system settings), Privacy (pushes
+`PrivacyScreen` on both graphs; the hosted policy is one tap further in, from
+that screen's own Privacy-policy row),
 **Export data** (`DataExportScreen`, DPDP), **Calendar sync** (toggle + target
 `DropdownMenu`, `CalendarSyncService`), Help (mailto), **Sign out** (`AlertDialog`→
 `signOut` + wipe prefs + reset stores + role→client), **Delete account** ("DELETE"
