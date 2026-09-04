@@ -48,12 +48,18 @@ import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.booking.BookingScreen
 import `in`.artistant.app.feature.booking.CheckoutScreen
 import `in`.artistant.app.feature.booking.ConfirmedScreen
+import `in`.artistant.app.feature.booking.InvoiceScreen
+import `in`.artistant.app.feature.booking.MatchConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
+import `in`.artistant.app.feature.bookings.MonthCalendarScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
+import `in`.artistant.app.feature.messages.ArchivedScreen
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
+import `in`.artistant.app.feature.messages.SafetyCentreScreen
+import `in`.artistant.app.feature.messages.SupportScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ArtistListKind
@@ -211,6 +217,20 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     BookingsScreen(
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // The empty state's only action, and the nudge's: both
+                        // send the client where the fact they are missing lives.
+                        onFindArtist = { navigateToTab(nav, ClientTab.Search.route) },
+                        onEditProfile = { navigateToTab(nav, ClientTab.Profile.route) },
+                        onOpenCalendar = { nav.navigate(ClientNavRoutes.MONTH_CALENDAR) },
+                        onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.MONTH_CALENDAR) {
+                TabPane(inner) {
+                    MonthCalendarScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                     )
                 }
             }
@@ -219,8 +239,37 @@ fun ClientTabsScaffold() {
                     MessagesScreen(
                         onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
-                        onOpenBookings = { nav.navigate(ClientTab.Bookings.route) },
+                        onOpenArchive = { nav.navigate(ClientNavRoutes.ARCHIVED) },
+                        onOpenSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.ARCHIVED) {
+                TabPane(inner) {
+                    ArchivedScreen(
+                        onBack = { nav.popBackStack() },
+                        onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.SUPPORT) {
+                TabPane(inner) {
+                    SupportScreen(
+                        onBack = { nav.popBackStack() },
                         bookingsLabel = ClientTab.Bookings.label,
+                        onOpenBookings = { navigateToTab(nav, ClientTab.Bookings.route) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.SAFETY_CENTRE) {
+                TabPane(inner) {
+                    SafetyCentreScreen(
+                        onBack = { nav.popBackStack() },
+                        // Reporting happens inside a conversation, so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ClientTab.Messages.route) },
+                        onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
                     )
                 }
             }
@@ -236,7 +285,13 @@ fun ClientTabsScaffold() {
             }
             composable(ClientNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
-                    BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                    BlockedAccountsScreen(
+                        onBack = { nav.popBackStack() },
+                        // "Block is not report" needs somewhere to go, and a
+                        // report is filed inside a conversation — so the remedy
+                        // is the inbox, not a form with no thread behind it.
+                        onReportConversation = { navigateToTab(nav, ClientTab.Messages.route) },
+                    )
                 }
             }
             // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
@@ -389,6 +444,7 @@ fun ClientTabsScaffold() {
                         // Only the client seat has a counterparty with a public
                         // profile, so only this scaffold wires the participant row.
                         onArtistClick = { id -> nav.navigate("artist/$id") },
+                        onOpenSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -432,8 +488,53 @@ fun ClientTabsScaffold() {
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) { entry ->
                 val bookingId = entry.arguments?.getString("bookingId").orEmpty()
+                // Its own instance, scoped to this destination. The Message CTA
+                // on the confirmed branch is a round-trip like the profile's, so
+                // it needs the same spinner-and-error pair rather than a
+                // navigation that can silently do nothing.
+                val confirmChat: ChatOpenViewModel = hiltViewModel()
+                val confirmOpening by confirmChat.opening.collectAsStateWithLifecycle()
+                val confirmError by confirmChat.error.collectAsStateWithLifecycle()
                 TabPane(inner) {
-                    ConfirmedScreen(
+                    Box(Modifier.fillMaxSize()) {
+                        ConfirmedScreen(
+                            bookingId = bookingId,
+                            onViewBooking = { id ->
+                                nav.navigate(ClientNavRoutes.bookingDetail(id)) {
+                                    popUpTo(ClientTab.Discover.route) { inclusive = false }
+                                }
+                            },
+                            onBackToDiscover = {
+                                nav.popBackStack(ClientTab.Discover.route, inclusive = false)
+                            },
+                            onOpenInvoice = { id -> nav.navigate(ClientNavRoutes.invoice(id)) },
+                            // Only reachable on the confirmed branch, where a
+                            // thread already exists (mig 0015 creates it on
+                            // confirm), so find-or-create resolves rather than
+                            // inserts.
+                            onMessageArtist = { artistId ->
+                                confirmChat.open(artistId, bookingId = bookingId) { threadId ->
+                                    nav.navigate(ClientNavRoutes.chat(threadId))
+                                }
+                            },
+                        )
+                        ChatOpenFeedback(
+                            opening = confirmOpening,
+                            error = confirmError,
+                            onDismissError = confirmChat::dismissError,
+                        )
+                    }
+                }
+            }
+            // Screen 94. The messaging section navigates here when an in-thread
+            // quote is accepted — this is the destination it lands on.
+            composable(
+                route = ClientNavRoutes.MATCH_CONFIRMED,
+                arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
+            ) { entry ->
+                val bookingId = entry.arguments?.getString("bookingId").orEmpty()
+                TabPane(inner) {
+                    MatchConfirmedScreen(
                         bookingId = bookingId,
                         onViewBooking = { id ->
                             nav.navigate(ClientNavRoutes.bookingDetail(id)) {
@@ -446,6 +547,18 @@ fun ClientTabsScaffold() {
                     )
                 }
             }
+            // Screen 132.
+            composable(
+                route = ClientNavRoutes.INVOICE,
+                arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    InvoiceScreen(
+                        bookingId = entry.arguments?.getString("bookingId").orEmpty(),
+                        onBack = { nav.popBackStack() },
+                    )
+                }
+            }
             composable(
                 route = ClientNavRoutes.BOOKING_DETAIL,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
@@ -455,6 +568,11 @@ fun ClientTabsScaffold() {
                         isArtistViewer = false,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                        // "Book again" off a cancelled booking starts where a
+                        // booking always starts — the artist's profile.
+                        onBookAgain = { artistId -> nav.navigate("artist/$artistId") },
+                        // Support lives inside the inbox on both roles.
+                        onOpenSupport = { navigateToTab(nav, ClientTab.Messages.route) },
                     )
                 }
             }

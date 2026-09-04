@@ -63,6 +63,17 @@ fun AppTextField(
     error: String? = null,
     enabled: Boolean = true,
     singleLine: Boolean = true,
+    /**
+     * Ceiling on how tall a multi-line field is allowed to grow.
+     *
+     * Ignored while [singleLine] is true (Compose forbids setting both). It
+     * exists for the fields that live inside fixed chrome — the chat composer
+     * pinned above the keyboard, the report sheet's note box — where an
+     * unbounded field would eat the transcript above it as someone types. The
+     * text still scrolls inside the field once the cap is reached, so nothing
+     * is truncated; only the box stops growing.
+     */
+    maxLines: Int = Int.MAX_VALUE,
     minHeight: Dp = AppTheme.dimens.component.control,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
@@ -133,6 +144,11 @@ fun AppTextField(
                     onValueChange = onValueChange,
                     enabled = enabled,
                     singleLine = singleLine,
+                    // `maxLines` and `singleLine` are mutually exclusive in
+                    // BasicTextField — passing a bounded maxLines alongside
+                    // singleLine throws. One line already IS the cap, so the
+                    // single-line case forces the default the platform expects.
+                    maxLines = if (singleLine) Int.MAX_VALUE else maxLines,
                     textStyle = LocalTextStyle.current.merge(
                         AppTheme.type.body.copy(
                             color = if (enabled) colors.ink else colors.ink4,

@@ -82,6 +82,11 @@ fun ArtistantNavHost() {
             // `signedIn = true` is what this tier MEANS — the router only reaches it from an
             // Authenticated session. The flow needs it stated, because re-routing to this same
             // `data object` is conflated by MutableStateFlow and re-fires none of its keys.
+            //
+            // `.Profile` is what this tier ASKS for, not always where it lands: the container
+            // resolves it through `entryStep`, which holds the entry at the community pledge
+            // (screen 27, rendered by `.Role`) until the device has taken it. Without that,
+            // this branch was a way to complete onboarding having never been shown the pledge.
             ArtistantTheme(role = signupState.role) {
                 SignupFlow(
                     startStep = SignupStep.Profile,

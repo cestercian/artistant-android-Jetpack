@@ -221,4 +221,154 @@ class BookingSlotsTest {
 
         assertFalse("a legal weekday with no slot left is still not bookable", chips[0].available)
     }
+
+    // ── the month grid (screen 05) ──────────────────────────────────────────
+
+    @Test
+    fun funnelMonthDays_padTheFirstAndLastWeeksWithTheNeighbouringMonths() {
+        // October 2026 starts on a Thursday, so a Monday-first grid needs three
+        // leading cells (28, 29, 30 September). The off-by-one that puts the 1st
+        // under the wrong weekday is invisible in a screenshot.
+        val days = funnelMonthDays(2026, Calendar.OCTOBER)
+
+        assertEquals(0, days.size % 7)
+        assertEquals(listOf(28, 29, 30), days.take(3).map { it.number })
+        assertTrue(days.take(3).none { it.inMonth })
+        assertEquals(1, days[3].number)
+        assertTrue(days[3].inMonth)
+        assertEquals(31, days.count { it.inMonth })
+        assertTrue("trailing pad belongs to November", days.last().inMonth.not())
+    }
+
+    @Test
+    fun funnelMonthDays_handleAFebruaryThatStartsOnASunday() {
+        // Feb 2026 starts on a Sunday: six leading cells, and the last week is
+        // whole, so the grid is exactly five rows with no trailing pad at all.
+        val days = funnelMonthDays(2026, Calendar.FEBRUARY)
+
+        assertEquals(6, days.takeWhile { !it.inMonth }.size)
+        assertEquals(28, days.count { it.inMonth })
+        assertEquals(0, days.size % 7)
+    }
+
+    @Test
+    fun monthSelectableDays_dropEverythingBeforeToday() {
+        val now = at(hour = 9, minute = 0, day = 15)
+
+        val open = monthSelectableDays(2026, Calendar.AUGUST, nowMs = now)
+
+        assertFalse("yesterday is not bookable", 14 in open)
+        assertTrue("today is", 15 in open)
+        assertTrue(31 in open)
+    }
+
+    @Test
+    fun monthSelectableDays_areEmptyForAMonthThatHasPassed() {
+        val now = at(hour = 9, minute = 0, day = 15)
+
+        assertTrue(monthSelectableDays(2026, Calendar.JULY, nowMs = now).isEmpty())
+        assertTrue(monthSelectableDays(2025, Calendar.DECEMBER, nowMs = now).isEmpty())
+    }
+
+    @Test
+    fun monthSelectableDays_honourTheArtistsWeekdays() {
+        val now = at(hour = 9, minute = 0, day = 1)
+
+        val open = monthSelectableDays(
+            year = 2026,
+            month = Calendar.AUGUST,
+            daysAvailable = listOf("Sat"),
+            nowMs = now,
+        )
+
+        // August 2026: the Saturdays are 1, 8, 15, 22, 29.
+        assertEquals(setOf(1, 8, 15, 22, 29), open)
+    }
+
+    @Test
+    fun monthSelectableDays_dropTodayWhenTheClockHasPassedTheLastSlot() {
+        // The same rule the strip applies, asserted on the grid: 23:10 is past
+        // every published slot, so today is gone but tomorrow is not.
+        val now = at(hour = 23, minute = 10, day = 15)
+
+        val open = monthSelectableDays(
+            year = 2026,
+            month = Calendar.AUGUST,
+            timeSlots = DefaultTimeSlots,
+            nowMs = now,
+        )
+
+        assertFalse(15 in open)
+        assertTrue(16 in open)
+    }
+
+    @Test
+    fun firstOpenMonth_stepsForwardPastAMonthWithNothingInIt() {
+        // An artist with nothing left in August (23:10 on the 31st) must open the
+        // picker on September rather than on an empty grid.
+        val now = at(hour = 23, minute = 10, day = 31)
+
+        val opening = firstOpenMonth(timeSlots = DefaultTimeSlots, nowMs = now)
+
+        assertEquals(2026, opening.year)
+        assertEquals(Calendar.SEPTEMBER, opening.month)
+        assertTrue(opening.selectableDays.isNotEmpty())
+    }
+
+    @Test
+    fun firstOpenMonth_comesBackOnTheCurrentMonthWhenNothingIsEverOpen() {
+        // A weekday the calendar does not have. The horizon runs out and the
+        // current month comes back empty — true, and still steppable — rather
+        // than the search running away.
+        val now = at(hour = 9, minute = 0, day = 15)
+
+        val opening = firstOpenMonth(daysAvailable = listOf("Blursday"), nowMs = now)
+
+        assertEquals(Calendar.AUGUST, opening.month)
+        assertTrue(opening.selectableDays.isEmpty())
+    }
+
+    @Test
+    fun steppedMonth_carriesTheYearBoundaryInBothDirections() {
+        assertEquals(2027 to Calendar.JANUARY, steppedMonth(2026, Calendar.DECEMBER, 1))
+        assertEquals(2025 to Calendar.DECEMBER, steppedMonth(2026, Calendar.JANUARY, -1))
+    }
+
+    @Test
+    fun dayOfMonthIfIn_onlyAnswersForTheMonthItWasAskedAbout() {
+        val epoch = funnelDayEpochMs(2026, Calendar.OCTOBER, 12)
+
+        assertEquals(12, dayOfMonthIfIn(epoch, 2026, Calendar.OCTOBER))
+        assertNull(dayOfMonthIfIn(epoch, 2026, Calendar.NOVEMBER))
+        assertNull(dayOfMonthIfIn(epoch, 2027, Calendar.OCTOBER))
+        assertNull("nothing picked yet", dayOfMonthIfIn(0L, 2026, Calendar.OCTOBER))
+    }
+
+    @Test
+    fun isAfterCurrentMonth_isTheCalendarsBackwardsFloor() {
+        val now = at(hour = 9, minute = 0, day = 15)
+
+        assertFalse(isAfterCurrentMonth(2026, Calendar.AUGUST, now))
+        assertFalse(isAfterCurrentMonth(2026, Calendar.JULY, now))
+        assertTrue(isAfterCurrentMonth(2026, Calendar.SEPTEMBER, now))
+        assertTrue(isAfterCurrentMonth(2027, Calendar.JANUARY, now))
+    }
+
+    // ── the dock's summary line ─────────────────────────────────────────────
+
+    @Test
+    fun bookingSummaryLine_joinsWhatIsDecidedAndDropsWhatIsNot() {
+        assertEquals(
+            "Sat 12 Oct · 8:00 PM · 90 min",
+            bookingSummaryLine("Sat 12 Oct", "8:00 PM", "90 min"),
+        )
+        assertEquals("Sat 12 Oct · 8:00 PM", bookingSummaryLine("Sat 12 Oct", "8:00 PM", ""))
+    }
+
+    @Test
+    fun bookingSummaryLine_instructsWhenNothingIsDecidedYet() {
+        // A dock with a live price and no words above it invites the tap the
+        // disabled CTA is about to refuse.
+        assertEquals("Pick a date to continue", bookingSummaryLine("", "", "  "))
+    }
 }

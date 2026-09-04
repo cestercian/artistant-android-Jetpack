@@ -2,6 +2,8 @@ package `in`.artistant.app.feature.wizard
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,10 +19,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,35 +39,51 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.EyebrowLabel
+import `in`.artistant.app.designsystem.component.hairlineTop
+import `in`.artistant.app.designsystem.component.IconCircle
 import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.SecondaryButton
+import `in`.artistant.app.designsystem.component.SheetScaffold
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.motionTween
-import `in`.artistant.app.feature.signup.SignupBackButton
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 
 /**
  * The artist onboarding wizard.
  *
  * ## Shape
  *
- * Fixed chrome top and bottom, one scrolling step between them: a back chevron
- * and Save & exit above the progress bar, the step's own lazy list in the
- * middle, and one CTA pinned at the bottom. The CTA is pinned rather than
- * scrolled because on a form the artist is typing into, a Continue button that
- * has scrolled off is indistinguishable from a Continue button that is disabled.
+ * Fixed chrome top and bottom, one scrolling step between them: a back circle,
+ * a progress track and a "03 / 09" counter across the top, the
+ * step's own lazy list in the middle, and one CTA pinned at the bottom. The CTA
+ * is pinned rather than scrolled because on a form the artist is typing into, a
+ * Continue button that has scrolled off is indistinguishable from a Continue
+ * button that is disabled.
  *
  * ## Why the chrome is not per-step
  *
  * Every step shares the same three affordances, so they live here once. The step
- * files own only what is different — which is also why the CTA's label and
- * enabled state come from [wizardCtaLabel] and `canAdvance` rather than from a
- * `when` inside each step.
+ * files own only what is different — which is also why the CTA's label, its
+ * footnote and its enabled state come from [wizardCtaLabel], [wizardFooterNote]
+ * and `canAdvance` rather than from a `when` inside each step.
+ *
+ * ## Where Save & exit lives
+ *
+ * The design's step bar carries a back circle and a counter and nothing else,
+ * and Save & exit is a sheet (screen 72). The wizard is a mandatory gate with no
+ * screen behind it, so that sheet has to stay reachable from every step or an
+ * artist eight steps in has no way out but force-quitting. It hangs off the
+ * leading circle on the FIRST step — where there is nowhere to go back to, so
+ * the circle is a close rather than a chevron — and off a second, smaller close
+ * beside the counter everywhere else.
  */
 @Composable
 fun WizardScreen(
@@ -84,28 +107,29 @@ fun WizardScreen(
     }
 
     // System back walks the flow rather than leaving it: the wizard is a gate,
-    // and there is no screen behind it. Disabled on the first and last steps,
-    // where back would mean "leave" and Save & exit is the honest way to do that.
+    // and there is no screen behind it. On the first step, where there is no
+    // previous step, it opens Save & exit — which is the honest answer to "I
+    // want out of this", and the only one that keeps the draft.
+    //
     // Deliberately still enabled while a publish is in flight: `back()` refuses
     // during that window, and disabling the handler instead would let the press
     // fall through and escape the gate mid-publish.
-    BackHandler(enabled = state.step != WizardStep.Identity && state.step != WizardStep.Done) {
-        viewModel.back()
+    BackHandler(enabled = state.step != WizardStep.Done) {
+        if (state.step == WizardStep.Identity) confirmingExit = true else viewModel.back()
     }
 
     Column(
         modifier
             .fillMaxSize()
-            .background(colors.bg)
+            .background(colors.surface)
             .statusBarsPadding(),
     ) {
         if (state.step != WizardStep.Done) {
             WizardTopBar(
-                canGoBack = state.step != WizardStep.Identity,
+                step = state.step,
                 onBack = viewModel::back,
                 onSaveAndExit = { confirmingExit = true },
             )
-            WizardProgressBar(state.step)
         }
 
         Box(Modifier.weight(1f)) {
@@ -125,12 +149,13 @@ fun WizardScreen(
         }
 
         if (state.step != WizardStep.Done) {
-            WizardFooter(state = state, onContinue = viewModel::next)
+            WizardFooter(state = state, onContinue = viewModel::next, onSkip = viewModel::next)
         }
     }
 
     if (confirmingExit) {
-        SaveAndExitDialog(
+        SaveAndExitSheet(
+            step = state.step,
             onConfirm = {
                 confirmingExit = false
                 viewModel.saveAndExit()
@@ -177,54 +202,109 @@ private fun WizardStepContent(state: WizardUiState, viewModel: WizardViewModel) 
     }
 }
 
+/**
+ * Back circle, progress track, counter — and the close that opens Save & exit.
+ *
+ * The Preview step draws the same bar with the track and counter swapped for its
+ * own centred title (screen 45): review is not a tenth thing to fill in, and
+ * showing "10 / 10" over it would say it is. It is also why the track counts
+ * nine — see [wizardProgressTotal]; a total that included this screen left a
+ * segment the form could never fill.
+ */
 @Composable
-private fun WizardTopBar(canGoBack: Boolean, onBack: () -> Unit, onSaveAndExit: () -> Unit) {
+private fun WizardTopBar(step: WizardStep, onBack: () -> Unit, onSaveAndExit: () -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val interaction = remember { MutableInteractionSource() }
+    val dimens = AppTheme.dimens
+    val first = step == WizardStep.Identity
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = space.xl, vertical = space.sm),
+            .padding(horizontal = dimens.component.gutter, vertical = dimens.space.sm),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
-        if (canGoBack) {
-            SignupBackButton(
-                onClick = onBack,
-                modifier = Modifier.semantics { testTag = "wizard.back" },
-            )
-        }
-        Spacer(Modifier.weight(1f))
-        Text(
-            "Save & exit",
-            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.ink3,
-            modifier = Modifier
-                .pressScale(interaction)
-                .clickable(interactionSource = interaction, indication = null, onClick = onSaveAndExit)
-                .padding(space.sm)
-                .semantics { testTag = "wizard.saveAndExit" },
+        IconCircle(
+            icon = if (first) Icons.Filled.Close else Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = if (first) "Save and exit setup" else "Back",
+            onClick = if (first) onSaveAndExit else onBack,
+            modifier = Modifier.semantics { testTag = if (first) "wizard.saveAndExit" else "wizard.back" },
         )
+        if (step == WizardStep.Preview) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    wizardStepTitle(step),
+                    style = AppTheme.type.sectionTitle,
+                    color = colors.ink,
+                )
+                Text(
+                    wizardStepSubtitle(step),
+                    style = AppTheme.type.caption,
+                    color = colors.ink4,
+                )
+            }
+        } else {
+            WizardProgressBar(step, Modifier.weight(1f))
+            wizardStepCounter(step)?.let { counter ->
+                Text(
+                    counter,
+                    style = AppTheme.type.monoPill,
+                    color = colors.ink4,
+                    modifier = Modifier.semantics { testTag = "wizard.counter" },
+                )
+            }
+        }
+        if (!first) {
+            // Save & exit has to stay reachable from a gate with no screen behind
+            // it. On the first step it IS the leading circle; after that the
+            // chevron owns that slot, so it moves here.
+            IconCircle(
+                icon = Icons.Filled.Close,
+                contentDescription = "Save and exit setup",
+                onClick = onSaveAndExit,
+                size = dimens.component.iconCircleSm,
+                modifier = Modifier.semantics { testTag = "wizard.saveAndExit" },
+            )
+        } else {
+            Spacer(Modifier.width(dimens.component.iconCircleSm))
+        }
     }
 }
 
 /**
- * The pinned CTA.
+ * The pinned CTA, plus the quiet line the design puts under it.
  *
  * `imePadding` so the keyboard lifts it instead of covering it — without it, the
  * identity and bio steps put the button under the keyboard the moment the field
  * takes focus, which is where "the wizard is stuck" reports come from.
+ *
+ * The footnote is a tap target on the optional steps ("Skip for now") and plain
+ * copy everywhere else. Same word, two jobs, and the difference is whether the
+ * CTA beside it already says it.
  */
 @Composable
-private fun WizardFooter(state: WizardUiState, onContinue: () -> Unit) {
-    val space = AppTheme.dimens.space
+private fun WizardFooter(state: WizardUiState, onContinue: () -> Unit, onSkip: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val note = wizardFooterNote(state)
+    val skippable = note == SKIP_NOTE
+    val interaction = remember { MutableInteractionSource() }
     Column(
         Modifier
             .fillMaxWidth()
+            // Opaque, with a hairline over it. The step above is a scroller and
+            // the CTA is pinned, so a transparent bar lets the last field slide
+            // under the button and read as a rendering fault. The design draws
+            // the same rule on every step that has something to scroll.
+            .background(colors.surface)
+            .hairlineTop()
             .navigationBarsPadding()
             .imePadding()
-            .padding(horizontal = space.xl, vertical = space.md),
-        verticalArrangement = Arrangement.spacedBy(space.sm),
+            .padding(
+                horizontal = dimens.component.gutter,
+                vertical = dimens.space.md,
+            ),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.md),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // The publish sequence narrates itself. A three-round-trip wait behind a
         // silent button is where artists tap twice.
@@ -232,7 +312,7 @@ private fun WizardFooter(state: WizardUiState, onContinue: () -> Unit) {
             Text(
                 wizardPublishProgressLabel(state.publishPhase),
                 style = AppTheme.type.caption,
-                color = AppTheme.colors.ink3,
+                color = colors.ink3,
             )
         }
         PrimaryButton(
@@ -242,41 +322,127 @@ private fun WizardFooter(state: WizardUiState, onContinue: () -> Unit) {
             fullWidth = true,
             modifier = Modifier.semantics { testTag = "wizard.continue" },
         )
+        if (note != null) {
+            Text(
+                note,
+                style = AppTheme.type.caption.copy(
+                    fontWeight = if (skippable) FontWeight.Bold else FontWeight.Medium,
+                ),
+                color = if (skippable) colors.ink3 else colors.ink4,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .then(
+                        if (skippable) {
+                            Modifier
+                                .pressScale(interaction)
+                                .clickable(
+                                    interactionSource = interaction,
+                                    indication = null,
+                                    onClick = onSkip,
+                                )
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(dimens.space.sm)
+                    .semantics { testTag = "wizard.footerNote" },
+            )
+        }
     }
 }
 
+/** The one string [wizardFooterNote] returns that is also an action. */
+private const val SKIP_NOTE = "Skip for now"
+
 /**
- * Save & exit is confirmed, not immediate.
+ * Save & exit (screen 72) — a sheet, not a dialog.
  *
- * It signs the artist out — an unrecoverable-feeling action from a stray tap on
- * a header — so it asks first, and says in the same breath that the progress
- * survives. Without that sentence the honest reading of "Save & exit" is
- * ambiguous about which of the two words wins.
+ * It signs the artist out, which is an unrecoverable-feeling action from a stray
+ * tap, so it asks first and spends the space saying exactly what survives: how
+ * many steps are banked, and that the staged cover and clips are on disk rather
+ * than in memory. The sentence "your progress is saved" on its own is the one
+ * that gets read as marketing; the segment count under it is the evidence.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SaveAndExitDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun SaveAndExitSheet(step: WizardStep, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val colors = AppTheme.colors
-    AlertDialog(
+    val dimens = AppTheme.dimens
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = colors.bgElev,
-        titleContentColor = colors.ink,
-        textContentColor = colors.ink2,
-        title = { Text("Save & exit setup?", style = AppTheme.type.headline) },
-        text = {
-            Text(
-                "Your progress is saved. You'll sign out and can pick up right here when you sign back in.",
-                style = AppTheme.type.footnote,
+        sheetState = sheetState,
+        dragHandle = null,
+        containerColor = colors.surface,
+        contentColor = colors.ink,
+    ) {
+        SheetScaffold(showGrabber = true) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.width(dimens.component.iconCircleSm))
+                Text(
+                    "Save & exit",
+                    style = AppTheme.type.sectionTitle,
+                    color = colors.ink,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+                IconCircle(
+                    icon = Icons.Filled.Close,
+                    contentDescription = "Keep going",
+                    onClick = onDismiss,
+                    size = dimens.component.iconCircleSm,
+                )
+            }
+            Banner(
+                title = "Your progress is saved.",
+                tone = BannerTone.Info,
+                detail = "You'll sign out and can pick up right here when you sign back in.",
+                modifier = Modifier.padding(top = dimens.space.lg),
             )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm, modifier = Modifier.semantics { testTag = "wizard.confirmExit" }) {
-                Text("Save & exit", style = AppTheme.type.footnote, color = colors.accentInk)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = dimens.space.xl),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+            ) {
+                EyebrowLabel("Saved so far")
+                Box(Modifier.weight(1f)) {
+                    androidx.compose.material3.HorizontalDivider(
+                        thickness = dimens.size.hairline,
+                        color = colors.hairline,
+                    )
+                }
+                Text(
+                    wizardSavedSoFarLabel(step),
+                    style = AppTheme.type.monoPill,
+                    color = colors.ink,
+                )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Keep setting up", style = AppTheme.type.footnote, color = colors.ink3)
-            }
-        },
-    )
+            WizardProgressBar(step, Modifier.padding(top = dimens.space.md))
+            Text(
+                "Including your cover photo and clips — staged media is cached on disk, not held in memory.",
+                style = AppTheme.type.caption,
+                color = colors.ink4,
+                modifier = Modifier.padding(top = dimens.space.md),
+            )
+            PrimaryButton(
+                text = "Save and sign out",
+                onClick = onConfirm,
+                fullWidth = true,
+                modifier = Modifier
+                    .padding(top = dimens.space.xl)
+                    .semantics { testTag = "wizard.confirmExit" },
+            )
+            SecondaryButton(
+                text = "Keep going",
+                onClick = onDismiss,
+                fullWidth = true,
+                modifier = Modifier.padding(top = dimens.space.md),
+            )
+        }
+    }
 }

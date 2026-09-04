@@ -76,24 +76,38 @@ class SupportChatTest {
 
     // --- the transcript ------------------------------------------------------
 
+    /**
+     * Two opening bubbles, in this order (design 34).
+     *
+     * The first says what this is — a scripted tree, not a person — and the
+     * second asks the question the option cards answer. They are separate lines
+     * on purpose: the disclosure has to be readable on its own, and folding it
+     * into the prompt makes it something people skim past on the way to the
+     * buttons.
+     */
     @Test
-    fun theTranscriptOpensOnTheGreeting() = runTest {
+    fun theTranscriptOpensOnTheDisclosureThenThePrompt() = runTest {
         val model = SupportChatViewModel(StubBookings())
 
-        assertEquals(listOf(SupportScript.GREETING), model.state.value.lines.map { it.text })
+        assertEquals(
+            listOf(SupportScript.GREETING, SupportScript.PROMPT),
+            model.state.value.lines.map { it.text },
+        )
+        assertTrue("it must say it is not a person", SupportScript.GREETING.contains("not a person"))
         assertEquals(SupportStep.Root, model.state.value.step)
     }
 
     @Test
     fun choosingATopicEchoesTheQuestionThenAnswersIt() = runTest {
         val model = SupportChatViewModel(StubBookings())
+        val opening = model.state.value.lines.size
 
         model.choose(SupportIntent.Safety, "Bookings")
 
         val lines = model.state.value.lines
-        assertEquals(3, lines.size)
-        assertFalse("the reader's turn comes first", lines[1].fromBot)
-        assertTrue(lines[2].fromBot)
+        assertEquals(opening + 2, lines.size)
+        assertFalse("the reader's turn comes first", lines[opening].fromBot)
+        assertTrue(lines[opening + 1].fromBot)
         assertEquals(SupportStep.Answered, model.state.value.step)
     }
 

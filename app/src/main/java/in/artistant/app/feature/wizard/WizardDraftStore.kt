@@ -40,6 +40,19 @@ data class WizardDraft(
     val category: String = "",
     val genre: String = "",
     val baseCity: String = "",
+    /**
+     * Travel radius in km, and the event types the artist takes.
+     *
+     * Draft-only, and deliberately so: `artists` carries `event_types` but this
+     * client has no writer for it, and there is no radius column at all. They
+     * are collected because they are real constraints the artist reasons about
+     * while setting up — and they survive a kill like every other answer — but
+     * nothing here claims they reach the public profile. See the PR body.
+     */
+    val travelRadiusKm: Int = 0,
+    val eventTypes: List<String> = emptyList(),
+    /** `artists.service_tags` slugs — published, unlike the two above. */
+    val serviceTags: List<String> = emptyList(),
     val packages: List<DraftPackage> = emptyList(),
     val techItems: List<String> = emptyList(),
     val daysAvailable: List<String> = emptyList(),

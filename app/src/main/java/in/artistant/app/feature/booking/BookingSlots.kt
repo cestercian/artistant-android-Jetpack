@@ -142,3 +142,192 @@ private fun startOfDayMs(epochMs: Long): Long = Calendar.getInstance(IST).apply 
 
 /** The wall clock every gig label is written and read in. */
 private val IST: TimeZone get() = TimeZone.getTimeZone("Asia/Kolkata")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The month grid behind screen 05
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One cell of the funnel's month grid.
+ *
+ * [inMonth] is false for the leading and trailing days that fill the first and
+ * last weeks out to seven. They are drawn — a week row with a hole in it reads as
+ * a rendering fault — but they are never selectable, so the caller does not have
+ * to carry two months' availability to draw one.
+ */
+data class FunnelDay(val number: Int, val inMonth: Boolean)
+
+/**
+ * The 5–6 week grid for [year]/[month] (`Calendar.MONTH`, 0-based), Monday first.
+ *
+ * Pure, so the grid the picker draws can be asserted without a Compose harness —
+ * the off-by-one that puts the 1st under the wrong weekday is invisible in a
+ * screenshot and obvious in a test.
+ */
+fun funnelMonthDays(year: Int, month: Int): List<FunnelDay> {
+    val first = Calendar.getInstance(IST).apply {
+        clear()
+        timeZone = IST
+        set(year, month, 1)
+    }
+    // Calendar.DAY_OF_WEEK is Sunday=1; +5 mod 7 rebases it to Monday=0.
+    val leading = (first.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    val daysInMonth = first.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val prevLength = Calendar.getInstance(IST).apply {
+        clear()
+        timeZone = IST
+        set(year, month, 1)
+        add(Calendar.MONTH, -1)
+    }.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    val cells = ArrayList<FunnelDay>(42)
+    for (i in leading downTo 1) cells += FunnelDay(prevLength - i + 1, inMonth = false)
+    for (d in 1..daysInMonth) cells += FunnelDay(d, inMonth = true)
+    var next = 1
+    while (cells.size % 7 != 0) cells += FunnelDay(next++, inMonth = false)
+    return cells
+}
+
+/**
+ * The days of [year]/[month] a host may actually request, by the same three
+ * rules the date strip applies — and no others.
+ *
+ * 1. **Not in the past.** A day before today in IST is gone. The strip got this
+ *    for free by starting at today; a month grid can be stepped backwards, so it
+ *    has to say so.
+ * 2. **A weekday the artist works** ([daysAvailable], empty meaning "all").
+ * 3. **Something left on the clock**, which only ever bites today: a day whose
+ *    last published slot has passed is not bookable, and offering it is how a
+ *    request for a show that already ended gets filed.
+ *
+ * Deliberately the same predicate as [upcomingDateChips] rather than a second
+ * opinion about availability — two screens disagreeing about which dates are dead
+ * is the bug this shape exists to prevent.
+ */
+fun monthSelectableDays(
+    year: Int,
+    month: Int,
+    daysAvailable: List<String> = emptyList(),
+    timeSlots: List<String> = emptyList(),
+    nowMs: Long = System.currentTimeMillis(),
+): Set<Int> {
+    val today = Calendar.getInstance(IST).apply { timeInMillis = nowMs }
+    val todayY = today.get(Calendar.YEAR)
+    val todayM = today.get(Calendar.MONTH)
+    val todayD = today.get(Calendar.DAY_OF_MONTH)
+    if (year < todayY || (year == todayY && month < todayM)) return emptySet()
+
+    val cursor = Calendar.getInstance(IST).apply {
+        clear()
+        timeZone = IST
+        set(year, month, 1)
+    }
+    val filterByArtist = daysAvailable.isNotEmpty()
+    val days = cursor.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val open = LinkedHashSet<Int>()
+    for (d in 1..days) {
+        cursor.set(Calendar.DAY_OF_MONTH, d)
+        if (year == todayY && month == todayM && d < todayD) continue
+        val weekday = cursor.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.SHORT, Locale.US).orEmpty()
+        if (filterByArtist && daysAvailable.none { it.equals(weekday, ignoreCase = true) }) continue
+        // The clock only trims TODAY; `bookableTimeSlots` returns the whole grid
+        // for any other day, so this is a no-op there rather than a second rule.
+        if (timeSlots.isNotEmpty() &&
+            bookableTimeSlots(timeSlots, cursor.timeInMillis, nowMs).isEmpty()
+        ) {
+            continue
+        }
+        open += d
+    }
+    return open
+}
+
+/** "October 2026" — the calendar card's own header, in the gig calendar's zone. */
+fun funnelMonthLabel(year: Int, month: Int): String {
+    val cal = Calendar.getInstance(IST).apply {
+        clear()
+        timeZone = IST
+        set(year, month, 1)
+    }
+    val f = java.text.SimpleDateFormat("MMMM yyyy", Locale.US)
+    f.timeZone = IST
+    return f.format(cal.time)
+}
+
+/** Midnight IST on [year]/[month]/[day] — the epoch a picked cell stands for. */
+fun funnelDayEpochMs(year: Int, month: Int, day: Int): Long =
+    Calendar.getInstance(IST).apply {
+        clear()
+        timeZone = IST
+        set(year, month, day)
+    }.timeInMillis
+
+/**
+ * The day-of-month [epochMs] falls on, but ONLY if it falls inside
+ * [year]/[month] — otherwise null.
+ *
+ * This is what lets the grid ring the picked date without the picked date living
+ * in the grid: the selection is an instant, the grid is a month, and stepping to
+ * November must not put a ring on the 12th because October's 12th was chosen.
+ */
+fun dayOfMonthIfIn(epochMs: Long, year: Int, month: Int): Int? {
+    if (epochMs <= 0L) return null
+    val cal = Calendar.getInstance(IST).apply { timeInMillis = epochMs }
+    if (cal.get(Calendar.YEAR) != year || cal.get(Calendar.MONTH) != month) return null
+    return cal.get(Calendar.DAY_OF_MONTH)
+}
+
+/** One month of the funnel calendar: which month, and which of its days are open. */
+data class FunnelMonth(val year: Int, val month: Int, val selectableDays: Set<Int>)
+
+/**
+ * The first month from [nowMs] onward that has a day this artist can take, and
+ * that month's open days — searched forward at most [horizonMonths].
+ *
+ * An artist can legitimately have nothing open for weeks (a three-day weekend
+ * artist away for a month), and opening the picker on an empty grid with no hint
+ * that stepping would help is the dead end this avoids. When the horizon runs out
+ * the CURRENT month comes back with an empty set, which the screen renders as a
+ * month with nothing in it — true, and still steppable.
+ */
+fun firstOpenMonth(
+    daysAvailable: List<String> = emptyList(),
+    timeSlots: List<String> = emptyList(),
+    nowMs: Long = System.currentTimeMillis(),
+    horizonMonths: Int = 12,
+): FunnelMonth {
+    val cal = Calendar.getInstance(IST).apply { timeInMillis = nowMs }
+    var year = cal.get(Calendar.YEAR)
+    var month = cal.get(Calendar.MONTH)
+    repeat(horizonMonths) {
+        val open = monthSelectableDays(year, month, daysAvailable, timeSlots, nowMs)
+        if (open.isNotEmpty()) return FunnelMonth(year, month, open)
+        val stepped = year * 12 + month + 1
+        year = stepped.floorDiv(12)
+        month = stepped.mod(12)
+    }
+    return FunnelMonth(
+        year = cal.get(Calendar.YEAR),
+        month = cal.get(Calendar.MONTH),
+        selectableDays = emptySet(),
+    )
+}
+
+/**
+ * [delta] months from [year]/[month], in absolute months.
+ *
+ * `year * 12 + month` rather than nudging the month field, because the year
+ * boundary is exactly where the naive version breaks: `month + 1` off December
+ * yields an out-of-range 12. `floorDiv`/`mod` carry the sign for backward steps
+ * where plain `/` and `%` would hand back a negative month.
+ */
+fun steppedMonth(year: Int, month: Int, delta: Int): Pair<Int, Int> {
+    val absolute = year * 12 + month + delta
+    return absolute.floorDiv(12) to absolute.mod(12)
+}
+
+/** Is [year]/[month] strictly after the month containing [nowMs]? */
+fun isAfterCurrentMonth(year: Int, month: Int, nowMs: Long = System.currentTimeMillis()): Boolean {
+    val cal = Calendar.getInstance(IST).apply { timeInMillis = nowMs }
+    return year * 12 + month > cal.get(Calendar.YEAR) * 12 + cal.get(Calendar.MONTH)
+}
