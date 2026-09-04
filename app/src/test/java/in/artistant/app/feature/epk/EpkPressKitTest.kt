@@ -1,6 +1,9 @@
 package `in`.artistant.app.feature.epk
 
 import `in`.artistant.app.data.model.ArtistPrompt
+import `in`.artistant.app.data.repository.ArtistMediaAspect
+import `in`.artistant.app.data.repository.ArtistMediaItem
+import `in`.artistant.app.data.repository.ArtistMediaKind
 import `in`.artistant.app.platform.media.UploadQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -395,6 +398,100 @@ class EpkPressKitTest {
         assertFalse(linkIsSavable("Bandcamp", "banccamp"))
         assertNotNull(linkLabelProblem(" "))
         assertNull(linkLabelProblem("Bandcamp"))
+    }
+
+    // ── A failed media read is not "you have no cover" ───────────────────────
+
+    // `directUrl` because `publicUrl` is derived — it prefers a direct URL and
+    // otherwise builds one from the bucket, which needs an AppEnvironment this
+    // test has no business booting.
+    private fun media(id: String, url: String) = ArtistMediaItem(
+        id = id,
+        artistId = ARTIST,
+        kind = ArtistMediaKind.photo,
+        aspect = ArtistMediaAspect.landscape,
+        position = 0,
+        storagePath = "$ARTIST/$id.jpg",
+        mimeType = "image/jpeg",
+        directUrl = url,
+    )
+
+    /**
+     * The bug Greptile found. `media.list` fails, the identity read lands, and
+     * the hub used to conclude from an empty photo list that there is no cover —
+     * lowering completion and drawing a dashed box asking for a cover the public
+     * profile was serving the whole time.
+     */
+    @Test
+    fun aFailedMediaReadFallsBackToTheArtistRowsCover() {
+        val url = epkCoverUrl(
+            photos = emptyList(),
+            photosHydrated = false,
+            artistCoverUrl = "https://cdn.example/cover.jpg",
+        )
+
+        assertEquals("https://cdn.example/cover.jpg", url)
+    }
+
+    /**
+     * The other half of the same distinction: once the list HAS been read, it is
+     * the truth. An artist who deleted every photo has no cover, even while a
+     * stale `artists.cover_url` still names one.
+     */
+    @Test
+    fun aReadListThatIsEmptyMeansNoCover() {
+        val url = epkCoverUrl(
+            photos = emptyList(),
+            photosHydrated = true,
+            artistCoverUrl = "https://cdn.example/stale.jpg",
+        )
+
+        assertNull(url)
+    }
+
+    /** With the list read, the first photo is the cover — not the artist column. */
+    @Test
+    fun aReadListPrefersItsOwnFirstPhoto() {
+        val url = epkCoverUrl(
+            photos = listOf(media("a", "https://cdn.example/a.jpg")),
+            photosHydrated = true,
+            artistCoverUrl = "https://cdn.example/stale.jpg",
+        )
+
+        assertEquals("https://cdn.example/a.jpg", url)
+    }
+
+    /** Both reads failed: there is nothing to claim, so nothing is claimed. */
+    @Test
+    fun neitherReadLandingMeansNoCover() {
+        assertNull(epkCoverUrl(photos = emptyList(), photosHydrated = false, artistCoverUrl = null))
+    }
+
+    /**
+     * And the point of the fallback: completion must not be docked for a cover
+     * the artist has. Six of seven rows filled reads 86%, not 71%, when the media
+     * list is the only thing that failed.
+     */
+    @Test
+    fun completionDoesNotDockACoverRecoveredFromTheArtistRow() {
+        val rows = rows(
+            bio = "A real bio.",
+            serviceTagCount = 2,
+            answered = 1,
+            samples = 2,
+            packages = 3,
+            fromPrice = 60_000,
+            tech = 4,
+            links = 2,
+            socials = 2,
+        )
+
+        val recovered = epkCoverUrl(emptyList(), photosHydrated = false, artistCoverUrl = "https://x/c.jpg")
+        val withFallback = epkCompletion(rows, hasCover = recovered != null)
+        val withoutFallback = epkCompletion(rows, hasCover = false)
+
+        assertTrue(withFallback.percent > withoutFallback.percent)
+        assertEquals(rows.size + 1, withFallback.filled)
     }
 
     // ── Cancel on a sheet whose every field autosaves ────────────────────────

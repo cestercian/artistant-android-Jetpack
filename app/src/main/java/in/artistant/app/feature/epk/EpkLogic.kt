@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.epk
 
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.data.model.ArtistPrompt
+import `in`.artistant.app.data.repository.ArtistMediaItem
 import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ServiceTags
@@ -865,3 +866,24 @@ data class EpkEditRevert(
     /** Nothing was touched — Cancel is then only a dismissal. */
     val isEmpty: Boolean get() = bio == null && services == null && prompts == null
 }
+
+/**
+ * The cover the hub draws — the media list when it can be trusted, the artist
+ * row's own column when it cannot.
+ *
+ * The hub used to read `photos.first()` and nothing else, which quietly turned a
+ * FAILED media read into a factual claim. The two reads are independent: the
+ * identity read can land `artists.cover_url` while `media.list` times out, and
+ * the artist would then be told their press kit has no cover, shown a dashed box
+ * asking for one, and docked the completion point for it — while the cover sat
+ * on their public profile the whole time.
+ *
+ * Hydrated-and-empty is a different fact from never-read, and only the second
+ * falls back. An artist who has deleted every photo has no cover even if a stale
+ * `cover_url` still names one, so once the list has been read it is the truth.
+ */
+fun epkCoverUrl(
+    photos: List<ArtistMediaItem>,
+    photosHydrated: Boolean,
+    artistCoverUrl: String?,
+): String? = if (photosHydrated) photos.firstOrNull()?.publicUrl else artistCoverUrl

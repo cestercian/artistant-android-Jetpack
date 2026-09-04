@@ -266,7 +266,7 @@ fun EpkScreen(
         null -> Unit
         EpkSheetKind.AddCover -> EpkModalSheet(onDismiss = { sheet = null }) {
             AddCoverSheet(
-                hasCover = state.photos.isNotEmpty(),
+                hasCover = state.hasCover,
                 onTakePhoto = {
                     sheet = null
                     requestCamera.launch(Manifest.permission.CAMERA)
@@ -418,7 +418,7 @@ private fun PressKitHeader(
     val subtitle = if (artist == null) {
         null
     } else {
-        "${epkCompletion(state.sectionRows(), hasCover = state.photos.isNotEmpty()).percent}% complete"
+        "${epkCompletion(state.sectionRows(), hasCover = state.hasCover).percent}% complete"
     }
     ScreenHeader(
         title = "Press kit",
@@ -456,7 +456,7 @@ private fun PressKitBody(
     val dimens = AppTheme.dimens
     val gutter = Modifier.padding(horizontal = dimens.component.gutter)
     val rows = state.sectionRows()
-    val hasCover = state.photos.isNotEmpty()
+    val hasCover = state.hasCover
     val completion = epkCompletion(rows, hasCover = hasCover)
     val bare = completion.filled == 0
 
@@ -534,7 +534,7 @@ private fun PressKitBody(
             Column(gutter, verticalArrangement = Arrangement.spacedBy(dimens.space.md)) {
                 if (!bare) SectionHeader("Cover")
                 EpkCoverBlock(
-                    coverUrl = state.photos.firstOrNull()?.publicUrl,
+                    coverUrl = state.coverUrl,
                     onAdd = { onOpenSheet(EpkSheetKind.AddCover) },
                     onOpen = { onOpenPane(EpkPane.Gallery) },
                 )
@@ -549,7 +549,12 @@ private fun PressKitBody(
         }
         // The gallery is the cover's overflow, so there is nothing to draw until
         // there is a cover — which is exactly what screen 87's caption says.
-        if (hasCover) {
+        //
+        // `photosHydrated` on top of that: a cover recovered from the artist row
+        // says nothing about what else is in the gallery, and three empty slots
+        // would be a claim we cannot make. The failure banner above already says
+        // why the page is thin, and offers the retry that fills it in.
+        if (hasCover && state.photosHydrated) {
             item(key = "gallery") {
                 Column(gutter, verticalArrangement = Arrangement.spacedBy(dimens.space.md)) {
                     // The count is META, not an action — the design draws it as
@@ -644,6 +649,21 @@ private fun openSection(
  * [PackagePricing.fromPrice] so the row can never quote a different minimum than
  * the profile it describes.
  */
+/**
+ * The cover to draw — see [epkCoverUrl] for why the media list is not the only
+ * place it can come from.
+ *
+ * An extension for the same reason [sectionRows] is one: four places ask (the
+ * header's percentage, the meter, the cover slot, the add-cover sheet's title),
+ * and four copies of the same three-field expression is four chances for one of
+ * them to keep reading `photos.first()`.
+ */
+internal val EpkUiState.coverUrl: String?
+    get() = epkCoverUrl(photos, photosHydrated, artist?.coverUrl)
+
+/** Whether there is a cover at all. @see coverUrl */
+internal val EpkUiState.hasCover: Boolean get() = coverUrl != null
+
 internal fun EpkUiState.sectionRows(): List<EpkSectionRow> {
     val savable = packageRows.filter(::packageRowIsSavable)
     val preview = previewPackages(packageRows)
