@@ -1,7 +1,6 @@
 package `in`.artistant.app.feature.messages
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,16 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.MarkEmailUnread
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.NotificationsOff
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.Unarchive
-import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,38 +32,41 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
-import `in`.artistant.app.data.repository.ReportReasons
+import `in`.artistant.app.data.repository.PendingReport
+import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.designsystem.component.Avatar
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.hairlineBottom
+import `in`.artistant.app.designsystem.component.ListRow
+import `in`.artistant.app.designsystem.component.PillTone
+import `in`.artistant.app.designsystem.component.SheetScaffold
+import `in`.artistant.app.designsystem.component.StatusPill
+import `in`.artistant.app.designsystem.component.StatusTone
+import `in`.artistant.app.designsystem.component.bookingStatusTone
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
-import `in`.artistant.app.domain.score.tierColor
 
 /**
- * "What is this thread about, and who is in it" — from the chat header's Details
- * pill.
+ * Thread details (design 33) — "the deal, not the chatter".
  *
- * It exists because a lot of context was latent: the gig, its date, its venue,
- * its fee, and the counterparty's standing were all one screen away with no way
- * in. The conversation actions below it are device-local and really do persist,
- * which is the bar for including them at all — a Star that forgets itself on
- * relaunch is worse than no Star.
+ * It answers *what did we actually agree* without scrolling the transcript, which
+ * is why the booking card is the first thing under the name and why the fee is
+ * set at the same weight as its own label. Everything below it is the small set
+ * of things you can do to a conversation.
  *
- * Report is the last row and stays in the same neutral style as the others. It
- * is a rare, serious action, not the sheet's primary one, and lime is this
- * system's single "do the positive thing" signal — a filled brand button here
- * would make reporting the loudest thing on the sheet and read as encouragement.
- * It opens a reason picker rather than filing anything, so it cannot be a
- * one-tap accident.
+ * Report is the last row and it is the only one in `danger`. It is a rare,
+ * serious action, not the sheet's primary one, and lime is this system's single
+ * "do the positive thing" signal — an accent button here would make reporting the
+ * loudest thing on the sheet and read as encouragement. It opens a reason picker
+ * rather than filing anything, so it cannot be a one-tap accident.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +84,12 @@ fun ThreadDetailsSheet(
      * offering an action that would have to guess who to block.
      */
     canBlock: Boolean,
-    reportSubmitted: Boolean,
+    /** Non-null once a report reached the server or this device's log. */
+    reportOutcome: ReportOutcome?,
+    /** Non-null when a report is held NOWHERE — the sheet owes a retry, not a receipt. */
+    failedReport: PendingReport?,
+    /** A report is in flight; the form stays up, so its CTA has to lock itself. */
+    isSubmittingReport: Boolean,
     /**
      * The last mute/block toggle didn't land. Rendered above the rows, because
      * this sheet is where the tap happened and the row it belongs to has already
@@ -104,7 +102,22 @@ fun ThreadDetailsSheet(
     onToggleMute: () -> Unit,
     onToggleBlock: () -> Unit,
     onMarkUnread: () -> Unit,
-    onReport: (reason: String) -> Unit,
+    onReport: (reason: String, details: String?) -> Unit,
+    /** Re-file the report the reader already wrote. */
+    onRetryReport: () -> Unit,
+    /** Give up on a report nothing is holding. */
+    onDiscardReport: () -> Unit,
+    /**
+     * Trust & safety (design 131).
+     *
+     * The advice belongs beside the remedies, not only in account settings:
+     * this sheet is where someone lands when a conversation has started to feel
+     * wrong, and "what do I do about this" is a different question from "file a
+     * report" — one it is worse to have to go looking for. The caller closes the
+     * sheet before navigating; a bottom sheet cannot stay up over a pushed
+     * destination.
+     */
+    onOpenSafetyCentre: () -> Unit,
     onDismiss: () -> Unit,
     /** Non-null only on the client seat — an artist's counterpart has no profile. */
     artistId: String? = null,
@@ -113,7 +126,7 @@ fun ThreadDetailsSheet(
     onArtistClick: (String) -> Unit = {},
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     var reporting by remember { mutableStateOf(false) }
     // Blocking gets a confirm step for the same reason reporting gets a reason
     // picker, plus one of its own: a block takes the conversation out of the
@@ -125,350 +138,403 @@ fun ThreadDetailsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = colors.bg,
+        dragHandle = null,
+        containerColor = colors.surface,
     ) {
-        // Outside the scrolling Column on purpose: it is the sheet's bar, and a
-        // title that scrolls away takes the only dismiss control with it.
-        SheetHeader(title = "Details", onDone = onDismiss)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = space.xl)
-                .padding(bottom = space.xxl)
-                .semantics { testTag = "chat.detailsSheet" },
-        ) {
-            SectionHeader("Gig details")
-            GigCard(context = context, onBookingClick = onBookingClick)
-
-            SectionHeader("In this conversation")
-            if (artistId != null) {
-                ParticipantRow(
-                    name = counterpartName,
-                    role = ThreadCounterpart.counterpartRole(viewerIsArtist),
-                    subtitle = artistSubtitle,
-                    score = artistScore,
-                    onClick = { onArtistClick(artistId) },
-                )
-            } else {
-                ParticipantRow(
-                    name = counterpartName,
-                    role = ThreadCounterpart.counterpartRole(viewerIsArtist),
-                )
-            }
-            ParticipantRow(name = "You", role = ThreadCounterpart.viewerRole(viewerIsArtist))
-
-            SectionHeader("Conversation")
-            actionError?.let {
-                Text(
-                    it,
-                    style = AppTheme.type.footnote,
-                    color = colors.hot,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = space.sm)
-                        .semantics { testTag = "threadDetails.actionError" },
-                )
-            }
-            when {
-                reportSubmitted -> ReportReceipt()
-                reporting -> ReportReasonPicker(
-                    counterpartName = counterpartName,
-                    onPick = onReport,
-                )
-                blocking -> BlockConfirm(
-                    counterpartName = counterpartName,
-                    onConfirm = {
-                        onToggleBlock()
-                        blocking = false
-                    },
-                    onCancel = { blocking = false },
-                )
-                else -> {
-                    // Labels flip with state so a row always reads as the action
-                    // it will perform, not the state it is in.
-                    ActionRow(
-                        label = if (starred) "Unstar" else "Star",
-                        icon = if (starred) Icons.Filled.Star else Icons.Filled.StarBorder,
-                        tint = if (starred) colors.warm else colors.ink,
-                        tag = "threadDetails.star",
-                        onClick = onToggleStar,
+        SheetScaffold {
+            SheetTitle(
+                title = when {
+                    failedReport != null -> "Report not sent"
+                    reportOutcome == ReportOutcome.Sent -> "Report received"
+                    reportOutcome == ReportOutcome.Queued -> "Report saved on this device"
+                    reporting -> "Report conversation"
+                    blocking -> "Block $counterpartName?"
+                    else -> "Thread details"
+                },
+                onClose = onDismiss,
+            )
+            Column(
+                Modifier
+                    .heightIn(max = dimens.size.heroTall)
+                    .verticalScroll(rememberScrollState())
+                    .semantics { testTag = "chat.detailsSheet" },
+            ) {
+                when {
+                    // Ordered so the worst outcome wins: a retry that fails
+                    // again must not be covered by the receipt of the attempt
+                    // before it.
+                    failedReport != null -> ReportFailure(
+                        onRetry = onRetryReport,
+                        onDiscard = onDiscardReport,
                     )
-                    // Mute sits second, directly under Star, matching the
-                    // reference's order — the two rows that change how loudly a
-                    // conversation reaches you belong together, above the two
-                    // that change where it sits.
-                    //
-                    // Labelled "Mute", not "Mute notifications": one word is
-                    // what the reference says, and the longer label was doing a
-                    // job the caption already does properly. A muted thread
-                    // still shows in the inbox and still counts as unread, and
-                    // the obvious wrong reading — that the other person has been
-                    // silenced too — needs a sentence, not an extra noun.
-                    ActionRow(
-                        label = if (muted) "Unmute" else "Mute",
-                        icon = if (muted) Icons.Filled.NotificationsOff else Icons.Filled.Notifications,
-                        tint = if (muted) colors.ink3 else colors.ink,
-                        tag = "threadDetails.mute",
-                        caption = if (muted) {
-                            "You won't get notifications about this conversation. " +
-                                "$counterpartName still gets theirs."
-                        } else {
-                            null
+
+                    reportOutcome != null -> ReportReceipt(counterpartName, reportOutcome)
+
+                    reporting -> ReportConversationSheet(
+                        counterpartName = counterpartName,
+                        submitting = isSubmittingReport,
+                        onSubmit = onReport,
+                        onOpenSafetyCentre = onOpenSafetyCentre,
+                        onBack = { reporting = false },
+                    )
+
+                    blocking -> BlockConfirm(
+                        counterpartName = counterpartName,
+                        onConfirm = {
+                            onToggleBlock()
+                            blocking = false
                         },
-                        onClick = onToggleMute,
+                        onCancel = { blocking = false },
                     )
-                    ActionRow(
-                        label = "Mark as unread",
-                        icon = Icons.Filled.MarkEmailUnread,
-                        tag = "threadDetails.markUnread",
-                        onClick = onMarkUnread,
+
+                    else -> DetailsBody(
+                        counterpartName = counterpartName,
+                        context = context,
+                        viewerIsArtist = viewerIsArtist,
+                        artistId = artistId,
+                        artistSubtitle = artistSubtitle,
+                        artistScore = artistScore,
+                        starred = starred,
+                        archived = archived,
+                        muted = muted,
+                        blocked = blocked,
+                        canBlock = canBlock,
+                        actionError = actionError,
+                        onArtistClick = onArtistClick,
+                        onBookingClick = onBookingClick,
+                        onToggleStar = onToggleStar,
+                        onToggleArchive = onToggleArchive,
+                        onToggleMute = onToggleMute,
+                        onMarkUnread = onMarkUnread,
+                        onStartBlock = { if (blocked) onToggleBlock() else blocking = true },
+                        onStartReport = { reporting = true },
+                        onOpenSafetyCentre = onOpenSafetyCentre,
                     )
-                    ActionRow(
-                        label = if (archived) "Unarchive" else "Archive",
-                        icon = if (archived) Icons.Filled.Unarchive else Icons.Filled.Archive,
-                        tag = "threadDetails.archive",
-                        onClick = onToggleArchive,
-                    )
-                    ActionRow(
-                        label = "Report conversation",
-                        icon = Icons.Outlined.Flag,
-                        tag = "threadDetails.report",
-                        onClick = { reporting = true },
-                    )
-                    // Block sits last, below Report, because report is the action
-                    // that actually gets someone looked at — blocking only
-                    // changes what THIS person sees (mig 0087 is client-side
-                    // filtering in v1). The caption on the blocked state says so
-                    // rather than letting the word "blocked" imply a wall that
-                    // isn't there yet.
-                    if (canBlock) {
-                        ActionRow(
-                            label = if (blocked) "Unblock $counterpartName" else "Block $counterpartName",
-                            icon = if (blocked) Icons.Outlined.LockOpen else Icons.Outlined.Block,
-                            tint = if (blocked) colors.ink3 else colors.ink,
-                            tag = "threadDetails.block",
-                            caption = if (blocked) {
-                                "Hidden from your inbox. They aren't told, and they can still " +
-                                    "message you."
-                            } else {
-                                null
-                            },
-                            onClick = { if (blocked) onToggleBlock() else blocking = true },
-                        )
-                    }
                 }
             }
         }
     }
 }
 
-/**
- * The gig, as a card.
- *
- * The one place card chrome earns its keep in a hairline-first design: this is a
- * distinct object being *referenced* by the conversation, not a row of it.
- */
 @Composable
-private fun GigCard(context: ThreadContext, onBookingClick: (String) -> Unit) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val bookingId = context.bookingId
-
-    if (bookingId == null) {
-        // Genuinely nothing agreed yet — say so rather than render an empty card.
-        Text(
-            "No booking yet — this is an inquiry.",
-            style = AppTheme.type.body,
-            color = colors.ink3,
-            modifier = Modifier.padding(vertical = space.sm),
-        )
-        return
-    }
-
-    val shape = RoundedCornerShape(AppTheme.dimens.radii.md)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(colors.bgCard)
-            .border(AppTheme.dimens.size.hairline, colors.line, shape)
-            .clickable { onBookingClick(bookingId) }
-            .padding(space.md)
-            .semantics { testTag = "threadDetails.gig" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.md),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(context.statusLabel, style = AppTheme.type.callout, color = colors.ink)
-            Text(
-                context.detailLine ?: "Details in the booking",
-                style = AppTheme.type.monoSmall,
-                color = colors.ink3,
-            )
-            context.fee?.let {
-                Spacer(Modifier.height(AppTheme.dimens.space.xs))
-                Text(
-                    "${formatInr(it)} artist fee",
-                    style = AppTheme.type.footnote,
-                    color = colors.accentInk,
-                )
-            }
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = colors.ink3,
-            modifier = Modifier.size(AppTheme.dimens.size.iconMd),
-        )
-    }
-}
-
-/**
- * One participant: avatar, name, and the seat they occupy.
- *
- * The role caption is what makes the two rows unambiguous when both names are
- * unfamiliar, and the roles are always opposites — see [ThreadCounterpart].
- */
-@Composable
-private fun ParticipantRow(
-    name: String,
-    role: String,
-    subtitle: String = "",
-    score: Int? = null,
-    onClick: (() -> Unit)? = null,
+private fun DetailsBody(
+    counterpartName: String,
+    context: ThreadContext,
+    viewerIsArtist: Boolean,
+    artistId: String?,
+    artistSubtitle: String,
+    artistScore: Int?,
+    starred: Boolean,
+    archived: Boolean,
+    muted: Boolean,
+    blocked: Boolean,
+    canBlock: Boolean,
+    actionError: String?,
+    onArtistClick: (String) -> Unit,
+    onBookingClick: (String) -> Unit,
+    onToggleStar: () -> Unit,
+    onToggleArchive: () -> Unit,
+    onToggleMute: () -> Unit,
+    onMarkUnread: () -> Unit,
+    onStartBlock: () -> Unit,
+    onStartReport: () -> Unit,
+    onOpenSafetyCentre: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+
+    // Who, with the profile behind it when there is one to open.
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            // The rule belongs to the row rather than following it, so the row's
-            // pitch is its height — see [hairlineBottom].
-            .hairlineBottom()
-            .padding(vertical = space.md),
+            .then(
+                if (artistId != null) {
+                    Modifier
+                        .clip(RoundedCornerShape(dimens.radii.md))
+                        .clickable { onArtistClick(artistId) }
+                } else {
+                    Modifier
+                },
+            )
+            .padding(vertical = dimens.space.sm)
+            .semantics(mergeDescendants = true) { testTag = "threadDetails.participant" },
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.md),
     ) {
-        Avatar(name = name, size = AppTheme.dimens.size.avatarSm)
+        Avatar(name = counterpartName, size = dimens.size.avatarLg)
         Column(Modifier.weight(1f)) {
             Text(
-                name,
-                style = AppTheme.type.body,
+                counterpartName,
+                style = AppTheme.type.sectionTitle,
                 color = colors.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                subtitle.ifBlank { role }.uppercase(),
-                style = AppTheme.type.monoSmall,
-                color = colors.ink3,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val subtitle = listOf(
+                artistSubtitle,
+                ThreadCounterpart.counterpartRole(viewerIsArtist),
+            ).firstOrNull { it.isNotBlank() }.orEmpty()
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, style = AppTheme.type.subtitle, color = colors.ink4, maxLines = 1)
+            }
         }
-        score?.let {
-            // Tier-coloured so the number carries the same meaning it does on the
-            // artist profile and the Discover tiles.
-            Text(
-                it.toString(),
-                style = AppTheme.type.monoMedium,
-                color = tierColor(ScoreBands.tier(it), colors),
-                modifier = Modifier.semantics { contentDescription = "Bookability score $it" },
-            )
-        }
-        if (onClick != null) {
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = colors.ink3,
-                modifier = Modifier.size(AppTheme.dimens.size.iconMd),
-            )
-        }
+    }
+
+    Spacer(Modifier.height(dimens.space.lg))
+    if (context.bookingId != null) {
+        BookingCard(context = context, artistScore = artistScore)
+    } else {
+        // The inquiry variant the design calls for, in place of the card rather
+        // than under it: there is nothing agreed, and an empty card with dashes
+        // in it would imply there is.
+        Banner(
+            title = "No booking yet — this is an inquiry.",
+            detail = "Nothing is agreed until a request is sent and accepted.",
+            tone = BannerTone.Promotion,
+            modifier = Modifier.semantics { testTag = "threadDetails.inquiry" },
+        )
+    }
+
+    Spacer(Modifier.height(dimens.space.lg))
+    actionError?.let {
+        Text(
+            it,
+            style = AppTheme.type.caption,
+            color = colors.danger,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = dimens.space.sm)
+                .semantics { testTag = "threadDetails.actionError" },
+        )
+    }
+
+    context.bookingId?.let { bookingId ->
+        ListRow(
+            title = "View booking",
+            onClick = { onBookingClick(bookingId) },
+            modifier = Modifier.semantics { testTag = "threadDetails.viewBooking" },
+        )
+    }
+    ListRow(
+        title = if (archived) "Unarchive conversation" else "Archive conversation",
+        subtitle = "Removes it from the inbox and the badge",
+        onClick = onToggleArchive,
+        modifier = Modifier.semantics { testTag = "threadDetails.archive" },
+    )
+    // Mute is a SERVER column (mig 0091) that `send-push` honours, unlike the
+    // two device-local flags around it — so its caption promises something that
+    // actually survives a reinstall, and says plainly that it silences only your
+    // side.
+    ListRow(
+        title = if (muted) "Unmute conversation" else "Mute conversation",
+        subtitle = if (muted) {
+            "You won't get notifications about this. $counterpartName still gets theirs."
+        } else {
+            "Stop notifications from this conversation on every device"
+        },
+        onClick = onToggleMute,
+        modifier = Modifier.semantics { testTag = "threadDetails.mute" },
+    )
+    ListRow(
+        title = "Mark as unread",
+        subtitle = "Saved on this device",
+        onClick = onMarkUnread,
+        modifier = Modifier.semantics { testTag = "threadDetails.markUnread" },
+    )
+    ListRow(
+        title = if (starred) "Remove star" else "Star this conversation",
+        subtitle = "Saved on this device",
+        onClick = onToggleStar,
+        modifier = Modifier.semantics { testTag = "threadDetails.star" },
+    )
+    if (canBlock) {
+        // Block sits below the housekeeping and above Report, because report is
+        // the action that actually gets someone looked at — blocking only
+        // changes what THIS person sees (mig 0087 is client-side filtering in
+        // v1). The caption says so rather than letting the word "blocked" imply
+        // a wall that isn't there yet.
+        ListRow(
+            title = if (blocked) "Unblock $counterpartName" else "Block $counterpartName",
+            subtitle = if (blocked) {
+                "Hidden from your inbox. They aren't told, and they can still message you."
+            } else {
+                "Private — they aren't told"
+            },
+            onClick = onStartBlock,
+            modifier = Modifier.semantics { testTag = "threadDetails.block" },
+        )
+    }
+
+    // Advice sits beside the remedies and above the report, because it is the
+    // step before one: block and report both change something, and this is the
+    // row for the person who does not yet know which of them they need. It is a
+    // plain ListRow, not `danger` — reading about safety is not a destructive
+    // act, and there is exactly one red thing on this sheet.
+    ListRow(
+        title = "Trust & safety",
+        subtitle = "How to keep a booking safe, and what to do when it isn't",
+        onClick = onOpenSafetyCentre,
+        modifier = Modifier.semantics { testTag = "threadDetails.safetyCentre" },
+    )
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.md))
+            .clickable(onClick = onStartReport)
+            .padding(vertical = dimens.space.lg)
+            .semantics(mergeDescendants = true) { testTag = "threadDetails.report" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+    ) {
+        Icon(
+            Icons.Outlined.Flag,
+            contentDescription = null,
+            tint = colors.danger,
+            modifier = Modifier.size(dimens.size.iconLg),
+        )
+        Text(
+            "Report this conversation",
+            style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.danger,
+        )
     }
 }
 
 /**
- * One tappable action.
+ * The gig behind the thread, as a card (design 33).
  *
- * [caption] is the slot for a row whose consequence isn't self-evident from its
- * label — currently mute and block, both of which people reliably assume do more
- * than they do. It renders only when the state it describes is actually in
- * effect, so an inert row stays a single line.
+ * The one place card chrome earns its keep in a hairline-first design: this is a
+ * distinct object being *referenced* by the conversation, not a row of it. The
+ * fee is set at the same weight as its own label because it is the answer to the
+ * question the whole sheet exists for.
  */
 @Composable
-private fun ActionRow(
-    label: String,
-    icon: ImageVector,
-    tag: String,
-    onClick: () -> Unit,
-    tint: Color = AppTheme.colors.ink,
-    caption: String? = null,
-) {
+private fun BookingCard(context: ThreadContext, artistScore: Int?) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
+    val dimens = AppTheme.dimens
+    Column(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            // Drawn on the row's bottom edge rather than laid out under it, so a
-            // run of these rows has no per-row unit of divider height in it —
-            // see [hairlineBottom]. This was the whole of the remaining pitch
-            // difference against the reference on this sheet.
-            .hairlineBottom()
-            .padding(vertical = space.md)
-            .semantics { testTag = tag },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(space.md),
+            .clip(RoundedCornerShape(dimens.radii.card))
+            .background(colors.surface3)
+            .padding(dimens.space.lg)
+            .semantics { testTag = "threadDetails.bookingCard" },
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(AppTheme.dimens.size.iconLg),
-        )
-        Column(Modifier.weight(1f)) {
-            Text(label, style = AppTheme.type.body, color = colors.ink)
-            caption?.let {
-                Text(it, style = AppTheme.type.footnote, color = colors.ink3)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Booking behind this thread",
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = colors.ink,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.size(dimens.space.sm))
+            StatusPill(label = context.statusLabel, tone = context.pillTone)
+        }
+        Spacer(Modifier.height(dimens.space.md))
+        context.dateLabel?.let { DetailLine(label = "Date", value = it) }
+        context.venue?.let { DetailLine(label = "Venue", value = it) }
+        context.fee?.let {
+            Spacer(Modifier.height(dimens.space.sm))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Artist fee", style = AppTheme.type.sectionTitle, color = colors.ink)
+                Text(formatInr(it), style = AppTheme.type.sectionTitle, color = colors.ink)
+            }
+        }
+        // Only when the score is real. A "Bookability score" row with a dash in
+        // it on a thread whose artist hasn't loaded would be the app inventing a
+        // reputation.
+        artistScore?.let { score ->
+            Spacer(Modifier.height(dimens.space.md))
+            HRule()
+            Spacer(Modifier.height(dimens.space.md))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+            ) {
+                Box(
+                    Modifier
+                        .size(dimens.size.iconXl)
+                        .clip(CircleShape)
+                        .background(colors.accent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(score.toString(), style = AppTheme.type.badge, color = colors.onAccent)
+                }
+                Text(
+                    // The tier, not a percentile. Design 33 prints "top 8% in
+                    // Bengaluru"; nothing in the schema ranks an artist against
+                    // a city, and a made-up percentile on a trust surface is the
+                    // worst kind of invented number. The band IS real — it is
+                    // the same one the profile and the score explainer show.
+                    "Bookability score · ${ScoreBands.tier(score).label}",
+                    style = AppTheme.type.subtitle,
+                    color = colors.ink2,
+                )
             }
         }
     }
 }
 
-/** Reason first, then file. Reporting should never be a single mis-tap. */
 @Composable
-private fun ReportReasonPicker(counterpartName: String, onPick: (String) -> Unit) {
+private fun DetailLine(label: String, value: String) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(Modifier.fillMaxWidth()) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = AppTheme.dimens.space.xs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = AppTheme.type.body, color = colors.ink2)
         Text(
-            "Why are you reporting this conversation?",
-            style = AppTheme.type.callout,
+            value,
+            style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold),
             color = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(space.sm))
-        ReportReasons.forEach { reason ->
-            Text(
-                reason,
-                style = AppTheme.type.body,
-                color = colors.ink2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                    .clickable { onPick(reason) }
-                    .padding(vertical = space.md)
-                    .semantics { testTag = "threadDetails.reason" },
-            )
-            HRule()
-        }
-        Spacer(Modifier.height(space.sm))
+    }
+}
+
+/** The sheet's own bar: a centred title and one way out. */
+@Composable
+private fun SheetTitle(title: String, onClose: () -> Unit) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = dimens.space.lg),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(Modifier.size(dimens.size.iconXl))
         Text(
-            "This won't be shared with $counterpartName.",
-            style = AppTheme.type.footnote,
-            color = colors.ink3,
+            title,
+            style = AppTheme.type.sectionTitle,
+            color = colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        Box(
+            Modifier
+                .size(dimens.size.iconXl)
+                .clip(CircleShape)
+                .background(colors.surface2)
+                .clickable(onClick = onClose)
+                .semantics { contentDescription = "Close"; testTag = "threadDetails.close" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = null,
+                tint = colors.ink,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
+        }
     }
 }
 
@@ -493,45 +559,32 @@ private fun BlockConfirm(
     onCancel: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     Column(Modifier.fillMaxWidth().semantics { testTag = "threadDetails.blockConfirm" }) {
-        Text("Block $counterpartName?", style = AppTheme.type.callout, color = colors.ink)
-        Spacer(Modifier.height(space.xs))
         Text(
             "Your conversations with them stop showing in your inbox, and they aren't told.",
             style = AppTheme.type.body,
             color = colors.ink2,
         )
-        Spacer(Modifier.height(space.xs))
+        Spacer(Modifier.height(dimens.space.sm))
         Text(
             "Blocking doesn't stop them sending messages or notifications — mute the " +
                 "conversation for that, and report it if something's wrong.",
-            style = AppTheme.type.footnote,
-            color = colors.ink3,
+            style = AppTheme.type.caption,
+            color = colors.ink4,
         )
-        Spacer(Modifier.height(space.md))
-        Text(
-            "Block $counterpartName",
-            style = AppTheme.type.body,
-            color = colors.ink,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                .clickable(onClick = onConfirm)
-                .padding(vertical = space.md)
-                .semantics { testTag = "threadDetails.blockConfirmed" },
+        Spacer(Modifier.height(dimens.space.lg))
+        ListRow(
+            title = "Block $counterpartName",
+            destructive = true,
+            onClick = onConfirm,
+            modifier = Modifier.semantics { testTag = "threadDetails.blockConfirmed" },
         )
-        HRule()
-        Text(
-            "Cancel",
-            style = AppTheme.type.body,
-            color = colors.ink3,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(AppTheme.dimens.radii.sm))
-                .clickable(onClick = onCancel)
-                .padding(vertical = space.md)
-                .semantics { testTag = "threadDetails.blockCancel" },
+        ListRow(
+            title = "Cancel",
+            onClick = onCancel,
+            showHairline = false,
+            modifier = Modifier.semantics { testTag = "threadDetails.blockCancel" },
         )
     }
 }
@@ -545,74 +598,97 @@ private fun BlockConfirm(
  * distinguish delivered from queued, and must not claim to.
  */
 @Composable
-private fun ReportReceipt() {
+private fun ReportReceipt(counterpartName: String, outcome: ReportOutcome) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(Modifier.fillMaxWidth().padding(vertical = space.sm)) {
-        Text("Report saved.", style = AppTheme.type.callout, color = colors.ink)
+    val dimens = AppTheme.dimens
+    Column(
+        Modifier.fillMaxWidth().semantics { testTag = "threadDetails.reportReceipt" },
+    ) {
         Text(
-            "Our team reviews reports to keep Artistant trustworthy. It's never shared with them.",
-            style = AppTheme.type.footnote,
-            color = colors.ink3,
+            // Two different facts, and only one of them is a delivery. The
+            // insert soft-fails into a local log, and telling a reporter their
+            // report reached Artistant while it is sitting in DataStore is the
+            // overclaim this whole branch exists to stop.
+            when (outcome) {
+                ReportOutcome.Sent -> "Thanks — the report is with our safety team."
+                ReportOutcome.Queued ->
+                    "Saved on this device. It hasn't reached our safety team yet — " +
+                        "we'll send it the next time you're online."
+                // Unreachable: Failed rides `failedReport` and renders
+                // [ReportFailure]. Stated rather than defaulted, so a future
+                // outcome cannot silently inherit the delivery sentence.
+                ReportOutcome.Failed -> "This report isn't saved anywhere yet."
+            },
+            style = AppTheme.type.body,
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(dimens.space.sm))
+        Text(
+            "$counterpartName is never shown this report. If you also want them out of your " +
+                "inbox, block them from this sheet.",
+            style = AppTheme.type.caption,
+            color = colors.ink4,
         )
     }
 }
 
 /**
- * The sheet's bar: title centred, an explicit Done at the trailing edge.
+ * A report nothing is holding.
  *
- * The drag handle alone was the only way out of here, and a grabber is a hint
- * about a gesture rather than a control — it is discoverable if you already know
- * the pattern and invisible if you don't. It stays (the reference shows one too);
- * this just adds the affordance that names the action.
+ * Not a receipt and not a toast. The insert failed and so did the on-device log,
+ * so the only true sentence is that the report does not exist — and that is a
+ * state with an action attached, not a message that fades. The reader's own
+ * words are kept behind [onRetry] so re-filing does not ask them to write, a
+ * second time, about something that already upset them enough to report.
  *
- * Centred rather than left-aligned because with something at one end and nothing
- * at the other, a left title makes the bar look like it lost a control. The Done
- * target is padded out to the row minimum — the word is short and the glyph-free
- * hit area would otherwise be about half a thumb.
+ * Discard is a deliberate second control rather than a timeout: the banner must
+ * not disappear on its own while what it says is still true.
  */
 @Composable
-private fun SheetHeader(title: String, onDone: () -> Unit) {
+private fun ReportFailure(onRetry: () -> Unit, onDiscard: () -> Unit) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val space = dimens.space
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = space.xl)
-            .padding(bottom = space.sm),
-        contentAlignment = Alignment.Center,
+    Column(
+        Modifier.fillMaxWidth().semantics { testTag = "threadDetails.reportFailure" },
     ) {
-        Text(title, style = AppTheme.type.headline, color = colors.ink)
-        Box(
-            Modifier
-                .align(Alignment.CenterEnd)
+        Banner(
+            title = "Your report wasn't sent",
+            detail = "It didn't reach our safety team, and this device couldn't hold on to " +
+                "it either. Nothing about this conversation has been reported yet.",
+            tone = BannerTone.Failure,
+            actionLabel = "Try again",
+            onAction = onRetry,
+            modifier = Modifier.semantics { testTag = "threadDetails.reportRetry" },
+        )
+        Spacer(Modifier.height(dimens.space.md))
+        Text(
+            "Discard this report",
+            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.ink3,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
                 .clip(CircleShape)
-                .clickable(onClick = onDone)
-                .heightIn(min = dimens.size.rowMin)
-                .padding(horizontal = space.sm)
-                .semantics { contentDescription = "Done" },
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                "Done",
-                style = AppTheme.type.body.copy(fontWeight = FontWeight.SemiBold),
-                color = colors.accentInk,
-            )
-        }
+                .clickable(onClick = onDiscard)
+                .padding(vertical = dimens.space.md)
+                .semantics { testTag = "threadDetails.reportDiscard" },
+        )
     }
 }
 
-@Composable
-private fun SectionHeader(title: String) {
-    val space = AppTheme.dimens.space
-    Spacer(Modifier.height(space.lg))
-    Text(
-        title.uppercase(),
-        style = AppTheme.type.caption,
-        color = AppTheme.colors.ink3,
-    )
-    Spacer(Modifier.height(space.sm))
-    HRule()
-    Spacer(Modifier.height(space.sm))
-}
+/**
+ * The pill tone for a thread's booking status.
+ *
+ * Derived from the app's ONE status→tone mapping ([bookingStatusTone]) rather
+ * than a second `when` over the same enum, so a thread and its booking can never
+ * disagree about what colour "confirmed" is — which is exactly the bug a parallel
+ * table invites the first time a status is added.
+ */
+private val ThreadContext.pillTone: StatusTone
+    get() = when (status?.let(::bookingStatusTone)) {
+        null, PillTone.Neutral -> StatusTone.Neutral
+        PillTone.Brand, PillTone.BrandSolid -> StatusTone.Live
+        PillTone.Warm -> StatusTone.Pending
+        PillTone.Good -> StatusTone.Done
+        PillTone.Hot -> StatusTone.Failed
+    }

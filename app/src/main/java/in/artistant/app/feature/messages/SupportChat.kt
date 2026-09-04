@@ -6,34 +6,46 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.designsystem.component.BackHeader
+import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +61,8 @@ import javax.inject.Inject
  * Deliberately a fixed tree and not an "assistant": nothing here generates text,
  * nothing pretends a person replied, and there is no typing indicator. Every
  * answer below is a sentence a human wrote, so the surface can be honest about
- * being canned while still being the fastest route to the right screen.
+ * being canned while still being the fastest route to the right screen — which
+ * is exactly what design 34 asks for ("honest about what it is").
  */
 enum class SupportStep { Root, Answered, Composing, NoteSent }
 
@@ -62,8 +75,14 @@ data class SupportLine(
     val offersBookings: Boolean = false,
 )
 
-/** A tappable quick reply. */
-data class SupportReply(val label: String, val intent: SupportIntent)
+/**
+ * A tappable branch of the tree.
+ *
+ * [detail] is the second line the design draws under each option ("Change a
+ * date, chase a reply, cancel"). It is what makes a menu of three words usable:
+ * the label says the topic, the detail says what is actually behind it.
+ */
+data class SupportReply(val label: String, val intent: SupportIntent, val detail: String? = null)
 
 /** What the reader can ask for. Closed set — this is a menu, not a parser. */
 enum class SupportIntent { Booking, Safety, Other, TypeItOut, BackToMenu }
@@ -77,7 +96,12 @@ enum class SupportIntent { Booking, Safety, Other, TypeItOut, BackToMenu }
  * dead end, and a dead end is only visible if you can enumerate the states.
  */
 object SupportScript {
-    const val GREETING = "Hi — I'm the Artistant assistant. What can I help you with?"
+    /** What it is, said first (design 34's whole point). */
+    const val GREETING = "I'm a guided assistant, not a person — I can answer common " +
+        "questions right here and hand you to the team when it needs one."
+
+    /** The second bubble: the question the options below answer. */
+    const val PROMPT = "What do you need?"
 
     private const val TYPE_IT_OUT = "I'd rather type it out"
     private const val BACK_TO_MENU = "Back to menu"
@@ -85,10 +109,14 @@ object SupportScript {
     /** Replies for [step]. There is always a way onward — no step returns empty. */
     fun replies(step: SupportStep): List<SupportReply> = when (step) {
         SupportStep.Root -> listOf(
-            SupportReply("I need help with a booking", SupportIntent.Booking),
-            SupportReply("I want to report a safety issue", SupportIntent.Safety),
-            SupportReply("Something else", SupportIntent.Other),
-            SupportReply(TYPE_IT_OUT, SupportIntent.TypeItOut),
+            SupportReply("A booking", SupportIntent.Booking, "Change a date, chase a reply, cancel"),
+            SupportReply(
+                "Safety",
+                SupportIntent.Safety,
+                "Someone asked me to pay off-platform",
+            ),
+            SupportReply("Something else", SupportIntent.Other, "Bugs, billing, account"),
+            SupportReply(TYPE_IT_OUT, SupportIntent.TypeItOut, "Send a note to the team"),
         )
         // After an answer, and after a note is sent, the only moves are "ask
         // something else" and "say it in your own words". The escape hatch is
@@ -182,8 +210,8 @@ class SupportChatViewModel @Inject constructor(
     private var nextId = 0L
 
     init {
-        val greeting = botLine(SupportScript.GREETING)
-        _state.update { it.copy(lines = listOf(greeting)) }
+        val opening = listOf(botLine(SupportScript.GREETING), botLine(SupportScript.PROMPT))
+        _state.update { it.copy(lines = opening) }
     }
 
     fun choose(intent: SupportIntent, bookingsLabel: String) {
@@ -229,23 +257,26 @@ class SupportChatViewModel @Inject constructor(
 }
 
 /**
- * The Artistant Support conversation.
+ * Artistant Support (design 34).
  *
- * Rendered as a thread rather than an FAQ because that is what it is replacing —
- * the reader arrived from the inbox expecting to talk to someone, and a list of
- * links would read as a dead end.
+ * A full screen rather than a sheet: the reader arrived from the inbox's
+ * permanent row expecting a conversation, and a half-height sheet with a
+ * transcript in it reads as a preview of one. It says what it is in its first
+ * sentence, offers three branches as cards, and its one real deep link hands off
+ * to the bookings tab.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SupportChatSheet(
-    onDismiss: () -> Unit,
+fun SupportScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
     bookingsLabel: String = "Bookings",
     onOpenBookings: (() -> Unit)? = null,
     viewModel: SupportChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     val listState = rememberLazyListState()
     val haptics = rememberHaptics()
 
@@ -262,44 +293,53 @@ fun SupportChatSheet(
         if (state.lines.isNotEmpty()) listState.animateScrollToItem(state.lines.lastIndex)
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = colors.bg,
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(colors.page)
+            // Same single source of keyboard movement as the chat — see
+            // ChatScreen and the activity's `adjustResize`.
+            .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
     ) {
-        Column(Modifier.fillMaxWidth().padding(bottom = space.lg)) {
-            Text(
-                "Artistant Support",
-                style = AppTheme.type.headline,
-                color = colors.ink,
-                modifier = Modifier.padding(horizontal = space.xl, vertical = space.sm),
-            )
-            LazyColumn(
-                Modifier.weight(1f, fill = false).fillMaxWidth().padding(horizontal = space.lg),
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(space.sm),
-            ) {
-                items(state.lines, key = { it.id }) { line ->
-                    SupportBubble(
-                        line = line,
-                        bookingsLabel = bookingsLabel,
-                        onOpenBookings = onOpenBookings?.let {
-                            {
-                                it()
-                                onDismiss()
-                            }
-                        },
-                    )
-                }
+        BackHeader(
+            title = "Artistant Support",
+            subtitle = "Booking help, safety and feedback",
+            onBack = onBack,
+            centered = false,
+            modifier = Modifier.padding(horizontal = dimens.component.gutter),
+        )
+        HRule()
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = dimens.component.gutter)
+                .semantics { testTag = "support.transcript" },
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(dimens.space.md, Alignment.Bottom),
+        ) {
+            items(state.lines, key = { it.id }) { line ->
+                SupportBubble(
+                    line = line,
+                    bookingsLabel = bookingsLabel,
+                    onOpenBookings = onOpenBookings,
+                )
             }
-            if (state.composing) {
-                SupportComposer(sending = state.sending, onSend = viewModel::sendNote)
+            item(key = "support.replies") {
+                SupportOptions(
+                    replies = state.replies,
+                    onChoose = { viewModel.choose(it, bookingsLabel) },
+                )
             }
-            SupportReplies(
-                replies = state.replies,
-                onChoose = { viewModel.choose(it, bookingsLabel) },
-            )
         }
+
+        ComposerBar(
+            onSend = viewModel::sendNote,
+            placeholder = "Type a message…",
+            enabled = !state.sending,
+            testTag = "support.composer",
+        )
     }
 }
 
@@ -310,87 +350,122 @@ private fun SupportBubble(
     onOpenBookings: (() -> Unit)?,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = if (line.fromBot) Alignment.Start else Alignment.End,
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(space.sm),
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.sm),
             verticalAlignment = Alignment.Bottom,
         ) {
             if (line.fromBot) {
-                // Brand wash, no face: this is the app talking and it should not
+                // The mark, not a face: this is the app talking and it should not
                 // borrow a person's shape to say so.
                 Box(
-                    Modifier
-                        .size(AppTheme.dimens.size.avatarSm)
-                        .clip(CircleShape)
-                        .background(colors.brandSoft),
+                    Modifier.size(dimens.size.avatarSm),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("A", style = AppTheme.type.monoSmall, color = colors.accentInk)
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(colors.darkest),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("A", style = AppTheme.type.monoPill, color = colors.accent)
+                    }
                 }
             }
             Text(
                 line.text,
-                style = AppTheme.type.callout,
-                color = if (line.fromBot) colors.ink else colors.brandInk,
+                style = AppTheme.type.body,
+                color = if (line.fromBot) colors.ink else colors.onAccent,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(AppTheme.dimens.radii.lg))
-                    .background(if (line.fromBot) colors.bgCard else colors.brand)
-                    .padding(horizontal = space.md, vertical = space.sm),
+                    // A gutter on the FAR side only, so the bubble hugs its own
+                    // content while the opposite edge always shows — that is
+                    // what makes the transcript read as two columns.
+                    .then(
+                        if (line.fromBot) {
+                            Modifier.padding(end = dimens.space.xxl)
+                        } else {
+                            Modifier.padding(start = dimens.space.xxl)
+                        },
+                    )
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = dimens.radii.lg,
+                            topEnd = dimens.radii.lg,
+                            bottomEnd = if (line.fromBot) dimens.radii.lg else dimens.radii.sm,
+                            bottomStart = if (line.fromBot) dimens.radii.sm else dimens.radii.lg,
+                        ),
+                    )
+                    .background(if (line.fromBot) colors.surface3 else colors.accent)
+                    .padding(horizontal = dimens.space.md, vertical = dimens.space.md),
             )
         }
         if (line.offersBookings && onOpenBookings != null) {
             Text(
                 "Go to $bookingsLabel",
-                style = AppTheme.type.footnote,
+                style = AppTheme.type.footnote.copy(fontWeight = FontWeight.Bold),
                 color = colors.accentInk,
                 modifier = Modifier
-                    .padding(top = space.xs, start = AppTheme.dimens.size.avatarSm)
+                    .padding(top = dimens.space.xs, start = dimens.size.avatarSm)
+                    .clip(CircleShape)
                     .clickable(onClick = onOpenBookings)
-                    .padding(space.xs),
+                    .padding(horizontal = dimens.space.sm, vertical = dimens.space.xs)
+                    .semantics { testTag = "support.bookingsLink" },
             )
         }
     }
 }
 
-/** Quick replies, right-aligned so they read as things the reader is about to say. */
+/**
+ * The branch options, as cards (design 34).
+ *
+ * Outlined rather than filled: they are a menu, not the screen's one action, and
+ * four accent buttons stacked would spend the app's single signal four times.
+ * The detail line under each label is what turns three words into a choice.
+ */
 @Composable
-private fun SupportReplies(replies: List<SupportReply>, onChoose: (SupportIntent) -> Unit) {
+private fun SupportOptions(replies: List<SupportReply>, onChoose: (SupportIntent) -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = space.lg, vertical = space.sm),
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(space.sm),
+        Modifier.fillMaxWidth().padding(top = dimens.space.xs),
+        verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
     ) {
         replies.forEach { reply ->
-            Text(
-                reply.label,
-                style = AppTheme.type.footnote,
-                color = colors.ink,
-                textAlign = TextAlign.End,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .border(AppTheme.dimens.size.hairline, colors.line, CircleShape)
+            val shape = RoundedCornerShape(dimens.radii.buttonLg)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .border(dimens.component.focusStroke, colors.hairline, shape)
                     .clickable { onChoose(reply.intent) }
-                    .padding(horizontal = space.lg, vertical = space.sm),
-            )
+                    .padding(horizontal = dimens.space.md, vertical = dimens.space.md)
+                    .semantics { testTag = "support.option.${reply.intent.name}" },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        reply.label,
+                        style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                        color = colors.ink,
+                    )
+                    reply.detail?.let {
+                        Spacer(Modifier.height(dimens.space.xs))
+                        Text(it, style = AppTheme.type.caption, color = colors.ink4)
+                    }
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = colors.lineStrong,
+                    modifier = Modifier.size(dimens.size.iconLg),
+                )
+            }
         }
     }
-}
-
-/** Free-text escape hatch. Owns its own draft so typing doesn't redraw the transcript. */
-@Composable
-private fun SupportComposer(sending: Boolean, onSend: (String) -> Unit) {
-    val space = AppTheme.dimens.space
-    Spacer(Modifier.height(space.xs))
-    MessageComposer(
-        placeholder = "Type your message…",
-        enabled = !sending,
-        onSend = onSend,
-        testTag = "support.composer",
-    )
 }
