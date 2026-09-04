@@ -352,6 +352,18 @@ data class AppType(
         fontFamily = MonoFamily, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
     ),
     /**
+     * The "pm" under the clock on a day's schedule row (screens 36 and 78, which
+     * draw the pair identically: the clock at 12, the meridiem at 11).
+     *
+     * Spelled out rather than aliased to [monoLabel], which is also 11: that one
+     * is the eyebrow and carries +0.12em of tracking for uppercase runs. This is
+     * one lowercase word sitting under a numeral, and eyebrow tracking on it
+     * reads as a gap between the p and the m.
+     */
+    val monoMeridiem: TextStyle = TextStyle(
+        fontFamily = MonoFamily, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+    ),
+    /**
      * A date in the dashboard's 14-day availability strip (screens 85 / 86).
      *
      * The smallest numeral in the app, and the design's own 10px: fourteen cells

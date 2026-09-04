@@ -679,12 +679,7 @@ fun DayEventRow(
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(time, style = AppTheme.type.monoSmall, color = colors.ink4)
-            meridiem?.let {
-                Text(it, style = AppTheme.type.monoSmall, color = colors.ink3)
-            }
-        }
+        ClockColumn(time, meridiem)
         Box(
             Modifier
                 .width(dimens.size.hairline * 3)
@@ -721,7 +716,37 @@ fun DayEventRow(
 }
 
 /**
- * Split "8:00 PM" into the clock and its meridiem, for [DayEventRow]'s stacked
+ * The clock at the leading edge of a day's schedule row, stacked: "8:00" over
+ * "pm" (design screens 36 and 78, which draw it identically).
+ *
+ * Two lines and an INTRINSIC width, both from the design, and both load-bearing.
+ * A gig row that printed "8:00 PM" on one line inside a fixed 62dp column
+ * clipped it — mono at 12sp needs about 92dp for seven glyphs — and widening the
+ * column to fit the longest possible label ("11:30 AM") would spend that width
+ * on every row that doesn't need it. Split, the widest line is four glyphs.
+ *
+ * Feed it from [splitClockLabel]; a label with no readable meridiem passes null
+ * and prints on one line.
+ */
+@Composable
+fun ClockColumn(time: String, meridiem: String?, modifier: Modifier = Modifier) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(time, style = AppTheme.type.monoSmall, color = colors.ink4)
+        meridiem?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                style = AppTheme.type.monoMeridiem,
+                color = colors.ink3,
+                modifier = Modifier.padding(top = dimens.space.xs / 2),
+            )
+        }
+    }
+}
+
+/**
+ * Split "8:00 PM" into the clock and its meridiem, for [ClockColumn]'s stacked
  * time column. Anything that isn't two tokens comes back whole with no
  * meridiem — a label we cannot read is still a label, and stacking half of it is
  * worse than printing all of it on one line.
