@@ -325,6 +325,14 @@ data class Components(
      * party inside a card rather than inside a line of text.
      */
     val rowAvatar: Dp = 40.dp,
+    /**
+     * The mono time column down the left of a gig row (design screen 36).
+     *
+     * Fixed rather than intrinsic so every row's act name starts on the same
+     * vertical: "8:00 PM" and "11:30 AM" are different widths, and a ragged left
+     * edge is what makes a day's schedule read as a list rather than as a table.
+     */
+    val gigTimeColumn: Dp = 62.dp,
     /** A header status pill ("● Taking gigs") — its own padding, not a chip's. */
     val pillPadH: Dp = 13.dp,
     val pillPadV: Dp = 8.dp,

@@ -4,10 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.BookingRepositoryError
 import `in`.artistant.app.data.repository.BookingsRepository
-import `in`.artistant.app.designsystem.component.monthLabelFromDateLabel
 import `in`.artistant.app.feature.artisthome.artistClientDisplayName
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,12 +15,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import javax.inject.Inject
 
 data class ArtistGigListItem(
     val booking: Booking,
     val clientName: String,
-    val monthKey: String,
+    /**
+     * The gig's calendar day, parsed ONCE here rather than per composition.
+     *
+     * Screen 36 indexes by month and reads by day, so every frame asks "which
+     * day is this on" for every row; `dayOfMonthInMonth` re-parsed the label
+     * each time. All three are null together when `date_label` is unreadable —
+     * such a row still lists, it just cannot be placed on the grid.
+     */
+    val year: Int? = null,
+    val month: Int? = null,
+    val dayOfMonth: Int? = null,
 )
 
 data class ArtistGigsUiState(
@@ -67,10 +78,13 @@ class ArtistGigsViewModel @Inject constructor(
                 val bookings = bookingsRepository.listForArtist()
                     .filter { it.status != BookingStatus.Cancelled }
                 val items = bookings.map { b ->
+                    val day = BookingDateFormat.parseLabel(b.date)
                     ArtistGigListItem(
                         booking = b,
                         clientName = artistClientDisplayName(b),
-                        monthKey = monthLabelFromDateLabel(b.date),
+                        year = day?.get(Calendar.YEAR),
+                        month = day?.get(Calendar.MONTH),
+                        dayOfMonth = day?.get(Calendar.DAY_OF_MONTH),
                     )
                 }
                 if (gen != generation) return@launch
@@ -84,7 +98,4 @@ class ArtistGigsViewModel @Inject constructor(
             }
         }
     }
-
-    fun groupedByMonth(): List<Pair<String, List<ArtistGigListItem>>> =
-        _state.value.items.groupBy { it.monthKey }.toList()
 }
