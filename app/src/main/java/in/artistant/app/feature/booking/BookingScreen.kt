@@ -1,15 +1,12 @@
 package `in`.artistant.app.feature.booking
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,8 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,37 +23,51 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.ArtistPackage
-import `in`.artistant.app.designsystem.component.DateCell
+import `in`.artistant.app.designsystem.component.AppTextField
+import `in`.artistant.app.designsystem.component.Chip
 import `in`.artistant.app.designsystem.component.EmptyState
-import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.dateChipLines
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.theme.AppTheme
-import `in`.artistant.app.domain.artist.PackagePricing
 
 /**
- * Booking compose — package, date strip, time grid, venue and guests.
+ * Screen 05 — "When's the show?", step one of the two-step booking funnel.
  *
- * The page is a run of small-caps section labels over the controls they name;
- * the only card chrome on it belongs to things the client picks between (the
- * package tiers, the date cards) and to the one grouped form block at the
- * bottom. Everything the client chose lands in [BookingDraftStore] on Continue,
- * which is what Checkout sends — this screen holds the whole request.
+ * The design's note is the whole shape of this page: **the calendar is the source
+ * of truth.** Artists maintain availability in their studio, so a host never even
+ * sees a dead date offered — closed days are drawn dim and are inert, and the
+ * grid opens on the first month the artist actually has something in.
+ *
+ * The old screen asked the same questions as a run of small-caps labels over a
+ * horizontally scrolling 14-day strip. Two things changed and both are the
+ * design's:
+ *
+ * - **A month, not a fortnight.** A strip can only offer what fits in two weeks,
+ *   which is the wrong horizon for a wedding. The grid can be stepped, and the
+ *   step is bounded at the current month because there is nothing to book behind
+ *   it.
+ * - **The step count is the chrome.** "Step 1 of 2" sits in the bar and the real
+ *   headline is in the scroll, so the funnel reads as a form you are partway
+ *   through rather than as a page called "Book".
+ *
+ * Time, venue and guests stay on this step. The design draws 05 as date +
+ * package and 06 as a read-only review, so these three have nowhere else to be
+ * asked — and `bookings.start_datetime` is composed from the start time, so it is
+ * not optional. They sit under the package list, in the design's field style.
  */
 @Composable
 fun BookingScreen(
@@ -69,18 +78,38 @@ fun BookingScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
+    val gutter = dimens.component.gutter
 
     when {
         state.isLoading && state.artist == null -> {
-            Box(modifier.fillMaxSize().background(colors.bg), contentAlignment = Alignment.Center) {
+            Box(
+                modifier
+                    .fillMaxSize()
+                    .background(colors.surface),
+                contentAlignment = Alignment.Center,
+            ) {
                 CircularProgressIndicator(color = colors.accentInk)
             }
         }
         state.artist == null -> {
-            Column(modifier.fillMaxSize().background(colors.bg)) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.ink)
+            Column(
+                modifier
+                    .fillMaxSize()
+                    .background(colors.surface),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = gutter, vertical = space.sm),
+                ) {
+                    IconCircle(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onBack,
+                        size = dimens.component.iconCircleSm,
+                    )
                 }
                 EmptyState(
                     title = "Artist not found",
@@ -95,47 +124,140 @@ fun BookingScreen(
             val selectedPkg = artist.packages.getOrNull(state.packageIndex)
             val fee = selectedPkg?.price ?: artist.price
             RevealOnAppear {
-                Column(modifier.fillMaxSize().background(colors.bg)) {
-                    FunnelHeader(title = "Book ${artist.name}", onBack = onBack)
+                Column(
+                    modifier
+                        .fillMaxSize()
+                        .background(colors.surface),
+                ) {
+                    FunnelStepBar(step = "Step 1 of 2", onClose = onBack)
                     Column(
                         Modifier
                             .weight(1f)
                             .verticalScroll(rememberScrollState())
-                            .padding(top = space.md, bottom = space.xl),
-                        verticalArrangement = Arrangement.spacedBy(space.xl),
+                            .padding(horizontal = gutter)
+                            .padding(top = space.lg, bottom = space.xl),
                     ) {
-                        PackageSection(
+                        Text(
+                            "When's the show?",
+                            style = AppTheme.type.screenTitle,
+                            color = colors.ink,
+                        )
+                        Text(
+                            // Says which fact the dimming carries. "Greyed dates"
+                            // with no sentence is a colour nobody can read.
+                            "Greyed dates are already booked out.",
+                            style = AppTheme.type.subtitle,
+                            color = colors.ink4,
+                            modifier = Modifier.padding(top = space.sm / 2),
+                        )
+                        FunnelCalendar(
+                            monthLabel = state.monthLabel,
+                            days = state.monthDays,
+                            selectableDays = state.selectableDays,
+                            selectedDay = state.selectedDay,
+                            canGoBack = state.canStepBack,
+                            onPrevMonth = { viewModel.stepMonth(-1) },
+                            onNextMonth = { viewModel.stepMonth(1) },
+                            onDay = viewModel::selectDay,
+                            modifier = Modifier.padding(top = space.xl),
+                        )
+                        if (state.selectableDays.isEmpty()) {
+                            // Loaded-and-nothing-open is not the same as
+                            // still-loading, and an empty month with no sentence
+                            // reads as a broken grid. Both the fact and the way
+                            // out (step forward) are stated.
+                            Text(
+                                "${artist.name} has nothing open in ${state.monthLabel}. " +
+                                    "Try the next month.",
+                                style = AppTheme.type.subtitle,
+                                color = colors.ink3,
+                                modifier = Modifier.padding(top = space.md),
+                            )
+                        }
+
+                        SectionTitle("Package", Modifier.padding(top = space.xl))
+                        PackageList(
                             packages = artist.packages,
                             fallbackPrice = artist.price,
                             selectedIndex = state.packageIndex,
                             onSelect = viewModel::selectPackage,
+                            modifier = Modifier.padding(top = space.md),
                         )
-                        DateSection(
-                            chips = state.dateChips,
-                            selectedEpochMs = state.selectedDateEpochMs,
-                            onSelect = viewModel::selectDate,
-                        )
-                        TimeSection(
+
+                        SectionTitle("Start time", Modifier.padding(top = space.xl))
+                        TimeSlots(
                             slots = state.timeSlots,
                             selected = state.selectedTime,
                             onSelect = viewModel::selectTime,
+                            modifier = Modifier.padding(top = space.md),
                         )
-                        VenueSection(
-                            venue = state.venue,
-                            onVenueChange = viewModel::setVenue,
+
+                        SectionTitle("Venue & guests", Modifier.padding(top = space.xl))
+                        AppTextField(
+                            value = state.venue,
+                            onValueChange = viewModel::setVenue,
+                            label = "Venue",
+                            hint = "e.g. Hard Rock Café, Bengaluru",
+                            modifier = Modifier.padding(top = space.md),
+                        )
+                        GuestsRow(
                             guests = state.guests,
-                            onGuestsChange = viewModel::setGuests,
-                            notes = state.venueNotes,
-                            onNotesChange = viewModel::setVenueNotes,
+                            onChange = viewModel::setGuests,
+                            modifier = Modifier.padding(top = space.lg),
                         )
-                        SummarySection(fee = fee)
+                        AppTextField(
+                            value = state.venueNotes,
+                            onValueChange = viewModel::setVenueNotes,
+                            label = "Anything they should know?",
+                            hint = "Gate, parking, load-in… (optional)",
+                            singleLine = false,
+                            minHeight = dimens.funnel.notesField,
+                            modifier = Modifier.padding(top = space.lg),
+                        )
+                        Text(
+                            // Live count on a field the ViewModel bounds — the
+                            // cap is enforced in the setter, so this is the only
+                            // warning a paste gets.
+                            "${state.venueNotes.length} / $VENUE_NOTES_MAX",
+                            style = AppTheme.type.footnote,
+                            color = AppTheme.colors.ink3,
+                            modifier = Modifier
+                                .align(Alignment.End)
+                                .padding(top = space.sm),
+                        )
                     }
                     CtaBar {
-                        FunnelCta(
-                            text = "Continue",
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(space.md),
+                        ) {
+                            Text(
+                                bookingSummaryLine(
+                                    dateLabel = state.selectedDateLabel,
+                                    time = state.selectedTime,
+                                    duration = selectedPkg?.duration.orEmpty(),
+                                ),
+                                style = AppTheme.type.subtitle,
+                                color = colors.ink4,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                formatInr(fee),
+                                style = AppTheme.type.subtitle.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                                color = colors.ink,
+                                maxLines = 1,
+                            )
+                        }
+                        PrimaryButton(
+                            text = "Request this date",
                             onClick = { if (viewModel.onContinue()) onContinue() },
                             fullWidth = true,
-                            enabled = state.canContinue && state.selectedTime.isNotBlank(),
+                            enabled = state.canContinue,
+                            modifier = Modifier.padding(top = space.md),
                         )
                     }
                 }
@@ -145,139 +267,107 @@ fun BookingScreen(
 }
 
 /**
- * Section header + body, on the page grid.
+ * "Sat 12 Oct · 8:00 pm · 90 min" — the dock's reminder of what is about to be
+ * asked for.
  *
- * Every section on this screen is the same shape, so it is one composable: the
- * label is a small-caps caption in `ink3`, never a sentence-case headline. The
- * label naming a control has to sit under the control it belongs to in the
- * visual hierarchy — a headline-weight title competes with the package names and
- * the time slots, which are the things being read.
- *
- * [bleed] drops the horizontal page padding for the body so a horizontally
- * scrolling strip can run to both screen edges while its label stays on grid.
+ * Blank parts are dropped rather than joined, so a state with no date yet reads
+ * as the parts that ARE decided instead of as a line of dangling separators. An
+ * empty line falls back to the instruction, because a dock with a live price and
+ * no words above it invites the tap the disabled CTA is about to refuse.
  */
-@Composable
-private fun Section(
-    label: String,
-    modifier: Modifier = Modifier,
-    bleed: Boolean = false,
-    content: @Composable () -> Unit,
-) {
-    val space = AppTheme.dimens.space
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(space.md)) {
-        SectionLabel(label, modifier = Modifier.padding(horizontal = space.lg))
-        if (bleed) {
-            content()
-        } else {
-            Box(Modifier.padding(horizontal = space.lg)) { content() }
-        }
-    }
+internal fun bookingSummaryLine(dateLabel: String, time: String, duration: String): String {
+    val parts = listOf(dateLabel, time, duration).map { it.trim() }.filter { it.isNotEmpty() }
+    return if (parts.isEmpty()) "Pick a date to continue" else parts.joinToString(" · ")
 }
 
 @Composable
-private fun PackageSection(
+private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, style = AppTheme.type.sectionTitle, color = AppTheme.colors.ink, modifier = modifier)
+}
+
+/** The design's field label: 12.5 semibold `ink4`, sitting on its own control. */
+@Composable
+private fun FieldLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+        color = AppTheme.colors.ink4,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun PackageList(
     packages: List<ArtistPackage>,
     fallbackPrice: Int,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val dimens = AppTheme.dimens
+    if (packages.isEmpty()) {
+        // An artist with no published tier still has a price, and the funnel
+        // still sends at it — the row states that rather than leaving a gap
+        // where the choice would be.
+        Text(
+            "Custom · ${formatInr(fallbackPrice)}",
+            style = AppTheme.type.body,
+            color = AppTheme.colors.ink2,
+            modifier = modifier,
+        )
+        return
+    }
+    Column(
+        modifier,
+        verticalArrangement = Arrangement.spacedBy(dimens.size.optionCardGap),
+    ) {
+        packages.forEachIndexed { index, pkg ->
+            PackageChoiceRow(
+                name = pkg.name,
+                includes = packageIncludesLine(pkg),
+                price = pkg.price,
+                selected = index == selectedIndex,
+                onClick = { onSelect(index) },
+            )
+        }
+    }
+}
+
+/**
+ * The artist's published start times as chips.
+ *
+ * A wrapping row of the library [Chip] rather than the old three-across grid of
+ * bordered pills: the light design has exactly one chip shape, and a second one
+ * that exists only here would be a fork of it. The list is short and
+ * artist-published, so it wraps rather than scrolls — a slot that scrolled out of
+ * sight is a slot nobody picks.
+ */
+@Composable
+private fun TimeSlots(
+    slots: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val space = AppTheme.dimens.space
-    Section("Pick a package") {
-        if (packages.isEmpty()) {
-            Text(
-                "Custom · ${formatInr(fallbackPrice)}",
-                style = AppTheme.type.body,
-                color = AppTheme.colors.ink2,
-            )
-        } else {
-            // Whole-set question, asked once: rows already on the server carry
-            // `popular = true` on every package, and a badge every row shares
-            // distinguishes nothing.
-            val badgesMeanSomething = PackagePricing.popularBadgeIsMeaningful(packages)
-            // `optionCardGap`, not `space.md`: the cards in a picker are one
-            // block of choices, and the reference stacks them two units tighter
-            // than the ramp's nearest step. Paired with `optionCardPad` — the
-            // two together are what the reference's row pitch is made of.
-            Column(verticalArrangement = Arrangement.spacedBy(AppTheme.dimens.size.optionCardGap)) {
-                packages.forEachIndexed { index, pkg ->
-                    PackageOptionRow(
-                        pkg = pkg,
-                        selected = index == selectedIndex,
-                        showPopularBadge = badgesMeanSomething && pkg.popular,
-                        onClick = { onSelect(index) },
-                    )
-                }
-            }
-        }
+    if (slots.isEmpty()) {
+        Text(
+            "No start times left today — pick another date.",
+            style = AppTheme.type.subtitle,
+            color = AppTheme.colors.ink3,
+            modifier = modifier,
+        )
+        return
     }
-}
-
-/**
- * The date strip: a legend, then a run of portrait date cards that bleeds to
- * both screen edges so a partly-visible card advertises the scroll.
- *
- * The cards come from [DateCell] rather than a local lookalike, and their two
- * lines come from [dateChipLines] rather than from slicing a rendered label —
- * the shipped version carved the day line out with `substringAfter(", ").take(6)`,
- * which truncated real dates.
- */
-@Composable
-private fun DateSection(chips: List<DateChip>, selectedEpochMs: Long, onSelect: (DateChip) -> Unit) {
-    val space = AppTheme.dimens.space
-    Section("Pick a date", bleed = true) {
-        Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-            AvailabilityLegend(Modifier.padding(horizontal = space.lg))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = space.lg),
-                horizontalArrangement = Arrangement.spacedBy(space.sm),
-            ) {
-                chips.forEach { chip ->
-                    DateCell(
-                        lines = dateChipLines(chip.epochMs),
-                        isSelected = chip.epochMs == selectedEpochMs,
-                        isFree = chip.available,
-                        enabled = chip.available,
-                        onClick = { onSelect(chip) },
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(space.sm)) {
+        slots.chunked(TIME_COLUMNS).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                row.forEach { slot ->
+                    Chip(
+                        label = slot,
+                        selected = slot == selected,
+                        onClick = { onSelect(slot) },
                     )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Time slots as a three-across grid of equal-width mono pills.
- *
- * Rows are chunked by hand rather than delegating to a lazy grid because this
- * screen is one long scroll and a nested scrollable inside it cannot measure.
- * `weight(1f)` per cell is what makes the columns line up; a `FlowRow` of
- * intrinsic-width pills produced a ragged right edge on a screen whose whole
- * rhythm is the page grid.
- */
-@Composable
-private fun TimeSection(slots: List<String>, selected: String, onSelect: (String) -> Unit) {
-    val space = AppTheme.dimens.space
-    Section("Pick a time") {
-        Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-            slots.chunked(TIME_COLUMNS).forEach { row ->
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(space.md),
-                ) {
-                    row.forEach { slot ->
-                        TimePill(
-                            slot = slot,
-                            selected = slot == selected,
-                            onClick = { onSelect(slot) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    // Keep the last row's cells the same width as a full row's
-                    // instead of letting two slots stretch across three columns.
-                    repeat(TIME_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -286,103 +376,38 @@ private fun TimeSection(slots: List<String>, selected: String, onSelect: (String
 
 private const val TIME_COLUMNS = 3
 
-@Composable
-private fun TimePill(
-    slot: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    val shape = RoundedCornerShape(dimens.radii.md)
-    Box(
-        modifier
-            .clip(shape)
-            // Unselected is transparent, not a filled surface: a grid of filled
-            // chips gives every slot the weight of the chosen one.
-            .background(if (selected) colors.brand else Color.Transparent)
-            .border(
-                dimens.size.hairline,
-                if (selected) Color.Transparent else colors.lineSoft,
-                shape,
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = dimens.space.md),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            slot,
-            style = AppTheme.type.monoChip,
-            color = if (selected) colors.brandInk else colors.ink,
-            textAlign = TextAlign.Center,
-        )
-    }
-}
-
 /**
- * Venue, head count and directions, grouped inside one card.
+ * Head count: the number, and a joined −/+ capsule to nudge it.
  *
- * These three are the only free-text/number entry on the screen, and grouping
- * them is what stops the page reading as an endless form: everything above is a
- * choice between rendered options, this is the part you type. The card is the
- * boundary of "your details".
+ * One capsule split by a hairline, not two buttons: two buttons read as two
+ * unrelated actions, and the joined shape reads as one value being nudged, which
+ * is what it is.
  */
 @Composable
-private fun VenueSection(
-    venue: String,
-    onVenueChange: (String) -> Unit,
-    guests: Int,
-    onGuestsChange: (Int) -> Unit,
-    notes: String,
-    onNotesChange: (String) -> Unit,
-) {
+private fun GuestsRow(guests: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val space = dimens.space
-    Section("Venue & guests") {
-        Column(
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
+            FieldLabel("Guests")
+            Text("$guests", style = AppTheme.type.sectionTitle, color = colors.ink)
+        }
+        Row(
             Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(dimens.radii.lg))
-                .background(colors.bgCard)
-                .padding(space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.lg),
+                .height(IntrinsicSize.Min)
+                .clip(CircleShape)
+                .background(colors.surface2),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            FieldLabel("Venue")
-            SunkenTextField(
-                value = venue,
-                onValueChange = onVenueChange,
-                placeholder = "e.g. Hard Rock Café, Bangalore",
+            StepperButton(Icons.Filled.Remove, "Fewer guests") { onChange(guests - GUEST_STEP) }
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .padding(vertical = dimens.space.sm)
+                    .width(dimens.size.hairline)
+                    .background(colors.hairline),
             )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(space.xs)) {
-                    FieldLabel("Guests")
-                    Text("$guests", style = AppTheme.type.monoLarge, color = colors.ink)
-                }
-                GuestStepper(
-                    onDecrement = { onGuestsChange(guests - GUEST_STEP) },
-                    onIncrement = { onGuestsChange(guests + GUEST_STEP) },
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    FieldLabel("Directions for the artist", modifier = Modifier.weight(1f))
-                    // Live counter on a bounded field — the cap is enforced in
-                    // the setter, so the count is the only warning a paste gets.
-                    Text(
-                        "${notes.length}/$VENUE_NOTES_MAX",
-                        style = AppTheme.type.monoMicroSoft,
-                        color = colors.ink3,
-                    )
-                }
-                SunkenTextField(
-                    value = notes,
-                    onValueChange = onNotesChange,
-                    placeholder = "Gate, parking, load-in… (optional)",
-                    minLines = 2,
-                )
-            }
+            StepperButton(Icons.Filled.Add, "More guests") { onChange(guests + GUEST_STEP) }
         }
     }
 }
@@ -391,77 +416,12 @@ private fun VenueSection(
 private const val GUEST_STEP = 10
 
 @Composable
-private fun FieldLabel(text: String, modifier: Modifier = Modifier) {
-    Text(text, style = AppTheme.type.caption, color = AppTheme.colors.ink3, modifier = modifier)
-}
-
-/**
- * An input well: a darker fill inside the card, no border. The card already drew
- * the boundary — a second outline inside it is chrome on chrome.
- */
-@Composable
-private fun SunkenTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    minLines: Int = 1,
-) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        textStyle = AppTheme.type.body.copy(color = colors.ink),
-        cursorBrush = SolidColor(colors.brand),
-        minLines = minLines,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(dimens.radii.md))
-            .background(colors.bgSoft)
-            .padding(horizontal = dimens.space.md, vertical = dimens.space.md),
-        decorationBox = { inner ->
-            if (value.isEmpty()) {
-                Text(placeholder, style = AppTheme.type.body, color = colors.ink3)
-            }
-            inner()
-        },
-    )
-}
-
-/**
- * A joined −/+ segmented control: one capsule split by a hairline, not two
- * separate buttons. Two buttons read as two unrelated actions; the joined shape
- * reads as one value being nudged, which is what it is.
- */
-@Composable
-private fun GuestStepper(onDecrement: () -> Unit, onIncrement: () -> Unit) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Row(
-        Modifier
-            .height(IntrinsicSize.Min)
-            .clip(CircleShape)
-            .background(colors.bgSoft),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StepperButton(Icons.Filled.Remove, "Fewer guests", onDecrement)
-        Box(
-            Modifier
-                .fillMaxHeight()
-                .padding(vertical = dimens.space.sm)
-                .width(dimens.size.hairline)
-                .background(colors.line),
-        )
-        StepperButton(Icons.Filled.Add, "More guests", onIncrement)
-    }
-}
-
-@Composable
 private fun StepperButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     val dimens = AppTheme.dimens
     Box(
         Modifier
             .size(width = dimens.size.controlMin, height = dimens.size.rowMin)
+            .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -471,25 +431,5 @@ private fun StepperButton(icon: ImageVector, label: String, onClick: () -> Unit)
             tint = AppTheme.colors.ink,
             modifier = Modifier.size(dimens.size.iconLg),
         )
-    }
-}
-
-/**
- * The artist's quoted fee, and only that. v1 is a matchmaker: there is no
- * platform fee or GST line to show, because there is no payment behind it.
- */
-@Composable
-private fun SummarySection(fee: Int) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(
-        Modifier.padding(horizontal = space.lg),
-        verticalArrangement = Arrangement.spacedBy(space.lg),
-    ) {
-        HRule()
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Artist fee", style = AppTheme.type.callout, color = colors.ink2)
-            Text(formatInr(fee), style = AppTheme.type.monoMedium, color = colors.accentInk)
-        }
     }
 }
