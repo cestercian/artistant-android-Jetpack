@@ -8,7 +8,6 @@ import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.domain.auth.ReturningLoginRoute
-import `in`.artistant.app.domain.auth.authAdvanceKey
 import `in`.artistant.app.domain.auth.returningLoginRoute
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.AppPreferences
@@ -50,7 +49,9 @@ class RootViewModel @Inject constructor(
     val profileHydrationError: StateFlow<String?> = _profileHydrationError
 
     // Tracks the (uuid, generation) we last routed for so we don't re-fetch on every
-    // recomposition — the iOS `.task(id: authAdvanceKey)` equivalent.
+    // recomposition — the iOS `.task(id: authAdvanceKey)` equivalent. [routingStep] owns the
+    // rule; null means "not routed for anyone", which is where every non-authenticated status
+    // leaves it so a recovered session routes again.
     private var lastRoutedKey: String? = null
 
     /**
@@ -80,12 +81,14 @@ class RootViewModel @Inject constructor(
             // changes — folding the generation in is what advances a same-uuid re-auth.
             combine(session.sessionStatus, session.signInGeneration) { status, gen -> status to gen }
                 .collect { (status, gen) ->
+                    // Which key we hold afterwards, and whether this status starts a pass.
+                    // Pure and tested — including "a refresh failure forgets the key, so the
+                    // recovery re-routes" (see [routingStep]).
+                    val step = routingStep(status, gen, lastRoutedKey)
+                    lastRoutedKey = step.key
                     when (status) {
                         is SessionStatus.Authenticated -> {
-                            val uid = status.session.user?.id?.lowercase()
-                            val key = authAdvanceKey(uid, gen)
-                            if (key != lastRoutedKey) {
-                                lastRoutedKey = key
+                            if (step.route) {
                                 // LAUNCHED, not awaited. Awaiting it here parked this
                                 // collector inside `fetchWithRetry`, so the sign-out
                                 // emission queued behind it and could not reach the
@@ -110,8 +113,12 @@ class RootViewModel @Inject constructor(
                             // pass, bump the generation, or clear the profile. Doing
                             // that on a RefreshFailure is what turned a token refresh
                             // that could not reach the server into a sign-out.
+                            //
+                            // The routing KEY is a different question and [routingStep]
+                            // already answered it above: every non-authenticated status
+                            // forgets it, so whatever a pass settled during the outage is
+                            // re-decided the moment the session is authenticated again.
                             if (status is SessionStatus.NotAuthenticated) {
-                                lastRoutedKey = null
                                 // A pass still in flight belongs to the session that just
                                 // ended: stop it and invalidate its writes (routingGeneration).
                                 routingJob?.cancel()

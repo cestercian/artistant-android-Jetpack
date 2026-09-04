@@ -76,18 +76,20 @@ class ArtistProfileReportTest {
     }
 
     @Test
-    fun `a landed report clears the failure and raises a receipt`() {
+    fun `a landed retry clears the banner it retried`() {
+        // Sent leaves nothing in the state — its receipt is a toast on the app's one host
+        // — but it must still take the loss down: the report is no longer lost.
         val started = ArtistProfileUiState(failedReport = pending).startingReport()!!
         val settled = started.settlingReport(ReportOutcome.Sent, pending, superseded = false)
         assertNull("the loss is over — it must not sit under the receipt", settled.failedReport)
-        assertEquals(ReportOutcome.Sent, settled.reportOutcome)
     }
 
     @Test
     fun `a queued report is a receipt, not a loss`() {
-        val settled = ArtistProfileUiState(isSubmittingReport = true)
+        // Queued is a soft-fail into the local log, and screen 56's note says so plainly.
+        // It is NOT the failure banner: something is holding the report.
+        val settled = ArtistProfileUiState(isSubmittingReport = true, failedReport = pending)
             .settlingReport(ReportOutcome.Queued, pending, superseded = false)
-        assertEquals(ReportOutcome.Queued, settled.reportOutcome)
         assertNull(settled.failedReport)
     }
 
@@ -96,7 +98,9 @@ class ArtistProfileReportTest {
         val settled = ArtistProfileUiState(isSubmittingReport = true)
             .settlingReport(ReportOutcome.Failed, pending, superseded = false)
         assertEquals(pending, settled.failedReport)
-        assertNull("Failed never toasts — it is a state with an action", settled.reportOutcome)
+        // The other half of "not a toast" is `reportToast(Failed) == null`, which
+        // ArtistProfileFactsTest holds — the two together are what stops one lost report
+        // from raising a banner AND a receipt that contradicts it.
     }
 
     @Test
@@ -107,7 +111,17 @@ class ArtistProfileReportTest {
         val discarded = ArtistProfileUiState(isSubmittingReport = true, failedReport = null)
         val settled = discarded.settlingReport(ReportOutcome.Failed, pending, superseded = true)
         assertNull("a discarded banner must not come back from the dead", settled.failedReport)
-        assertNull(settled.reportOutcome)
+        assertFalse(settled.isSubmittingReport)
+    }
+
+    @Test
+    fun `a superseded landing leaves the standing banner alone`() {
+        // The mirror of the case above, and the reason `superseded` returns early rather
+        // than clearing: a stale Sent must not take down a banner raised by the report
+        // that replaced it.
+        val standing = ArtistProfileUiState(isSubmittingReport = true, failedReport = pending)
+        val settled = standing.settlingReport(ReportOutcome.Sent, pending, superseded = true)
+        assertEquals(pending, settled.failedReport)
         assertFalse(settled.isSubmittingReport)
     }
 }

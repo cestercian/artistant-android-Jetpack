@@ -183,9 +183,11 @@ internal fun ArtistProfileUiState.startingReport(): ArtistProfileUiState? =
  * from is how a discarded banner comes back from the dead.
  *
  * A [ReportOutcome.Failed] is durable state with the reader's own words kept for
- * the retry, never a toast; the other two are momentary and toast-shaped. They are
- * mutually exclusive: whichever is set clears the other, so the page can never show
- * a receipt and a loss for the same report.
+ * the retry, never a toast, so it is the only outcome that lands in the state at
+ * all. The other two are momentary and toast-shaped: [ArtistProfileFacts.reportToast]
+ * raises them on the app's single host and they leave nothing here. They must still
+ * CLEAR a standing banner — a retry that lands is the end of the loss it retried —
+ * which is what the last branch is for.
  */
 internal fun ArtistProfileUiState.settlingReport(
     outcome: ReportOutcome,
@@ -195,8 +197,7 @@ internal fun ArtistProfileUiState.settlingReport(
     val settled = copy(isSubmittingReport = false)
     return when {
         superseded -> settled
-        outcome == ReportOutcome.Failed ->
-            settled.copy(failedReport = pending, reportOutcome = null)
-        else -> settled.copy(reportOutcome = outcome, failedReport = null)
+        outcome == ReportOutcome.Failed -> settled.copy(failedReport = pending)
+        else -> settled.copy(failedReport = null)
     }
 }

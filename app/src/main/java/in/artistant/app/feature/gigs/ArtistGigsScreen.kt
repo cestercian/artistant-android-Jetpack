@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.designsystem.component.ClockColumn
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.MonthCalendarHeader
 import `in`.artistant.app.designsystem.component.MonthDayGrid
@@ -44,6 +45,7 @@ import `in`.artistant.app.designsystem.component.bookingStatusTone
 import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.component.selectedDayLabel
+import `in`.artistant.app.designsystem.component.splitClockLabel
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -261,12 +263,11 @@ private fun GigDayRow(
             .padding(dimens.component.cardPad),
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
     ) {
-        Text(
-            booking.time.takeIf { it.isNotBlank() } ?: "—",
-            style = AppTheme.type.monoCount,
-            color = colors.ink2,
-            modifier = Modifier.width(dimens.component.gigTimeColumn),
-        )
+        // "8:00" over "pm", the way design 36 draws it — see [ClockColumn]. It
+        // was one 22sp line inside a fixed 62dp column, which is not wide enough
+        // for any evening slot the booking flow can produce.
+        val (clock, meridiem) = splitClockLabel(booking.time)
+        ClockColumn(clock.takeIf { it.isNotBlank() } ?: "—", meridiem)
         Box(
             Modifier
                 .width(dimens.size.stroke)

@@ -239,3 +239,47 @@ compile-only build.
   need a device/AVD (Macrobenchmark); the JVM unit net is the current regression
   guard. The AndroidX/Compose *library* profiles already ship in their AARs and
   are installed by `profileinstaller` (wired in `app/build.gradle.kts`).
+
+---
+
+## 10. Debug screen harness (`-e uitest`)
+
+How anyone LOOKS at a screen on a device without a real account or real rows.
+Debug source set only (`app/src/debug/java/in/artistant/app/harness/`), so a
+release artifact does not contain the flags, the fixtures or the fakes — the
+code is absent, not disabled. Flag names mirror the iOS XCUITest harness, and
+arrive as one comma-separated string extra because adb has no argv:
+
+```bash
+adb install -r -t app/build/outputs/apk/dev/debug/app-dev-debug.apk
+adb shell am start -n in.artistant.app/.MainActivity \
+  -e uitest "reset,skip-signup-as-artist,seed-fixture-data,seed-open-quote"
+adb exec-out screencap -p > shot.png
+```
+
+| Flag | What it does | Why it needs a flag |
+|---|---|---|
+| `reset` | Start from a clean slate (no cached harness state) | |
+| `skip-signup-as-client` / `skip-signup-as-artist` | Boot signed in, land on that role's tabs | Every screen behind the auth gate needs a session |
+| `seed-fixture-data` | Swap the Supabase repositories for seeded in-memory fakes | No network on the emulator. **Implied by every other `seed-*` flag** — a flag that asks for rows switches on the only thing that can hold them |
+| `seed-pending-request` | +1 `pending_confirm` booking | Drives the artist Accept/Decline surface without disturbing the baseline |
+| `seed-open-quote` | +1 bookingless thread and the `open` gig request standing in it | `ThreadQuote.pick` refuses a thread carrying a `booking_id`, and the baseline thread has one — so the in-thread quote card, its Accept/Counter dock and the narrated accept (designs 08 / 70) have no other path |
+| `seed-disputed-booking` | +1 `disputed` booking (design 96) | Support sets `disputed`; neither client can, so no sequence of taps produces one |
+| `seed-read-only-booking` | +1 booking whose status decodes to `Unknown`, rendered read-only (design 97) | The state means "the server is ahead of this build", which needs a server ahead of this build |
+| `seed-blocked-user` | Boot with the fixture counterparty already blocked | Blocking happens inside the chat a block then hides, so "already blocked" has no in-app path |
+| `block-list-unavailable` | Make every blocked-list read + write fail | The case the blocked-accounts screen must render as "couldn't load", never as "empty" — the fakes otherwise never fail |
+| `force-update` | Show the update-required gate (design 120) | `app_settings` is RLS default-deny and mig 0037 revoked `app_setting()`, so no client can read a minimum version |
+| `service-outage` | Show the service-outage gate (design 121) | Same source as `force-update` |
+| `land-in-wizard-at-<step>` | Boot an artist into the EPK wizard instead of the tabs | Reports EPK setup incomplete, which is the switch `gateFor` reads. The `<step>` suffix is parsed and carried but not yet consumed — the wizard owns its cursor and seeking it would mean a debug seam in production code |
+
+Tokens are accepted bare (`seed-fixture-data`) or in the iOS spelling
+(`-uitest-seed-fixture-data`). An unrecognised token is ignored rather than
+fatal — a typo must not crash a device someone is mid-demo on. The canonical
+list is [`HarnessFlags`](../app/src/debug/java/in/artistant/app/harness/HarnessFlags.kt);
+keep this table in step with it.
+
+A `seed-*` flag still needs a **role** of its own: it turns the fixtures on, but
+the rows it seeds live behind the auth gate, so without `skip-signup-as-artist`
+(or `-as-client`) the launch stops at signup and you see none of them. That case
+logs `[harness] … passed with no role` at warn — check logcat if a seeded state
+does not show up.

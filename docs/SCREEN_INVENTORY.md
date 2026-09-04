@@ -1,9 +1,13 @@
 # SCREEN_INVENTORY.md — Artistant Android
 
-Every iOS SwiftUI screen mapped to its Compose target, plus the design-system
-tokens and the 27 reusable components. **45 screens, 27 components.** For each
-screen: purpose, ViewModel, navigation, Compose equivalent, models, APIs, state,
-dependencies, and notes on animation / gesture / lifecycle.
+Every screen mapped to its Compose target, plus the design-system tokens and the
+reusable components. It began as the iOS port matrix (45 SwiftUI screens, 27
+components); the Sep-2026 "Artistant iOS Light" redesign rewrote most of them
+against **138 design screens in 11 sections**, added a dozen with no iOS
+original, and grew `designsystem/component/` to 45 files. For each screen:
+purpose, ViewModel, navigation, Compose equivalent, models, APIs, state,
+dependencies, and notes on animation / gesture / lifecycle. An entry that names
+its design screen has been through the redesign; one that does not, has not.
 
 Roles: **C** = client-side, **A** = artist-side, **S** = shared.
 
@@ -478,27 +482,67 @@ first, local wipe after (`cleanUpAfterAccountDelete`).
 ## 6. Screens — Artist-facing (`feature/…`)
 
 **ArtistHomeScreen** (A, tab root) → `feature/artisthome/`. *ViewModel:*
-`ArtistHomeViewModel`. *Compose:* greeting bar, earnings `Sparkline` + range
-toggle (7D/30D/ALL) + delta pill (truthful empty state), bookability card
-(`ScoreRing` + metric bars)→`ScoreExplainer`, 14-day availability strip
-(`LazyRow` booked/busy/open from bookings + `CalendarSyncService.busyDays`,
-MANAGE→`ManageAvailability`), gig-requests list→`GigRequest`, upcoming gigs.
-`UploadProgressBanner`. Subscribe banner→`Paywall` (gated). *APIs:* Artists/
-Bookings/Score repos, RequestStore. *Lifecycle:* refresh on user id (parallel);
-`pendingGigRequestId` deep link; pull-to-refresh. *Deps:* EntitlementStore,
-CalendarSyncService.
+`ArtistHomeViewModel` + `ArtistStudioLogic.kt` (pure derivations). *Design:* 09 /
+85 / 86 (AS). **Money first, score second, requests third** — the order an artist
+opens the app in, and the reverse of the greeting-plus-demand-chart it replaced.
+*Compose:* header + standing pill ("Taking gigs" / "No days picked"→
+`ManageAvailability`); the page's one accent card carrying what the month has
+PLAYED plus what is agreed and still ahead (`monthMoney`; nothing is in custody,
+so "awaiting settlement" is not said); bookability + reply-speed pair→
+`ScoreExplainer`; requests list→`GigRequest`; up next. `dashboardMode` picks
+between three SCREENS, not one screen with holes: a failed FIRST bookings read
+is `Unavailable` (em-dashes, inert grey strip, an explicit refusal to guess),
+never `Cold` — an unshaded 14-day strip reads as fourteen open nights and is the
+one artist-side failure that costs a real fee. **Nothing here mutates**: the
+design draws inline Accept/Quote, this build routes to the request, where the
+clash warning is. Subscribe banner→`Paywall` survives, still gated on
+`showSubscribeBanner`; `UploadProgressBanner` does not — the press-kit queue
+belongs to the press kit (76 / 66). *APIs:* Artists/Bookings/Score/Requests
+repos. *Lifecycle:* refresh on user id (parallel); `pendingGigRequestId` deep
+link; pull-to-refresh. *Deps:* EntitlementStore.
 
-**ArtistGigsScreen** (A, tab root) → `feature/gigs/`. *Compose:* `MonthCalendar`
-(booked days, events, select→`BookingDetail` via injected booking). *APIs:*
-`BookingsRepository.listForArtist`. *Lifecycle:* refresh on user id;
-pull-to-refresh; silent on failure.
+**EarningsScreen** (A, `earnings`) → `feature/artisthome/`. *ViewModel:*
+`EarningsViewModel`. *Design:* 133 (AS), "earnings without custody". Twelve
+trailing months of AGREED fees as a proportional bar chart (shape; the figure
+above it is the number, and every bucket keeps a hairline floor so an empty
+month reads as empty rather than as a gap), window switcher, per-gig rows.
+Row states are **Agreed / Played**, not the design's Agreed / Settled —
+settlement is not something this product can observe. The closing note says
+outright that this is not a payout statement and is not certifiable as income,
+and is deliberately not collapsible. Buckets by GIG date, not creation date;
+`pending_confirm` is excluded from every rupee figure, so declining a request
+cannot make earnings fall.
 
-**GigRequestDetailScreen** (A, `GigRequest`) → `feature/gigrequest/`. *Compose:*
-sticky `CtaScrim` action bar (when open): Decline (`AlertDialog` + haptic),
-Counter (`ModalBottomSheet` ₹ field), Accept (haptic→`requestStore.accept`);
-calendar-clash card (`CalendarSyncService.clashes` top-2 + "+N more"); error
-banner. *APIs:* RequestsRepository. *Lifecycle:* `LaunchedEffect(request.date)`
-clash read.
+**ArtistGigsScreen** (A, tab root) → `feature/gigs/`. *Design:* 36 (AS),
+"calendar, then the day". **The rewrite is a deletion**: the screen used to draw
+the month grid AND every gig of every month grouped under its own header, so a
+booking appeared twice and the list was what you read. Now the grid is the index
+and the list below it is exactly one day. *Compose:* masthead + month summary,
+`MonthCalendarHeader` + the shared `MonthDayGrid`, then that day's rows —
+`ClockColumn` ("8:00" over "pm", intrinsic width), an accent spine, act + meta,
+fee + status `Pill`→`BookingDetail`. The selection is never null (`initialDayFor`
+= today when today is in view, else the month's first booked day), because a
+nullable one adds a fourth state that says less than the grid alone. *APIs:*
+`BookingsRepository.listForArtist`.
+
+**GigRequestDetailScreen** (A, `GigRequest`) → `feature/gigs/`. *Design:* 35 /
+107 / 108 / 109 (AS) — one route, four states. Organising idea: **only one of the
+three answers is irreversible**, so everything the artist needs goes in front of
+that one. *Compose:* proposal card (107 shows both numbers, theirs struck
+through), fact rows (Date / Venue / Guests, a blank field dropped rather than
+dashed), message block, the calendar-clash warning ABOVE the dock
+(`CalendarSyncService.clashes`), then Accept / Counter→`counter_offer/{id}` /
+Decline. 108 is terminal and names the one route back; 109 says expired and
+withdrawn are different and neither is the artist's fault. **Withdraw (107) and
+Message (107/108) are not drawn** — no write path for the first, and a thread
+only exists once a request is ACCEPTED (mig 0047). Request status has its own
+`PillTone` map beside `bookingStatusTone`. *APIs:* RequestsRepository.
+
+**Screen 21 "Open gigs" is not built, deliberately.**
+`gig_requests_select_participants` (mig 0002, narrowed by 0009) reads
+`auth.uid() = artist_id or auth.uid() = client_id`, so an artist cannot read a
+request that was not addressed to them: a feed of other hosts' requests has no
+data source, and the match percentage has no column either.
 
 **EpkScreen** (A, "Press kit" tab root) → `feature/epk/`. *ViewModel:*
 `EpkViewModel`. **Redesigned Sep 2026 (design 23 / 87 / 76) — a HUB, not a
@@ -660,10 +704,20 @@ and no invented file size) and hands off through `ACTION_SEND` / `ACTION_VIEW`;
 Failed names the step that stopped and says nothing partial was sent. *APIs:*
 `AccountRepository.requestDataExport` (`data-export` Edge Function).
 
-**ManageAvailabilityScreen** (A) → `feature/availability/`. *Compose:* two `FlowRow`
-chip grids (days/times) + light haptic, live "HOW CLIENTS SEE YOU" preview pill,
-bottom save bar (spinner + "Saving…"). *APIs:* `fetchSelfAvailability` /
-`updateAvailability`. *Lifecycle:* seed on user id.
+**ManageAvailabilityScreen** (A) → `feature/availability/`. *Design:* 22 / 105 /
+106 (AS), "the calendar is inventory". *Compose:* the month comes FIRST —
+`MonthCalendarHeader` + the shared `MonthDayGrid` (same tiles and rings as
+Bookings and Gigs; it gained one optional `unavailableDays` parameter rather
+than growing a second grid that disagreed about what a booked day looks like),
+with no selectable day because this calendar is inventory, not a filter. Then
+the "HOW CLIENTS SEE YOU" preview — which shows the MISSING badge on an empty
+week (105), so the cost is visible rather than described — and the two `FlowRow`
+chip grids (days / times) that change what the grid draws. Two refusals: a
+failed bookings read says so in `danger` and marks nothing as taken rather than
+drawing open nights, and a failed SEED disables Save (106), since an empty
+working copy must never be written over real data. *APIs:*
+`fetchSelfAvailability` / `updateAvailability` + `listForArtist` for the booked
+nights. *Lifecycle:* seed on user id.
 
 ---
 
@@ -782,7 +836,7 @@ row on both graphs — the design gives 64 no entry point of its own.
 |---|---|---|
 | `ScoreRing`(+`ScoreNum`) | progress arc + track + mono numeral/NEW | `Canvas` `drawArc` (start top, round cap) + `Text`; `animateFloatAsState` |
 | `Sparkline`(+`MiniBars`) | line path + gradient area + endpoint | `Canvas` `Path` + `drawPath` fill + marker |
-| `MonthCalendar` | month grid + legend + schedule (design 78) | `Column` of 7-wide `Row`s; four fills via `monthDayFill` (booked ⁄ unavailable ⁄ open ⁄ selected) + today's ring; `MonthCalendarCard`, `MonthCalendarLegend`, `DayEventRow`; month `DropdownMenu` |
+| `MonthCalendar` | month grid + legend + schedule (design 78) | `Column` of 7-wide `Row`s; four fills via `monthDayFill` (booked ⁄ unavailable ⁄ open ⁄ selected) + today's ring; `MonthCalendarCard`, `MonthCalendarLegend`, `DayEventRow`, `ClockColumn` ("8:00" over "pm", intrinsic width — shared with the Gigs day list, designs 36 / 78); month `DropdownMenu` |
 | `DetailHeader` | back circle + LEFT-aligned record title | `Row` + `IconCircle` + 2-line `Column` + mirrored trailing slot |
 | `EventTimeline` | 11dp dot, 2dp rule, no glyphs | `Row(IntrinsicSize.Min)` + weighted connector |
 | `BottomActionBar` | pinned bar, hairline top, nav-bar inset | `Column` + `hairlineTop()` |
@@ -811,7 +865,7 @@ bar without being laid out against it.
 | `KVRow` / `HRule` | `Row` key/value; `HRule`→`Divider`/`HorizontalDivider` (1dp `line`) |
 | `EmptyStateView` | centered icon+title+sub+CTA |
 | `EditArtistLinkSheet` | `ModalBottomSheet` form |
-| `Toast`(`ToastCenter`) | app-wide overlay via a `SnackbarHost`-style host or custom top overlay + `AnimatedVisibility` |
+| `Toast`(`ToastCenter`) | **shipped (design 77):** ONE `ToastHost` above the NavHost + `AnimatedVisibility`, fed by the `@Singleton ToastController` a feature ViewModel injects. Composes nothing when clear, so a faded toast cannot hit-test |
 | `UploadProgressBanner`(+`FailedUploadsSheet`) | top banner bound to `UploadQueue` state + `ModalBottomSheet` |
 | `FlowLayout` (inline, not in Components/) | Compose **`FlowRow`** (built-in) |
 
