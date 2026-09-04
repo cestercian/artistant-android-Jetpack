@@ -51,8 +51,11 @@ ArtistantRoot:
 enums:
 - **ClientRoute:** `ArtistProfile(id)`, `ScoreExplainer`, `Booking(artistId)`,
   `RequestQuote(artistId)`, `Checkout`, `Confirmed(bookingId)`,
-  `BookingDetail(bookingId)`, `Chat(threadId)`, `Search`.
-- **ArtistRoute:** `GigRequest(id)`, `ScoreExplainer`.
+  `BookingDetail(bookingId)`, `Chat(threadId)`, `Search`,
+  `artist_reviews/{artistId}`, `bookability/{artistId}` (both added Sep 2026 by
+  section AP).
+- **ArtistRoute:** `GigRequest(id)`, `ScoreExplainer`, `score_history` (Sep 2026,
+  AP — the ledger moved from a sheet to a pushed screen).
 
 `ArtistProfile(id)` routes through an **`ArtistRouteLoader`** (skeleton →
 `ArtistsRepository.ensureFull(id)` fetch-on-miss → screen or not-found), mirroring
@@ -204,19 +207,27 @@ travel columns on `artists`.
 checkbox: `p_services` is an array-overlap test, so two selections widen the feed.
 No per-row counts — `search_facets` publishes none for service tags.
 
-**ArtistProfileScreen** (C, pushed) → `feature/artist/`. *ViewModel:*
-`ArtistProfileViewModel`. *Compose:* `GeometryReader`→`BoxWithConstraints` hero
-(48% height, `MediaContainer` video>photo>gradient, glass back/save/share,
-`ShareLink`→Android share intent, score chip→`ScoreBreakdownSheet`); About (bio
-clamp + more/less, gallery strip); **Packages = horizontally-swipeable perforated
-ticket cards** (`HorizontalPager`, dashed tear line via `Canvas`, notch cutouts,
-lime wash on select) + "Request a quote"→`RequestQuote`; Reviews (stars + italic
-serif); disclosure rows (Sound=`SpotifyEmbed` + samples, Tech rider, Social→open
-URL). **Glass dock** (`Scaffold` bottomBar): Message (async open chat→`Chat`) +
-"Check availability"→`Booking`. *Models:* `Artist`, `ArtistMediaItem`, `SampleRow`,
-`Review`, `ScoreBreakdown`. *APIs:* ArtistMedia/ArtistLinks/Samples/Reviews/Score
-repos. *Lifecycle:* `LaunchedEffect(artistId,userId)` fires 4 parallel loads with
-cancel guards. *Deps:* SavedStore, SessionManager, MessageStore.
+**ArtistProfileScreen** (C, pushed) → `feature/artist/`. **Redesigned Sep 2026 —
+section AP, design screens 04 / 54 / 55 / 101 / 103.** *ViewModel:*
+`ArtistProfileViewModel`. *Compose:* `BackHeader` + "···" (a sheet, not a
+dropdown: Save / Share / Report); identity block (96dp round portrait on the
+artist's own cover gradient, name, `ArtistProfileFacts.subtitle`, accent rating
+pill computed off the same review list the section renders); ruled three-cell
+stat strip (Shows · Bookability · Replies in — the middle cell opens
+`ScoreBreakdownSheet`); About with a measured More/Less; **Packages replace the
+rate card** (quiet accent-hairline selection seeding `BookingDraftStore`) + a
+"Request a quote" row; Gallery strip; Listen (`SampleRow` + `SpotifyDisclosure`,
+or screen 101's redirect card when there is no audio); "Most clients ask about"
+(prompts); "What they play" (service tags); Reviews (preview + "See all"→
+`ArtistReviewsScreen`, or screen 100's scoped failure). **Dock:** Message circle
++ a single accent CTA carrying the price ("Check availability · ₹26,000",
+`PackagePricing.dockPrice`). *States:* 54 skeleton with **no navigation bar**;
+55 not-found naming the cause with a route to Discover (a failed READ gets Retry
+instead); 103 self view (`ViewerIdentity`) swaps the verbs and drops the booking
+controls rather than letting them fail against the self-booking guard.
+*Models:* `Artist`, `GalleryPhoto`, `Sample`, `Review`, `ScoreBreakdown`,
+`ReportOutcome`. *APIs:* Artists/Reviews/Score/Reports repos. *Deps:* SavedStore,
+ViewerIdentity, BookingDraftStore.
 
 **BookingScreen** (C, `Booking`) → `feature/booking/`. *ViewModel:* `BookingViewModel`
 (`BookingStore.draft`). *Compose:* package radio picker, `DateScroller` (real
@@ -342,11 +353,41 @@ T&C links), subscribe CTA (spinner/"Waiting for approval…"), Restore. *APIs:*
 Play Billing (dormant). *Lifecycle:* re-pull products if empty. *State:* purchase
 outcome→onComplete + dismiss.
 
-**ScoreExplainerScreen** (A, `ScoreExplainer`) → `feature/score/`. *Compose:* hero
-`ScoreRing(120,stroke 7)` or NEW pill; tiers table; 5 weighted metric rows
-(Show-up 30% / Reviews 25% / Reply 20% / Cancellations 15% [flipped] / Social 10%)
-with clamped bars. *APIs:* `ScoreRepository.breakdownForSelf`. *State:*
-breakdownError + Retry. *Nav:* "View history"→`ScoreHistorySheet`.
+**ScoreExplainerScreen** (A, `ScoreExplainer`) → `feature/score/`. **Redesigned
+Sep 2026 — design 50 / 79 / 80.** *Compose:* `BackHeader` + `SegmentedControl`
+(Score · Stats · Opportunities). **Score:** `ScoreDonut`; **Stats:** the five
+`Meter` rows from `ScoreFactors` (Show-up 30 / Reviews 25 / Reply 20 /
+Reliability 15 [cancellations inverted] / Social 10); **Opportunities:**
+`ScoreOpportunities` rows, each opening the press kit or the wizard — a "+N" pill
+only where the points are real. *States:* **79 New** — a five-segment gig counter
+and the words "not a low score, no score"; **80 failed** — the headline "This
+isn't your real score" above an em-dash donut and five unavailable meters.
+*APIs:* `ScoreRepository.breakdownForSelf`/`historyForSelf`,
+`ArtistsRepository.ensureFull` (self, for the Opportunities tab). *Nav:* "See
+score history"→`ScoreHistoryScreen`.
+
+**BookabilityScreen** (C, `bookability/{artistId}`) → `feature/score/`. **New
+Sep 2026 — design 16, "show the arithmetic".** *Compose:* accent headline card
+(score / 100 · tier + one line of provenance) then the itemised `Meter` rows;
+an `AccentNote` states that nothing on the screen can be bought. *State:* a
+failed metrics read keeps the number and renders every factor unavailable rather
+than hiding the section. *APIs:* `ScoreRepository.breakdown(artistId)`,
+`ArtistsRepository`.
+
+**ArtistReviewsScreen** (C, `artist_reviews/{artistId}`) → `feature/artist/`.
+**New Sep 2026 — design 102.** *Compose:* `BackHeader` (corpus size in the
+subtitle), `SearchBar`, `Chip` lenses (All *n* / 5 star / Recent), `ReviewCard`
+list, dock CTA → `RequestQuote`. *Logic:* `ReviewSearch` — "Recent" is a stated
+90-day window, not a re-sort. *States:* three distinct empties (no corpus /
+nothing in this lens / no match for a query, which quotes the corpus size) plus
+screen 100's failure banner.
+
+**ReportArtistSheet** (C) → `feature/artist/ArtistProfileSheets.kt`. **New
+Sep 2026 — design 56.** *Compose:* `SheetScaffold` inside a `ModalBottomSheet`,
+five `ArtistReportReasons` radio rows, optional note, "Submit report" (disabled
+until a reason is picked) + "Queued on this device if you're offline". *APIs:*
+`ReportsRepository.reportArtist` → `ReportOutcome`; the toast says Sent or
+Queued and never "received".
 
 ---
 
@@ -357,14 +398,25 @@ breakdownError + Retry. *Nav:* "View history"→`ScoreHistorySheet`.
 Cancel/Submit (disabled until rating≥1, spinner, dismiss-guard). *APIs:*
 `ReviewsRepository.insert`. Success haptic.
 
-**ScoreBreakdownSheet** (C) → `feature/score/`. *Compose:* `ModalBottomSheet`
-(medium/large detents → partial/full), `ScoreRing(64,stroke 5)` or NEW pill,
-metric rows + `HRule`; reply speed inverted to "~Xm/~Xh/~a day"; translucent bg.
-Data passed from ArtistProfile.
+**ScoreBreakdownSheet** (C) → `feature/score/`. **Redesigned Sep 2026 — design
+99, "renders only what it can back".** *Compose:* `ModalBottomSheet` +
+`SheetScaffold`; `ScoreDisc` + name + tier, the five `Meter` rows when the
+metrics loaded, and a "See the full breakdown"→`BookabilityScreen` CTA.
+*Degraded:* an `Attention` banner, then only the factors the artist ROW can
+vouch for (`total_gigs`, `on_time_rate`, the loaded reviews) under WHAT WE CAN
+SHOW, the rest as `UnavailableRow`s under NOT LOADED — no empty bar to misread
+as a zero — plus Retry. `breakdownFailed` is threaded in rather than inferred
+from a null breakdown, which is also what "not fetched yet" looks like.
 
-**ScoreHistorySheet** (A) → `feature/score/`. *Compose:* `Sparkline` (88dp) +
-delta badge (up/down/flat, colored). *APIs:* `ScoreRepository.historyForSelf`.
-*State:* fetchError; empty/success branches; cancel-guarded.
+**ScoreHistoryScreen** (A, `score_history`) → `feature/score/`. **Redesigned
+Sep 2026 — design 51, "the ledger, not the number".** A pushed screen, not a
+sheet. *Compose:* today's score + a signed delta pill, a bar chart scaled to the
+window's own range (bars, not a line — each point is a discrete recomputation),
+and a per-recomputation list. `score_history` stores `(score, computed_at)` and
+no reason column, so the design's per-*event* attributions are deliberately not
+invented; the decay window and the New-tier floor are stated instead. *APIs:*
+`ScoreRepository.historyForSelf`. *States:* loading / failed (banner + retry) /
+genuinely empty.
 
 **DataExportScreen** (S) → `feature/profile/`. *Compose:* single "Export my data"→
 `AccountService.exportData` → write temp JSON → Android **share sheet**

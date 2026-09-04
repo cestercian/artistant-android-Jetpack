@@ -61,19 +61,18 @@ import timber.log.Timber
  * with three widths, so a portrait shot reads portrait and a landscape one gets
  * the room it needs instead of every photo being cropped to the same square.
  *
- * Local constants rather than `Size` tokens because `designsystem/theme` was
- * held by a concurrent branch while this landed; they belong beside the widths
- * they pair with and should move onto the ramp in a follow-up.
+ * On the ramp now (the raw Dps this used to carry predate the light tokens):
+ * the square tile and the row height are `hero.tileWidth`, a portrait one steps
+ * down to `component.tileImage`, and a landscape one takes `hero.tileHeight`.
  */
-private val GALLERY_TILE_HEIGHT: Dp = 150.dp
-private val GALLERY_TILE_SQUARE: Dp = 150.dp
-private val GALLERY_TILE_PORTRAIT: Dp = 120.dp
-private val GALLERY_TILE_LANDSCAPE: Dp = 200.dp
-
-private fun galleryTileWidth(aspect: ArtistMediaAspect): Dp = when (aspect) {
-    ArtistMediaAspect.square -> GALLERY_TILE_SQUARE
-    ArtistMediaAspect.portrait -> GALLERY_TILE_PORTRAIT
-    ArtistMediaAspect.landscape -> GALLERY_TILE_LANDSCAPE
+@Composable
+private fun galleryTileWidth(aspect: ArtistMediaAspect): Dp {
+    val dimens = AppTheme.dimens
+    return when (aspect) {
+        ArtistMediaAspect.square -> dimens.hero.tileWidth
+        ArtistMediaAspect.portrait -> dimens.component.tileImage
+        ArtistMediaAspect.landscape -> dimens.hero.tileHeight
+    }
 }
 
 /**
@@ -104,11 +103,14 @@ internal fun GalleryStrip(photos: List<GalleryPhoto>, modifier: Modifier = Modif
                 contentDescription = "Photo ${index + 1} of ${photos.size}",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(width = galleryTileWidth(photo.aspect), height = GALLERY_TILE_HEIGHT)
-                    .clip(RoundedCornerShape(dimens.radii.sm))
+                    .size(
+                        width = galleryTileWidth(photo.aspect),
+                        height = dimens.hero.tileWidth,
+                    )
+                    .clip(RoundedCornerShape(dimens.radii.md))
                     // Behind the image, so a slow load is a quiet placeholder
                     // rather than a hole in the page.
-                    .background(colors.bgCard),
+                    .background(colors.placeholder),
             )
         }
     }
@@ -120,6 +122,11 @@ internal fun GalleryStrip(photos: List<GalleryPhoto>, modifier: Modifier = Modif
  * Spotify's recommended minimum for the artist/album embed form (iOS asks for
  * the same 380 under `minHeight`). Shorter and the widget scrolls its own track
  * list inside a letterbox.
+ *
+ * A literal rather than a token on purpose: it is a third-party widget's
+ * requirement, not a decision this design system gets to make, and putting it on
+ * the ramp would invite a later token sweep to "harmonise" it into a broken
+ * embed.
  */
 private val SPOTIFY_EMBED_HEIGHT: Dp = 380.dp
 

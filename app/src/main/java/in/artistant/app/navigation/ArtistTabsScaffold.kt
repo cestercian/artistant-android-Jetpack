@@ -45,7 +45,9 @@ import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
+import `in`.artistant.app.feature.score.ScoreHistoryScreen
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -188,7 +190,31 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
                 TabPane(inner) {
-                    ScoreExplainerScreen(onBack = { nav.popBackStack() })
+                    ScoreExplainerScreen(
+                        onBack = { nav.popBackStack() },
+                        // Every opportunity opens the thing it is about (design
+                        // 50). The press kit owns the listing (samples, photos,
+                        // packages, bio); the wizard owns the steps surfaced
+                        // nowhere else (tech rider, socials); and the two
+                        // score-moving rows that are not "fields" at all go where
+                        // the metric is actually earned — the inbox for reply
+                        // speed, the gig list for the hosts a review is asked
+                        // from.
+                        onOpenEditor = { editor ->
+                            when (editor) {
+                                ScoreEditor.PressKit -> nav.navigate(ArtistTab.Epk.route)
+                                ScoreEditor.Wizard -> nav.navigate(ArtistNavRoutes.WIZARD)
+                                ScoreEditor.Messages -> nav.navigate(ArtistTab.Messages.route)
+                                ScoreEditor.Gigs -> nav.navigate(ArtistTab.Gigs.route)
+                            }
+                        },
+                        onSeeHistory = { nav.navigate(ArtistNavRoutes.SCORE_HISTORY) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SCORE_HISTORY) {
+                TabPane(inner) {
+                    ScoreHistoryScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(ArtistNavRoutes.PAYWALL) {
