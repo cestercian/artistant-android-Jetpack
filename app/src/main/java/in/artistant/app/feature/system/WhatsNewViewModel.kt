@@ -45,6 +45,22 @@ class WhatsNewViewModel @Inject constructor(
     }
 
     /**
+     * The account list's "What's new" row — the way back to the sheet.
+     *
+     * The launch trigger fires once per version and is right to; this is what
+     * makes the notes readable afterwards, so it deliberately ignores the
+     * seen-version record instead of consulting [decideWhatsNew].
+     *
+     * It presents THIS build's notes and falls back to the most recent release
+     * that has any, so a patch release with no entry of its own still opens
+     * something true. The sheet stamps the version it describes, so the fallback
+     * cannot pass an older release off as this one.
+     */
+    fun showOnDemand() {
+        _visibleNote.value = ReleaseNotes.forVersion(currentVersion) ?: ReleaseNotes.mostRecent()
+    }
+
+    /**
      * Close and remember. Both the cross and "Got it" land here — neither is
      * more of an acknowledgement than the other, so treating them differently
      * would only produce a way to see the same sheet twice.

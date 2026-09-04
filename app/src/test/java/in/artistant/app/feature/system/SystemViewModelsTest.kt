@@ -68,6 +68,27 @@ class SystemViewModelsTest {
         assertTrue(prefs.recorded.isEmpty())
     }
 
+    @Test
+    fun `the account list can reopen the notes after the launch trigger is spent`() {
+        // The row exists precisely for the user who dismissed the sheet — or who
+        // never saw it, being a first install — so it ignores the seen-version
+        // record rather than consulting the launch decision.
+        val prefs = FakeSystemPreferences(seenVersion = BuildConfig.VERSION_NAME)
+        val vm = WhatsNewViewModel(prefs)
+        assertNull("the launch trigger is spent on this build", vm.visibleNote.value)
+        vm.showOnDemand()
+        assertEquals(BuildConfig.VERSION_NAME, vm.visibleNote.value?.version)
+    }
+
+    @Test
+    fun `an on-demand sheet is acknowledged like any other`() {
+        val prefs = FakeSystemPreferences(seenVersion = BuildConfig.VERSION_NAME)
+        val vm = WhatsNewViewModel(prefs)
+        vm.showOnDemand()
+        vm.acknowledge()
+        assertNull(vm.visibleNote.value)
+    }
+
     // ── Rate Artistant (138) ─────────────────────────────────────────────────
 
     @Test

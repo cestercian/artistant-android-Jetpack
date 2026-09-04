@@ -42,7 +42,8 @@ data class ReleaseNote(
  * The rule for adding an entry is the design's own note — *three features and
  * the real fixes*. Three, because a list of nine is a changelog and nobody reads
  * a changelog; real, because a fix nobody noticed does not belong on a screen
- * that interrupts the app.
+ * that interrupts the app. **Append**, never prepend: [mostRecent] reads the end
+ * of the list.
  *
  * A version with no entry shows nothing (see [decideWhatsNew]). That is the
  * normal case for a patch release, and it is why the table is keyed rather than
@@ -79,6 +80,17 @@ object ReleaseNotes {
 
     /** The entry for [version], or null when that release shipped without notes. */
     fun forVersion(version: String): ReleaseNote? = notes.firstOrNull { it.version == version }
+
+    /**
+     * The newest release that has notes at all — what the account list's
+     * "What's new" row shows when the running build shipped without an entry.
+     *
+     * The table is keyed for [forVersion] and **appended in release order** for
+     * this: the last entry is the newest. Null only if nobody has ever authored
+     * a note, which `ReleaseNotesTableTest` refuses — a settings row that opens
+     * nothing is the silent tap the redesign's notes keep ruling out.
+     */
+    fun mostRecent(): ReleaseNote? = notes.lastOrNull()
 }
 
 /** What the app should do about the What's-new sheet on this launch. */

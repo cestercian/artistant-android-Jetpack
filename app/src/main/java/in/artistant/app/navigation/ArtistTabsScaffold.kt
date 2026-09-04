@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -66,9 +67,11 @@ import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.score.ScoreHistoryScreen
 import `in`.artistant.app.feature.system.ActivityScreen
+import `in`.artistant.app.feature.system.AppStore
 import `in`.artistant.app.feature.system.FeedbackScreen
 import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.ToastViewModel
+import `in`.artistant.app.feature.system.WhatsNewViewModel
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -107,6 +110,11 @@ fun ArtistTabsScaffold() {
     // the handle a destination raises a toast with. There is no rating prompt on
     // this graph — it fires on a review the CLIENT leaves.
     val toasts: ToastViewModel = hiltViewModel()
+    // Screen 137, for the account list's "What's new" row — see [ClientTabsScaffold] for why
+    // this resolves the same instance the root's `WhatsNewHost` draws.
+    val whatsNew: WhatsNewViewModel = hiltViewModel()
+    // The Play listing, for the same list's "Rate Artistant" row (138).
+    val context = LocalContext.current
 
     // One-shot, for both reasons spelled out on [ClientTabsScaffold] and
     // [TabRouter]: a recreation must not re-apply a stale tab and pop the restored
@@ -218,6 +226,12 @@ fun ArtistTabsScaffold() {
                         onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
                         onSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                         onHelpCentre = { nav.navigate(ArtistNavRoutes.HELP_CENTRE) },
+                        onFeedback = { nav.navigate(ArtistNavRoutes.FEEDBACK) },
+                        onActivity = { nav.navigate(ArtistNavRoutes.ACTIVITY) },
+                        // Not a route: screen 137 is presented by the root's host, and this is
+                        // the root-scoped ViewModel that host draws — see [SystemRoutes].
+                        onWhatsNew = whatsNew::showOnDemand,
+                        onRateApp = { AppStore.openListing(context) },
                         onNotifications = { nav.navigate(ArtistNavRoutes.NOTIFICATIONS) },
                         onLanguage = { nav.navigate(ArtistNavRoutes.LANGUAGE) },
                         onAccessibility = { nav.navigate(ArtistNavRoutes.ACCESSIBILITY) },

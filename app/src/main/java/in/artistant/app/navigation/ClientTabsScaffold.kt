@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import `in`.artistant.app.designsystem.component.LightTabAction
 import `in`.artistant.app.designsystem.component.LightTabBar
 import `in`.artistant.app.designsystem.component.LightTabItem
@@ -80,11 +81,13 @@ import `in`.artistant.app.feature.profile.NotificationSettingsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.system.ActivityScreen
+import `in`.artistant.app.feature.system.AppStore
 import `in`.artistant.app.feature.system.FeedbackScreen
 import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.RatePromptHost
 import `in`.artistant.app.feature.system.RatePromptViewModel
 import `in`.artistant.app.feature.system.ToastViewModel
+import `in`.artistant.app.feature.system.WhatsNewViewModel
 import `in`.artistant.app.ui.RootViewModel
 
 /**
@@ -150,6 +153,16 @@ fun ClientTabsScaffold() {
     // Screen 138. Scaffold-scoped so the booking-detail destination that arms it
     // and the sheet that draws it are the same instance.
     val ratePrompt: RatePromptViewModel = hiltViewModel()
+    // Screen 137, for the account list's "What's new" row. The SAME instance the root's
+    // `WhatsNewHost` collects: this composable sits above any NavHost, so
+    // `LocalViewModelStoreOwner` is still the activity — exactly like `rootViewModel` above.
+    // A `hiltViewModel()` inside a destination would resolve against that destination's
+    // back-stack entry instead, and the sheet would be asked to open on a ViewModel nobody
+    // is drawing.
+    val whatsNew: WhatsNewViewModel = hiltViewModel()
+    // Screen 138's other half — the row that goes to the listing without waiting for a
+    // completed booking to earn the prompt.
+    val context = LocalContext.current
 
     // Push deep links: flip tab then push the detail/chat route.
     //
@@ -343,6 +356,12 @@ fun ClientTabsScaffold() {
                         onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
                         onSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                         onHelpCentre = { nav.navigate(ClientNavRoutes.HELP_CENTRE) },
+                        onFeedback = { nav.navigate(ClientNavRoutes.FEEDBACK) },
+                        onActivity = { nav.navigate(ClientNavRoutes.ACTIVITY) },
+                        // Not a route: screen 137 is presented by the root's host, and this is
+                        // the root-scoped ViewModel that host draws — see [SystemRoutes].
+                        onWhatsNew = whatsNew::showOnDemand,
+                        onRateApp = { AppStore.openListing(context) },
                         onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
                         onLanguage = { nav.navigate(ClientNavRoutes.LANGUAGE) },
                         onAccessibility = { nav.navigate(ClientNavRoutes.ACCESSIBILITY) },
