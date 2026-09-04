@@ -30,6 +30,25 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 /**
  * Help + feedback sheet — port of iOS Profile HelpCenter / FeedbackSheet.
  * FAQ is static; submit is owned by [ProfileViewModel] so dismissal can't cancel it.
+ *
+ * **Superseded by section SH (Sep 2026), and still compiled on purpose.**
+ *
+ * The light redesign makes these two separate screens — designs 63 and 64 — and
+ * both now exist as `feature/system/HelpCentreScreen.kt` and
+ * `FeedbackScreen.kt`, at the routes `help_centre` and `feedback` on both
+ * graphs. They are better in every respect the design cares about: the FAQ set
+ * switches by audience, anything blocking the user is promoted above it, the
+ * feedback composer shows `app_feedback.body`'s own 2,000-character constraint
+ * before it can reject anything, and a note that cannot be sent is queued rather
+ * than dropped.
+ *
+ * This file survives only because [ProfileScreen] still opens it and
+ * `feature/profile` belongs to the account-settings section, which is being
+ * rewritten in parallel. Deleting it here would take that branch's build down.
+ * Swapping the call site for a `nav.navigate(SystemRoutes.HELP_CENTRE)` is the
+ * integration pass's job; this file goes with it.
+ *
+ * Do not add a call site.
  */
 @Composable
 fun HelpFeedbackSheet(
