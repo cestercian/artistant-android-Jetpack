@@ -338,9 +338,6 @@ data class Components(
     /** The earnings chart's drawing box (screen 133) and its bars' top radius. */
     val barChart: Dp = 78.dp,
     val barRadius: Dp = 3.dp,
-    /** A negotiation-history dot (screen 107). Larger than [statusDot]: it is
-     *  the node of a timeline, not a state marker beside a word. */
-    val timelineDot: Dp = 11.dp,
 )
 
 /**
