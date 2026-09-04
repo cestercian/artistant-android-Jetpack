@@ -65,6 +65,7 @@ import `in`.artistant.app.feature.signup.LegalDoc
 import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.AccessibilityScreen
+import `in`.artistant.app.feature.profile.AccessibilityViewModel
 import `in`.artistant.app.feature.profile.AccountScreen
 import `in`.artistant.app.feature.profile.DataExportScreen
 import `in`.artistant.app.feature.profile.DeleteAccountScreen
@@ -119,6 +120,11 @@ fun ClientTabsScaffold() {
     // activity and `hiltViewModel()` resolves the same instance the gate is driven by. Profile's
     // "Switch to artist mode" needs its `retryRouting` — see that destination.
     val rootViewModel: RootViewModel = hiltViewModel()
+    val accessibilityViewModel: AccessibilityViewModel = hiltViewModel()
+    // Accessibility -> "Always show labels" (design 129). Read here rather than inside
+    // `LightTabBar` so the design-system component stays free of Hilt and of this app's
+    // preference store; the host owns the preference, the bar just draws what it is told.
+    val a11ySettings by accessibilityViewModel.state.collectAsStateWithLifecycle()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ClientTab.entries.any { it.route == route }
@@ -190,6 +196,7 @@ fun ClientTabsScaffold() {
                 // nothing to compose until an artist is picked — the funnel
                 // starts on a profile. A dedicated "new booking" flow is a
                 // section-PR decision, not a P1 invention.
+                showLabels = a11ySettings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Find an artist",
                     icon = Icons.Filled.Add,

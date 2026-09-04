@@ -233,11 +233,14 @@ private fun ThisDeviceCard(name: String, detail: String) {
 }
 
 /**
- * How this phone names itself — "Pixel 8", "Samsung SM-G991B".
+ * How this phone names itself — "Google Pixel 8", "Samsung SM-G991B", "Xiaomi 14".
  *
- * `Build.MODEL` alone is often a part number, and `MANUFACTURER` alone is a brand, so the pair
- * is joined unless the model already starts with the manufacturer (Google's models do). Both
- * are platform facts; nothing here is inferred.
+ * `Build.MODEL` alone is often a bare part number ("SM-G991B" tells nobody anything), and
+ * `MANUFACTURER` alone is just a brand, so the pair is joined — EXCEPT where the model already
+ * carries the brand ("Xiaomi 14"), which would otherwise render "Xiaomi Xiaomi 14". Both values
+ * are platform facts; nothing here is inferred or prettified beyond the case of the first
+ * letter, because this is a security screen and the name has to match what the person's other
+ * devices call this one.
  */
 internal fun deviceLabel(manufacturer: String, model: String): String {
     val make = manufacturer.trim()

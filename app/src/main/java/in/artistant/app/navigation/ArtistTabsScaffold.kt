@@ -26,6 +26,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.navArgument
 import `in`.artistant.app.designsystem.component.LightTabAction
 import `in`.artistant.app.designsystem.component.LightTabBar
@@ -49,6 +50,7 @@ import `in`.artistant.app.feature.signup.LegalDoc
 import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.AccessibilityScreen
+import `in`.artistant.app.feature.profile.AccessibilityViewModel
 import `in`.artistant.app.feature.profile.AccountScreen
 import `in`.artistant.app.feature.profile.DataExportScreen
 import `in`.artistant.app.feature.profile.DeleteAccountScreen
@@ -79,6 +81,11 @@ private enum class ArtistTab(val route: String, val label: String, val icon: Ima
 @Composable
 fun ArtistTabsScaffold() {
     val nav = rememberNavController()
+    val accessibilityViewModel: AccessibilityViewModel = hiltViewModel()
+    // Accessibility -> "Always show labels" (design 129). Read here rather than inside
+    // `LightTabBar` so the design-system component stays free of Hilt and of this app's
+    // preference store; the host owns the preference, the bar just draws what it is told.
+    val a11ySettings by accessibilityViewModel.state.collectAsStateWithLifecycle()
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ArtistTab.entries.any { it.route == route }
@@ -139,6 +146,7 @@ fun ArtistTabsScaffold() {
                 // It goes to the availability editor: the artist-side verb that
                 // actually changes what the market can see is "open a date", and
                 // that editor already exists. Not a new flow — a shortcut to one.
+                showLabels = a11ySettings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Manage availability",
                     icon = Icons.Filled.PlayArrow,

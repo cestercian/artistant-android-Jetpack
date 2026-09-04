@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,9 +34,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -75,9 +78,12 @@ data class LightTabAction(
  *    hairline instead of scrolling behind a blurred pane, which removes the
  *    whole two-layer scrim+veil approximation the old bar needed — there is
  *    nothing to see through any more, so there is nothing to fake.
- * 2. **No labels.** The design draws glyphs only. Every label is still carried
- *    as the cell's `contentDescription`, so a screen reader loses nothing; what
- *    is lost is four words of chrome off a phone screen.
+ * 2. **No labels by default.** The design draws glyphs only. Every label is
+ *    still carried as the cell's `contentDescription`, so a screen reader loses
+ *    nothing; what is lost is four words of chrome off a phone screen. The
+ *    accessibility screen (design 129) turns them back on for people who read the
+ *    word faster than the pictogram — see [showLabels], which is an opt-IN rather
+ *    than a second opinion about the default.
  * 3. **Selection is tint, not a travelling capsule.** Active `ink`, inactive
  *    `ink4`. A sliding highlight was the old bar's one piece of continuity
  *    motion; on an opaque light bar it reads as a grey lozenge sliding about,
@@ -102,6 +108,15 @@ fun LightTabBar(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
     action: LightTabAction? = null,
+    /**
+     * Draw each glyph's label under it — Accessibility, "Always show labels".
+     *
+     * Defaulted off, so every existing call site keeps the design's unlabelled bar and only a
+     * host that reads the preference passes anything. The bar grows by the label's line height
+     * when it is on and nothing else moves, because the height was already composed from its
+     * parts rather than hard-coded.
+     */
+    showLabels: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
@@ -128,9 +143,13 @@ fun LightTabBar(
             // evenly either side of it. With an even item count that is exactly
             // two and two, which is what the design draws.
             val half = items.size / 2
-            items.take(half).forEach { TabGlyph(it, it.route == selectedRoute, onSelect) }
+            items.take(half).forEach {
+                TabGlyph(it, it.route == selectedRoute, onSelect, showLabels)
+            }
             action?.let { CentreAction(it) }
-            items.drop(half).forEach { TabGlyph(it, it.route == selectedRoute, onSelect) }
+            items.drop(half).forEach {
+                TabGlyph(it, it.route == selectedRoute, onSelect, showLabels)
+            }
         }
     }
 }
@@ -140,6 +159,7 @@ private fun TabGlyph(
     item: LightTabItem,
     selected: Boolean,
     onSelect: (String) -> Unit,
+    showLabels: Boolean,
 ) {
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
@@ -167,14 +187,28 @@ private fun TabGlyph(
             .semantics { testTag = "tab.${item.route}"; contentDescription = item.label },
         contentAlignment = Alignment.TopCenter,
     ) {
-        Icon(
-            imageVector = item.icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier
-                .size(chrome.tabIcon)
-                .pressScale(interaction),
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier
+                    .size(chrome.tabIcon)
+                    .pressScale(interaction),
+            )
+            // The cell already carries the label as its content description, so this text is
+            // decorative to a screen reader and must not be announced twice.
+            if (showLabels) {
+                Text(
+                    text = item.label,
+                    style = AppTheme.type.tabLabel,
+                    color = tint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clearAndSetSemantics {},
+                )
+            }
+        }
     }
 }
 
