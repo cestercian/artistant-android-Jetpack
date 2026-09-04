@@ -170,35 +170,68 @@ the iOS repo.
 
 ## 4. Screens — Artist wizard (`feature/wizard/`, all **A**)
 
-One `WizardViewModel` (the 585-line `ArtistOnboardingStore` port): `flowOrder`
-= identity→location→pricing→tech→availability→cover→socials→bio→samples→preview→done,
-per-step validation, pending-media handoff to `UploadQueue`. Reached when
-artist & !setupComplete. Shared `WizardScaffold` chrome (serif title, subtitle,
-back, primary CTA) + a segment progress bar. `AnimatedContent` on `step`
-(`.easeInOut(0.2)`).
+**Redesigned Sep 2026** against "Artistant iOS Light" screens 37, 38, 24, 39,
+40, 41, 42, 43, 44, 45, 46 and 72 — see `docs/REDESIGN_2026-09.md`.
 
-**WizardScaffold + steps** — each step is a screen; CTA→`advance()`, gated by
-validation:
-- **Identity** — stage name, @handle (live availability, mono, border by status),
-  category grid (`FlowRow` chips), genre. Auto-focus.
-- **Location** — base city (required) + event types (`FlowRow` capsules).
-- **Pricing** — editable tiers (`LazyColumn` over mutable list): name/duration/₹
-  price/popular; trash/add. Price≥1000 to pass.
-- **Tech** — tech-rider multi-select `FlowRow` chips (presets).
-- **Availability** — days-open + start-times capsule grids.
-- **Cover** — video>photo>gradient. **Photo Picker** + **CameraX** (permission
-  gate) + `VideoTrimmer` (Media3, ≤10s) + `WizardMediaCache` staging + gallery
-  strip + gradient `LazyVerticalGrid`. *Lifecycle:* `LaunchedEffect` ensures artist
-  row + loads remote media. Uploads deferred to publish.
-- **Socials** — paste Spotify/Instagram/YouTube (`FlowRow` over platform enum).
-- **Bio** — ≤200-char multiline field, live counter (warm/hot near cap). Skip/Continue.
-- **Samples** — ≤6 audio via **SAF** `OpenDocument` sheet + `WizardMediaCache`,
-  per-row title + duration + trash. Skip/Continue.
-- **Preview + Publish** — `runPublish()`: upsert artist row (`setup_complete=true`),
-  parallel packages+tech write, flip `published=true`, delete stale cover, enqueue
-  pending media to WorkManager, →done. Progress overlay.
-- **Done** — 3 concentric brand circles + spring checkmark, "You're live.", "Open
-  dashboard" → `setupComplete=true` (routes to ArtistTabs).
+One `WizardViewModel` (the `ArtistOnboardingStore` port): `flowOrder` =
+identity→location→pricing→tech→availability→cover→socials→bio→samples→preview→done,
+per-step validation, pending-media handoff to `UploadQueue`, and a debounced
+draft (`WizardDraftStore`) that restores across process death. Reached when
+artist & !setupComplete.
+
+**Chrome** (`WizardScreen`, `WizardScaffold`) — a back circle, a ten-cell
+progress track and a "03 / 10" counter across the top; the step's own
+`LazyColumn` under a plain 26/700 question; one pinned CTA on an opaque bar with
+a hairline over it. Filled segments mean FINISHED, not reached, and the counter
+and the Save & exit sheet repeat that same arithmetic. `AnimatedContent` on
+`step`, fade only. The design's flow has eleven steps; ours has ten, and the
+total is derived from `WizardFlowOrder` rather than typed.
+
+**Save & exit (design 72)** — a `ModalBottomSheet` over `SheetScaffold`, not an
+AlertDialog. It states how many steps are banked and that staged media is on
+disk rather than in memory, then signs out keeping the draft. Reachable from
+every step: it is the leading circle on step one (where there is nothing to go
+back to) and a second close beside the counter after that.
+
+**Steps** — each is a screen; CTA→`next()`, gated by `wizardCanAdvance`:
+- **Identity (37)** — stage name, @handle (live availability, tick / cross,
+  public address under the field), category chips, genre. The category's seeded
+  pricing band is stated here, on the step that picks it. Genre stays a text
+  field: the design draws chips, but `artists.genre` is free text with no
+  vocabulary to constrain it to.
+- **Location (38)** — base city (required, published), travel radius, event
+  types. The last two are held in the draft only — there is no radius column and
+  no `event_types` writer in this client — and the step's banner says so.
+- **Pricing (24)** — editable tiers over `LazyColumn`: name / duration / ₹ fee /
+  "most booked", and under a hairline the ALL-IN the host pays, derived through
+  `BookingMath` so the wizard and the checkout cannot disagree. The design's
+  market-rate line is replaced by the band we seeded, because there is no market
+  aggregate on this backend.
+- **Tech (39)** — the seven presets as checkable rows, anything typed as chips.
+  No rider PDF slot: `tech_rider` stores text rows.
+- **Availability (40)** — a seven-letter day strip plus start-time chips,
+  compressed into the one badge a search row has space for and shown while still
+  editable (`availabilityBadge`). No "notice you need" — no column for it.
+- **Cover (41)** — a 3:4 slot, a Camera / Library pair, and the gradient that
+  stands in when there is no photo. A denied camera permission routes to the
+  system settings page rather than leaving a dead button. Photo only.
+- **Socials (42)** — paste fields for Instagram / Spotify / YouTube. The design
+  prefers OAuth; there is none on this backend, so the banner says plainly that
+  the links are not verified.
+- **Bio (43)** — ≤200-char multiline field, live counter (warm then danger near
+  the cap) and `bioGuidance` saying what good looks like at that length, plus
+  the service-tag picker (published via `updateServiceTags`).
+- **Samples (44)** — ≤6 audio via **SAF** `OpenDocument` + `WizardMediaCache`,
+  per-row title and duration. Upload state is READ off `UploadQueue` — queued /
+  uploading / failed with a retry — because the queue is the only thing that
+  survives a kill and knows.
+- **Preview (45)** — centred back header; the cover, the identity line and seven
+  rows, each stating its value with an inline Edit that jumps back to the owning
+  step. `publish()`: upsert artist row, parallel packages + rider + service
+  tags, flip `published`, enqueue pending media, →done.
+- **Done (46)** — accent check, "You're live.", the copyable public address, and
+  the New-tier expectation off `ScoreBands`. "Open my dashboard" →
+  `setupComplete=true` (routes to ArtistTabs).
 
 ---
 

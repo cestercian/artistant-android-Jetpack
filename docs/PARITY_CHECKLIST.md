@@ -101,23 +101,23 @@ Android file now mirrors.
 
 | iOS path | Android target | Status | Notes |
 |---|---|---|---|
-| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | done | Publish: upsert + packages/tech RPCs + published; gallery/SAF + UploadQueue |
-| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardScreen.kt` (Identity) | done | Inline form in host |
-| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardScreen.kt` (Location) | done | |
-| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardScreen.kt` (Pricing) | done | `replace_packages` on publish |
-| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | done | `replace_tech_rider` on publish |
-| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | done | |
-| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | done | Gallery + TakePicture camera + gradient |
+| `Screens/ArtistWizard/ArtistWizardView.swift` | `feature/wizard/WizardScreen.kt` | done | **Redesigned Sep 2026 (design 72).** Back circle + progress track + "03 / 10" counter; Save & exit is a sheet stating what survives, reachable from every step. Publish: upsert + packages/tech RPCs + service tags + published; gallery/SAF + UploadQueue |
+| `Screens/ArtistWizard/ArtistIdentityStep.swift` | `feature/wizard/WizardFormSteps.kt` (Identity) | done | **Redesigned Sep 2026 (design 37).** AppTextField + Chip; public address under the handle; the category's seeded pricing band stated on the step that picks it. Genre stays a free-text field — the design draws chips, the column has no vocabulary |
+| `Screens/ArtistWizard/ArtistLocationStep.swift` | `feature/wizard/WizardFormSteps.kt` (Location) | done | **Redesigned Sep 2026 (design 38).** Base city + travel radius + event types. Radius and event types are draft-only (no radius column; no `event_types` writer in this client) and the step says so |
+| `Screens/ArtistWizard/ArtistPricingStep.swift` | `feature/wizard/WizardFormSteps.kt` (Pricing) | done | **Redesigned Sep 2026 (design 24).** Fee in, all-in out — the host's total per tier through `BookingMath`. No market-rate line: there is no such aggregate. `replace_packages` on publish |
+| `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardFormSteps.kt` (Tech) | done | **Redesigned Sep 2026 (design 39).** Presets as checkable rows, custom lines as chips. No rider PDF — `tech_rider` stores text rows. `replace_tech_rider` on publish |
+| `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardFormSteps.kt` (Availability) | done | **Redesigned Sep 2026 (design 40).** Day strip + start-time chips compressed to one badge, shown while still editable. No "notice you need" — no column for it |
+| `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Cover) | done | **Redesigned Sep 2026 (design 41).** Camera / Library pair; a denied permission routes to the system settings page. Photo only — no video cover path |
 | `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder |
 | `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistoryScreen.kt` | done | **Redesigned Sep 2026 (design 51)** — a pushed screen, not a sheet. Per-*recomputation* deltas: `score_history` stores no reason column, so no per-event cause is invented. Route `score_history` |
 | `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
-| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardScreen.kt` (Socials) | done | |
-| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardScreen.kt` (Bio) | done | |
-| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | done | SAF + UploadQueue after go-live |
-| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | done | |
-| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | done | |
+| `Screens/ArtistWizard/ArtistSocialsStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Socials) | done | **Redesigned Sep 2026 (design 42).** Paste fields, not OAuth — no link endpoint on this backend — and the banner says the links are not verified |
+| `Screens/ArtistWizard/ArtistBioStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Bio) | done | **Redesigned Sep 2026 (design 43).** Live counter plus what-good-looks-like guidance at four lengths; service tags published via `updateServiceTags` |
+| `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardMediaSteps.kt` (Samples) | done | **Redesigned Sep 2026 (design 44).** Upload state read off `UploadQueue` — queued / uploading / failed with a retry — rather than a bar driven locally. SAF + UploadQueue after go-live |
+| `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardPublishSteps.kt` (Preview) | done | **Redesigned Sep 2026 (design 45).** Centred back header; seven rows, each stating its value with an Edit that jumps back to the owning step |
+| `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardPublishSteps.kt` (Done) | done | **Redesigned Sep 2026 (design 46).** Ends on the public address (copyable) and sets the New-tier expectation off `ScoreBands` |
 | `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder + wizard CTA |
 
 ## Screens — Profile / Settings / Paywall (M6/M7)
