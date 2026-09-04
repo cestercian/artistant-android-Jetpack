@@ -80,11 +80,33 @@ class WizardMediaCache @Inject constructor(
      * before the first one arrives — that is an ANR, not jank. The hop lives here
      * rather than at each call site so a fifth caller cannot forget it.
      */
-    suspend fun adoptPhoto(uri: Uri): PendingPhoto = withContext(Dispatchers.IO) {
-        val name = "photo-${UUID.randomUUID()}.jpg"
-        copyInto(uri, File(rootDir(), name), "Could not read photo")
-        PendingPhoto(name)
-    }
+    /**
+     * Copy a picked or captured photo into the cache.
+     *
+     * [consumeSource] unlinks the ORIGINAL once the copy exists, and only a
+     * camera capture may pass it: that file is a temp JPEG the app minted in its
+     * own cache dir purely to give the camera somewhere to write, so once the
+     * bytes are staged it is dead weight. Every other source — a gallery pick, a
+     * document provider — is somebody else's file that this app holds a read
+     * grant on, and deleting it would take a photo out of the artist's library.
+     *
+     * The caller passes the flag rather than this deciding from the URI, because
+     * the URI does not say: a FileProvider authority looks like ours whether or
+     * not we minted the row behind it, and guessing wrong deletes a stranger's
+     * photo. The one call site that owns its file is the one that says so.
+     */
+    suspend fun adoptPhoto(uri: Uri, consumeSource: Boolean = false): PendingPhoto =
+        withContext(Dispatchers.IO) {
+            val name = "photo-${UUID.randomUUID()}.jpg"
+            copyInto(uri, File(rootDir(), name), "Could not read photo")
+            if (consumeSource) {
+                // Best effort by design. The copy has already succeeded, so a
+                // failure here costs one stale file that the next visit to the
+                // press kit sweeps — not the photo the artist just took.
+                runCatching { context.contentResolver.delete(uri, null, null) }
+            }
+            PendingPhoto(name)
+        }
 
     /**
      * Copy a picked clip into the cache, rejecting what the bucket will not take.

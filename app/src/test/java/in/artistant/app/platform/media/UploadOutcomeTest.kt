@@ -1,6 +1,13 @@
 package `in`.artistant.app.platform.media
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -195,5 +202,165 @@ class UploadOutcomeTest {
             "a whole batch must not burn its budget faster than a handover recovers",
             waited >= 30_000L,
         )
+    }
+
+    // ── Per-item retry / discard (design screen 66) ──────────────────────────
+
+    /**
+     * Retrying one burned task hands it a fresh budget and puts it at the BACK.
+     *
+     * The back, not the head: the artist retrying one item has said nothing about
+     * the others, and jumping the queue would delay uploads that are still working
+     * in favour of one that has already failed three times.
+     */
+    @Test
+    fun retryingOneBurnedTaskRequeuesItWithAFreshBudget() {
+        val state = UploadQueue.State(
+            pending = listOf(photo("live", attempts = 1)),
+            failed = listOf(photo("burned", attempts = 3)),
+            batchTotal = 2,
+            batchCompleted = 1,
+        )
+
+        val next = retryOne(state, "burned")
+
+        assertEquals(listOf("live", "burned"), next.pending.map { it.id })
+        assertEquals(0, next.pending.last().attempts)
+        assertTrue(next.failed.isEmpty())
+        // The banner's "k of n" has to count the requeued task, or it reports a
+        // batch the queue has already outgrown.
+        assertEquals(3, next.batchTotal)
+    }
+
+    /** An id that names nothing failed returns the SAME state, so the caller can skip
+     *  the snapshot write and the drain kick — what a double-tap looks like. */
+    @Test
+    fun retryingAnUnknownIdIsAnIdentity() {
+        val state = UploadQueue.State(failed = listOf(photo("burned", attempts = 3)))
+
+        assertSame(state, retryOne(state, "someone-elses-task"))
+        // And a task that is merely pending is not retryable — it has not failed.
+        val withLive = state.copy(pending = listOf(photo("live")))
+        assertSame(withLive, retryOne(withLive, "live"))
+    }
+
+    /** Discard drops exactly one and leaves the rest of the failure set alone. */
+    @Test
+    fun discardingOneBurnedTaskLeavesTheOthers() {
+        val state = UploadQueue.State(
+            failed = listOf(photo("a", attempts = 3), photo("b", attempts = 3)),
+        )
+
+        val next = discardOne(state, "a")
+
+        assertEquals(listOf("b"), next.failed.map { it.id })
+    }
+
+    @Test
+    fun discardingAnUnknownIdChangesNothing() {
+        val state = UploadQueue.State(failed = listOf(photo("a", attempts = 3)))
+
+        assertEquals(state.failed.map { it.id }, discardOne(state, "ghost").failed.map { it.id })
+    }
+
+    // ── The IO drain races these two ─────────────────────────────────────────
+    //
+    // `retryFailed(id)` and `discardFailed(id)` are called from the stalled-upload
+    // sheet on the main thread while the drain writes the same `_state` from an IO
+    // coroutine. They used to READ the state, compute a new one from that snapshot,
+    // and ASSIGN it — three steps a completion can land in the middle of.
+
+    /**
+     * The hazard itself, pinned as arithmetic.
+     *
+     * Not a concurrency test — it cannot be, because the bug is not in these pure
+     * functions, it is in what the caller applies them TO. So it states both
+     * outcomes side by side: a transition computed from a snapshot the drain has
+     * already replaced silently reverts the drain's work, and the same transition
+     * computed from the current value does not.
+     */
+    @Test
+    fun aTransitionComputedFromAStaleSnapshotUndoesACompletion() {
+        val start = UploadQueue.State(
+            pending = listOf(photo("a")),
+            failed = listOf(photo("b", attempts = 3)),
+            isRunning = true,
+            batchTotal = 2,
+        )
+        // The drain finishes "a" while the artist's tap is in flight.
+        val afterCompletion = uploadSucceeded(start, "a")
+        assertEquals(1, afterCompletion.batchCompleted)
+
+        // Old shape: computed from `start`, assigned over `afterCompletion`.
+        val clobbered = discardOne(start, "b")
+        assertEquals(0, clobbered.batchCompleted)
+        assertEquals(listOf("a"), clobbered.pending.map { it.id })
+
+        // Shipped shape: computed from whatever is current when the swap happens.
+        val correct = discardOne(afterCompletion, "b")
+        assertEquals(1, correct.batchCompleted)
+        assertTrue(correct.pending.isEmpty())
+        assertTrue(correct.failed.isEmpty())
+    }
+
+    /**
+     * And the real thing: fifty concurrent transitions over one `MutableStateFlow`,
+     * composed the way [UploadQueue.retryFailed] and [UploadQueue.discardFailed]
+     * compose them. Read-modify-write under CAS loses nothing; read-then-assign
+     * drops whichever ones interleave.
+     */
+    @Test
+    fun concurrentRetriesAndDiscardsLoseNoTask() = runBlocking {
+        val ids = (0 until 50).map { "t$it" }
+        val flow = MutableStateFlow(UploadQueue.State(failed = ids.map { photo(it, attempts = 3) }))
+
+        coroutineScope {
+            ids.forEachIndexed { i, id ->
+                launch(Dispatchers.Default) {
+                    if (i % 2 == 0) {
+                        flow.getAndUpdate { discardOne(it, id) }
+                    } else {
+                        flow.getAndUpdate { retryOne(it, id) }
+                    }
+                }
+            }
+        }
+
+        // Every id was accounted for exactly once: the odd half requeued, the even
+        // half dropped, none left burned and none duplicated.
+        assertTrue(flow.value.failed.isEmpty())
+        assertEquals(25, flow.value.pending.size)
+        assertEquals(
+            ids.filterIndexed { i, _ -> i % 2 == 1 }.toSet(),
+            flow.value.pending.map { it.id }.toSet(),
+        )
+    }
+
+    /**
+     * The bulk Retry all had the same shape one level up: it read `failed`, then
+     * cleared it inside an update that re-added only the CAPTURED list. A task that
+     * burned its last attempt in that gap was cleared without being requeued.
+     */
+    @Test
+    fun bulkRetryRequeuesATaskThatFailedDuringIt() {
+        val start = UploadQueue.State(
+            pending = listOf(photo("a")),
+            failed = listOf(photo("b", attempts = 3)),
+            isRunning = true,
+            batchTotal = 2,
+        )
+        // "a" burns its last attempt just as Retry all is tapped.
+        val afterFailure = uploadFailed(start, photo("a", attempts = 3), maxAttempts = 3)
+        assertEquals(setOf("a", "b"), afterFailure.failed.map { it.id }.toSet())
+
+        // Computed from the current value, both come back — not just the one a
+        // stale capture would have known about.
+        val retried = afterFailure.copy(
+            failed = emptyList(),
+            pending = afterFailure.pending + afterFailure.failed.map { it.withAttempt(0) },
+            batchTotal = afterFailure.batchTotal + afterFailure.failed.size,
+        )
+        assertEquals(setOf("a", "b"), retried.pending.map { it.id }.toSet())
+        assertTrue(retried.failed.isEmpty())
     }
 }

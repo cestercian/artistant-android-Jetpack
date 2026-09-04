@@ -539,6 +539,41 @@ data class Dashboard(
 )
 
 /**
+ * The press kit's own geometry — design screens 23 / 87 / 76.
+ *
+ * Its own group for the reason [Dashboard] has one: these are the measurements of
+ * a *page*, not steps on the control ladder [Size] describes, and the person
+ * tuning how tall a cover band is should not have to walk past twelve icon sizes
+ * to find it.
+ */
+data class PressKit(
+    /**
+     * The cover band, filled. A banner rather than a 16:9 frame: at the page
+     * gutter a true 16:9 cover is 197dp tall, which pushes the gallery and the
+     * whole section list off the first screen — and the first screen is the
+     * entire argument of a completion page. The slot still says "16:9" because
+     * that is the crop a client's tile will take.
+     */
+    val cover: Dp = 142.dp,
+    /**
+     * The cover band, empty. Shorter than [cover] on purpose (screen 87): an
+     * outline is lighter than a fill, so at the same height the empty state reads
+     * as the bigger object of the two, which is backwards.
+     */
+    val coverEmpty: Dp = 126.dp,
+    /** A gallery cell in the three-up strip. */
+    val galleryCell: Dp = 80.dp,
+    /**
+     * The completion meter. Thicker than [Dashboard.meterHeight] because this one
+     * IS the headline — the score page's meters accompany a number, this one is
+     * the number.
+     */
+    val meter: Dp = 6.dp,
+    /** The upload banner's progress bar, a step down: it sits inside a card. */
+    val uploadMeter: Dp = 5.dp,
+)
+
+/**
  * width : height ratios for media containers.
  *
  * Two, because two are what the app crops to: [editorial] for the wizard's cover
@@ -590,5 +625,6 @@ data class Dimens(
     val chrome: Chrome = Chrome(),
     val hero: Hero = Hero(),
     val dashboard: Dashboard = Dashboard(),
+    val pressKit: PressKit = PressKit(),
     val funnel: Funnel = Funnel(),
 )

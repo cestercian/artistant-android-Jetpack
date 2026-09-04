@@ -1,12 +1,16 @@
 package `in`.artistant.app.feature.epk
 
 import `in`.artistant.app.data.model.ArtistPackage
+import `in`.artistant.app.data.model.ArtistPrompt
+import `in`.artistant.app.data.repository.ArtistMediaItem
 import `in`.artistant.app.data.repository.PackageDraft
 import `in`.artistant.app.designsystem.theme.ArtistGradient
 import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.media.UploadQueue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import timber.log.Timber
+import java.io.File
 
 /**
  * Every decision the EPK editor makes, extracted from the Composables and the
@@ -469,9 +473,17 @@ fun normalizeLinkUrl(raw: String): String {
     }
 }
 
-/** A link needs both halves: a bare URL has nothing to label it in the list. */
+/**
+ * A link needs both halves, and the address half has to be an address.
+ *
+ * "Non-blank" was the whole test until the redesign, which meant a typo saved and
+ * then published a dead tap target on the artist's PUBLIC profile. The two
+ * `*Problem` functions in `EpkPressKit.kt` say WHY under each field on screen 74;
+ * this is the same rule reduced to the one bit the Save button needs, so the
+ * button and the field messages can never disagree.
+ */
 fun linkIsSavable(label: String, url: String): Boolean =
-    label.isNotBlank() && url.isNotBlank()
+    linkLabelProblem(label) == null && linkUrlProblem(url) == null
 
 // ── Share link ───────────────────────────────────────────────────────────────
 
@@ -509,6 +521,78 @@ fun canAddSample(stored: Int, uploading: Int): Boolean = stored + uploading < MA
 
 fun canAddPhoto(currentCount: Int, uploadInFlight: Boolean): Boolean =
     !uploadInFlight && currentCount < MAX_PHOTOS
+
+// ── Photo uploads ────────────────────────────────────────────────────────────
+
+/**
+ * What became of a staged photo that was handed to the server.
+ *
+ * The three-way distinction the direct upload path used to collapse into "it
+ * either worked or it did not, and either way the bytes are gone". See
+ * [sendStagedPhoto].
+ */
+sealed interface StagedPhotoOutcome {
+    /** It landed. The staging copy has been unlinked; there is nothing to keep. */
+    data object Sent : StagedPhotoOutcome
+
+    /**
+     * It failed, and the staging copy is still on disk under [fileName]. A retry
+     * can send those same bytes — no second pick, no second camera trip.
+     */
+    data class Held(val fileName: String) : StagedPhotoOutcome
+
+    /**
+     * There was nothing to send: the name points at a file that is not there.
+     * This is `cacheDir` — the OS reclaims it whenever it likes, and the wizard's
+     * orphan sweep removes anything the restored draft no longer references — so
+     * a recorded name is a claim to verify, not a fact (`WizardMediaCache.exists`
+     * says the same thing about resume). Only a fresh pick can answer this one,
+     * so it must not be offered as a retry.
+     */
+    data object Gone : StagedPhotoOutcome
+}
+
+/**
+ * Upload a staged photo, and unlink the staging copy **only if it lands**.
+ *
+ * The bug this replaces cost the artist the photo. `WizardMediaCache.adoptPhoto`
+ * unlinks a CAMERA capture as soon as the bytes are staged — which is right, that
+ * file is a temp JPEG the app minted to give the camera somewhere to write, and
+ * the staged copy is meant to be the one that survives. The direct upload path
+ * then deleted that staged copy in a `finally`, and a `finally` runs on the
+ * failure branch too. So one dropped connection unlinked both app-owned copies of
+ * a photo taken seconds earlier, and the only way forward was to shoot it again —
+ * for a failure whose entire character is that it is temporary.
+ *
+ * Success is the only thing that makes staged bytes dead weight, so success is
+ * the only branch that deletes them.
+ *
+ * A **cancellation** still unlinks, and that is not the same call as a failure:
+ * what cancels this is the ViewModel's scope being cleared, which destroys the
+ * state that would have offered the Retry. With no reader left, keeping the file
+ * would leak a multi-megabyte JPEG into the cache for nobody. That is the half of
+ * the old `finally` that was right, kept on purpose.
+ *
+ * `Exception` rather than `Throwable`, for [saveCatching]'s reason: an OOM is not
+ * a "retry when you're back online" state.
+ */
+suspend fun sendStagedPhoto(file: File, upload: suspend (File) -> Unit): StagedPhotoOutcome {
+    if (!file.isFile) return StagedPhotoOutcome.Gone
+    try {
+        upload(file)
+    } catch (e: CancellationException) {
+        file.delete()
+        throw e
+    } catch (e: Exception) {
+        // The bytes stay. `e` is deliberately not carried into the outcome: the
+        // caller's banner says the same sentence for every transport failure, and
+        // a Throwable held in UI state outlives the scope it was thrown in.
+        Timber.w(e, "Photo upload failed; keeping staged copy %s for retry", file.name)
+        return StagedPhotoOutcome.Held(file.name)
+    }
+    file.delete()
+    return StagedPhotoOutcome.Sent
+}
 
 // ── Sample uploads ───────────────────────────────────────────────────────────
 
@@ -803,3 +887,77 @@ fun coverGradientPickToWrite(
     val clamped = ArtistGradient.clampIndex(requested)
     return clamped.takeIf { it != shownCoverGradient(pending, published) }
 }
+
+// ── Sheet edits are transactions ─────────────────────────────────────────────
+
+/**
+ * The values a sheet's Cancel puts back, captured the moment it opened.
+ *
+ * Design 67 and 68 each carry a Cancel/Skip, and on a screen whose every field
+ * autosaves that word has to mean something. Held by value so the sheet's own
+ * state can be edited freely while it is open.
+ */
+data class EpkEditSnapshot(
+    val bio: String,
+    val services: List<String>,
+    val prompts: List<ArtistPrompt>,
+)
+
+/**
+ * What Cancel has to undo — a non-null field is one that changed and must be
+ * both restored locally and written back.
+ *
+ * The write-back is the half that is easy to miss. Disarming the pending saves
+ * covers the edit that has not gone out yet, but the debounce is 1.2s and a
+ * sheet stays open far longer than that, so by the time Cancel is tapped the
+ * write has usually already happened; the service chips beside the bio never
+ * debounced at all and wrote on the tap. Restoring only local state would leave
+ * the artist reading their old bio while their public profile served the new one.
+ *
+ * Every difference is written back, including when nothing had escaped yet.
+ * That costs one redundant PATCH on a rarely-pressed button, and it is the only
+ * rule without a wrong branch: consulting the armed-save set instead answers
+ * "nothing escaped" for the ordinary sequence of type, pause past the debounce,
+ * type again — which sends one value and arms another.
+ */
+fun epkEditRevert(
+    snapshot: EpkEditSnapshot,
+    bio: String,
+    services: List<String>,
+    prompts: List<ArtistPrompt>,
+): EpkEditRevert = EpkEditRevert(
+    bio = snapshot.bio.takeIf { bio != snapshot.bio },
+    services = snapshot.services.takeIf { services != snapshot.services },
+    prompts = snapshot.prompts.takeIf { prompts != snapshot.prompts },
+)
+
+/** @see epkEditRevert */
+data class EpkEditRevert(
+    val bio: String?,
+    val services: List<String>?,
+    val prompts: List<ArtistPrompt>?,
+) {
+    /** Nothing was touched — Cancel is then only a dismissal. */
+    val isEmpty: Boolean get() = bio == null && services == null && prompts == null
+}
+
+/**
+ * The cover the hub draws — the media list when it can be trusted, the artist
+ * row's own column when it cannot.
+ *
+ * The hub used to read `photos.first()` and nothing else, which quietly turned a
+ * FAILED media read into a factual claim. The two reads are independent: the
+ * identity read can land `artists.cover_url` while `media.list` times out, and
+ * the artist would then be told their press kit has no cover, shown a dashed box
+ * asking for one, and docked the completion point for it — while the cover sat
+ * on their public profile the whole time.
+ *
+ * Hydrated-and-empty is a different fact from never-read, and only the second
+ * falls back. An artist who has deleted every photo has no cover even if a stale
+ * `cover_url` still names one, so once the list has been read it is the truth.
+ */
+fun epkCoverUrl(
+    photos: List<ArtistMediaItem>,
+    photosHydrated: Boolean,
+    artistCoverUrl: String?,
+): String? = if (photosHydrated) photos.firstOrNull()?.publicUrl else artistCoverUrl

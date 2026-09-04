@@ -438,14 +438,21 @@ calendar-clash card (`CalendarSyncService.clashes` top-2 + "+N more"); error
 banner. *APIs:* RequestsRepository. *Lifecycle:* `LaunchedEffect(request.date)`
 clash read.
 
-**EpkScreen** (A, "Profile" tab root) → `feature/epk/`. *ViewModel:* `EpkViewModel`.
-*Compose:* cover (video>photo>gradient + 6-preset picker), photos 3-col
-`LazyVerticalGrid`, samples (≤6, SAF→immediate `SamplesRepository.upload`), social
-rows, read-only bio, pricing tiers (1.2s debounce→`PackagesRepository.replaceAll`),
-tech rider `FlowRow`, custom links (`EditArtistLinkSheet` CRUD), share-link card
-(copy→clipboard "COPIED ✓"). *APIs:* Packages/ArtistMedia/Samples/ArtistLinks/
-Artists repos. *Lifecycle:* 4 parallel loads on user id (cancel-guarded); reload
-on `UploadQueue.batchCompleted`. *Deps:* EPKStore, UploadQueue.
+**EpkScreen** (A, "Press kit" tab root) → `feature/epk/`. *ViewModel:*
+`EpkViewModel`. **Redesigned Sep 2026 (design 23 / 87 / 76) — a HUB, not a
+form.** *Compose:* `ScreenHeader` "Press kit" + "N% complete" + account gear;
+`EpkQueueBanner` (76 working / 66 stalled, batch progress — supabase-kt reports no
+byte counter, so no per-file %); `EpkCompletionMeter` (bar + the sentence that
+says what to do next); `EpkCoverBlock` (`MediaSlot` filled / `DashedSlot` empty);
+`EpkGalleryStrip` (three cells, fixed); six `EpkSectionListRow`s stating the FACT
+when filled and the EFFECT when not — or `EpkInvitationRow`s on a bare kit (87).
+Rows open a sheet (`EpkSheets.kt`: 65 add cover, 67 bio+services, 68 personality,
+74 link, 75 audio, 66 stalled) or a pane (`EpkPanes.kt`: gallery, samples,
+packages, tech, links+socials). Panes are in-screen with a `BackHandler`, not
+NavHost destinations — one ViewModel, one write queue. *APIs:* Packages/
+ArtistMedia/Samples/ArtistLinks/Artists repos. *Lifecycle:* 4 parallel loads on
+user id (cancel-guarded); reload on `UploadQueue.batchCompleted`; ON_STOP flushes
+the debounce. *Deps:* EPKStore, UploadQueue.
 
 ---
 
