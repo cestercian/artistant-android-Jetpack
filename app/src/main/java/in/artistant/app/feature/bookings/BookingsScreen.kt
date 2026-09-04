@@ -56,6 +56,7 @@ import `in`.artistant.app.designsystem.component.Pill
 import `in`.artistant.app.designsystem.component.PillTone
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScreenHeader
+import `in`.artistant.app.designsystem.component.SegmentedControl
 import `in`.artistant.app.designsystem.component.SkeletonBlock
 import `in`.artistant.app.designsystem.component.bookingStatusTone
 import `in`.artistant.app.designsystem.rememberHaptics
@@ -214,7 +215,16 @@ private fun BookingsList(
             verticalArrangement = Arrangement.spacedBy(dimens.space.md),
         ) {
             Spacer(Modifier.height(dimens.space.xs))
-            SegmentedTabs(selected = state.tab, onSelect = onSelectTab)
+            // The shared switch, not chips: every booking is in exactly one half
+            // and there is no state where neither is chosen. Its selected fill is
+            // a raised hairline rather than lime, which leaves the screen's one
+            // accent for the countdown badge — the thing worth finding.
+            SegmentedControl(
+                options = BookingsTab.entries,
+                selected = state.tab,
+                onSelect = onSelectTab,
+                label = { it.label },
+            )
             // A thread that would not open is still true next time this screen is
             // opened, so it states itself here rather than as a snackbar that
             // scrolls away with the tap that caused it.
@@ -268,50 +278,6 @@ private fun BookingsList(
                 }
             }
             Spacer(Modifier.height(dimens.chrome.contentTailroom))
-        }
-    }
-}
-
-/**
- * Upcoming / Past.
- *
- * A two-item segmented control rather than [Chip]s: chips are a filter you can
- * turn off, and these two are a partition — every booking is in exactly one of
- * them, and there is no state where neither is chosen. The selected half takes a
- * `hairline` fill rather than the accent, because the screen's one accent is
- * already spent on the countdown badge, which is the thing worth finding.
- */
-@Composable
-private fun SegmentedTabs(selected: BookingsTab, onSelect: (BookingsTab) -> Unit) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(dimens.radii.control))
-            .background(colors.surface3)
-            .padding(dimens.space.xs),
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.xs),
-    ) {
-        BookingsTab.entries.forEach { tab ->
-            val isSelected = tab == selected
-            Box(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(dimens.radii.md))
-                    .background(if (isSelected) colors.hairline else androidx.compose.ui.graphics.Color.Transparent)
-                    .clickable(role = Role.Tab) { onSelect(tab) }
-                    .padding(vertical = dimens.space.md),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    tab.label,
-                    style = AppTheme.type.rowTitle.copy(
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                    ),
-                    color = if (isSelected) colors.ink else colors.ink4,
-                )
-            }
         }
     }
 }

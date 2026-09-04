@@ -52,12 +52,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -1104,15 +1101,9 @@ private fun CancelFlow(
                     // date to offer, a client whose event is off does not.
                     if (reason == CancelReason.DateChanged) {
                         AccentNote(
-                            buildAnnotatedString {
-                                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.ink)) {
-                                    append("Date moved? ")
-                                }
-                                append(
-                                    "Message $counterparty first — shifting a date is usually " +
-                                        "easier than starting over.",
-                                )
-                            },
+                            lead = "Date moved?",
+                            text = "Message $counterparty first — shifting a date is usually " +
+                                "easier than starting over.",
                         )
                     }
                 }
@@ -1137,13 +1128,12 @@ private fun CancelFlow(
                     }
                     reason?.let {
                         AccentNote(
-                            buildAnnotatedString {
-                                append("You told us the reason was ")
-                                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = colors.ink)) {
-                                    append(it.label.lowercase())
-                                }
-                                append(". We use it to match you better next time.")
-                            },
+                            lead = "You said: ${it.label.lowercase()}.",
+                            // Not "the artist only sees that you cancelled" —
+                            // `bookings_select_participants` grants the whole row
+                            // to both sides, `cancel_reason` included.
+                            text = "We use it to match you better next time. It is saved " +
+                                "on the booking, so $counterparty can see it too.",
                         )
                     }
                 }
