@@ -22,16 +22,6 @@ object ClientNavRoutes {
     const val REQUEST_QUOTE = "request_quote/{artistId}"
     const val ARTIST_LIST = "artist_list/{kind}"
 
-    /**
-     * Where a confirmed match lands — design 94, "Match confirmed".
-     *
-     * Declared here because the chat section needed the name; the destination
-     * and every route to it belong to the BOOKING section. The chat does NOT
-     * navigate here: accepting an in-thread quote creates no booking on this
-     * backend, so there is no id to open it with — see [ChatEvent.QuoteAccepted].
-     */
-    const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
-
     /** The archive (design 60 / 111) — reachable from the inbox header. */
     const val ARCHIVED = "archived"
 
@@ -62,9 +52,19 @@ object ClientNavRoutes {
 
     /**
      * Screen 94 — the landing for a match reached by NEGOTIATION rather than
-     * through checkout. Messaging navigates here when an in-thread quote is
-     * accepted; [CONFIRMED] stays the funnel's own page, and the two say
+     * through checkout. [CONFIRMED] stays the funnel's own page, and the two say
      * different things because they are reached from different places.
+     *
+     * **Not reached from the chat**, despite the design's story. Accepting an
+     * in-thread quote is a `gig_requests` status PATCH; the only server reaction
+     * (mig 0047, rewritten by 0076) opens the bookingless thread the quote is
+     * already in, and that migration deliberately creates NO booking because the
+     * client has to consent to the final amount. RLS agrees —
+     * `bookings_insert_client` gates inserts on `auth.uid() = client_id` and the
+     * seat that accepts an `open` quote is the artist — so there is no id to open
+     * this with. The chat's accept ends at the frozen quote card, which says so.
+     * See [ChatEvent.QuoteAccepted]. This becomes reachable from messaging the
+     * day the backend grows a consented request→booking path.
      */
     const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
 
@@ -81,7 +81,6 @@ object ClientNavRoutes {
     fun bookingDetail(bookingId: String) = "booking_detail/$bookingId"
     fun requestQuote(artistId: String) = "request_quote/$artistId"
     fun artistList(kind: String) = "artist_list/$kind"
-    fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
 
     fun artistReviews(artistId: String) = "artist_reviews/$artistId"
     fun bookability(artistId: String) = "bookability/$artistId"
@@ -134,7 +133,6 @@ object ArtistNavRoutes {
     fun gigRequest(requestId: String) = "gig_request/$requestId"
     fun counterOffer(requestId: String) = "counter_offer/$requestId"
     fun chat(threadId: String) = "chat/$threadId"
-    fun matchConfirmed(bookingId: String) = "match_confirmed/$bookingId"
     const val PROFILE = "profile"
     const val PAYWALL = "paywall"
     const val WIZARD = "wizard"
@@ -152,9 +150,6 @@ object ArtistNavRoutes {
 
     /** See [ClientNavRoutes.BLOCKED_ACCOUNTS] — same screen, artist graph. */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
-
-    /** See [ClientNavRoutes.MATCH_CONFIRMED] — same destination, artist graph. */
-    const val MATCH_CONFIRMED = "match_confirmed/{bookingId}"
 
     /** See [ClientNavRoutes.ARCHIVED]. */
     const val ARCHIVED = "archived"
