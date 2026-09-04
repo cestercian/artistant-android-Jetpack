@@ -105,6 +105,18 @@ fun ManageAvailabilityScreen(
                         )
                         Spacer(Modifier.height(space.lg))
 
+                        // The month comes first: the artist opens this screen to
+                        // find out what is already spoken for, and the chips
+                        // below are how they change what it draws.
+                        AvailabilityCalendar(
+                            month = state.month,
+                            days = state.days,
+                            bookedDates = state.bookedDates,
+                            bookingsUnavailable = state.bookingsUnavailable,
+                            onMonthChange = viewModel::showMonth,
+                        )
+                        Spacer(Modifier.height(space.lg))
+
                         Text("HOW CLIENTS SEE YOU", style = AppTheme.type.caption, color = colors.ink3)
                         Spacer(Modifier.height(space.sm))
                         Row(

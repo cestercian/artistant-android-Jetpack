@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.common.util.availabilityKicker
 import `in`.artistant.app.data.repository.ArtistsRepository
+import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.wizard.WizardWeekdays
 import `in`.artistant.app.platform.auth.SessionManager
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.YearMonth
 import javax.inject.Inject
 
 data class ManageAvailabilityUiState(
@@ -24,6 +26,20 @@ data class ManageAvailabilityUiState(
     val seedFailed: Boolean = false,
     val error: String? = null,
     val saved: Boolean = false,
+
+    /** The month the calendar (design 22) is showing. */
+    val month: YearMonth = YearMonth.now(),
+    /** Confirmed nights, as IST dates. Empty when [bookingsUnavailable]. */
+    val bookedDates: Set<LocalDate> = emptySet(),
+    /**
+     * The bookings read failed, so [bookedDates] is empty for the WRONG reason.
+     *
+     * The calendar must not shade anything in this state and must say why. An
+     * unshaded month is a month with every night free, which is the single most
+     * expensive lie this screen can tell an artist — they hand out a date they
+     * have already sold.
+     */
+    val bookingsUnavailable: Boolean = false,
 ) {
     /**
      * The badge clients actually see, driven by the current selection — the whole
@@ -47,6 +63,7 @@ data class ManageAvailabilityUiState(
 @HiltViewModel
 class ManageAvailabilityViewModel @Inject constructor(
     private val artists: ArtistsRepository,
+    private val bookings: BookingsRepository,
     private val session: SessionManager,
 ) : ViewModel() {
 
@@ -68,6 +85,36 @@ class ManageAvailabilityViewModel @Inject constructor(
 
     init {
         seed()
+        loadBookedNights()
+    }
+
+    fun showMonth(month: YearMonth) {
+        _state.update { it.copy(month = month) }
+    }
+
+    /**
+     * The calendar's shading, read separately from the availability row.
+     *
+     * Separate on purpose: the two reads hit different tables and fail
+     * independently, and a dropped bookings read must not stop the artist
+     * editing the weekdays they play. It only ever sets the calendar's own
+     * fields, so a failure here leaves [ManageAvailabilityUiState.error] — which
+     * gates Save — untouched.
+     */
+    fun loadBookedNights() {
+        viewModelScope.launch {
+            runCatching { bookings.listForArtist() }
+                .onSuccess { list ->
+                    _state.update {
+                        it.copy(bookedDates = bookedDates(list), bookingsUnavailable = false)
+                    }
+                }
+                .onFailure {
+                    _state.update { s ->
+                        s.copy(bookedDates = emptySet(), bookingsUnavailable = true)
+                    }
+                }
+        }
     }
 
     fun seed() {
