@@ -1,14 +1,24 @@
 package `in`.artistant.app.feature.discover
 
+import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.common.util.formatInrShort
+import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.ArtistPackage
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.score.ScoreTier
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
 
 /**
- * Pure decisions behind the Discover masthead + hero carousel.
+ * Pure decisions behind the Discover masthead, hero card and rails.
  *
  * They live outside the composables so the rules are testable without a Compose
- * runtime, and so the *reasons* below survive a UI rewrite.
+ * runtime, and so the *reasons* below survive a UI rewrite — which is exactly
+ * what happened in the Sep-2026 redesign: the full-bleed hero pager became a
+ * 262dp card under a titled header, and every rule in this file carried over
+ * unchanged.
  */
 object DiscoverHeroLogic {
 
@@ -22,21 +32,21 @@ object DiscoverHeroLogic {
     const val PLACE_FALLBACK = "India"
 
     /**
-     * The place name shown in "Tonight in <X>." — the user's city, or
+     * The place name in the header's subtitle — the user's city, or
      * [PLACE_FALLBACK].
      *
      * Trims first: a whitespace-only value is a blank city that happens to be
-     * non-null, and rendering "Tonight in  ." would be worse than the fallback.
+     * non-null, and rendering "· Sat 12 Oct" with a hole in front of it would be
+     * worse than the fallback.
      */
     fun mastheadPlace(city: String?): String =
         city?.trim().orEmpty().ifEmpty { PLACE_FALLBACK }
 
     /**
-     * Single-character monogram for the masthead avatar chip.
+     * Single-character monogram for a nameless avatar chip.
      *
-     * One character, not two: the chip is only 40dp and a two-letter monogram
-     * collides with the ring at that size. Returns "" for a nameless user so the
-     * caller can fall back to a neutral glyph instead of inventing an initial.
+     * Returns "" for a nameless user so the caller can fall back to a neutral
+     * glyph instead of inventing an initial.
      */
     fun avatarInitial(name: String?): String =
         name?.trim()
@@ -45,27 +55,66 @@ object DiscoverHeroLogic {
             ?.toString()
             .orEmpty()
 
-    /**
-     * Should the hero rotate on this tick?
-     *
-     * Two gates, both about not animating for nothing:
-     * - one slide can't rotate anywhere, and a self-advancing single-page pager
-     *   would just churn state forever;
-     * - a user who has asked the system to reduce motion should get a carousel
-     *   they page themselves, not one that moves under them.
-     */
-    fun shouldAutoAdvance(pageCount: Int, animationsEnabled: Boolean): Boolean =
-        pageCount > 1 && animationsEnabled
+    /** "Sat 12 Oct" — the header's date and the rail titles' day. */
+    fun dateLabel(date: LocalDate): String {
+        val day = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)
+        val month = date.month.getDisplayName(TextStyle.SHORT, Locale.US)
+        return "$day ${date.dayOfMonth} $month"
+    }
 
-    /** Next slide index, wrapping. Returns 0 for an empty carousel. */
-    fun nextPage(current: Int, pageCount: Int): Int =
-        if (pageCount <= 0) 0 else (current + 1) % pageCount
+    /**
+     * "Bengaluru · Sat 12 Oct" — the header subtitle (screen 02).
+     *
+     * The design's note for this screen is that the city and the date sit in the
+     * header *because* they scope every price under it. The date is TODAY, not a
+     * date the user picked: Discover has no date control, and printing a date the
+     * feed was not actually queried for would be the exact dishonesty the note is
+     * trying to prevent.
+     */
+    fun headerSubtitle(city: String?, today: LocalDate): String =
+        "${mastheadPlace(city)} · ${dateLabel(today)}"
+
+    /** "Available Sat night" — the date-scoped rail's title (screen 02). */
+    fun availableRailTitle(date: LocalDate): String =
+        "Available ${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)} night"
+
+    /**
+     * Has [daysAvailable] itself said this artist works on [date]?
+     *
+     * The rail above these artists is captioned "Available Sat night", so every
+     * row under it is a claim — and this is the only evidence the app holds for
+     * one. `days_available` is the artist's own published week.
+     *
+     * **An empty list is NOT evidence, and does not pass.** This used to return
+     * true for it, on the reasoning that an absence of information is not a
+     * statement of unavailability — which is right about the ARTIST and wrong
+     * about the rail. The two are only equivalent while the server is doing the
+     * filtering, and `SupabaseSearchRepository.executeSearch` silently retries
+     * WITHOUT the 0073 dimensions when the RPC signature is missing (as do the
+     * Fake twins, whose default `search` overload drops `date` entirely). On that
+     * path the page is unfiltered, every artist with a blank week sails through
+     * this gate, and the rail asserts availability for people who never said
+     * anything. Requiring the artist's own word makes the caption true no matter
+     * which signature answered.
+     *
+     * The cost is that a roster where nobody publishes a week produces no
+     * availability rail at all — `applyRails` drops an empty one — which is the
+     * correct outcome: we have no evidence anyone is free, so we say nothing.
+     */
+    fun evidencesAvailability(daysAvailable: List<String>, date: LocalDate): Boolean {
+        if (daysAvailable.isEmpty()) return false
+        val abbr = date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US)
+        return daysAvailable.any { it.trim().equals(abbr, ignoreCase = true) }
+    }
 
     /** What the price cell says when there is no honest figure to quote. */
     const val PRICE_ON_REQUEST = "ON REQUEST"
 
+    /** The lower-case form for the light design's tile and row metadata. */
+    const val PRICE_ON_REQUEST_SOFT = "Pricing on request"
+
     /**
-     * The trailing `FROM ₹75K` cell on the hero strip and the featured frame.
+     * The trailing `FROM ₹75K` cell on a compact strip.
      *
      * Two bugs it exists to stop, both on the same shipped expression
      * (`packages.firstOrNull()?.price ?: artist.price`):
@@ -82,5 +131,67 @@ object DiscoverHeroLogic {
     fun fromPriceLabel(packages: List<ArtistPackage>, fallback: Int): String {
         val from = PackagePricing.fromPrice(packages, fallback)
         return if (from > 0) "FROM ${formatInrShort(from)}" else PRICE_ON_REQUEST
+    }
+
+    /**
+     * "Techno DJ · from ₹28,000" — a rail tile's second line (screen 02).
+     *
+     * The design prints a bare "₹28,000" here. We print "from", because the
+     * number is [PackagePricing.fromPrice] — the cheapest package, not a quote —
+     * and a bare figure beside a category reads as the price of the act. One word
+     * is a cheap price for not implying a quote we have not made.
+     */
+    fun tileMeta(artist: Artist): String {
+        val price = PackagePricing.fromPrice(artist.packages, artist.price)
+        val category = artist.category.trim()
+        val money = if (price > 0) "from ${formatInr(price)}" else PRICE_ON_REQUEST_SOFT
+        return if (category.isEmpty()) money else "$category · $money"
+    }
+
+    /**
+     * "Indie folk band · 5 pc · Bengaluru" — the hero card's meta line.
+     *
+     * Fields that are blank on a tile projection drop out entirely rather than
+     * leaving an empty slot between separators.
+     */
+    fun heroMeta(artist: Artist): String? =
+        listOf(artist.genre, artist.category, artist.city)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" · ")
+
+    /** "₹42,000" for the hero's price cell, or null when there is no figure. */
+    fun heroPrice(artist: Artist): String? =
+        PackagePricing.fromPrice(artist.packages, artist.price)
+            .takeIf { it > 0 }
+            ?.let { "from ${formatInr(it)}" }
+
+    /**
+     * "4.92 (128)" — the hero's rating cell, or null.
+     *
+     * Null when the artist has no rating at all: a fresh act reads "0.0 (0)"
+     * otherwise, which is a worse claim than saying nothing. The count in
+     * parentheses is completed shows, which is what the number is an average of.
+     */
+    fun heroRating(rating: Double, gigs: Int): String? {
+        if (rating <= 0.0) return null
+        val stars = String.format(Locale.US, "%.2f", rating)
+        return if (gigs > 0) "$stars ($gigs)" else stars
+    }
+
+    /**
+     * The hero card's badge — the screen's one accent — or null.
+     *
+     * Driven by the score band and nothing else, because the band is the only
+     * standing the backend publishes. An unranked or merely rising act gets no
+     * badge at all: a badge on everyone says nothing, which is the same rule the
+     * availability kicker follows.
+     */
+    fun heroBadge(score: Int, gigs: Int): String? = when (ScoreBands.tier(score, gigs)) {
+        ScoreTier.Elite -> "Top rated"
+        ScoreTier.Trusted -> "Trusted"
+        ScoreTier.Rising, ScoreTier.New -> null
     }
 }

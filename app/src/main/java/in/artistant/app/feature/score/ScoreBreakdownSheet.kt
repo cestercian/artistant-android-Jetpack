@@ -1,15 +1,20 @@
 package `in`.artistant.app.feature.score
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -17,182 +22,254 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
 import `in`.artistant.app.data.repository.ScoreBreakdown
-import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.ScoreRing
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.EyebrowLabel
+import `in`.artistant.app.designsystem.component.IconCircle
+import `in`.artistant.app.designsystem.component.Meter
+import `in`.artistant.app.designsystem.component.PrimaryButton
+import `in`.artistant.app.designsystem.component.SecondaryButton
+import `in`.artistant.app.designsystem.component.SheetScaffold
+import `in`.artistant.app.designsystem.component.UnavailableRow
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
-import `in`.artistant.app.domain.score.tierColor
 import java.util.Locale
 
 /**
- * Client-facing Bookability Score sheet — port of iOS ScoreBreakdownSheet.
- * Real-world rows (gigs, show-up %, reviews, reply estimate, cancellations),
- * not the self-facing 0–100 sub-scores.
+ * The client-facing Bookability sheet — design screen 99 and its healthy twin.
+ *
+ * **Renders only what it can back.** The artist row itself carries a `score`, a
+ * `total_gigs` and an `on_time_rate`, and those arrive with the profile; the
+ * five weighted `metric_*` columns arrive in a second read that can fail on its
+ * own. When it does, this sheet keeps the number (it is the server's, and it did
+ * not change) and itemises only the factors the row can vouch for — the rest go
+ * under NOT LOADED with a dash and no bar, because an empty bar in a list of
+ * full ones reads as a factor that scored zero.
+ *
+ * That is the difference between screen 99 and an error screen, and it is why
+ * [breakdownFailed] is threaded in rather than inferred from a null
+ * [breakdown]: null is also what "the fetch has not returned yet" looks like,
+ * and claiming a partial view during the first frame of every profile would
+ * make the honest state meaningless.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScoreBreakdownSheet(
     artist: Artist,
     breakdown: ScoreBreakdown?,
+    breakdownFailed: Boolean,
     reviews: List<Review>,
     reviewsFailed: Boolean,
+    onRetry: () -> Unit,
+    onSeeBookability: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val tier = breakdown?.tier ?: ScoreBands.tier(artist.score, artist.gigs)
-    val ring = breakdown?.numericScore ?: if (tier == ScoreTier.New) null else artist.score
-    val gigs = breakdown?.totalGigs ?: artist.gigs
-    val reviewAvg = if (reviews.isEmpty()) null else reviews.map { it.rating }.average()
+    val isNew = tier == ScoreTier.New
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = colors.bg,
+        dragHandle = null,
+        containerColor = colors.surface,
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = space.xl)
-                .padding(bottom = space.xxl),
-        ) {
-            // Identity row: the ring rides at the LEADING edge with the title and
-            // tier stacked beside it, rather than centred under the title. Centring
-            // it cost roughly a third of the sheet's height to one number, and
-            // pushed the rows that explain that number below the fold — which is
-            // the wrong way round for a sheet whose whole job is the explanation.
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                ScoreRing(
-                    value = ring,
-                    size = AppTheme.dimens.size.ringMd,
-                    // The tier is spelled out beside the title now, so the ring's
-                    // own label would print it twice.
-                    showLabel = false,
-                    totalGigs = gigs,
-                )
-                Spacer(Modifier.width(space.lg))
-                Column(Modifier.weight(1f)) {
-                    Text("Bookability Score", style = AppTheme.type.headline, color = colors.ink)
+        // The scroll rides the sheet's DIRECT child: `ModalBottomSheet` bounds
+        // that node to the display, while a `verticalScroll` deeper inside a
+        // wrap-content Column measures with infinite height and grows past the
+        // sheet instead of scrolling inside it.
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            SheetScaffold {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = space.lg),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        tier.name.uppercase(),
-                        style = AppTheme.type.monoSmall,
-                        color = tierColor(tier, colors),
+                        "Score details",
+                        style = AppTheme.type.sectionTitle,
+                        color = colors.ink,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconCircle(
+                        icon = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        onClick = onDismiss,
+                        size = dimens.component.iconCircleSm,
                     )
                 }
-            }
-            Spacer(Modifier.height(space.lg))
 
-            if (tier == ScoreTier.New) {
-                HRule()
-                Spacer(Modifier.height(space.lg))
-                Text(
-                    "Still building a score — under 5 completed gigs. Gigs and reviews still count.",
-                    style = AppTheme.type.body,
-                    color = colors.ink2,
-                )
-                Spacer(Modifier.height(space.lg))
-                RealRow("Gigs played", "$gigs", "on Artistant")
-                ReviewRow(reviewAvg, reviews.size, reviewsFailed)
-            } else {
-                RealRow("Gigs played", "$gigs", "on Artistant")
-                breakdown?.let { b ->
-                    if (b.showUpRate > 0) {
-                        RealRow("Shows up", "${b.showUpRate}%", "of confirmed shows")
-                    }
-                    ReviewRow(reviewAvg, reviews.size, reviewsFailed)
-                    replyLabel(b.replySpeed)?.let { RealRow("Replies", it, "typical response") }
-                    if (b.cancellationRate > 0) {
-                        RealRow(
-                            "Cancellations",
-                            "${b.cancellationRate}%",
-                            "of bookings, last 12 months",
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(space.lg),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ScoreDisc(
+                        score = if (isNew) null else artist.score,
+                        size = dimens.size.ringMd,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(space.xs)) {
+                        Text(
+                            artist.name,
+                            style = AppTheme.type.rowTitle,
+                            color = colors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            // The tier, not a percentile: nothing in the schema
+                            // ranks an artist against their city, and "top 18% in
+                            // Bengaluru" would be a number this client invented.
+                            if (isNew) "New on Artistant" else "${tier.label} tier",
+                            style = AppTheme.type.subtitle,
+                            color = colors.ink4,
+                            maxLines = 1,
                         )
                     }
-                } ?: run {
-                    ReviewRow(reviewAvg, reviews.size, reviewsFailed)
+                }
+                Spacer(Modifier.height(space.lg))
+
+                Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
+                    if (breakdownFailed) {
+                        Banner(
+                            title = "Couldn't itemise this score",
+                            detail = "Showing what this artist's record can back on its " +
+                                "own. The rest needs a fetch we couldn't complete.",
+                            tone = BannerTone.Attention,
+                        )
+                    }
+                    if (isNew) {
+                        Text(
+                            "Under ${ScoreBands.MIN_GIGS_FOR_RANK} completed gigs, so " +
+                                "there is no ranked score yet. That is not a low score — " +
+                                "it is no score.",
+                            style = AppTheme.type.body,
+                            color = colors.ink2,
+                        )
+                    }
+
+                    if (breakdown != null) {
+                        EyebrowLabel("What moves it")
+                        ScoreFactors.of(breakdown).forEach { factor ->
+                            Meter(
+                                label = factor.label,
+                                fraction = factor.fraction,
+                                value = factor.display,
+                            )
+                        }
+                    } else {
+                        // Degraded (99): only the facts the artist row itself carries.
+                        EyebrowLabel("What we can show")
+                        Meter(
+                            label = "Shows completed",
+                            // No denominator exists for a career total, so the bar is
+                            // full and the figure carries the meaning.
+                            fraction = if (artist.gigs > 0) 1f else 0f,
+                            value = "${artist.gigs}",
+                        )
+                        if (artist.onTime > 0) {
+                            Meter(
+                                label = ScoreFactors.SHOW_UP,
+                                fraction = artist.onTime.coerceIn(0, PERCENT) / PERCENT.toFloat(),
+                                value = "${artist.onTime}%",
+                            )
+                        }
+                        reviewAverage(reviews)?.let { average ->
+                            Meter(
+                                label = ScoreFactors.REVIEWS,
+                                fraction = (average / MAX_RATING).toFloat(),
+                                value = String.format(Locale.US, "%.1f / %d", average, MAX_RATING),
+                            )
+                        }
+                        Spacer(Modifier.height(space.xs))
+                        EyebrowLabel("Not loaded")
+                        ScoreFactors.labels
+                            .filterNot { it == ScoreFactors.SHOW_UP && artist.onTime > 0 }
+                            .filterNot { it == ScoreFactors.REVIEWS && reviewAverage(reviews) != null }
+                            .forEach { UnavailableRow(it) }
+                    }
+
+                    if (reviewsFailed) {
+                        Text(
+                            "Reviews couldn't be loaded, so they aren't counted in what " +
+                                "you see here.",
+                            style = AppTheme.type.caption,
+                            color = colors.ink4,
+                        )
+                    }
+                    Text(
+                        if (breakdown != null) {
+                            "Computed from completed bookings, verified reviews and " +
+                                "response times on Artistant. Nothing here can be bought."
+                        } else {
+                            "The total is still the server's number. We just can't " +
+                                "itemise all of it right now."
+                        },
+                        style = AppTheme.type.caption,
+                        color = colors.ink4,
+                    )
+                    Spacer(Modifier.height(space.sm))
+                    if (breakdownFailed) {
+                        PrimaryButton(text = "Retry", onClick = onRetry, fullWidth = true)
+                        Spacer(Modifier.height(space.sm))
+                        SecondaryButton(
+                            text = "See the full breakdown",
+                            onClick = onSeeBookability,
+                            fullWidth = true,
+                        )
+                    } else {
+                        PrimaryButton(
+                            text = "See the full breakdown",
+                            onClick = onSeeBookability,
+                            fullWidth = true,
+                        )
+                    }
                 }
             }
-
-            // Closing note. Without it the rows are five unsourced statistics; the
-            // sheet exists because clients ask where the number comes from.
-            Spacer(Modifier.height(space.lg))
-            Text(
-                "Computed from completed bookings, verified reviews, and chat response " +
-                    "times on Artistant.",
-                style = AppTheme.type.footnote,
-                color = colors.ink3,
-            )
         }
     }
 }
 
 /**
- * One statistic. The trailing group is a value plus a QUALIFIER — "96%" means
- * nothing without "of confirmed shows" next to it, and the sheet was shipping
- * the bare figures. The qualifier is set dimmer so the number still leads.
+ * The accent disc a score rides in on the light design — a filled circle with
+ * the number in it, not a progress ring.
  *
- * Each row closes with a hairline, which is also what pushes the row pitch onto
- * the reference's: at `space.sm` and no rule the rows sat 36.6 apart against a
- * reference 43.
+ * The ring survives on the self-facing explainer, where the arc is the subject.
+ * Here the number is one fact among several and a ring beside a name reads as a
+ * loading spinner that stopped.
  */
 @Composable
-private fun RealRow(label: String, value: String, qualifier: String? = null) {
+internal fun ScoreDisc(score: Int?, size: Dp, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = space.md),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom,
+    Box(
+        modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(if (score == null) colors.surface2 else colors.accent),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = AppTheme.type.callout, color = colors.ink2)
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, style = AppTheme.type.monoMedium, color = colors.ink)
-            if (qualifier != null) {
-                Spacer(Modifier.width(space.sm))
-                Text(qualifier, style = AppTheme.type.footnote, color = colors.ink3)
-            }
-        }
-    }
-    HRule()
-}
-
-@Composable
-private fun ReviewRow(avg: Double?, count: Int, failed: Boolean) {
-    when {
-        failed -> RealRow("Reviews", "Couldn't load")
-        avg == null || count == 0 -> RealRow("Reviews", "none yet")
-        // Locale.US, not the device default: the row is mono numerals sitting
-        // beside "$gigs" and "96%", and a French/Arabic device would render this
-        // one figure as "4,5" (or in Eastern-Arabic digits) inside an otherwise
-        // ASCII column.
-        else -> RealRow(
-            "Reviews",
-            String.format(Locale.US, "%.1f", avg),
-            if (count == 1) "across 1 review" else "across $count reviews",
+        Text(
+            text = score?.toString() ?: "New",
+            style = AppTheme.type.monoNumber,
+            color = if (score == null) colors.ink3 else colors.onAccent,
+            maxLines = 1,
         )
     }
 }
 
-/**
- * Invertible linear map from metric_reply_speed (≤5min→100, ≥24h→0).
- * Approximate duration for client-facing copy.
- *
- * Returns the DURATION only. It used to prefix each string with "Replies", and
- * the row it feeds is already labelled "Replies" — so the sheet was rendering
- * "Replies · Replies ~6h".
- */
-private fun replyLabel(speed: Int): String? {
-    if (speed <= 0) return null
-    val minutes = ((100 - speed) / 100.0 * (24 * 60 - 5) + 5).toInt().coerceAtLeast(1)
-    return when {
-        minutes < 60 -> "~${minutes}m"
-        minutes < 24 * 60 -> "~${minutes / 60}h"
-        else -> "~1d"
-    }
-}
+private const val PERCENT = 100
+private const val MAX_RATING = 5
+
+private fun reviewAverage(reviews: List<Review>): Double? =
+    if (reviews.isEmpty()) null else reviews.sumOf { it.rating }.toDouble() / reviews.size

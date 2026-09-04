@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
@@ -111,6 +112,12 @@ data class SearchUiState(
 class SearchViewModel @Inject constructor(
     private val searchRepository: SearchRepository,
     private val searchRecents: SearchRecents,
+    /**
+     * Discover's "See all" hand-off. Defaulted so the JVM tests can build a
+     * ViewModel without one — Hilt always passes every argument, so the default
+     * only ever applies in a test.
+     */
+    private val searchSeed: SearchSeed = SearchSeed(),
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SearchUiState())
@@ -140,7 +147,47 @@ class SearchViewModel @Inject constructor(
                     runSearch(reset = true)
                 }
         }
+        viewModelScope.launch {
+            // A seed can arrive before this ViewModel exists (Discover's tap
+            // switches tabs, which is what CREATES it), so the flow is collected
+            // rather than read once — and consumed on arrival, because a seed is
+            // an event: left in place it would re-apply the rail's filters on the
+            // next configuration change, silently undoing whatever the user had
+            // narrowed to since.
+            searchSeed.pending.filterNotNull().collect {
+                val seed = searchSeed.consume() ?: return@collect
+                applySeed(seed)
+            }
+        }
         loadHistogram(null)
+    }
+
+    /**
+     * Adopt a rail's filters wholesale (see [SearchSeed]).
+     *
+     * A REPLACEMENT, not a merge: "See all" on a rail means "show me that rail",
+     * and folding its city into whatever the user had left on the Search tab
+     * three taps ago produces a page that is neither. Everything the seed does
+     * not name is cleared, exactly as [clearFilters] would.
+     */
+    private fun applySeed(seed: SearchSeedRequest) {
+        queryFlow.value = seed.text
+        _state.update {
+            it.copy(
+                query = seed.text,
+                city = seed.city,
+                categories = setOfNotNull(seed.category),
+                dateIso = seed.dateIso,
+                flexDays = 0,
+                eventType = null,
+                services = emptySet(),
+                minScore = 0,
+                minPrice = it.priceDataMin,
+                maxPrice = it.priceDataMax,
+            )
+        }
+        loadHistogram(seed.city)
+        runSearch(reset = true)
     }
 
     fun applyRecent(term: String) {
@@ -209,6 +256,48 @@ class SearchViewModel @Inject constructor(
             if (!next.add(slug)) next.remove(slug)
             s.copy(services = next)
         }
+    }
+
+    /**
+     * Pick ONE service, or none with null — the "Compare by service" sheet
+     * (screen 53).
+     *
+     * Radio, not checkbox, and the design's note says why: comparing means one
+     * lens at a time. The RPC's `p_services` is an overlap test, so two selected
+     * services WIDEN the feed rather than narrowing it — the opposite of what a
+     * control called "compare" implies. [toggleService] survives for the tests
+     * that pin its set semantics.
+     */
+    fun selectService(slug: String?) {
+        _state.update { it.copy(services = setOfNotNull(slug)) }
+    }
+
+    /**
+     * Drop one filter — a summary chip's tap (screen 104) and the results
+     * header's chip row.
+     *
+     * Keyed by [SearchFilterKind] rather than by the chip's label, because the
+     * label is display text: "Band, DJ" is one chip standing for a set, and
+     * anything that tried to undo it by parsing that string back into categories
+     * would break the first time a category contained a comma.
+     */
+    fun dropFilter(kind: SearchFilterKind) {
+        _state.update { s ->
+            when (kind) {
+                SearchFilterKind.City -> s.copy(city = null)
+                SearchFilterKind.Date -> s.copy(dateIso = null, flexDays = 0)
+                SearchFilterKind.Category -> s.copy(categories = emptySet())
+                SearchFilterKind.EventType -> s.copy(eventType = null)
+                SearchFilterKind.Service -> s.copy(services = emptySet())
+                SearchFilterKind.Price -> s.copy(minPrice = s.priceDataMin, maxPrice = s.priceDataMax)
+                SearchFilterKind.Score -> s.copy(minScore = 0)
+            }
+        }
+        // The city drives the price facet, so dropping it has to re-ask for the
+        // span the slider is measured against — otherwise the sheet keeps a
+        // narrowing that describes a roster we are no longer searching.
+        if (kind == SearchFilterKind.City) loadHistogram(null)
+        runSearch(reset = true)
     }
 
     fun setDate(iso: String?) {
