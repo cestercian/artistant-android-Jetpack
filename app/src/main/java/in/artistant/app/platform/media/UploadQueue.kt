@@ -22,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -192,15 +193,23 @@ class UploadQueue @Inject constructor(
      * invisible, and a retry nobody can ask for is the same thing as no retry.
      */
     fun retryFailed() {
-        val failed = _state.value.failed
-        if (failed.isEmpty()) return
-        _state.update {
-            it.copy(
-                failed = emptyList(),
-                pending = it.pending + failed.map { t -> t.withAttempt(0) },
-                batchTotal = it.batchTotal + failed.size,
-            )
+        // Read-modify-write on ONE value. The list used to be read before the
+        // update and closed over inside it, so a task that burned its last
+        // attempt in that gap was cleared by `failed = emptyList()` without ever
+        // being added to `pending` from the stale capture — the drain reported a
+        // failure and the queue silently ate the task.
+        val before = _state.getAndUpdate { current ->
+            if (current.failed.isEmpty()) {
+                current
+            } else {
+                current.copy(
+                    failed = emptyList(),
+                    pending = current.pending + current.failed.map { it.withAttempt(0) },
+                    batchTotal = current.batchTotal + current.failed.size,
+                )
+            }
         }
+        if (before.failed.isEmpty()) return
         persist()
         scheduleWork()
         pump()
@@ -220,10 +229,15 @@ class UploadQueue @Inject constructor(
      * row the previous tap already requeued looks like.
      */
     fun retryFailed(taskId: String) {
-        val before = _state.value
-        val next = retryOne(before, taskId)
-        if (next === before) return
-        _state.value = next
+        // `getAndUpdate`, not read-then-assign. The drain writes this same
+        // `_state` from an IO coroutine, so a completion landing between the read
+        // and the assignment was overwritten by a snapshot taken before it —
+        // resurrecting an uploaded task, or flipping `isRunning` back to true
+        // over a drain that had just finished. `retryOne` is a no-op for an id
+        // that names nothing, so it is safe to apply unconditionally and decide
+        // afterwards, off the value the successful CAS actually replaced.
+        val before = _state.getAndUpdate { retryOne(it, taskId) }
+        if (before.failed.none { it.id == taskId }) return
         persist()
         scheduleWork()
         pump()
@@ -239,8 +253,12 @@ class UploadQueue @Inject constructor(
      * [clearAll]: drop it from state first so nothing can drain it, then unlink.
      */
     fun discardFailed(taskId: String) {
-        val dropped = _state.value.failed.firstOrNull { it.id == taskId } ?: return
-        _state.value = discardOne(_state.value, taskId)
+        // Two reads of `_state.value` and a bare assignment between them was
+        // three chances to act on a value the drain had already replaced. One
+        // atomic swap: `before` IS the snapshot that was retired, so the task
+        // whose bytes we unlink is exactly the one this call removed.
+        val before = _state.getAndUpdate { discardOne(it, taskId) }
+        val dropped = before.failed.firstOrNull { it.id == taskId } ?: return
         persist()
         scope.launch {
             runCatching { dropped.stagedFile().delete() }
