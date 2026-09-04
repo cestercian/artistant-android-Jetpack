@@ -275,28 +275,57 @@ controls rather than letting them fail against the self-booking guard.
 `ReportOutcome`. *APIs:* Artists/Reviews/Score/Reports repos. *Deps:* SavedStore,
 ViewerIdentity, BookingDraftStore.
 
-**BookingScreen** (C, `Booking`) → `feature/booking/`. *ViewModel:* `BookingViewModel`
-(`BookingStore.draft`). *Compose:* package radio picker, `DateScroller` (real
-`daysAvailable`, busy dims), time `LazyVerticalGrid` 3-col (preferred slots),
-venue field + guests stepper (10–5000/10), summary (fee only — v1 hides fees).
-CTA→`Checkout`. *Lifecycle:* `LaunchedEffect(artistId)` ensures artist + `startDraft`.
+**BookingScreen** (C, `Booking`) → `feature/booking/`. **Redesigned — screen 05
+"When's the show?" (BC).** *ViewModel:* `BookingViewModel`. *Compose:*
+`FunnelStepBar` "Step 1 of 2", 26sp question, `FunnelCalendar` month grid (opens
+on the first month with an open day; closed days dim and inert; back-step floors
+at the current month), `PackageChoiceRow` list, start-time chips, venue field +
+guests stepper (10–5000/10), bounded notes with a live counter. Dock: summary
+line + fee, CTA "Request this date"→`Checkout`. *Pure logic:* `funnelMonthDays`,
+`monthSelectableDays`, `firstOpenMonth`, `steppedMonth`, `dayOfMonthIfIn`,
+`isAfterCurrentMonth`, `bookingSummaryLine`.
 
-**RequestQuoteScreen** (C, `RequestQuote`) → `feature/booking/`. *Compose:*
-`DateScroller`, budget (mono ₹, numeric, required), optional message/venue/guests.
-CTA (gated amount>0)→`RequestsRepository.create` (7-day expiry). Inline error;
-success state→dismiss.
+**RequestQuoteScreen** (C, `RequestQuote`) → `feature/booking/`. **Redesigned —
+screen 17 "the brief, prefilled" (BC).** *Compose:* occasion chips, Date/Start
+picker fields opening `FunnelCalendar` / slot sheets, guests + venue, budget
+(numeric ₹, required), 500-char note with counter. CTA (gated amount>0)
+→`RequestsRepository.create` (7-day expiry). *Data:* occasion and start time have
+no `gig_requests` column and are composed into the message by `quoteBriefMessage`;
+budget is one amount, not the design's range.
 
-**CheckoutScreen** (C, `Checkout`) → `feature/booking/`. *ViewModel:*
-`CheckoutViewModel`. *Compose:* summary card, confirm-match button →
-`SubscriptionService`/`Payments` seam → `confirmDraftAsBooking` →`Confirmed`.
-v1 quota gate → `PaywallScreen` sheet. *APIs:* create-booking path. *State:*
-retry banner on payment-ok/write-fail. Analytics `booking_created`/`booking_paid`.
-Success/error haptics. *Deps:* EntitlementStore.
+**CheckoutScreen** (C, `Checkout`) → `feature/booking/`. **Redesigned — screen 06
+"no money in v1" (BC).** *ViewModel:* `CheckoutViewModel`. *Compose:* act card
+(`checkoutActMeta` carries date/time/venue), "Your request" term rows, artist-fee
+row, accent `NoteBlock` on the no-payment terms, "What happens next" card. CTA
+→`SubscriptionService`/`Payments` seam → create → `Confirmed`. v1 quota gate →
+`PaywallScreen`. *State:* retry banner on payment-ok/write-fail; narrated wait
+covers the two-hop submit. Success/error haptics. *Deps:* EntitlementStore.
 
-**ConfirmedScreen** (C, `Confirmed`) → `feature/booking/`. *Compose:* spring halo +
-checkmark, italic "Match confirmed", details card, `StatusTimeline`, actions:
-View booking (pop-to-root + `pendingBookingDetail` + switch tab), `AddToCalendar`,
-Back to discover. *Anim:* `LaunchedEffect` spring scale.
+**ConfirmedScreen** (C, `Confirmed`) → `feature/booking/`. **Redesigned — screen 07
+"say the outcome, not 'success'" (BC).** *Compose:* `OutcomeMark` (spring tick),
+headline branching on status (`confirmedHeadline`), terms card (`confirmedTerms`),
+"See the record"→`Invoice`. Actions: pending → View booking / Back to discover;
+confirmed → Message the artist (`ChatOpenViewModel`) / Add to calendar.
+
+**MatchConfirmedScreen** (C, `MatchConfirmed`) → `feature/booking/`. **New — screen
+94 (BC).** Route `match_confirmed/{bookingId}`; the landing for a match reached
+by chat negotiation. Outcome mark, "It's a match. You're both in.", act card with
+a `Confirmed` badge, package + fee, frozen-terms note (mig 0096). CTA "View the
+booking" + "Back to discover".
+
+**InvoiceScreen** (C, `Invoice`) → `feature/booking/`. **New — screen 132 (BC).**
+Route `invoice/{bookingId}`; reachable from Confirmed, and from Booking detail
+once BN wires it. "A record, not a tax invoice": billed-to card + status pill,
+booking terms, fee / Artistant's ₹0 / total = fee (`invoiceLines` never prints
+the persisted `platform_fee_inr` or `gst_inr` as charges), disclaimer note. CTA
+shares plain text, not a PDF.
+
+**CounterOfferScreen** (A, `CounterOffer`) → `feature/booking/`. **New — screen 61
+(BC).** Route `counter_offer/{requestId}` on the ARTIST graph — `gig_requests`
+has one UPDATE policy (`gig_requests_update_artist`, mig 0002), so a client-side
+counter is blocked on the backend. Sheet-styled destination: their offer above,
+a 60dp amount well below, `counterDeltaLine` under it, note, "Send counter"
+→`RequestsRepository.counter`.
 
 **BookingsScreen** (C, tab root) → `feature/bookings/`. *ViewModel:*
 `BookingsViewModel`. *Compose:* `MonthCalendar` (booked=lime, `eventsForDay`,

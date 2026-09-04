@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Artist
+import `in`.artistant.app.data.model.BookingDateFormat
 import `in`.artistant.app.data.model.BookingDraft
 import `in`.artistant.app.data.repository.ArtistsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +28,11 @@ data class BookingUiState(
     val isLoading: Boolean = true,
     val loadError: String? = null,
     val packageIndex: Int = 0,
-    val dateChips: List<DateChip> = emptyList(),
+    /** The month the grid is SHOWING — not the month of the picked date. */
+    val visibleYear: Int = 0,
+    val visibleMonth: Int = 0,
+    val monthDays: List<FunnelDay> = emptyList(),
+    val selectableDays: Set<Int> = emptySet(),
     val selectedDateEpochMs: Long = 0L,
     val selectedDateLabel: String = "",
     val timeSlots: List<String> = DefaultTimeSlots,
@@ -35,8 +40,32 @@ data class BookingUiState(
     val venue: String = "",
     val guests: Int = 100,
     val venueNotes: String = "",
-    val canContinue: Boolean = false,
-)
+) {
+    /** "October 2026" — the calendar card's header. */
+    val monthLabel: String get() = funnelMonthLabel(visibleYear, visibleMonth)
+
+    /**
+     * Which cell of the VISIBLE month is ringed, or null when the picked date is
+     * in another month. See [dayOfMonthIfIn] — the selection is an instant, the
+     * grid is a month, and stepping away must not leave a ring behind.
+     */
+    val selectedDay: Int?
+        get() = dayOfMonthIfIn(selectedDateEpochMs, visibleYear, visibleMonth)
+
+    /**
+     * Stepping back stops at the current month. There is nothing to book in the
+     * past, and a picker that walks into 2019 is a picker with no floor.
+     */
+    val canStepBack: Boolean get() = isAfterCurrentMonth(visibleYear, visibleMonth)
+
+    /**
+     * A request needs a day and a start time. Both are real blocks — the day
+     * because the artist may have nothing open in the month on screen, the time
+     * because `bookings.start_datetime` is composed from it.
+     */
+    val canContinue: Boolean
+        get() = selectedDateLabel.isNotBlank() && selectedTime.isNotBlank()
+}
 
 @HiltViewModel
 class BookingViewModel @Inject constructor(
@@ -63,13 +92,19 @@ class BookingViewModel @Inject constructor(
                 return@launch
             }
             val published = resolveTimeSlots(full.timeSlots)
-            // The strip starts at today, so the clock has to be part of what
-            // "available" means: a day whose last slot has already gone by is not
-            // bookable, and offering it is how a request for a show that already
-            // ended gets filed. See [bookableTimeSlots].
-            val chips = upcomingDateChips(daysAvailable = full.daysAvailable, timeSlots = published)
-            val firstAvailable = chips.firstOrNull { it.available } ?: chips.first()
-            val slots = bookableTimeSlots(published, firstAvailable.epochMs)
+            // The grid opens on the first month that has anything in it, so an
+            // artist who is away until November opens on November rather than on
+            // an empty October the host has to guess their way out of. The clock
+            // is part of what "open" means: a day whose last slot has already
+            // gone by is not bookable, and offering it is how a request for a
+            // show that already ended gets filed. See [bookableTimeSlots].
+            val opening = firstOpenMonth(
+                daysAvailable = full.daysAvailable,
+                timeSlots = published,
+            )
+            val firstDay = opening.selectableDays.minOrNull()
+            val firstEpoch = firstDay?.let { funnelDayEpochMs(opening.year, opening.month, it) } ?: 0L
+            val slots = if (firstEpoch > 0L) bookableTimeSlots(published, firstEpoch) else published
             val popularIdx = full.packages.indexOfFirst { it.popular }.takeIf { it >= 0 } ?: 0
             // Open on the tier the client tapped on the profile, if they came
             // that way. Without this the selection there was cosmetic: the route
@@ -84,12 +119,18 @@ class BookingViewModel @Inject constructor(
                     artist = full,
                     isLoading = false,
                     packageIndex = handedOver ?: popularIdx,
-                    dateChips = chips,
-                    selectedDateEpochMs = firstAvailable.epochMs,
-                    selectedDateLabel = firstAvailable.label,
+                    visibleYear = opening.year,
+                    visibleMonth = opening.month,
+                    monthDays = funnelMonthDays(opening.year, opening.month),
+                    selectableDays = opening.selectableDays,
+                    selectedDateEpochMs = firstEpoch,
+                    selectedDateLabel = if (firstEpoch > 0L) {
+                        BookingDateFormat.weekdayString(firstEpoch)
+                    } else {
+                        ""
+                    },
                     timeSlots = slots,
                     selectedTime = defaultTimeFromSlots(slots),
-                    canContinue = true,
                 )
             }
         }
@@ -99,18 +140,47 @@ class BookingViewModel @Inject constructor(
         _state.update { it.copy(packageIndex = index) }
     }
 
-    fun selectDate(chip: DateChip) {
-        if (!chip.available) return
+    /**
+     * Step the grid a month. The PICKED date does not move — a host checking
+     * whether the artist is freer in November has not thereby cancelled the 12th
+     * of October, and `selectedDay` simply stops matching until they step back.
+     */
+    fun stepMonth(delta: Int) {
         _state.update { s ->
-            // The grid is per-day, not per-screen: only today hides the slots the
-            // clock has passed, so moving off today has to restore the artist's
-            // whole list — and moving onto it has to trim it again. Keeping the
-            // current pick when it survives the move is what stops a date tap
-            // silently re-deciding the time.
-            val slots = bookableTimeSlots(resolveTimeSlots(s.artist?.timeSlots.orEmpty()), chip.epochMs)
+            if (delta < 0 && !s.canStepBack) return@update s
+            val (year, month) = steppedMonth(s.visibleYear, s.visibleMonth, delta)
             s.copy(
-                selectedDateEpochMs = chip.epochMs,
-                selectedDateLabel = chip.label,
+                visibleYear = year,
+                visibleMonth = month,
+                monthDays = funnelMonthDays(year, month),
+                selectableDays = monthSelectableDays(
+                    year = year,
+                    month = month,
+                    daysAvailable = s.artist?.daysAvailable.orEmpty(),
+                    timeSlots = resolveTimeSlots(s.artist?.timeSlots.orEmpty()),
+                ),
+            )
+        }
+    }
+
+    /**
+     * Pick a day of the VISIBLE month. A day the artist has closed is refused
+     * here as well as being drawn inert — the guard belongs to the model, not to
+     * the one composable that happens to grey the cell.
+     */
+    fun selectDay(day: Int) {
+        _state.update { s ->
+            if (day !in s.selectableDays) return@update s
+            val epoch = funnelDayEpochMs(s.visibleYear, s.visibleMonth, day)
+            // The slot list is per-day, not per-screen: only today hides the
+            // slots the clock has passed, so moving off today has to restore the
+            // artist's whole list — and moving onto it has to trim it again.
+            // Keeping the current pick when it survives the move is what stops a
+            // date tap silently re-deciding the time.
+            val slots = bookableTimeSlots(resolveTimeSlots(s.artist?.timeSlots.orEmpty()), epoch)
+            s.copy(
+                selectedDateEpochMs = epoch,
+                selectedDateLabel = BookingDateFormat.weekdayString(epoch),
                 timeSlots = slots,
                 selectedTime = s.selectedTime.takeIf { it in slots } ?: defaultTimeFromSlots(slots),
             )
