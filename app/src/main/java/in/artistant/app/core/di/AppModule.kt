@@ -9,6 +9,7 @@ import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.observability.PostHogAnalytics
 import `in`.artistant.app.platform.observability.SentryCrash
 import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.platform.storage.KeyValueStore
 import `in`.artistant.app.platform.auth.AuthGateway
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.SignupConsentStore
@@ -37,6 +38,10 @@ abstract class AppModule {
     /** [AppPreferences] IS the consent store — the interface only keeps signup unit-testable. */
     @Binds
     abstract fun bindSignupConsentStore(prefs: AppPreferences): SignupConsentStore
+
+    /** Ditto for the generic snapshot store — see [KeyValueStore]. */
+    @Binds
+    abstract fun bindKeyValueStore(prefs: AppPreferences): KeyValueStore
 
     @Binds
     abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents

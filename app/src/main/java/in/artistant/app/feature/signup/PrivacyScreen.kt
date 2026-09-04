@@ -35,15 +35,13 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** What screen 62 shows. Two switches and nothing else that can fail. */
+/** What screen 62 shows. One switch and nothing else that can fail. */
 data class PrivacyUiState(
     val readReceipts: Boolean = true,
-    val showCity: Boolean = true,
 )
 
 /** Reads and writes [PrivacyPreferences]. No network, so no loading or failed state. */
@@ -56,9 +54,7 @@ class PrivacyViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            combine(prefs.readReceipts, prefs.showCity) { receipts, city ->
-                PrivacyUiState(readReceipts = receipts, showCity = city)
-            }.collect { _state.value = it }
+            prefs.readReceipts.collect { _state.value = PrivacyUiState(readReceipts = it) }
         }
     }
 
@@ -75,30 +71,35 @@ class PrivacyViewModel @Inject constructor(
         _state.update { it.copy(readReceipts = enabled) }
         viewModelScope.launch { runCatching { prefs.setReadReceipts(enabled) } }
     }
-
-    fun setShowCity(enabled: Boolean) {
-        _state.update { it.copy(showCity = enabled) }
-        viewModelScope.launch { runCatching { prefs.setShowCity(enabled) } }
-    }
-
 }
 
 /**
- * Screen 62 — **two toggles, both explained**.
+ * Screen 62 — **the switches that are switches, and the line that isn't**.
  *
  * The design's note is about the subtitles: "each switch says what the other side sees, so
  * nobody has to guess at the consequence." A privacy control whose label is a noun ("Read
  * receipts") makes the user model the system; one whose label is the consequence ("People you
  * chat with can see when you've read their messages") does not.
  *
- * **Where the settings live, and why it is stated.** Neither switch has a column in the
- * canonical schema, so both are device preferences — see [PrivacyPreferences] for the
- * migration evidence. The note under them says so, because a settings screen that silently
- * fails to follow you to a new phone is a settings screen that lied.
+ * **The design draws two switches and this screen ships one.** Read receipts survive because
+ * the setting is something the CLIENT can honour: `mark_thread_read` is a write we make, and a
+ * write we can decline to make. "Show my city on my profile" had no such property. The city is
+ * a `users.city` column with no visibility flag anywhere in the 107 canonical migrations, it is
+ * read from the server by everyone who opens your profile, and a flag on this phone reaches
+ * none of them — so the switch could only ever have hidden your city from you. A privacy
+ * control that does nothing to the thing it names is worse than an absent one: it is the reason
+ * somebody stops worrying. It is a line of text now, and the line says who can see the city and
+ * that nothing here changes it. Restoring the switch needs a visibility column, which is a
+ * schema change and therefore starts in the iOS repo.
  *
- * The footer is the one line on this screen that is NOT a setting, and it says so out loud:
- * the phone-number rule is how the platform works, not something anyone can switch off. That
- * is the same sentence the sign-in screen's legal line carries, deliberately.
+ * **Where the setting lives, and why it is stated.** Read receipts have no column either, so
+ * the switch is a device preference — see [PrivacyPreferences] for the migration evidence. The
+ * note under it says so, because a settings screen that silently fails to follow you to a new
+ * phone is a settings screen that lied.
+ *
+ * The footer is the other line that is NOT a setting, and it says so out loud: the phone-number
+ * rule is how the platform works, not something anyone can switch off. That is the same
+ * sentence the sign-in screen's legal line carries, deliberately.
  */
 @Composable
 fun PrivacyScreen(
@@ -113,7 +114,6 @@ fun PrivacyScreen(
         state = state,
         onBack = onBack,
         onReadReceipts = viewModel::setReadReceipts,
-        onShowCity = viewModel::setShowCity,
         onOpenLegal = onOpenLegal,
         onDataExport = onDataExport,
         modifier = modifier,
@@ -125,7 +125,6 @@ private fun PrivacyContent(
     state: PrivacyUiState,
     onBack: () -> Unit,
     onReadReceipts: (Boolean) -> Unit,
-    onShowCity: (Boolean) -> Unit,
     onOpenLegal: (LegalDoc) -> Unit,
     onDataExport: (() -> Unit)?,
     modifier: Modifier = Modifier,
@@ -153,12 +152,12 @@ private fun PrivacyContent(
             onChange = onReadReceipts,
             testTag = "privacy.readReceipts",
         )
-        PrivacyToggle(
-            title = "Show my city on my profile",
-            detail = "Your city appears on your profile header. Turn off to hide it.",
-            checked = state.showCity,
-            onChange = onShowCity,
-            testTag = "privacy.showCity",
+        // Where the design's second switch was. It is a stated fact rather than a control
+        // because there is nothing behind it to control — see this file's header.
+        PrivacyFact(
+            title = "Your city is shown on your profile",
+            detail = "Artists and hosts see the city on your profile so they know who they're " +
+                "matching with. It isn't adjustable in this version.",
         )
 
         ListRow(
@@ -196,8 +195,8 @@ private fun PrivacyContent(
 
         Spacer(Modifier.height(space.lg))
         Banner(
-            title = "Both switches are saved on this device. Artistant has no server-side " +
-                "privacy setting, so they don't follow you to another phone.",
+            title = "This switch is saved on this device. Artistant has no server-side privacy " +
+                "setting, so it doesn't follow you to another phone.",
             tone = BannerTone.Note,
         )
 
@@ -209,6 +208,34 @@ private fun PrivacyContent(
             color = colors.ink4,
         )
         Spacer(Modifier.height(space.xl))
+    }
+}
+
+/**
+ * One row that reads like a switch row and carries no switch.
+ *
+ * Same title/detail typography and the same hairline, so it sits in the list the design draws
+ * rather than under it — but with nothing on the right, because there is nothing to tap. The
+ * alternative, a disabled Switch, states the same fact and invites the tap anyway.
+ */
+@Composable
+private fun PrivacyFact(title: String, detail: String) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .hairlineBottom()
+            .padding(vertical = dimens.space.lg)
+            .semantics(mergeDescendants = true) { testTag = "privacy.cityFact" },
+    ) {
+        Text(
+            title,
+            style = AppTheme.type.rowTitle.copy(fontSize = AppTheme.type.body.fontSize),
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(dimens.space.xs))
+        Text(detail, style = AppTheme.type.caption, color = colors.ink4)
     }
 }
 
@@ -270,7 +297,6 @@ private fun PrivacyPreview() {
             state = PrivacyUiState(),
             onBack = {},
             onReadReceipts = {},
-            onShowCity = {},
             onOpenLegal = {},
             onDataExport = {},
         )

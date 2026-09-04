@@ -47,6 +47,19 @@ interface SignupConsentStore {
 }
 
 /**
+ * The generic small-snapshot key/value half of [AppPreferences], behind an interface.
+ *
+ * Same reason as [SignupConsentStore] above it, and the same one implementation: a preference
+ * wrapper that reads and writes through this can be round-tripped in a JVM test, where
+ * `AppPreferences` itself needs an Android `Context` and a real DataStore file. Keys stay the
+ * caller's — this holds no schema of its own.
+ */
+interface KeyValueStore {
+    fun getString(key: String): Flow<String?>
+    suspend fun setString(key: String, value: String)
+}
+
+/**
  * Thin DataStore (Preferences) wrapper — replaces iOS UserDefaults/Persistence.
  * Holds the role plus a generic string get/set for small snapshots. `wipeAll()`
  * clears the main store on sign-out / delete-account; the calendar store is
@@ -59,7 +72,7 @@ class AppPreferences @Inject constructor(
     // only constructible because a hand-written `@Provides` in AppModule shadowed it,
     // so the first direct injection would have failed with a missing-binding error.
     @ApplicationContext private val context: Context,
-) : SignupConsentStore {
+) : SignupConsentStore, KeyValueStore {
     private val roleKey = stringPreferencesKey("role")
     private val communityAgreedKey = booleanPreferencesKey("community.agreed")
     private val communityAgreedDateKey = longPreferencesKey("community.agreedDate")
@@ -94,12 +107,12 @@ class AppPreferences @Inject constructor(
     }
 
     /** Generic string read for the small persisted snapshots (search recents, hints). */
-    fun getString(key: String): Flow<String?> {
+    override fun getString(key: String): Flow<String?> {
         val k = stringPreferencesKey(key)
         return context.dataStore.data.map { it[k] }
     }
 
-    suspend fun setString(key: String, value: String) {
+    override suspend fun setString(key: String, value: String) {
         context.dataStore.edit { it[stringPreferencesKey(key)] = value }
     }
 
