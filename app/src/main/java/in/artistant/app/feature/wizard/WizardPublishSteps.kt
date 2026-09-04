@@ -1,13 +1,12 @@
 package `in`.artistant.app.feature.wizard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -16,11 +15,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,25 +31,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import coil3.compose.AsyncImage
 import `in`.artistant.app.common.util.formatInr
-import `in`.artistant.app.designsystem.component.HRule
-import `in`.artistant.app.designsystem.component.Pill
-import `in`.artistant.app.designsystem.component.PillTone
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.EyebrowLabel
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.pressScale
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistGradient
-import `in`.artistant.app.feature.epk.EpkSectionHeader
-import `in`.artistant.app.feature.signup.EditorialHeadline
+import `in`.artistant.app.domain.score.ScoreBands
+import `in`.artistant.app.domain.artist.ServiceTags
 import java.io.File
 
 /**
@@ -55,239 +61,192 @@ import java.io.File
  *
  * The preview is not decoration. It is the only point in the flow where the
  * artist sees the fields they typed one screen at a time assembled into the
- * thing a client will actually judge — which is why every section carries an
- * edit jump back to the step that owns it, rather than making them press Back
- * nine times.
+ * thing a client will actually judge — which is why every row carries an edit
+ * jump back to the step that owns it, rather than making them press Back nine
+ * times.
  */
 
-// ── Preview ──────────────────────────────────────────────────────────────────
+// ── Preview (screen 45) ──────────────────────────────────────────────────────
 
 fun LazyListScope.previewStep(state: WizardUiState, vm: WizardViewModel) {
-    item(key = "preview.hero") { PreviewHero(state, vm) }
-    item(key = "preview.stats") { PreviewStats(state) }
-    item(key = "preview.packages") { PreviewPackages(state, vm) }
-    if (state.techItems.isNotEmpty()) {
-        item(key = "preview.tech") { PreviewTech(state, vm) }
+    item(key = "preview.cover") { PreviewCover(state, vm) }
+    item(key = "preview.identity") { PreviewIdentity(state, vm) }
+    item(key = "preview.rows") { PreviewRows(state, vm) }
+    state.publishError?.let { message ->
+        item(key = "preview.error") {
+            Banner(
+                title = "Couldn't publish.",
+                tone = BannerTone.Failure,
+                detail = message,
+                modifier = Modifier.semantics { testTag = "wizard.preview.error" },
+            )
+        }
     }
-    item(key = "preview.extras") { PreviewExtras(state, vm) }
 }
 
 @Composable
-private fun PreviewHero(state: WizardUiState, vm: WizardViewModel) {
+private fun PreviewCover(state: WizardUiState, vm: WizardViewModel) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val space = dimens.space
+    val shape = RoundedCornerShape(dimens.radii.card)
     Box(
         Modifier
             .fillMaxWidth()
-            .aspectRatio(dimens.aspect.editorial)
-            .clip(RoundedCornerShape(dimens.radii.lg))
+            .aspectRatio(PREVIEW_COVER_RATIO)
+            .clip(shape)
+            .background(colors.placeholder)
+            .border(dimens.size.hairline, colors.hairline, shape)
             .semantics { testTag = "wizard.preview.hero" },
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(ArtistGradient.palette(state.coverGradientIndex))),
-        )
-        state.pendingCoverPath?.let { path ->
+        if (state.pendingCoverPath == null) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(dimens.space.sm),
+            ) {
+                Icon(
+                    Icons.Outlined.Image,
+                    contentDescription = null,
+                    tint = colors.ink4,
+                    modifier = Modifier.size(dimens.component.emptyGlyph),
+                )
+                Text("Cover", style = AppTheme.type.subtitle, color = colors.ink4)
+            }
+        } else {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(ArtistGradient.palette(state.coverGradientIndex))),
+            )
             AsyncImage(
-                model = remember(path) { File(path) },
-                contentDescription = null,
+                model = remember(state.pendingCoverPath) { File(state.pendingCoverPath) },
+                contentDescription = "Your cover photo",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        1f - dimens.fraction.heroFade to Color.Transparent,
-                        1f to colors.bg,
-                    ),
-                ),
-        )
-        EditChip(
+        EditPill(
             onClick = { vm.jumpTo(WizardStep.Cover) },
             tag = "wizard.preview.editCover",
-            onMedia = true,
-            modifier = Modifier.align(Alignment.TopEnd).padding(space.md),
+            onSurface = true,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(dimens.space.md),
         )
-        Column(
-            Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(space.lg),
-            verticalArrangement = Arrangement.spacedBy(space.xs),
-        ) {
-            if (state.category.isNotBlank()) {
-                Text(
-                    state.category.uppercase(),
-                    style = AppTheme.type.monoMicro,
-                    color = colors.inkOnMedia,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(colors.chipOnMedia)
-                        .padding(horizontal = space.sm, vertical = space.xs),
-                )
-            }
+    }
+}
+
+@Composable
+private fun PreviewIdentity(state: WizardUiState, vm: WizardViewModel) {
+    val colors = AppTheme.colors
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
             Text(
                 state.stageName.ifBlank { "Your stage name" },
-                style = AppTheme.type.profileHeroName,
+                style = AppTheme.type.displaySub,
                 color = colors.ink,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                listOf(state.genre.ifBlank { "Genre" }, state.baseCity.ifBlank { "City" })
-                    .joinToString(" · "),
-                style = AppTheme.type.callout,
-                color = colors.ink2,
+                listOfNotNull(
+                    state.genre.trim().ifBlank { null },
+                    state.category.ifBlank { null },
+                    state.baseCity.ifBlank { null },
+                ).joinToString(" · ").ifBlank { "Genre · Category · City" },
+                style = AppTheme.type.subtitle,
+                color = colors.ink4,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-    }
-}
-
-@Composable
-private fun PreviewStats(state: WizardUiState) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(dimens.radii.md))
-            .background(colors.bgCard)
-            .padding(vertical = dimens.space.lg, horizontal = dimens.space.md)
-            .semantics { testTag = "wizard.preview.stats" },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        WizardStat("@${state.handle}", "Handle", Modifier.weight(1f))
-        WizardStatDivider()
-        WizardStat(
-            sortedWeekdays(state.daysAvailable).joinToString(" "),
-            "Days",
-            Modifier.weight(1f).padding(start = dimens.space.md),
-        )
-        WizardStatDivider()
-        WizardStat(
-            state.previewPackages.size.toString(),
-            "Tiers",
-            Modifier.weight(1f).padding(start = dimens.space.md),
-        )
-    }
-}
-
-@Composable
-private fun PreviewPackages(state: WizardUiState, vm: WizardViewModel) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column {
-        EpkSectionHeader(title = "Packages")
-        Spacer(Modifier.height(space.sm))
-        HRule()
-        state.previewPackages.forEach { pkg ->
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = space.md),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(pkg.name, style = AppTheme.type.callout, color = colors.ink)
-                        if (pkg.popular) {
-                            Spacer(Modifier.size(space.sm))
-                            Pill(text = "Popular", tone = PillTone.Brand)
-                        }
-                    }
-                    if (pkg.duration.isNotBlank()) {
-                        Text(pkg.duration, style = AppTheme.type.caption, color = colors.ink3)
-                    }
-                }
-                Text(formatInr(pkg.price), style = AppTheme.type.monoPrice, color = colors.ink)
-            }
-            HRule()
-        }
-        Spacer(Modifier.height(space.sm))
-        EditChip(onClick = { vm.jumpTo(WizardStep.Pricing) }, tag = "wizard.preview.editPricing")
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun PreviewTech(state: WizardUiState, vm: WizardViewModel) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column {
-        EpkSectionHeader(title = "Tech rider")
-        Spacer(Modifier.height(space.sm))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(space.sm),
-            verticalArrangement = Arrangement.spacedBy(space.sm),
-        ) {
-            state.techItems.forEach { item ->
-                Text(
-                    item,
-                    style = AppTheme.type.caption,
-                    color = colors.ink2,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(colors.bgCard)
-                        .padding(horizontal = space.md, vertical = space.sm),
-                )
-            }
-        }
-        Spacer(Modifier.height(space.sm))
-        EditChip(onClick = { vm.jumpTo(WizardStep.Tech) }, tag = "wizard.preview.editTech")
+        EditPill(onClick = { vm.jumpTo(WizardStep.Identity) }, tag = "wizard.preview.editIdentity")
     }
 }
 
 /**
- * The optional steps, reported honestly.
+ * Every section as a row that states what it holds and jumps back to the step
+ * that owns it.
  *
- * Skipping is allowed, so the preview names what was skipped rather than hiding
- * it — the artist should find out here, where one tap fixes it, and not from a
- * thin-looking profile a week later.
+ * The value line is the point: "2 tiers · ₹15k–₹38k" is a fact the artist can
+ * check against what they meant, where "Packages ›" is a door they have to open
+ * to find out. Skipped steps say "Not added" rather than disappearing — the
+ * artist should discover a thin profile here, where one tap fixes it, and not
+ * from a week of silence.
  */
 @Composable
-private fun PreviewExtras(state: WizardUiState, vm: WizardViewModel) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-        EpkSectionHeader(title = "Also on your profile")
-        HRule()
-        ExtraRow(
+private fun PreviewRows(state: WizardUiState, vm: WizardViewModel) {
+    val dimens = AppTheme.dimens
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space.sm)) {
+        PreviewRow(
             label = "Bio",
-            value = state.bio.ifBlank { "Not added" },
+            value = if (state.bio.isBlank()) "Not added" else "${state.bio.length} characters",
             filled = state.bio.isNotBlank(),
             onEdit = { vm.jumpTo(WizardStep.Bio) },
         )
-        HRule()
-        ExtraRow(
-            label = "Social links",
-            value = socialSummary(state),
-            filled = wizardStepIsFilled(state, WizardStep.Socials),
-            onEdit = { vm.jumpTo(WizardStep.Socials) },
+        PreviewRow(
+            label = "Packages",
+            value = packagesSummary(state),
+            filled = state.previewPackages.isNotEmpty(),
+            onEdit = { vm.jumpTo(WizardStep.Pricing) },
         )
-        HRule()
-        ExtraRow(
-            label = "Audio samples",
+        PreviewRow(
+            label = "Tech rider",
+            value = if (state.techItems.isEmpty()) {
+                "Not added"
+            } else {
+                "${state.techItems.size} line${if (state.techItems.size == 1) "" else "s"}"
+            },
+            filled = state.techItems.isNotEmpty(),
+            onEdit = { vm.jumpTo(WizardStep.Tech) },
+        )
+        PreviewRow(
+            label = "Availability",
+            value = availabilityBadge(state.daysAvailable, state.timeSlots) ?: "No badge yet",
+            filled = availabilityBadge(state.daysAvailable, state.timeSlots) != null,
+            onEdit = { vm.jumpTo(WizardStep.Availability) },
+        )
+        PreviewRow(
+            label = "Samples",
             value = if (state.pendingSamples.isEmpty()) {
                 "Not added"
             } else {
-                "${state.pendingSamples.size} queued — uploads after you go live"
+                "${state.pendingSamples.size} clip${if (state.pendingSamples.size == 1) "" else "s"} " +
+                    "— upload after you publish"
             },
             filled = state.pendingSamples.isNotEmpty(),
             onEdit = { vm.jumpTo(WizardStep.Samples) },
         )
-        state.publishError?.let { message ->
-            Spacer(Modifier.height(space.sm))
-            Text(
-                message,
-                style = AppTheme.type.footnote,
-                color = colors.hot,
-                modifier = Modifier.semantics { testTag = "wizard.preview.error" },
-            )
-        }
+        PreviewRow(
+            label = "Services",
+            value = if (state.serviceTags.isEmpty()) {
+                "Not added"
+            } else {
+                ServiceTags.labels(state.serviceTags).joinToString(", ")
+            },
+            filled = state.serviceTags.isNotEmpty(),
+            onEdit = { vm.jumpTo(WizardStep.Bio) },
+        )
+        PreviewRow(
+            label = "Socials",
+            value = socialSummary(state),
+            filled = wizardStepIsFilled(state, WizardStep.Socials),
+            onEdit = { vm.jumpTo(WizardStep.Socials) },
+        )
     }
+}
+
+/** "2 tiers · ₹15,000–₹38,000", derived through the same filter publish uses. */
+private fun packagesSummary(state: WizardUiState): String {
+    val savable = state.previewPackages
+    if (savable.isEmpty()) return "No publishable tier yet"
+    val prices = savable.map { it.price }
+    val range = if (prices.min() == prices.max()) {
+        formatInr(prices.min())
+    } else {
+        "${formatInr(prices.min())}–${formatInr(prices.max())}"
+    }
+    return "${savable.size} tier${if (savable.size == 1) "" else "s"} · $range"
 }
 
 private fun socialSummary(state: WizardUiState): String {
@@ -300,54 +259,69 @@ private fun socialSummary(state: WizardUiState): String {
 }
 
 @Composable
-private fun ExtraRow(label: String, value: String, filled: Boolean, onEdit: () -> Unit) {
+private fun PreviewRow(label: String, value: String, filled: Boolean, onEdit: () -> Unit) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     Row(
-        Modifier.fillMaxWidth().padding(vertical = space.md),
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(dimens.radii.buttonLg))
+            .background(colors.surface3)
+            .padding(horizontal = dimens.space.lg, vertical = dimens.space.md)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$label. $value"
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = AppTheme.type.footnote, color = colors.ink)
+            Text(label, style = AppTheme.type.rowTitle, color = colors.ink)
             Text(
                 value,
                 style = AppTheme.type.caption,
-                color = if (filled) colors.ink2 else colors.ink3,
+                color = if (filled) colors.ink3 else colors.ink4,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        EditChip(onClick = onEdit, tag = "wizard.preview.edit.${label.lowercase()}")
+        EditPill(onClick = onEdit, tag = "wizard.preview.edit.${label.lowercase()}")
     }
 }
 
 /**
- * "Edit" as a word in the accent, not a pencil glyph.
+ * "Edit" as a word in the accent green, not a pencil glyph.
  *
  * At this size a glyph needs a label for accessibility anyway, and the preview
- * carries six of them — six identical 16dp icons down a page is a puzzle, six
- * words is a list.
+ * carries eight of them — eight identical 16dp icons down a page is a puzzle,
+ * eight words are a list. `accentInk` rather than `accent`, because lime as text
+ * on off-white is decoration rather than a link.
  */
 @Composable
-private fun EditChip(
+private fun EditPill(
     onClick: () -> Unit,
     tag: String,
     modifier: Modifier = Modifier,
-    onMedia: Boolean = false,
+    onSurface: Boolean = false,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
     val interaction = remember { MutableInteractionSource() }
     Text(
-        "EDIT",
-        style = AppTheme.type.monoMicro,
-        color = if (onMedia) colors.inkOnMedia else colors.brand,
+        "Edit",
+        style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+        color = colors.accentInk,
         modifier = modifier
-            .clip(CircleShape)
-            .then(if (onMedia) Modifier.background(colors.chipOnMedia) else Modifier)
             .pressScale(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = space.sm, vertical = space.xs)
+            .clip(CircleShape)
+            // On the cover it floats over a photo, so it takes an opaque disc;
+            // in a row it sits on `surface3` and needs no chrome at all.
+            .then(if (onSurface) Modifier.background(colors.surface) else Modifier)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = dimens.space.md, vertical = dimens.space.sm)
             .semantics {
                 testTag = tag
                 contentDescription = "Edit this section"
@@ -355,21 +329,27 @@ private fun EditChip(
     )
 }
 
-// ── Done ─────────────────────────────────────────────────────────────────────
+/** The preview cover is wider than the 3:4 crop — it is a card, not a hero. */
+private const val PREVIEW_COVER_RATIO = 4f / 3f
+
+// ── You're live (screen 46) ──────────────────────────────────────────────────
 
 /**
  * The celebration, and the one screen in the flow that is not a form.
  *
  * It renders its own layout rather than going through [WizardStepScaffold]:
- * there is nothing to scroll, and centring the mark is the whole point. The
- * handle is quoted back because it is the first time the artist sees their
- * profile as an address rather than as a field they filled in.
+ * there is nothing to fill in. It ends on the ADDRESS, because that is the first
+ * time the handle stops being a field the artist typed and becomes somewhere a
+ * client can go — and it sets the score expectation in the same breath, so
+ * "New" is a starting tier rather than a verdict discovered later.
  */
 @Composable
 fun WizardDoneScreen(state: WizardUiState, onOpenDashboard: () -> Unit, modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
-    val space = dimens.space
+    val clipboard = LocalClipboardManager.current
+    val haptics = rememberHaptics()
+    val address = wizardPublicAddress(state.handle)
 
     // RevealOnAppear rather than a hand-rolled spring: it is the repo's one
     // entrance animation and it already collapses to nothing under
@@ -378,56 +358,131 @@ fun WizardDoneScreen(state: WizardUiState, onOpenDashboard: () -> Unit, modifier
         Column(
             modifier
                 .fillMaxSize()
-                .padding(horizontal = space.xl)
+                .padding(horizontal = dimens.component.gutter)
                 .semantics { testTag = "wizard.step.done" },
-            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                // Two concentric discs: a soft halo the accent can bloom into,
-                // then the solid mark. One flat disc reads as a system alert.
-                Box(
-                    Modifier
-                        .size(dimens.size.ringXl)
-                        .clip(CircleShape)
-                        .background(colors.brand.copy(alpha = 0.10f)),
+            Box(
+                Modifier
+                    .size(dimens.size.ringMd)
+                    .clip(CircleShape)
+                    .background(colors.accent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = colors.onAccent,
+                    modifier = Modifier.size(dimens.size.iconXl),
                 )
-                Box(
+            }
+            Spacer(Modifier.height(dimens.space.xl))
+            Text("You're live.", style = AppTheme.type.displayHero, color = colors.ink)
+            Spacer(Modifier.height(dimens.space.md))
+            Text(
+                buildString {
+                    append("Hosts searching ")
+                    append(state.genre.trim().ifBlank { state.category.ifBlank { "live acts" } })
+                    if (state.baseCity.isNotBlank()) append(" in ${state.baseCity}")
+                    append(" can find and book you from now.")
+                },
+                style = AppTheme.type.body,
+                color = colors.ink3,
+            )
+            if (address != null) {
+                Spacer(Modifier.height(dimens.space.xl))
+                Row(
                     Modifier
-                        .size(dimens.size.ringLg)
-                        .clip(CircleShape)
-                        .background(colors.brand),
-                    contentAlignment = Alignment.Center,
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(dimens.radii.card))
+                        .background(colors.surface3)
+                        .clickable(role = Role.Button) {
+                            clipboard.setText(AnnotatedString(address))
+                            haptics.success()
+                        }
+                        .padding(dimens.space.lg)
+                        .semantics { testTag = "wizard.done.address" },
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Column(Modifier.weight(1f)) {
+                        EyebrowLabel("Your public profile")
+                        Spacer(Modifier.height(dimens.space.sm))
+                        Text(
+                            address,
+                            style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                            color = colors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Icon(
-                        Icons.Filled.Check,
-                        contentDescription = null,
-                        tint = colors.brandInk,
-                        modifier = Modifier.size(dimens.size.iconXl),
+                        Icons.Filled.ContentCopy,
+                        contentDescription = "Copy your profile address",
+                        tint = colors.ink4,
+                        modifier = Modifier.size(dimens.size.iconLg),
                     )
                 }
             }
-            Spacer(Modifier.height(space.xxl))
-            EditorialHeadline(
-                lead = "You're ",
-                accent = "live",
-                tail = ".",
-                style = AppTheme.type.displayTitle,
-            )
-            Spacer(Modifier.height(space.md))
-            Text(
-                "Clients can find and book you at artistant.in/${state.handle}.",
-                style = AppTheme.type.footnote,
-                color = colors.ink2,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(space.xxl))
+            Spacer(Modifier.height(dimens.space.md))
+            NewTierCard()
+            Spacer(Modifier.height(dimens.space.xxl))
             PrimaryButton(
-                text = "Open dashboard",
+                text = "Open my dashboard",
                 onClick = onOpenDashboard,
                 fullWidth = true,
                 modifier = Modifier.semantics { testTag = "wizard.done.openDashboard" },
             )
         }
+    }
+}
+
+/**
+ * What the score says on day one, and what moves it.
+ *
+ * The thresholds come from [ScoreBands] rather than being written out here: the
+ * number of completed gigs that leaves the New tier is a product rule the score
+ * screen already states, and two copies of it is how the wizard starts promising
+ * something the score does not do.
+ */
+@Composable
+private fun NewTierCard() {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val shape = RoundedCornerShape(dimens.radii.card)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.brandSoft)
+            .border(dimens.size.hairline, colors.accent, shape)
+            .padding(dimens.space.lg)
+            .semantics { testTag = "wizard.done.scoreNote" },
+        verticalArrangement = Arrangement.spacedBy(dimens.space.md),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
+        ) {
+            Text(
+                "New",
+                style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                color = colors.onAccent,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(colors.accent)
+                    .padding(horizontal = dimens.space.md, vertical = dimens.space.sm),
+            )
+            Text(
+                "Your score starts at “New”",
+                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                color = colors.ink,
+            )
+        }
+        Text(
+            "${ScoreBands.MIN_GIGS_FOR_RANK} completed gigs move you off the New tier. " +
+                "Reply speed counts from your first request.",
+            style = AppTheme.type.subtitle,
+            color = colors.ink3,
+        )
     }
 }

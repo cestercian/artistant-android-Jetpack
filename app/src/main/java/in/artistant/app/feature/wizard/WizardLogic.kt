@@ -1,6 +1,8 @@
 package `in`.artistant.app.feature.wizard
 
 import `in`.artistant.app.data.model.HandleRules
+import `in`.artistant.app.data.model.SearchCatalog
+import `in`.artistant.app.domain.booking.BookingMath
 import `in`.artistant.app.data.repository.WizardProfileDraft
 import `in`.artistant.app.feature.booking.DefaultTimeSlots
 import `in`.artistant.app.feature.epk.PackageRow
@@ -307,6 +309,159 @@ fun starterPackageRows(category: String): List<PackageRow> = when (category) {
     )
 }
 
+// ── Pricing: fee in, all-in out ──────────────────────────────────────────────
+
+/**
+ * The band the starter tiers span for a category, and how many of them there are.
+ *
+ * This is a statement about the FORM, not about the market. The wizard has no
+ * access to what other acts charge — there is no such aggregate on this backend —
+ * so a "acts in your genre near Bengaluru charge ₹31,000–₹45,000" line would be
+ * a number we invented, printed next to real money the artist is about to
+ * publish. What we can say honestly is what we just put in their form and where
+ * it came from, which is what this describes.
+ */
+data class WizardPricingBand(val low: Int, val high: Int, val tiers: Int)
+
+/**
+ * The band [starterPackageRows] seeds for [category].
+ *
+ * Derived from the seed rows rather than written out a second time: a hand-kept
+ * copy is how the sentence under the tiers starts quoting a range the tiers
+ * above it no longer contain.
+ */
+fun pricingBandFor(category: String): WizardPricingBand? {
+    val prices = starterPackageRows(category).mapNotNull { it.price.toIntOrNull() }.filter { it > 0 }
+    if (prices.isEmpty()) return null
+    return WizardPricingBand(low = prices.min(), high = prices.max(), tiers = prices.size)
+}
+
+/**
+ * What the host pays, from what the artist takes home.
+ *
+ * Straight through [BookingMath], which is the same arithmetic the checkout runs
+ * — 5% platform fee, then 18% GST on fee + platform. Re-deriving it here with
+ * the same two constants is how the wizard and the checkout start quoting
+ * different totals for the same tier, and the artist finds out from a client.
+ *
+ * A blank or unparseable price returns null rather than 0: "no number yet" and
+ * "a free gig" are different, and rendering the second for the first puts "Host
+ * sees ₹0" under a row the artist is halfway through typing.
+ */
+fun packageAllInInr(price: String): Int? {
+    val fee = price.filter { it.isDigit() }.toIntOrNull()?.takeIf { it > 0 } ?: return null
+    return BookingMath.compute(fee).total
+}
+
+// ── Location: radius and event types ─────────────────────────────────────────
+
+/**
+ * Travel radius options, in km, plus the "won't travel" floor.
+ *
+ * A radius is a real constraint on which gigs are worth quoting for, and the
+ * design puts it on the location step so travel is priced on top of the fee
+ * rather than silently eaten out of it. It is held in the DRAFT only: `artists`
+ * has no radius column on this backend, so publishing it would mean inventing a
+ * write. See the PR body.
+ */
+val WizardTravelRadii: List<Int> = listOf(0, 25, 50, 150, 500)
+
+/** "Up to 150 km", or "City only" for the floor. */
+fun travelRadiusLabel(km: Int): String = if (km <= 0) "City only" else "Up to ${'$'}km km"
+
+/**
+ * The event types a host can filter by.
+ *
+ * Sourced from the search filter's own vocabulary rather than redeclared: an
+ * event type is only worth ticking if a client ticking the same chip finds you,
+ * and two lists is how those two halves drift apart.
+ */
+val WizardEventTypes: List<String> get() = SearchCatalog.eventTypes
+
+// ── Availability: one badge ──────────────────────────────────────────────────
+
+/**
+ * Everything the availability step knows, compressed to the one pill a search
+ * result has room for — "Thu–Sun evenings" — or null when there is nothing to
+ * say yet.
+ *
+ * Compression is the whole point of the step. Seven day chips and six start
+ * times are 13 facts, and a search row can carry one; an artist who never sees
+ * the compressed form has no way to tell that picking Tue and Thu and Sat reads
+ * as "Tue, Thu, Sat" while Thu through Sun reads as a weekend act.
+ *
+ * Null on either half missing, and both halves are load-bearing: days with no
+ * times is not a schedule a client can book against, and times with no days is
+ * not a schedule at all.
+ */
+fun availabilityBadge(days: Set<String>, slots: Set<String>): String? {
+    val ordered = sortedWeekdays(days)
+    if (ordered.isEmpty() || slots.isEmpty()) return null
+    return "${'$'}{weekdayRunLabel(ordered)} ${'$'}{timeOfDayLabel(slots)}"
+}
+
+/**
+ * "Thu–Sun" for a contiguous run, "Every day" for all seven, otherwise the days
+ * themselves.
+ *
+ * Contiguity is checked against [WizardWeekdays] order and does NOT wrap. A
+ * Saturday-to-Monday act is three days written as three days rather than as
+ * "Sat–Mon", which would read as a five-day run to anyone scanning left to
+ * right — the calendar week does not wrap on a profile the way it does in the
+ * artist's head.
+ */
+private fun weekdayRunLabel(ordered: List<String>): String {
+    if (ordered.size == WizardWeekdays.size) return "Every day"
+    if (ordered.size == 1) return ordered.first()
+    val indices = ordered.map { WizardWeekdays.indexOf(it) }
+    val contiguous = indices.zipWithNext().all { (a, b) -> b == a + 1 }
+    // Two adjacent days read better named than dashed: "Sat–Sun" and "Sat, Sun"
+    // are the same length and the second is unambiguous.
+    return if (contiguous && ordered.size > 2) {
+        "${'$'}{ordered.first()}–${'$'}{ordered.last()}"
+    } else {
+        ordered.joinToString(", ")
+    }
+}
+
+/**
+ * The half of the badge that describes WHEN, derived from the stored slots.
+ *
+ * The stored vocabulary is clock times ("7:30 PM") because that is what the
+ * client's booking grid renders and what `artists.default_time_slots` holds. A
+ * badge cannot carry six clock times, so they collapse into the two words a
+ * host actually filters on.
+ */
+private fun timeOfDayLabel(slots: Set<String>): String {
+    val hours = slots.mapNotNull(::slotHour24)
+    if (hours.isEmpty()) return "evenings"
+    val late = hours.all { it >= LATE_NIGHT_HOUR }
+    val early = hours.all { it < EVENING_HOUR }
+    return when {
+        late -> "late nights"
+        early -> "afternoons"
+        hours.any { it < EVENING_HOUR } -> "afternoons & evenings"
+        else -> "evenings"
+    }
+}
+
+/** "7:30 PM" → 19. Null for anything that is not one of our own slot strings. */
+internal fun slotHour24(slot: String): Int? {
+    val match = SLOT_PATTERN.find(slot.trim()) ?: return null
+    val hour12 = match.groupValues[1].toIntOrNull() ?: return null
+    val pm = match.groupValues[3].uppercase() == "PM"
+    return when {
+        pm && hour12 == 12 -> 12
+        pm -> hour12 + 12
+        hour12 == 12 -> 0
+        else -> hour12
+    }
+}
+
+private val SLOT_PATTERN = Regex("""^(\d{1,2}):(\d{2})\s*([AaPp][Mm])${'$'}""")
+private const val EVENING_HOUR = 17
+private const val LATE_NIGHT_HOUR = 22
+
 // ── Handle ───────────────────────────────────────────────────────────────────
 
 /**
@@ -430,44 +585,43 @@ fun wizardStepIsFilled(state: WizardUiState, step: WizardStep): Boolean = when (
     WizardStep.Preview, WizardStep.Done -> true
 }
 
-// ── Copy ─────────────────────────────────────────────────────────────────────
+// ── Copy ────────────────────────────────────────────────────────────────────
 
 /**
- * The step headline, split so the accent word can be set in italic brand.
+ * The step headline — one plain sentence, set in the design's 26/700 screen
+ * title.
  *
- * Returned as a triple rather than one string because the editorial headline is
- * a single paragraph with one tinted run — three separate Texts would wrap
- * mid-phrase, which is the whole reason `EditorialHeadline` exists.
+ * The old dark design split this into a lead/accent/tail triple so one word
+ * could be tinted and italicised. The light design has no second voice to switch
+ * into: it asks the artist a question in one weight and one colour, and the only
+ * accent on the screen is the CTA. So the triple is gone and this returns a
+ * String.
  */
-data class WizardHeadline(val lead: String, val accent: String, val tail: String)
-
-fun wizardStepHeadline(step: WizardStep): WizardHeadline = when (step) {
-    WizardStep.Identity -> WizardHeadline("Your stage ", "identity", "")
-    WizardStep.Location -> WizardHeadline("Where you ", "play", "")
-    WizardStep.Pricing -> WizardHeadline("Set your ", "pricing", "")
-    WizardStep.Tech -> WizardHeadline("Tech ", "rider", "")
-    WizardStep.Availability -> WizardHeadline("When you ", "play", "")
-    WizardStep.Cover -> WizardHeadline("Pick your ", "cover", "")
-    WizardStep.Socials -> WizardHeadline("Plug in your ", "sound", "")
-    WizardStep.Bio -> WizardHeadline("Your story, ", "briefly", "")
-    WizardStep.Samples -> WizardHeadline("Drop in a few ", "clips", "")
-    WizardStep.Preview -> WizardHeadline("How does this ", "look", "?")
-    WizardStep.Done -> WizardHeadline("You're ", "live", ".")
+fun wizardStepTitle(step: WizardStep): String = when (step) {
+    WizardStep.Identity -> "Who's playing?"
+    WizardStep.Location -> "Where do you play?"
+    WizardStep.Pricing -> "What do you charge?"
+    WizardStep.Tech -> "What must the venue provide?"
+    WizardStep.Availability -> "When are you open?"
+    WizardStep.Cover -> "Your cover"
+    WizardStep.Socials -> "Where can we hear you?"
+    WizardStep.Bio -> "Say it in your words"
+    WizardStep.Samples -> "Add a few clips"
+    WizardStep.Preview -> "Preview"
+    WizardStep.Done -> "You're live."
 }
 
 fun wizardStepSubtitle(step: WizardStep): String = when (step) {
-    WizardStep.Identity -> "How clients will discover and book you."
-    WizardStep.Location -> "Helps us route the right gigs your way."
-    WizardStep.Pricing -> "We seeded these from your category — tweak to taste."
-    WizardStep.Tech -> "What you'll need from the venue. Pick all that apply."
-    WizardStep.Availability ->
-        "Pick the days and start times you take gigs. Clients see this on your profile and in search."
-    WizardStep.Cover -> "Drop a photo, or pick a gradient if you'd rather skip uploads for now."
-    WizardStep.Socials -> "Paste any of these — they show up on your profile and feed the Bookability Score later."
-    WizardStep.Bio -> "A line or two about your sound, your live energy, or what makes your gigs different."
-    WizardStep.Samples ->
-        "Up to six short audio samples. Anything 30s–2 min works — give clients a real sense of your sound."
-    WizardStep.Preview -> "This is how clients will see you — take a last look before you go live."
+    WizardStep.Identity -> "This is the name on your profile and in search."
+    WizardStep.Location -> "Base city routes gigs to you. Travel is quoted on top."
+    WizardStep.Pricing -> "Hosts see one all-in number. Travel is added on top, never taken out of your fee."
+    WizardStep.Tech -> "Hosts see this before they book, so nothing derails load-in."
+    WizardStep.Availability -> "Hosts see this on your profile and filter search by it."
+    WizardStep.Cover -> "One photo. This is the first thing a host sees."
+    WizardStep.Socials -> "Links feed the social proof part of your Bookability Score."
+    WizardStep.Bio -> "A short bio and the tags hosts filter by."
+    WizardStep.Samples -> "30 seconds to 2 minutes each. Live recordings beat studio ones."
+    WizardStep.Preview -> "Exactly what clients see"
     WizardStep.Done -> ""
 }
 
@@ -477,16 +631,76 @@ fun wizardStepSubtitle(step: WizardStep): String = when (step) {
  * Optional steps flip to "Skip for now" the moment they are empty, which is the
  * only signal the artist gets that continuing past them costs nothing. A
  * disabled button with unchanged copy reads as a broken form instead.
+ *
+ * The Pricing step names its destination ("Next — tech rider") because it is the
+ * one step where the artist has just been shown numbers and needs to know that
+ * Continue is not Publish.
  */
 fun wizardCtaLabel(state: WizardUiState): String = when (state.step) {
-    WizardStep.Preview -> if (state.isPublishing) "Publishing…" else "Looks good, publish"
-    WizardStep.Done -> "Open dashboard"
+    WizardStep.Preview -> if (state.isPublishing) "Publishing…" else "Publish my profile"
+    WizardStep.Done -> "Open my dashboard"
+    WizardStep.Pricing -> "Next — tech rider"
     WizardStep.Cover -> if (state.pendingCover == null) "Skip for now" else "Continue"
     WizardStep.Samples -> if (state.pendingSamples.isEmpty()) "Skip for now" else "Continue"
     WizardStep.Bio -> if (state.bio.isBlank()) "Skip for now" else "Continue"
     WizardStep.Socials -> if (!wizardStepIsFilled(state, WizardStep.Socials)) "Skip for now" else "Continue"
     else -> "Continue"
 }
+
+/**
+ * The quiet line UNDER the CTA, or null when the step has nothing to add.
+ *
+ * The design puts one there on five screens and it is doing three different
+ * jobs: an escape hatch on the optional steps ("Skip for now", rendered as a
+ * tappable line beside a filled Continue), a progress estimate on Pricing, and a
+ * reassurance on Preview. Returning them from one place keeps the footer from
+ * growing a `when` per job.
+ */
+fun wizardFooterNote(state: WizardUiState): String? = when (state.step) {
+    WizardStep.Pricing -> "Step ${'$'}{(wizardProgressIndex(state.step) ?: 0) + 1} of ${'$'}{wizardProgressTotal()} · takes about 6 minutes"
+    WizardStep.Preview -> "You can keep editing after you publish"
+    // Only when the CTA still says Continue: the label already says "Skip for
+    // now" when the step is empty, and repeating it under the button reads as
+    // two different skips.
+    WizardStep.Socials, WizardStep.Bio, WizardStep.Samples ->
+        "Skip for now".takeIf { wizardCtaLabel(state) == "Continue" }
+    else -> null
+}
+
+/**
+ * The "01 / 11" counter on the step bar.
+ *
+ * Zero-padded, because the alternative jitters: "9 / 11" and "10 / 11" are
+ * different widths, and the counter sits at the trailing edge of a bar whose
+ * other half is a progress track that must not move under it.
+ */
+fun wizardStepCounter(step: WizardStep): String? {
+    val index = wizardProgressIndex(step) ?: return null
+    return "${'$'}{(index + 1).toString().padStart(2, '0')} / ${'$'}{wizardProgressTotal()}"
+}
+
+/**
+ * "6 of 11" — how much of the form the Save & exit sheet is promising to keep.
+ *
+ * Counts steps LEFT BEHIND, not the one being looked at, so the number agrees
+ * with the filled segments on the bar above it. Claiming the current step is
+ * saved would be the one number on that sheet that is not quite true — the
+ * artist may be standing on it with the field still empty.
+ */
+fun wizardSavedSoFarLabel(step: WizardStep): String =
+    "${wizardProgressIndex(step) ?: wizardProgressTotal()} of ${wizardProgressTotal()}"
+
+/**
+ * The public address the profile will answer on.
+ *
+ * Rendered on the last screen and in the preview because it is the first time
+ * the handle stops being a field the artist filled in and starts being a place
+ * a client can go. Blank handle returns null rather than "artistant.in/@" —
+ * a half-formed URL reads as a bug, and the identity gate makes this
+ * unreachable in practice.
+ */
+fun wizardPublicAddress(handle: String): String? =
+    handle.trim().takeIf { it.isNotEmpty() }?.let { "artistant.in/@${'$'}it" }
 
 /** Narration for the publish overlay — the artist should never watch a bare spinner. */
 fun wizardPublishProgressLabel(phase: WizardPublishPhase): String = when (phase) {
@@ -499,7 +713,7 @@ fun wizardPublishProgressLabel(phase: WizardPublishPhase): String = when (phase)
 /** Where the publish sequence currently is. Drives the CTA's narration only. */
 enum class WizardPublishPhase { Idle, SavingProfile, SavingDetails, GoingLive }
 
-// ── Bio counter ──────────────────────────────────────────────────────────────
+// ── Bio counter and guidance ─────────────────────────────────────────────────
 
 /** How loudly to render the bio character counter. */
 enum class WizardCounterTone { Quiet, Warn, Over }
@@ -516,6 +730,32 @@ fun bioCounterTone(length: Int): WizardCounterTone = when {
     WIZARD_BIO_MAX - length <= 20 -> WizardCounterTone.Warn
     else -> WizardCounterTone.Quiet
 }
+
+/**
+ * What good looks like, at this length.
+ *
+ * The design's note on the bio step is that the hint "says what good looks like
+ * instead of only counting characters", and that is a different sentence at
+ * every stage of writing: an empty box needs a prompt, one sentence needs a
+ * second, two sentences are finished, and a bio pressed against the ceiling
+ * needs to be told that it is about to stop accepting keystrokes. A single
+ * static line would be wrong three times out of four.
+ *
+ * The thresholds are in characters rather than in sentences because a sentence
+ * counter would have to parse prose, and it would be wrong about "Bengaluru-
+ * based. Weddings, pubs, brand nights." — three full stops, one sentence.
+ */
+fun bioGuidance(length: Int): String = when {
+    length == 0 -> "Two sentences is plenty. What you sound like, and what you'll play."
+    length < BIO_ONE_SENTENCE -> "Keep going — one more line about your live sets."
+    length < BIO_TWO_SENTENCES -> "Good. A second sentence about the rooms you play would finish it."
+    length < WIZARD_BIO_MAX -> "Two sentences is plenty."
+    else -> "That's the limit — trim a line to keep editing."
+}
+
+/** Roughly one sentence of prose, and roughly two. */
+private const val BIO_ONE_SENTENCE = 60
+private const val BIO_TWO_SENTENCES = 140
 
 /** Clamp on the way in so a pasted essay truncates instead of silently overflowing. */
 fun clampBio(raw: String): String = if (raw.length <= WIZARD_BIO_MAX) raw else raw.take(WIZARD_BIO_MAX)

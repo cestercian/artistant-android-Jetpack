@@ -13,6 +13,7 @@ import `in`.artistant.app.data.repository.PackagesRepository
 import `in`.artistant.app.data.repository.TechRiderRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.ArtistGradient
+import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.feature.epk.PackageRow
 import `in`.artistant.app.feature.epk.addTechItem
 import `in`.artistant.app.feature.epk.packageDrafts
@@ -51,6 +52,17 @@ data class WizardUiState(
     val category: String = "",
     val genre: String = "",
     val baseCity: String = "",
+    /**
+     * How far the artist will travel, and which occasions they take.
+     *
+     * Draft-only. `artists` has no radius column and this client has no writer
+     * for `event_types`, so neither reaches the public profile — the location
+     * step says so on screen rather than letting the artist believe otherwise.
+     */
+    val travelRadiusKm: Int = 0,
+    val eventTypes: Set<String> = emptySet(),
+    /** `artists.service_tags` slugs. Published, via `updateServiceTags`. */
+    val serviceTags: List<String> = emptyList(),
     /**
      * Pricing tiers as editor rows, not domain packages. Prices are Strings for
      * the same reason the EPK editor keeps them that way: a live text field has
@@ -97,6 +109,17 @@ data class WizardUiState(
      * an empty preview with no explanation at all.
      */
     val mediaError: String? = null,
+    /**
+     * What the background upload queue is doing right now.
+     *
+     * Surfaced on the Samples step because the queue outlives the wizard: an
+     * artist who published, had a sample fail, and was sent back in by a dropped
+     * `setup_complete` write arrives at a step that already has work behind it.
+     * The design's note is that the banner "reports state instead of hiding it",
+     * and the only way to do that honestly is to read the queue rather than to
+     * animate a bar of our own.
+     */
+    val uploads: UploadQueue.State = UploadQueue.State(),
     /** Set while the draft is being restored, so the form doesn't flash empty. */
     val isRestoring: Boolean = true,
 ) {
@@ -142,7 +165,25 @@ class WizardViewModel @Inject constructor(
         viewModelScope.launch { restore() }
         observeHandle()
         observeDraftWrites()
+        observeUploads()
     }
+
+    /**
+     * Mirror the upload queue into the form state.
+     *
+     * A mirror rather than a `collectAsState` in the composable, so the Samples
+     * step reads one state object like every other step and the queue stays a
+     * ViewModel-side dependency — the seam rule applies to a singleton with a
+     * StateFlow exactly as it does to a repository.
+     */
+    private fun observeUploads() {
+        viewModelScope.launch {
+            uploadQueue.state.collect { snapshot -> _state.update { it.copy(uploads = snapshot) } }
+        }
+    }
+
+    /** Re-arm everything the runner gave up on. Surfaced by the samples banner. */
+    fun retryFailedUploads() = uploadQueue.retryFailed()
 
     // ── Restore ──────────────────────────────────────────────────────────────
 
@@ -254,6 +295,9 @@ class WizardViewModel @Inject constructor(
         category = draft.category,
         genre = draft.genre,
         baseCity = draft.baseCity,
+        travelRadiusKm = draft.travelRadiusKm,
+        eventTypes = draft.eventTypes.toSet(),
+        serviceTags = draft.serviceTags,
         packageRows = draft.packages.map {
             PackageRow(it.key, it.name, it.duration, it.price, it.popular)
         },
@@ -307,6 +351,9 @@ class WizardViewModel @Inject constructor(
         category = category,
         genre = genre,
         baseCity = baseCity,
+        travelRadiusKm = travelRadiusKm,
+        eventTypes = eventTypes.toList(),
+        serviceTags = serviceTags,
         packages = packageRows.map { DraftPackage(it.key, it.name, it.duration, it.price, it.popular) },
         techItems = techItems,
         daysAvailable = daysAvailable.toList(),
@@ -390,6 +437,21 @@ class WizardViewModel @Inject constructor(
     // ── Location ─────────────────────────────────────────────────────────────
 
     fun onBaseCitySelected(value: String) = _state.update { it.copy(baseCity = value) }
+
+    fun onTravelRadiusSelected(km: Int) = _state.update { it.copy(travelRadiusKm = km) }
+
+    fun toggleEventType(value: String) =
+        _state.update { it.copy(eventTypes = toggleInSet(value, it.eventTypes)) }
+
+    /**
+     * Service tags go through [ServiceTags.toggle], not plain list arithmetic.
+     *
+     * That is where the six-tag cap lives, and where the refusal-at-the-boundary
+     * rule lives with it: an over-cap tick returns the list unchanged, so what
+     * the artist sees selected is exactly what publish writes.
+     */
+    fun toggleServiceTag(slug: String) =
+        _state.update { it.copy(serviceTags = ServiceTags.toggle(it.serviceTags, slug)) }
 
     // ── Pricing ──────────────────────────────────────────────────────────────
 
@@ -643,8 +705,21 @@ class WizardViewModel @Inject constructor(
                 coroutineScope {
                     val pkgs = async { packages.replaceAll(userId, packageDrafts(snap.packageRows)) }
                     val tech = async { techRider.replaceAll(userId, snap.techItems) }
+                    // Service tags are one column on the row the upsert above
+                    // just wrote, but they are NOT part of that upsert: the
+                    // wizard publish row is a fixed shape shared with the resume
+                    // path, and widening it to carry an optional array would make
+                    // "the artist skipped the bio step" and "the artist cleared
+                    // their services" the same write. The dedicated setter is
+                    // owner-guarded and whole-set, which is what this needs.
+                    val tags = async {
+                        if (snap.serviceTags.isNotEmpty()) {
+                            artists.updateServiceTags(userId, snap.serviceTags)
+                        }
+                    }
                     pkgs.await()
                     tech.await()
+                    tags.await()
                 }
 
                 _state.update { it.copy(publishPhase = WizardPublishPhase.GoingLive) }

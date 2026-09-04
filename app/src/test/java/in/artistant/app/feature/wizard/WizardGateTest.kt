@@ -162,7 +162,7 @@ class WizardGateTest {
     fun `the publish button narrates itself while it is working`() {
         val publishing = state(WizardStep.Preview).copy(isPublishing = true)
         assertEquals("Publishing…", wizardCtaLabel(publishing))
-        assertEquals("Looks good, publish", wizardCtaLabel(state(WizardStep.Preview)))
+        assertEquals("Publish my profile", wizardCtaLabel(state(WizardStep.Preview)))
         // A second tap during the round-trip would fire the whole sequence twice.
         assertFalse(publishing.canAdvance)
     }
