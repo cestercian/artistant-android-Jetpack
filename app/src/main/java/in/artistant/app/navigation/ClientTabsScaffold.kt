@@ -229,6 +229,7 @@ fun ClientTabsScaffold() {
                     ArchivedScreen(
                         onBack = { nav.popBackStack() },
                         onThreadClick = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -396,6 +397,7 @@ fun ClientTabsScaffold() {
                         // Only the client seat has a counterparty with a public
                         // profile, so only this scaffold wires the participant row.
                         onArtistClick = { id -> nav.navigate("artist/$id") },
+                        onOpenSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }

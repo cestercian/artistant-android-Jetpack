@@ -251,6 +251,7 @@ fun ArtistTabsScaffold() {
                     ArchivedScreen(
                         onBack = { nav.popBackStack() },
                         onThreadClick = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }
@@ -305,6 +306,7 @@ fun ArtistTabsScaffold() {
                     ChatScreen(
                         onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                        onOpenSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
                     )
                 }
             }

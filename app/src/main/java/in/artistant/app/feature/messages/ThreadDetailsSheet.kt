@@ -95,6 +95,17 @@ fun ThreadDetailsSheet(
     onToggleBlock: () -> Unit,
     onMarkUnread: () -> Unit,
     onReport: (reason: String, details: String?) -> Unit,
+    /**
+     * Trust & safety (design 131).
+     *
+     * The advice belongs beside the remedies, not only in account settings:
+     * this sheet is where someone lands when a conversation has started to feel
+     * wrong, and "what do I do about this" is a different question from "file a
+     * report" — one it is worse to have to go looking for. The caller closes the
+     * sheet before navigating; a bottom sheet cannot stay up over a pushed
+     * destination.
+     */
+    onOpenSafetyCentre: () -> Unit,
     onDismiss: () -> Unit,
     /** Non-null only on the client seat — an artist's counterpart has no profile. */
     artistId: String? = null,
@@ -140,6 +151,7 @@ fun ThreadDetailsSheet(
                     reporting -> ReportConversationSheet(
                         counterpartName = counterpartName,
                         onSubmit = onReport,
+                        onOpenSafetyCentre = onOpenSafetyCentre,
                         onBack = { reporting = false },
                     )
 
@@ -173,6 +185,7 @@ fun ThreadDetailsSheet(
                         onMarkUnread = onMarkUnread,
                         onStartBlock = { if (blocked) onToggleBlock() else blocking = true },
                         onStartReport = { reporting = true },
+                        onOpenSafetyCentre = onOpenSafetyCentre,
                     )
                 }
             }
@@ -202,6 +215,7 @@ private fun DetailsBody(
     onMarkUnread: () -> Unit,
     onStartBlock: () -> Unit,
     onStartReport: () -> Unit,
+    onOpenSafetyCentre: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
@@ -327,6 +341,18 @@ private fun DetailsBody(
             modifier = Modifier.semantics { testTag = "threadDetails.block" },
         )
     }
+
+    // Advice sits beside the remedies and above the report, because it is the
+    // step before one: block and report both change something, and this is the
+    // row for the person who does not yet know which of them they need. It is a
+    // plain ListRow, not `danger` — reading about safety is not a destructive
+    // act, and there is exactly one red thing on this sheet.
+    ListRow(
+        title = "Trust & safety",
+        subtitle = "How to keep a booking safe, and what to do when it isn't",
+        onClick = onOpenSafetyCentre,
+        modifier = Modifier.semantics { testTag = "threadDetails.safetyCentre" },
+    )
 
     Row(
         Modifier

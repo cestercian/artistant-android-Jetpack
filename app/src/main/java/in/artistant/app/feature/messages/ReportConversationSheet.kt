@@ -59,6 +59,8 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 fun ReportConversationSheet(
     counterpartName: String,
     onSubmit: (reason: String, details: String?) -> Unit,
+    /** The footer link out to trust & safety (design 131) — see [ThreadDetailsSheet]. */
+    onOpenSafetyCentre: () -> Unit,
     onBack: () -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -117,7 +119,24 @@ fun ReportConversationSheet(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(dimens.space.md))
+        Spacer(Modifier.height(dimens.space.sm))
+        // The footer link the safety screens all carry. Someone on this form has
+        // decided something is wrong and may not be sure a report is the right
+        // instrument — blocking, or simply keeping the deal on Artistant, often
+        // is. The way to that advice belongs here rather than three screens away
+        // in account settings.
+        Text(
+            "Read our trust & safety guide",
+            style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.accentInk,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(CircleShape)
+                .clickable(onClick = onOpenSafetyCentre)
+                .padding(vertical = dimens.space.md)
+                .semantics { testTag = "report.safetyCentre" },
+        )
         Text(
             "Back",
             style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),

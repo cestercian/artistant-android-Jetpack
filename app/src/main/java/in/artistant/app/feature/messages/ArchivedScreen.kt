@@ -40,6 +40,7 @@ import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
+import `in`.artistant.app.designsystem.component.ListRow
 import `in`.artistant.app.designsystem.theme.AppTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -65,6 +66,16 @@ import java.util.Locale
 fun ArchivedScreen(
     onBack: () -> Unit,
     onThreadClick: (String) -> Unit,
+    /**
+     * Trust & safety (design 131).
+     *
+     * The archive is the inbox's overflow — everything you can do to a pile of
+     * conversations rather than to one — so the guide that explains what to do
+     * about a conversation that went wrong hangs off it, alongside the sheet's
+     * own row and the report form's footer. Without these three the destination
+     * was registered on both graphs and reachable from neither.
+     */
+    onOpenSafetyCentre: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: MessagesViewModel = hiltViewModel(),
 ) {
@@ -159,6 +170,15 @@ fun ArchivedScreen(
                 )
             }
         }
+
+        HRule()
+        ListRow(
+            title = "Trust & safety",
+            subtitle = "How to keep a booking safe, and what to do when it isn't",
+            onClick = onOpenSafetyCentre,
+            showHairline = false,
+            modifier = Modifier.semantics { testTag = "archived.safetyCentre" },
+        )
 
         // The rule, on the screen that could break it (design 60).
         if (items.isNotEmpty()) {

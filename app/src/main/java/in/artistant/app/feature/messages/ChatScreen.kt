@@ -96,6 +96,8 @@ fun ChatScreen(
     onBack: () -> Unit,
     onBookingClick: (String) -> Unit = {},
     onArtistClick: (String) -> Unit = {},
+    /** Trust & safety (design 131), from the details sheet and the report form. */
+    onOpenSafetyCentre: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
@@ -266,6 +268,13 @@ fun ChatScreen(
             // affordance for undoing an accidental block — the conversation is
             // by then out of the inbox, so closing the sheet would strand it.
             onToggleBlock = viewModel::toggleBlocked,
+            // Closed first, then pushed: a bottom sheet cannot stay up over a
+            // destination, and leaving it in state means finding it still open
+            // on the way back from a screen the reader has finished with.
+            onOpenSafetyCentre = {
+                viewModel.dismissDetails()
+                onOpenSafetyCentre()
+            },
             onMarkUnread = {
                 viewModel.markUnread()
                 viewModel.dismissDetails()

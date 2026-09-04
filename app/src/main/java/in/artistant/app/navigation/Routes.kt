@@ -35,7 +35,14 @@ object ClientNavRoutes {
     /** The archive (design 60 / 111) — reachable from the inbox header. */
     const val ARCHIVED = "archived"
 
-    /** Trust & safety (design 131) — from account settings and from the archive. */
+    /**
+     * Trust & safety (design 131).
+     *
+     * Three ways in from this section, all inside the surfaces where the
+     * question comes up: the chat's thread-details sheet, the report form's
+     * footer, and the archive (the inbox's overflow). Account settings adds a
+     * fourth and belongs to the profile section.
+     */
     const val SAFETY_CENTRE = "safety_centre"
 
     /** The scripted support assistant (design 34) — the inbox's permanent row. */
