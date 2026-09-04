@@ -178,6 +178,25 @@ data class EpkUiState(
      */
     val samplesStaging: Int = 0,
 
+    /**
+     * What the upload queue is doing, in the press kit's words — design screens
+     * 76 (working) and 66 (stalled). Null when the queue has nothing to report,
+     * which is the absence of a banner rather than a banner saying so.
+     *
+     * Derived in [observeUploadQueue] rather than in the Composable so the
+     * mapping is a pure function over queue state with a test, and so the screen
+     * never has to hold a reference to the queue itself.
+     */
+    val uploadBanner: EpkUploadBanner? = null,
+
+    /**
+     * The burned tasks, one row each, for the stalled sheet (66).
+     *
+     * Carries the staged file's SIZE, which is a `stat` — measured on the IO
+     * dispatcher in the queue observer, never in composition.
+     */
+    val stalledUploads: List<StalledUpload> = emptyList(),
+
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val savingPackages: Boolean = false,
@@ -326,7 +345,22 @@ class EpkViewModel @Inject constructor(
                 // never missing from both numbers at once — which is the window the
                 // cap used to be picked through.
                 val staged = queue.pending.count { task -> task is UploadQueue.Task.AudioSample }
-                _state.update { it.copy(samplesUploading = staged) }
+                // The banner the press kit draws, and the rows the stalled sheet
+                // lists. Both are recomputed on every emission — unlike the
+                // dismissible message below they are not something the artist can
+                // wave away, they are a report of what the queue holds right now.
+                //
+                // The sizes are a `stat` per burned task, so the whole mapping
+                // goes to IO: this collector runs on `viewModelScope`, i.e. the
+                // main dispatcher.
+                val stalled = withContext(Dispatchers.IO) { stalledRowsFor(queue) }
+                _state.update {
+                    it.copy(
+                        samplesUploading = staged,
+                        uploadBanner = uploadBannerFor(queue),
+                        stalledUploads = stalled,
+                    )
+                }
                 val failed = failedUploadMessage(queue.failed)
                 if (failed != lastFailed) {
                     lastFailed = failed
@@ -489,6 +523,31 @@ class EpkViewModel @Inject constructor(
     }
 
     fun dismissUploadError() = _state.update { it.copy(uploadFailedMessage = null) }
+
+    /**
+     * Send ONE burned upload back round — the stalled sheet's per-item Retry (66).
+     *
+     * Per-item first, bulk second, because two uploads rarely stall for the same
+     * reason: an oversized clip beside a cover that hit a dead cell. "Retry all"
+     * on its own spends the drain on the one that is going to fail again.
+     */
+    fun retryStalledUpload(taskId: String) {
+        _state.update { it.copy(statusNote = "Retrying upload…") }
+        uploadQueue.retryFailed(taskId)
+    }
+
+    /**
+     * Forget one burned upload and its staged bytes (66's Discard).
+     *
+     * No confirmation dialog. The thing being discarded is a copy the app made of
+     * a file the artist still has, of an upload that has already failed three
+     * times — the cost of a mis-tap is picking it again, and a modal in front of
+     * every row would make clearing a stuck queue a six-tap job.
+     */
+    fun discardStalledUpload(taskId: String) {
+        uploadQueue.discardFailed(taskId)
+        _state.update { it.copy(statusNote = "Upload discarded.") }
+    }
 
     // ── Cover palette ────────────────────────────────────────────────────────
 

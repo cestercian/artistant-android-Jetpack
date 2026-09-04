@@ -469,9 +469,17 @@ fun normalizeLinkUrl(raw: String): String {
     }
 }
 
-/** A link needs both halves: a bare URL has nothing to label it in the list. */
+/**
+ * A link needs both halves, and the address half has to be an address.
+ *
+ * "Non-blank" was the whole test until the redesign, which meant a typo saved and
+ * then published a dead tap target on the artist's PUBLIC profile. The two
+ * `*Problem` functions in `EpkPressKit.kt` say WHY under each field on screen 74;
+ * this is the same rule reduced to the one bit the Save button needs, so the
+ * button and the field messages can never disagree.
+ */
 fun linkIsSavable(label: String, url: String): Boolean =
-    label.isNotBlank() && url.isNotBlank()
+    linkLabelProblem(label) == null && linkUrlProblem(url) == null
 
 // ── Share link ───────────────────────────────────────────────────────────────
 

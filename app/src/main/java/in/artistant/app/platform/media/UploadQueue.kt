@@ -207,6 +207,48 @@ class UploadQueue @Inject constructor(
     }
 
     /**
+     * Send ONE burned task back round — design screen 66's per-item Retry.
+     *
+     * Bulk retry alone is the wrong granularity for a stalled queue and it is the
+     * only one the banner used to offer. Two uploads stall for different reasons
+     * far more often than for the same one (a clip over the bucket's 10 MiB cap
+     * beside a cover that hit a dead cell), so "Retry all" spends the network on
+     * the task that is going to fail again either way. The sheet offers per-item
+     * first and the bulk control second for exactly that reason.
+     *
+     * A no-op when the id names nothing failed, which is what a double-tap on a
+     * row the previous tap already requeued looks like.
+     */
+    fun retryFailed(taskId: String) {
+        val before = _state.value
+        val next = retryOne(before, taskId)
+        if (next === before) return
+        _state.value = next
+        persist()
+        scheduleWork()
+        pump()
+    }
+
+    /**
+     * Forget one burned task and delete its staged bytes — screen 66's Discard.
+     *
+     * The delete is the point. A discarded task that left its file behind would
+     * leave a multi-megabyte copy in `filesDir` that nothing references and no
+     * sweep on this screen's path claims, for a clip the artist has explicitly
+     * said they no longer want. Same reasoning, and the same ordering, as
+     * [clearAll]: drop it from state first so nothing can drain it, then unlink.
+     */
+    fun discardFailed(taskId: String) {
+        val dropped = _state.value.failed.firstOrNull { it.id == taskId } ?: return
+        _state.value = discardOne(_state.value, taskId)
+        persist()
+        scope.launch {
+            runCatching { dropped.stagedFile().delete() }
+                .onFailure { Timber.w(it, "Discarded upload file delete failed: %s", dropped.id) }
+        }
+    }
+
+    /**
      * Call once auth session is ready (RootViewModel). Restored poison tasks
      * with burned attempt budgets stay in failed; others re-enter the runner.
      *
@@ -503,6 +545,32 @@ internal fun uploadFailed(
         state.copy(pending = rest, failed = state.failed + task)
     }
 }
+
+/**
+ * Move one burned task from `failed` back to the end of `pending`, with a fresh
+ * attempt budget — the state half of [UploadQueue.retryFailed].
+ *
+ * Appended rather than pushed to the head: the artist retrying one item has said
+ * nothing about the others, and jumping the queue would delay uploads that are
+ * still working in favour of one that has already failed three times.
+ *
+ * `batchTotal` grows with it, so the "k of n" the banner reads counts the
+ * requeued task rather than reporting a batch the queue has already outgrown.
+ * Returns the SAME instance when nothing matched, so a caller can skip the
+ * persist and the drain kick on a no-op.
+ */
+internal fun retryOne(state: UploadQueue.State, taskId: String): UploadQueue.State {
+    val task = state.failed.firstOrNull { it.id == taskId } ?: return state
+    return state.copy(
+        failed = state.failed.filterNot { it.id == taskId },
+        pending = state.pending + task.withAttempt(0),
+        batchTotal = state.batchTotal + 1,
+    )
+}
+
+/** Drop one burned task — the state half of [UploadQueue.discardFailed]. */
+internal fun discardOne(state: UploadQueue.State, taskId: String): UploadQueue.State =
+    state.copy(failed = state.failed.filterNot { it.id == taskId })
 
 /**
  * How long the drain waits after [task]'s attempt failed, given the state that failure
