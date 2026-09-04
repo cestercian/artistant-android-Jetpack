@@ -11,6 +11,8 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.SearchRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.feature.saved.SavedStore
+import `in`.artistant.app.feature.system.ActivityLog
+import `in`.artistant.app.feature.system.unreadActivityCount
 import `in`.artistant.app.feature.search.SearchSeed
 import `in`.artistant.app.feature.search.SearchSeedRequest
 import kotlinx.coroutines.CancellationException
@@ -18,8 +20,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -91,6 +96,7 @@ class DiscoverViewModel @Inject constructor(
     private val artistsRepository: ArtistsRepository,
     private val usersRepository: UsersRepository,
     private val savedStore: SavedStore,
+    activityLog: ActivityLog,
     private val searchSeed: SearchSeed = SearchSeed(),
 ) : ViewModel() {
 
@@ -112,6 +118,23 @@ class DiscoverViewModel @Inject constructor(
 
     /** Saved-heart ids, straight off the shared optimistic store. */
     val savedIds: StateFlow<Set<String>> = savedStore.ids
+
+    /**
+     * Is there an unread notification behind the header's bell (screen 02)?
+     *
+     * The log is this device's own record of arriving pushes — there is no
+     * server-side read state and screen 123 says so — which is exactly why the
+     * dot is derived from it rather than from a count the feed would have to be
+     * told. Cold-started `false`, so a bell never claims news before the store
+     * has been read.
+     */
+    val hasUnreadActivity: StateFlow<Boolean> = activityLog.entries
+        .map { unreadActivityCount(it) > 0 }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(UNREAD_SUBSCRIPTION_GRACE_MS),
+            initialValue = false,
+        )
 
     init {
         loadCategories()
@@ -260,6 +283,9 @@ class DiscoverViewModel @Inject constructor(
     }
 
     companion object {
+        /** Keeps the bell's flow alive across a tab switch rather than re-reading DataStore. */
+        private const val UNREAD_SUBSCRIPTION_GRACE_MS = 5_000L
+
         private const val TOP_CITY = "Bangalore"
         private val COMEDY_CATEGORIES = listOf("Stand-up")
 

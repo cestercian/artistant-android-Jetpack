@@ -246,9 +246,11 @@ fun ClientTabsScaffold() {
                     DiscoverScreen(
                         onArtistClick = { id -> nav.navigate("artist/$id") },
                         onOpenSearch = { navigateToTab(nav, ClientTab.Search.route) },
-                        onOpenSaved = {
-                            nav.navigate(ClientNavRoutes.artistList(ArtistListKind.Saved.raw))
-                        },
+                        // The header bell (design 02) — screen 123, which until
+                        // now was registered on both graphs with nothing
+                        // pointing at it. Saved kept its Profile row (26) and is
+                        // not lost with the heart that used to sit here.
+                        onOpenActivity = { nav.navigate(ClientNavRoutes.ACTIVITY) },
                     )
                 }
             }
