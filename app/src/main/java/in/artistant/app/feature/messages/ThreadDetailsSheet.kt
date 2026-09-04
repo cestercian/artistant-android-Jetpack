@@ -88,6 +88,8 @@ fun ThreadDetailsSheet(
     reportOutcome: ReportOutcome?,
     /** Non-null when a report is held NOWHERE — the sheet owes a retry, not a receipt. */
     failedReport: PendingReport?,
+    /** A report is in flight; the form stays up, so its CTA has to lock itself. */
+    isSubmittingReport: Boolean,
     /**
      * The last mute/block toggle didn't land. Rendered above the rows, because
      * this sheet is where the tap happened and the row it belongs to has already
@@ -170,6 +172,7 @@ fun ThreadDetailsSheet(
 
                     reporting -> ReportConversationSheet(
                         counterpartName = counterpartName,
+                        submitting = isSubmittingReport,
                         onSubmit = onReport,
                         onOpenSafetyCentre = onOpenSafetyCentre,
                         onBack = { reporting = false },

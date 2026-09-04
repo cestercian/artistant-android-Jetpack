@@ -58,6 +58,14 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 @Composable
 fun ReportConversationSheet(
     counterpartName: String,
+    /**
+     * A submission is in flight.
+     *
+     * This form stays on screen for the whole round trip — it has no outcome to
+     * render yet — so the CTA has to say so itself, or a second tap files the
+     * same report again.
+     */
+    submitting: Boolean,
     onSubmit: (reason: String, details: String?) -> Unit,
     /** The footer link out to trust & safety (design 131) — see [ThreadDetailsSheet]. */
     onOpenSafetyCentre: () -> Unit,
@@ -100,9 +108,12 @@ fun ReportConversationSheet(
 
         Spacer(Modifier.height(dimens.space.lg))
         PrimaryButton(
-            text = "Submit report",
+            // The label changes as well as the state: a disabled button with the
+            // same words reads as "you did something wrong", and the one thing
+            // this reader must not think is that their report did not go.
+            text = if (submitting) "Sending report…" else "Submit report",
             onClick = { reason?.let { onSubmit(it, note.trim().ifBlank { null }) } },
-            enabled = reason != null,
+            enabled = reason != null && !submitting,
             fullWidth = true,
             modifier = Modifier.semantics { testTag = "report.submit" },
         )
@@ -140,12 +151,15 @@ fun ReportConversationSheet(
         Text(
             "Back",
             style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-            color = colors.ink3,
+            color = if (submitting) colors.ink4 else colors.ink3,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(CircleShape)
-                .clickable(onClick = onBack)
+                // Also off while the write is out: stepping back to the actions
+                // list mid-flight hides the form that is about to answer, and
+                // the answer then lands on a sheet the reader has left.
+                .clickable(enabled = !submitting, onClick = onBack)
                 .padding(vertical = dimens.space.md)
                 .semantics { testTag = "report.back" },
         )

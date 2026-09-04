@@ -260,6 +260,7 @@ fun ChatScreen(
             canBlock = state.counterpartId != null,
             reportOutcome = state.reportOutcome,
             failedReport = state.failedReport,
+            isSubmittingReport = state.isSubmittingReport,
             // A mute/block that didn't land is reported HERE, on the sheet the
             // tap came from, rather than in the transcript's own error slot —
             // that one speaks for the conversation failing to load and offers to

@@ -15,6 +15,7 @@ import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.data.repository.PendingReport
 import `in`.artistant.app.data.repository.ReportOutcome
+import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.CLIENT_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
@@ -182,7 +183,7 @@ class ChatViewModelTest {
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
         requests: FakeRequestsRepository = FakeRequestsRepository(),
-        reports: FakeReportsRepository = FakeReportsRepository(),
+        reports: ReportsRepository = FakeReportsRepository(),
         readReceipts: ReadReceiptsPreference = ReadReceiptsPreference { true },
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
@@ -196,6 +197,36 @@ class ChatViewModelTest {
         readReceipts = readReceipts,
         viewer = { viewerId },
     )
+
+    /**
+     * A reports seam that can be held OPEN.
+     *
+     * `FakeReportsRepository` answers instantly, which is the one shape that
+     * cannot reproduce a double tap: the window a second tap lands in is exactly
+     * the round trip. [gate] holds the write there until the test releases it.
+     */
+    private class GatedReports(
+        var outcome: ReportOutcome = ReportOutcome.Sent,
+    ) : ReportsRepository {
+        val gate = CompletableDeferred<Unit>()
+        val conversation = mutableListOf<Triple<String, String, String?>>()
+
+        override suspend fun reportConversation(
+            threadId: String,
+            reason: String,
+            details: String?,
+        ): ReportOutcome {
+            conversation += Triple(threadId, reason, details)
+            gate.await()
+            return outcome
+        }
+
+        override suspend fun reportArtist(
+            artistId: String,
+            reason: String,
+            details: String?,
+        ): ReportOutcome = outcome
+    }
 
     private fun serverMessage(id: String, body: String, at: Long = 5_000L, mine: Boolean = true) =
         Message(
@@ -1316,6 +1347,63 @@ class ChatViewModelTest {
         )
         assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
         assertNull(model.state.value.failedReport)
+    }
+
+    /**
+     * Two taps on Submit file ONE report.
+     *
+     * The form does not close on submit — it stays up and becomes a receipt only
+     * when the outcome lands — so the CTA is live for the whole round trip, and
+     * the second tap used to file the same row again. Duplicates are not a
+     * cosmetic problem: they are two rows in `public.reports` about one person
+     * for one thing, which the moderation team reads as a pattern.
+     */
+    @Test
+    fun aDoubleTapOnSubmitFilesTheReportOnce() = runTest {
+        val reports = GatedReports()
+        val model = vm(ScriptedMessages(), reports = reports)
+
+        model.reportConversation("Spam or a scam", "same link twice")
+        advanceUntilIdle()
+        assertTrue(
+            "the form has to lock itself while the write is out",
+            model.state.value.isSubmittingReport,
+        )
+
+        model.reportConversation("Spam or a scam", "same link twice")
+        advanceUntilIdle()
+
+        assertEquals("the second tap must not reach the seam", 1, reports.conversation.size)
+
+        reports.gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(1, reports.conversation.size)
+        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertFalse(
+            "and the form unlocks when the answer lands",
+            model.state.value.isSubmittingReport,
+        )
+    }
+
+    /** The retry button is the same door: it must not open a second write either. */
+    @Test
+    fun retryCannotStartASecondReportWhileOneIsInFlight() = runTest {
+        val reports = GatedReports(outcome = ReportOutcome.Failed)
+        val model = vm(ScriptedMessages(), reports = reports)
+        model.reportConversation("Pressuring or aggressive messages")
+        advanceUntilIdle()
+
+        model.retryReport()
+        advanceUntilIdle()
+
+        assertEquals(1, reports.conversation.size)
+
+        reports.gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertNotNull(model.state.value.failedReport)
+        assertFalse(model.state.value.isSubmittingReport)
     }
 
     /**

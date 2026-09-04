@@ -152,6 +152,16 @@ data class ChatUiState(
      */
     val failedReport: PendingReport? = null,
     /**
+     * A report is in flight.
+     *
+     * The form does not close on submit — it stays up and only becomes a receipt
+     * when the outcome lands — so without this the CTA is live for the whole
+     * round trip and a second tap files the SAME report again. Duplicates are
+     * not free here: they are two rows in `public.reports` against one person for
+     * one thing, which is noise the moderation team reads as a pattern.
+     */
+    val isSubmittingReport: Boolean = false,
+    /**
      * The other person's user id, for blocking (mig 0087). Unlike [artistId] this
      * is populated on BOTH seats — an artist blocks a client just as a client
      * blocks an artist — and is null only when the seat can't be resolved, which
@@ -209,6 +219,13 @@ class ChatViewModel @Inject constructor(
     val events = _events.receiveAsFlow()
 
     private var subscription: MessagesSubscription? = null
+    /**
+     * Bumped on each report attempt, and in [onCleared], so a completion that is
+     * no longer the current one cannot write state. Same idiom, and the same
+     * reason, as [subscribeGeneration] below it.
+     */
+    private var reportGeneration = 0
+
     /** Bumped on each subscribe attempt so a superseded join is discarded. */
     private var subscribeGeneration = 0
 
@@ -775,18 +792,35 @@ class ChatViewModel @Inject constructor(
      *    failure with the reader's own words kept for a retry.
      */
     fun reportConversation(reason: String, details: String? = null) {
-        _state.update { it.copy(reportOutcome = null, failedReport = null) }
+        // One report per tap. The sheet keeps the form up for the whole round
+        // trip — it has no outcome to render yet — so the CTA stays live, and a
+        // double tap used to file the row twice.
+        if (_state.value.isSubmittingReport) return
+        reportGeneration += 1
+        val myGeneration = reportGeneration
+        _state.update {
+            it.copy(reportOutcome = null, failedReport = null, isSubmittingReport = true)
+        }
         viewModelScope.launch {
             val outcome = runCatching { reports.reportConversation(threadId, reason, details) }
                 // A throw is a contract violation (the interface promises not
                 // to), so it is the WORST of the three claims and not the middle
                 // one: we know nothing about where the report went.
                 .getOrDefault(ReportOutcome.Failed)
-            _state.update {
-                if (outcome == ReportOutcome.Failed) {
-                    it.copy(failedReport = PendingReport(reason, details), reportOutcome = null)
-                } else {
-                    it.copy(reportOutcome = outcome, failedReport = null)
+            _state.update { state ->
+                // The flag belongs to the attempt that is finishing, so it is
+                // always released — a superseded completion that returned early
+                // without clearing it would wedge the form shut for good.
+                val settled = state.copy(isSubmittingReport = false)
+                when {
+                    // Superseded or retired (see [onCleared]): the write is not
+                    // ours to make, and claiming an outcome for a report the
+                    // reader has moved on from is how a dismissed banner comes
+                    // back from the dead.
+                    myGeneration != reportGeneration -> settled
+                    outcome == ReportOutcome.Failed ->
+                        settled.copy(failedReport = PendingReport(reason, details), reportOutcome = null)
+                    else -> settled.copy(reportOutcome = outcome, failedReport = null)
                 }
             }
         }
@@ -808,6 +842,7 @@ class ChatViewModel @Inject constructor(
     fun discardFailedReport() = _state.update { it.copy(failedReport = null) }
 
     override fun onCleared() {
+        reportGeneration += 1
         subscribeGeneration += 1
         subscription?.cancel()
         subscription = null
