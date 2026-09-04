@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -472,6 +473,18 @@ private fun ThreadRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
+                    // Starring is set one screen away, in the chat's details
+                    // sheet. Without a mark here it is state nothing ever shows
+                    // — a control whose effect is invisible reads as a no-op.
+                    if (item.starred) {
+                        Spacer(Modifier.width(dimens.space.xs))
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = "Starred",
+                            tint = colors.warm,
+                            modifier = Modifier.size(dimens.size.iconSm),
+                        )
+                    }
                     Spacer(Modifier.width(dimens.space.sm))
                     Text(
                         InboxProjection.timeAgo(item.thread.lastMessageAtEpochMs, nowMs),

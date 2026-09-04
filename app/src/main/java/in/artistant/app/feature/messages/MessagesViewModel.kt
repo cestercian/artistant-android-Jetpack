@@ -178,7 +178,10 @@ class MessagesViewModel @Inject constructor(
             }
     }
 
-    fun toggleStarred(threadId: String) = viewModelScope.launch { flagsStore.toggleStarred(threadId) }
+    // No `toggleStarred` here on purpose. The light inbox has ONE swipe and it
+    // archives (design 19), so the star's only control is the chat's details
+    // sheet — see [ChatViewModel.toggleStarred]. What the inbox owes the flag is
+    // display, not a second way to set it.
 
     fun toggleArchived(threadId: String) = viewModelScope.launch { flagsStore.toggleArchived(threadId) }
 
