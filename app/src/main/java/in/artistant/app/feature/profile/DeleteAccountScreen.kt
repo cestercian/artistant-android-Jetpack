@@ -72,6 +72,27 @@ enum class DeleteReason(val label: String) {
     Other("Something else"),
 }
 
+/**
+ * Whether the mirrored gigs came off this device's calendar.
+ *
+ * Three states because there are three, and the receipt on stage 3 must not flatten them: the
+ * wipe runs AFTER that screen is already up (the server row is gone, and holding a spinner
+ * through a 30-second logout would read as a delete that never happened), so [Pending] is what
+ * the row shows for the moment it takes, and [Failed] is what it shows when the calendar
+ * provider refused. A tick over a wipe that threw is the one screen in the app whose whole job
+ * is honesty claiming an erasure that did not happen.
+ */
+sealed interface CalendarOutcome {
+    /** The wipe has not answered yet. */
+    data object Pending : CalendarOutcome
+
+    /** The mirrored events are off this device. */
+    data object Cleaned : CalendarOutcome
+
+    /** They are not, and [reason] is why. */
+    data class Failed(val reason: String) : CalendarOutcome
+}
+
 data class DeleteAccountUiState(
     val stage: DeleteStage = DeleteStage.Reason,
     val reason: DeleteReason? = null,
@@ -80,6 +101,8 @@ data class DeleteAccountUiState(
     val failure: String? = null,
     /** What the account is about to lose. Null counts render without a number, never as zero. */
     val consequences: DeleteConsequences = DeleteConsequences(),
+    /** What the device-calendar wipe actually managed. Stage 3's third row reads this. */
+    val calendar: CalendarOutcome = CalendarOutcome.Pending,
 ) {
     /** The typed confirmation has to match exactly, case included. */
     val canDelete: Boolean get() = !working && confirmation.trim() == DELETE_KEYWORD
@@ -185,12 +208,19 @@ class DeleteAccountViewModel @Inject constructor(
                 // logout timeout would read as a delete that never happened.
                 _state.update { it.copy(working = false, stage = DeleteStage.Receipt) }
                 draftStore.clear()
-                val cleanupError = cleanUpAfterAccountDelete(
+                val cleanup = cleanUpAfterAccountDelete(
                     wipeCalendar = { calendarSync.wipeForAccountDelete() },
                     signOut = { session.signOut() },
                     wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
                 )
-                if (cleanupError != null) _state.update { it.copy(failure = cleanupError) }
+                _state.update {
+                    it.copy(
+                        calendar = cleanup.calendarFailure
+                            ?.let(CalendarOutcome::Failed)
+                            ?: CalendarOutcome.Cleaned,
+                        failure = cleanup.message ?: it.failure,
+                    )
+                }
                 onDeleted()
             }
             .onFailure { e ->
@@ -449,13 +479,14 @@ private fun DeleteReceiptStage(
         AccountGap()
         AccountPageTitle("Account deleted", body = "Here's exactly what that means.")
         AccountGap()
-        deleteReceipt(state.consequences).forEachIndexed { index, item ->
+        deleteReceipt(state.consequences, state.calendar).forEachIndexed { index, item ->
             CheckRow(
                 title = item.title,
                 subtitle = item.detail,
-                // The last item — the backup window — is PENDING, not done: the purge has not
-                // happened yet, and ticking it would claim an erasure that is 30 days away.
-                state = if (index == BACKUP_ITEM_INDEX) MarkState.Pending else MarkState.Done,
+                // Each row carries its own mark, because two of the four are not "done": the
+                // backup window has not happened yet, and the calendar row reports what the
+                // wipe actually managed.
+                state = item.mark,
                 showHairline = false,
                 modifier = Modifier.semantics { testTag = "delete.receipt.$index" },
             )
@@ -582,36 +613,61 @@ private fun bookingsLabel(count: Int): String = when (count) {
     else -> "$count bookings"
 }
 
+/** One line of the stage-3 receipt, with the mark that says how true it is. */
+data class DeleteReceiptItem(val title: String, val detail: String, val mark: MarkState)
+
 /**
  * What stage 3 itemises — the receipt.
  *
- * Four lines, and the fourth is the honest one: the backup window. Everything else on a
- * "deleted" screen is a claim about the past; that line is a claim about the next 30 days, and
- * it is the one people actually need. It is deliberately NOT ticked (see the render).
+ * Four lines, and only two of them are unqualified claims about the past. The backup window is
+ * a claim about the next 30 days and is deliberately NOT ticked. The calendar line reports what
+ * the wipe actually managed ([calendar]): those events are on the DEVICE, not on the server,
+ * and the delete cannot remove them if the calendar provider says no — so a tick there is a
+ * claim this function is often not entitled to make. When it can't, the row says so and tells
+ * the user what is left to do, because nobody else is going to.
  */
-fun deleteReceipt(facts: DeleteConsequences): List<DeleteItem> = listOf(
-    DeleteItem(
+fun deleteReceipt(
+    facts: DeleteConsequences,
+    calendar: CalendarOutcome,
+): List<DeleteReceiptItem> = listOf(
+    DeleteReceiptItem(
         title = "Gone now",
         detail = "Your profile, bookings, messages, saved acts and reviews",
+        mark = MarkState.Done,
     ),
-    DeleteItem(
+    DeleteReceiptItem(
         title = "Handle released",
         detail = facts.handle
             ?.let { "@$it is free for someone else to take" }
             ?: "Your username is free for someone else to take",
+        mark = MarkState.Done,
     ),
-    DeleteItem(
-        title = "Calendar cleaned",
-        detail = "Mirrored events removed from your device calendar",
-    ),
-    DeleteItem(
+    when (calendar) {
+        CalendarOutcome.Pending -> DeleteReceiptItem(
+            title = "Clearing your calendar",
+            detail = "Removing the mirrored events from this device",
+            mark = MarkState.Active,
+        )
+        CalendarOutcome.Cleaned -> DeleteReceiptItem(
+            title = "Calendar cleaned",
+            detail = "Mirrored events removed from your device calendar",
+            mark = MarkState.Done,
+        )
+        is CalendarOutcome.Failed -> DeleteReceiptItem(
+            // Not "Calendar not cleaned": a negation inside a title is read as its opposite by
+            // anyone scanning, and a screen reader gives it no more emphasis than the rest.
+            title = "Couldn't clear your calendar",
+            detail = "The mirrored events are still in your device calendar — " +
+                "${calendar.reason}. Delete them there when you get a chance.",
+            mark = MarkState.Failed,
+        )
+    },
+    DeleteReceiptItem(
         title = "Backups purge in 30 days",
         detail = "Standard retention window, then it's unrecoverable",
+        mark = MarkState.Pending,
     ),
 )
-
-/** Which receipt row is the not-yet-true one. */
-private const val BACKUP_ITEM_INDEX = 3
 
 /** The off-ramp's second clause — what Support could save, when we know what that is. */
 internal fun supportOfframpLine(facts: DeleteConsequences): String {

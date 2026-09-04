@@ -2,7 +2,6 @@ package `in`.artistant.app.designsystem.component
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +11,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -108,9 +108,16 @@ fun CheckDot(
  *
  * [onClick] turns the row into a radio: the whole row is the target, because a 22dp disc is
  * under the 48dp minimum and asking someone to hit it exactly is how a settings list becomes
- * unusable one-handed. The content description merges title and subtitle, and the semantics
- * role is `RadioButton` when the row is selectable so a screen reader announces the tick
- * rather than reading "button" over a list of six identical-sounding options.
+ * unusable one-handed. The content description merges title and subtitle.
+ *
+ * **A radio has to announce WHICH one is chosen**, and this used to announce only that it was a
+ * radio. `Modifier.clickable(role = RadioButton)` sets the role and nothing else, so TalkBack
+ * read six identical "radio button, Hindi / Marathi / …" rows with no way to hear which one was
+ * already selected — the tick is drawn by [CheckDot], which is decorative, so a screen reader
+ * user could not tell their current language or their picked deletion reason apart from the
+ * five they had not chosen. `Modifier.selectable` carries the selected state into the semantics
+ * tree, and [MarkState.Done] is what "selected" means on both of this row's radio call sites
+ * (screens 130 and 115): the ticked one.
  */
 @Composable
 fun CheckRow(
@@ -148,7 +155,8 @@ fun CheckRow(
             .fillMaxWidth()
             .then(
                 if (onClick != null) {
-                    Modifier.clickable(
+                    Modifier.selectable(
+                        selected = state == MarkState.Done,
                         interactionSource = interaction,
                         indication = ripple(),
                         role = Role.RadioButton,

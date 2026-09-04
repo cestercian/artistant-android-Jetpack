@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.paywall
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -36,8 +37,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.platform.billing.PlayBillingService
 import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
@@ -94,9 +97,32 @@ fun PaywallScreen(
         onSubscribe = { viewModel.subscribe(context.findActivity(), onComplete) },
         onRetry = viewModel::load,
         onRestore = viewModel::restore,
+        onManageInPlay = { openPlaySubscription(context) },
         onDismissPending = viewModel::dismissPending,
         modifier = modifier,
     )
+}
+
+/**
+ * Open this subscription's page in the Play Store.
+ *
+ * "Manage in Google Play" used to call the RESTORE path, which re-queries entitlements and
+ * changes nothing the button's label promises — somebody trying to cancel, change payment
+ * method or check their renewal date got a silent no-op. Play's own deep link is a documented
+ * https URL, so the Play app takes it via its intent filter and a device without Play falls back
+ * to the browser, which shows the same page.
+ *
+ * `context.packageName` rather than the `applicationId` literal: the dev and staging flavours
+ * carry suffixes, and the wrong package on this URL opens a store page for an app that does not
+ * exist. A failure to resolve BOTH is swallowed — a store page that will not open is a
+ * disappointment, not a crash out of a click handler.
+ */
+private fun openPlaySubscription(context: Context) {
+    val url = "https://play.google.com/store/account/subscriptions" +
+        "?package=${context.packageName}&sku=${PlayBillingService.PRODUCT_ID}"
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+    }
 }
 
 @Composable
@@ -106,6 +132,7 @@ private fun PaywallContent(
     onSubscribe: () -> Unit,
     onRetry: () -> Unit,
     onRestore: () -> Unit,
+    onManageInPlay: () -> Unit,
     onDismissPending: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -177,6 +204,7 @@ private fun PaywallContent(
                 onSubscribe = onSubscribe,
                 onRetry = onRetry,
                 onRestore = onRestore,
+                onManageInPlay = onManageInPlay,
                 onDismissPending = onDismissPending,
             )
         }
@@ -189,6 +217,7 @@ private fun ColumnScope.PaywallFooter(
     onSubscribe: () -> Unit,
     onRetry: () -> Unit,
     onRestore: () -> Unit,
+    onManageInPlay: () -> Unit,
     onDismissPending: () -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -248,13 +277,24 @@ private fun ColumnScope.PaywallFooter(
                 modifier = Modifier.semantics { testTag = "paywall.restore" },
             )
         }
-        ProState.Active -> SecondaryButton(
-            text = "Manage in Google Play",
-            onClick = onRestore,
-            fullWidth = true,
-            enabled = !state.working,
-            modifier = Modifier.semantics { testTag = "paywall.manage" },
-        )
+        // Two different actions, and they were one: managing the plan is Play's job (cancel,
+        // change card, read the renewal date) and restoring is ours (re-read entitlements onto
+        // this device). Collapsing them meant the manage button silently did the other thing.
+        ProState.Active -> {
+            SecondaryButton(
+                text = "Manage in Google Play",
+                onClick = onManageInPlay,
+                fullWidth = true,
+                modifier = Modifier.semantics { testTag = "paywall.manage" },
+            )
+            SecondaryButton(
+                text = "Restore purchases",
+                onClick = onRestore,
+                fullWidth = true,
+                enabled = !state.working,
+                modifier = Modifier.semantics { testTag = "paywall.restoreActive" },
+            )
+        }
     }
 }
 
@@ -534,6 +574,7 @@ private fun PaywallOfferPreview() {
             onSubscribe = {},
             onRetry = {},
             onRestore = {},
+            onManageInPlay = {},
             onDismissPending = {},
         )
     }
@@ -549,6 +590,7 @@ private fun PaywallUnavailablePreview() {
             onSubscribe = {},
             onRetry = {},
             onRestore = {},
+            onManageInPlay = {},
             onDismissPending = {},
         )
     }
@@ -564,6 +606,7 @@ private fun PaywallActivePreview() {
             onSubscribe = {},
             onRetry = {},
             onRestore = {},
+            onManageInPlay = {},
             onDismissPending = {},
         )
     }

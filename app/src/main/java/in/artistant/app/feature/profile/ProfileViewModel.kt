@@ -357,9 +357,9 @@ class ProfileViewModel @Inject constructor(
      * would write a blank handle over the user's own. `termsAccepted = false` is an assertion
      * of nothing, not a revocation — see that method's contract.
      *
-     * [onSwitched] is the caller's re-route (the root gate's `retryRouting`). It runs only on a
-     * successful write, so a failed switch leaves the user where they are with the reason on
-     * screen rather than half-moved.
+     * [onSwitched] is the caller's re-route (the root gate's `retryRouting`). It runs on a
+     * completed SERVER write — see [switchRoleOnServerThenDevice] for why the DataStore write
+     * beside it may not veto it.
      */
     fun switchToArtistMode(onSwitched: () -> Unit) = viewModelScope.launch {
         val current = _state.value
@@ -377,25 +377,23 @@ class ProfileViewModel @Inject constructor(
             return@launch
         }
         _state.update { it.copy(switchingRole = true, actionError = null) }
-        runCatching {
-            users.upsertSelfProfile(
-                handle = handle,
-                fullName = profile.fullName.orEmpty(),
-                city = profile.city.orEmpty(),
-                role = AppRole.Artist,
-                termsAccepted = false,
-            )
-            prefs.setRole(AppRole.Artist)
-        }.onSuccess {
+        val outcome = switchRoleOnServerThenDevice(
+            updateServer = {
+                users.upsertSelfProfile(
+                    handle = handle,
+                    fullName = profile.fullName.orEmpty(),
+                    city = profile.city.orEmpty(),
+                    role = AppRole.Artist,
+                    termsAccepted = false,
+                )
+            },
+            persistLocally = { prefs.setRole(AppRole.Artist) },
+        )
+        if (outcome.switched) {
             _state.update { it.copy(switchingRole = false, role = AppRole.Artist) }
             onSwitched()
-        }.onFailure { e ->
-            _state.update {
-                it.copy(
-                    switchingRole = false,
-                    actionError = e.message ?: "Couldn't switch to artist mode.",
-                )
-            }
+        } else {
+            _state.update { it.copy(switchingRole = false, actionError = outcome.failure) }
         }
     }
 
@@ -480,20 +478,82 @@ class ProfileViewModel @Inject constructor(
  *
  * @return the message to surface, or null when the cleanup finished cleanly.
  */
+/**
+ * The result of a role switch: whether the ACCOUNT changed, and what to say if it did not.
+ */
+internal data class RoleSwitchOutcome(val switched: Boolean, val failure: String?)
+
+/**
+ * Change the account's role on the server, then record it on the device — in that order, and
+ * with only the first one able to fail the switch.
+ *
+ * The two writes are not equal and the old code treated them as one `runCatching` block, which
+ * made the smaller one able to veto the larger. `users.role` is the fact: `users_update_self`
+ * (mig 0002) has accepted it, every client that reads the account sees an artist, and the row
+ * cannot be un-updated by anything that happens next. [AppPreferences.setRole] is a DataStore
+ * edit that throws IOException on a preferences file it cannot write — and when it did, the
+ * screen printed "Couldn't switch to artist mode", skipped the re-route, and left somebody
+ * standing in the client scaffold as an artist, with a button that would try the same write
+ * again.
+ *
+ * So the local write is best-effort. Losing it costs one wrong first frame at the next cold
+ * start, which the root gate corrects the moment it re-reads the profile — the same correction
+ * it performs for a device whose cached role is stale for any other reason. Reporting failure
+ * over it costs the user the flow.
+ */
+internal suspend fun switchRoleOnServerThenDevice(
+    updateServer: suspend () -> Unit,
+    persistLocally: suspend () -> Unit,
+): RoleSwitchOutcome {
+    val serverFailure = runCatching { updateServer() }.exceptionOrNull()
+    if (serverFailure != null) {
+        return RoleSwitchOutcome(
+            switched = false,
+            failure = serverFailure.message ?: "Couldn't switch to artist mode.",
+        )
+    }
+    runCatching { persistLocally() }
+    return RoleSwitchOutcome(switched = true, failure = null)
+}
+
 internal suspend fun cleanUpAfterAccountDelete(
     wipeCalendar: suspend () -> Unit,
     signOut: suspend () -> Unit,
     wipeLocalState: suspend () -> Unit,
-): String? {
-    // The mirrored gigs are the device owner's own calendar events. Failing to
-    // remove them cannot un-delete the account, and on the ordinary path the
-    // sign-out below replaces this screen before any message could be read, so
-    // this failure is swallowed rather than reported.
-    runCatching { wipeCalendar() }
-    if (runCatching { signOut() }.isSuccess) return null
-    runCatching { wipeLocalState() }
-    return "Account deleted. Restart the app to finish signing out."
+): AccountDeleteCleanup {
+    // The mirrored gigs are the device owner's own calendar events. Failing to remove them
+    // cannot un-delete the account, so it does not stop anything below — but it is REPORTED
+    // now rather than swallowed. The receipt on stage 3 itemises "Calendar cleaned" with a
+    // tick, and a tick over a wipe that threw is the screen claiming an erasure that did not
+    // happen, on the one screen in the app whose entire job is telling the truth about what
+    // was deleted.
+    val calendarFailure = runCatching { wipeCalendar() }.exceptionOrNull()
+    val message = if (runCatching { signOut() }.isSuccess) {
+        null
+    } else {
+        runCatching { wipeLocalState() }
+        "Account deleted. Restart the app to finish signing out."
+    }
+    return AccountDeleteCleanup(
+        calendarFailure = calendarFailure?.let {
+            it.message?.takeIf(String::isNotBlank) ?: "this device wouldn't let us"
+        },
+        message = message,
+    )
 }
+
+/**
+ * What the local half of a delete managed, once the server row is already gone.
+ *
+ * Two independent facts, because the receipt states them separately: whether the mirrored
+ * calendar events came off this device, and whether the session teardown finished.
+ */
+internal data class AccountDeleteCleanup(
+    /** null when the mirrored events really were removed; the reason when they were not. */
+    val calendarFailure: String?,
+    /** A sentence for the user, or null when there is nothing left to tell them. */
+    val message: String?,
+)
 
 /**
  * The local cleanup that follows a PLAIN sign-out attempt.

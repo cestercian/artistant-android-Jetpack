@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.profile
 
+import `in`.artistant.app.designsystem.component.MarkState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -89,32 +90,71 @@ class DeleteConsequencesTest {
 
     @Test
     fun `the receipt itemises four things and one of them is the backup window`() {
-        val items = deleteReceipt(DeleteConsequences())
+        val items = deleteReceipt(DeleteConsequences(), CalendarOutcome.Cleaned)
         assertEquals(4, items.size)
         assertEquals("Backups purge in 30 days", items[3].title)
         assertTrue(items[3].detail.contains("unrecoverable"))
+        // Not ticked: the purge is 30 days away and this screen does not claim it yet.
+        assertEquals(MarkState.Pending, items[3].mark)
     }
 
     @Test
     fun `the receipt names the handle it released`() {
         assertEquals(
             "@rheamenon is free for someone else to take",
-            deleteReceipt(DeleteConsequences(handle = "rheamenon"))[1].detail,
+            deleteReceipt(DeleteConsequences(handle = "rheamenon"), CalendarOutcome.Cleaned)[1].detail,
         )
     }
 
     @Test
     fun `the receipt degrades the handle line rather than printing a bare at-sign`() {
-        assertFalse(deleteReceipt(DeleteConsequences(handle = null))[1].detail.contains("@"))
+        assertFalse(
+            deleteReceipt(DeleteConsequences(handle = null), CalendarOutcome.Cleaned)[1]
+                .detail.contains("@"),
+        )
     }
 
     @Test
     fun `the receipt mentions the device calendar, which is the one thing not on the server`() {
         assertTrue(
-            deleteReceipt(DeleteConsequences()).any {
+            deleteReceipt(DeleteConsequences(), CalendarOutcome.Cleaned).any {
                 it.title == "Calendar cleaned" && it.detail.contains("device calendar")
             },
         )
+    }
+
+    // ── The calendar row reports what the wipe managed (review finding 5) ──────────────
+
+    @Test
+    fun `a calendar wipe that failed is never ticked, and says what is left to do`() {
+        // The bug: the row read "Calendar cleaned" with a tick whatever happened, on the one
+        // screen in the app whose entire job is stating truthfully what was deleted.
+        val row = deleteReceipt(
+            DeleteConsequences(),
+            CalendarOutcome.Failed("no calendar permission"),
+        )[CALENDAR_ROW]
+        assertEquals(MarkState.Failed, row.mark)
+        assertFalse("a failed wipe must not claim the word 'cleaned'", row.title.contains("cleaned"))
+        assertTrue(row.detail.contains("no calendar permission"))
+        assertTrue("it has to say what the user can do about it", row.detail.contains("Delete them"))
+    }
+
+    @Test
+    fun `a wipe still running is neither ticked nor failed`() {
+        // Stage 3 goes up BEFORE the wipe answers, so this is the state the row opens in.
+        val row = deleteReceipt(DeleteConsequences(), CalendarOutcome.Pending)[CALENDAR_ROW]
+        assertEquals(MarkState.Active, row.mark)
+        assertFalse(row.title.contains("cleaned"))
+    }
+
+    @Test
+    fun `only a real success ticks the calendar row`() {
+        val marks = listOf(
+            CalendarOutcome.Pending,
+            CalendarOutcome.Cleaned,
+            CalendarOutcome.Failed("nope"),
+        ).map { deleteReceipt(DeleteConsequences(), it)[CALENDAR_ROW].mark }
+        assertEquals(listOf(MarkState.Active, MarkState.Done, MarkState.Failed), marks)
     }
 
     // ── The off-ramp on stage 1 ────────────────────────────────────────────────────────
@@ -152,5 +192,10 @@ class DeleteConsequencesTest {
         assertFalse(
             DeleteAccountUiState(confirmation = DELETE_KEYWORD, working = true).canDelete,
         )
+    }
+
+    private companion object {
+        /** Which receipt row is the calendar one. */
+        const val CALENDAR_ROW = 2
     }
 }
