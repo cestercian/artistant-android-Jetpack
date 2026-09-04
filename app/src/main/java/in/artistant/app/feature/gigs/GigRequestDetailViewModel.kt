@@ -49,10 +49,36 @@ sealed interface GigRequestDetailEvent {
     data object Accepted : GigRequestDetailEvent
 }
 
+/**
+ * How the last attempt to load the request ended.
+ *
+ * Three terminal cases, not two. [NotFound] and [Failed] both leave
+ * [GigRequestDetailUiState.request] null, and collapsing them is what made the
+ * screen tell an artist whose network had dropped that their request had
+ * "expired or been withdrawn by the client" — a false, unrecoverable-sounding
+ * statement about someone else's action, with no way to retry.
+ */
+enum class GigRequestLoad { Loading, Loaded, NotFound, Failed }
+
+/**
+ * Which of the three a completed read was.
+ *
+ * An error ALWAYS wins over an absent row, because when the read threw we never
+ * learned whether the row exists — [found] is null because nothing came back,
+ * not because the server said there is nothing. Only a read that succeeded and
+ * returned no match is genuinely [GigRequestLoad.NotFound].
+ */
+internal fun gigRequestLoad(found: StoredRequest?, error: Throwable?): GigRequestLoad = when {
+    error != null -> GigRequestLoad.Failed
+    found != null -> GigRequestLoad.Loaded
+    else -> GigRequestLoad.NotFound
+}
+
 data class GigRequestDetailUiState(
     val request: StoredRequest? = null,
     val clashes: List<CalendarSyncPlanner.Clash> = emptyList(),
-    val isLoading: Boolean = true,
+    val load: GigRequestLoad = GigRequestLoad.Loading,
+    /** The failure's message — only ever set alongside [GigRequestLoad.Failed]. */
     val loadError: String? = null,
     /**
      * WHICH mutation is in flight, or null when none is.
@@ -69,6 +95,9 @@ data class GigRequestDetailUiState(
 ) {
     /** Any mutation in flight — every dock control is disabled while one is. */
     val isActing: Boolean get() = actingAction != null
+
+    /** Derived so every existing call site keeps reading one flag. */
+    val isLoading: Boolean get() = load == GigRequestLoad.Loading
 }
 
 @HiltViewModel
@@ -93,7 +122,7 @@ class GigRequestDetailViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, loadError = null) }
+            _state.update { it.copy(load = GigRequestLoad.Loading, loadError = null) }
             try {
                 // Seed calendar clash reads from the artist's confirmed bookings.
                 runCatching { bookingsRepository.listForArtist() }
@@ -105,15 +134,32 @@ class GigRequestDetailViewModel @Inject constructor(
                     it.copy(
                         request = found,
                         clashes = clashes,
-                        isLoading = false,
-                        loadError = if (found == null) "Request not found." else null,
+                        load = gigRequestLoad(found, error = null),
+                        loadError = null,
                     )
                 }
             } catch (e: RequestsRepositoryError) {
-                _state.update { it.copy(isLoading = false, loadError = e.message) }
+                failLoad(e)
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, loadError = e.message) }
+                failLoad(e)
             }
+        }
+    }
+
+    /**
+     * A read that threw leaves [GigRequestDetailUiState.request] alone.
+     *
+     * Nulling it would blank a request the artist is reading because a
+     * background refresh dropped — the same rule the studio's dashboard follows
+     * next door. The failure shows as a banner over whatever is already there,
+     * and as a retryable failure screen when there is nothing.
+     */
+    private fun failLoad(e: Throwable) {
+        _state.update {
+            it.copy(
+                load = gigRequestLoad(found = it.request, error = e),
+                loadError = e.message ?: "Couldn't load this request.",
+            )
         }
     }
 

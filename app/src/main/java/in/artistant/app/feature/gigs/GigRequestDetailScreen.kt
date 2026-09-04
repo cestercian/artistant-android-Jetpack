@@ -115,11 +115,43 @@ fun GigRequestDetailScreen(
                 CircularProgressIndicator(color = colors.accentInk)
             }
         }
-        // Screen 109. Reached mostly from a push tap on a request that has since
-        // gone, so the copy names both causes: a withdrawn request is DELETEd by
-        // the client and an expired one is swept (mig 0090), and both leave the
-        // same absent row — we genuinely cannot tell which happened, and neither
-        // is the artist's fault.
+        // The read FAILED — checked before the not-found branch below, because
+        // both leave `request` null and only one of them is a statement about
+        // the client. Telling an artist whose network dropped that their request
+        // was "withdrawn by the client" is false, blames someone else for it,
+        // and (worst) sounds terminal enough that they would not try again. So
+        // this says what actually happened and offers the retry.
+        request == null && state.load == GigRequestLoad.Failed -> {
+            Column(
+                modifier
+                    .fillMaxSize()
+                    .background(colors.page)
+                    .semantics { testTag = "screen.gigRequestLoadFailed" },
+            ) {
+                BackHeader(
+                    title = "Gig request",
+                    onBack = onBack,
+                    modifier = Modifier.padding(horizontal = space.sm, vertical = space.sm),
+                )
+                Column(
+                    Modifier.padding(horizontal = gutter),
+                    verticalArrangement = Arrangement.spacedBy(space.md),
+                ) {
+                    Banner(
+                        title = "Couldn't load this request",
+                        detail = state.loadError,
+                        tone = BannerTone.Failure,
+                        actionLabel = "Retry",
+                        onAction = viewModel::refresh,
+                    )
+                }
+            }
+        }
+        // Screen 109 — the read SUCCEEDED and there was no such row. The copy
+        // names both causes: a withdrawn request is DELETEd by the client and an
+        // expired one is swept (mig 0090), and both leave the same absent row —
+        // we genuinely cannot tell which happened, and neither is the artist's
+        // fault.
         request == null -> {
             Column(
                 modifier
@@ -175,6 +207,19 @@ fun GigRequestDetailScreen(
                         else -> ClosedBody(request)
                     }
 
+                    // A refresh that dropped over a request already on screen.
+                    // The body above keeps its data: blanking a request because
+                    // a background poll failed is how an artist loses the offer
+                    // they were reading.
+                    if (state.load == GigRequestLoad.Failed) {
+                        Banner(
+                            title = "Couldn't refresh this request",
+                            detail = state.loadError,
+                            tone = BannerTone.Failure,
+                            actionLabel = "Retry",
+                            onAction = viewModel::refresh,
+                        )
+                    }
                     state.actionError?.let {
                         Banner(title = "That didn't go through", detail = it, tone = BannerTone.Failure)
                     }

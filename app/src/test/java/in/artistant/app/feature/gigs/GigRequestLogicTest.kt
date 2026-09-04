@@ -294,4 +294,78 @@ class GigRequestLogicTest {
         clientFullName = "Client",
         startDatetimeIso = null,
     )
+
+    // ── calendarDayOf: the instant outranks the label ────────────────────────
+    //
+    // A gig whose `date_label` will not parse but whose `start_datetime` is fine
+    // used to get null calendar fields: it vanished from every month's busy
+    // days, could never be reached by tapping a tile, and still counted toward
+    // `items.isNotEmpty()` — so it also suppressed the "No gigs yet" empty
+    // state. The artist saw a blank month with no explanation for it.
+
+    @Test
+    fun calendarDayOf_readsTheInstantWhenTheLabelIsUnreadable() {
+        // 14:30 UTC on 12 Sep 2026 in `start_datetime`, garbage in `date_label`.
+        val placed = calendarDayOf(
+            booking("x", 36_000).copy(
+                date = "next Saturday",
+                time = "",
+                startDatetimeIso = "2026-09-12T14:30:00Z",
+            ),
+        )
+        requireNotNull(placed) { "a row with a valid instant must still be placeable" }
+        assertEquals(2026, placed.get(Calendar.YEAR))
+        assertEquals(Calendar.SEPTEMBER, placed.get(Calendar.MONTH))
+        assertEquals(12, placed.get(Calendar.DAY_OF_MONTH))
+    }
+
+    @Test
+    fun calendarDayOf_stillFallsBackToTheLabelWithNoInstant() {
+        val placed = calendarDayOf(booking("x", 36_000).copy(startDatetimeIso = null))
+        requireNotNull(placed)
+        assertEquals(12, placed.get(Calendar.DAY_OF_MONTH))
+    }
+
+    @Test
+    fun calendarDayOf_isNullOnlyWhenNothingResolves() {
+        assertNull(
+            calendarDayOf(
+                booking("x", 36_000).copy(
+                    date = "TBD",
+                    time = "TBD",
+                    startDatetimeIso = null,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun calendarDayOf_placesALateNightGigOnTheNightItStarts() {
+        // 20:00 UTC is 01:30 IST the next day. IST is the authority on which
+        // night a gig belongs to, not the device's zone.
+        val placed = calendarDayOf(
+            booking("x", 36_000).copy(startDatetimeIso = "2026-09-12T20:00:00Z"),
+        )
+        assertEquals(13, placed!!.get(Calendar.DAY_OF_MONTH))
+    }
+
+    @Test
+    fun gigsMonthSummary_countsAGigThatOnlyItsInstantCanPlace() {
+        // The finding's user-visible half: such a gig belongs in the month
+        // total, because it is about to be drawn on that month's grid.
+        val b = booking("x", 36_000).copy(
+            date = "next Saturday",
+            time = "",
+            startDatetimeIso = "2026-09-12T14:30:00Z",
+        )
+        val placed = calendarDayOf(b)!!
+        val item = ArtistGigListItem(
+            booking = b,
+            clientName = "Client",
+            year = placed.get(Calendar.YEAR),
+            month = placed.get(Calendar.MONTH),
+            dayOfMonth = placed.get(Calendar.DAY_OF_MONTH),
+        )
+        assertEquals("1 gig this month · ₹36,000 booked", gigsMonthSummary(listOf(item), 2026, 8))
+    }
 }

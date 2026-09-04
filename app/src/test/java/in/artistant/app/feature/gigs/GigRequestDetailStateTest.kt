@@ -1,5 +1,8 @@
 package `in`.artistant.app.feature.gigs
 
+import `in`.artistant.app.data.model.GigRequest
+import `in`.artistant.app.data.model.GigRequestStatus
+import `in`.artistant.app.data.model.StoredRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -62,4 +65,79 @@ class GigRequestDetailStateTest {
             GigRequestAction.entries.toList(),
         )
     }
+
+    // ── Load outcome: a failure is not an absence ────────────────────────────
+    //
+    // `request` is null in two very different situations, and the screen used to
+    // treat them as one: it rendered screen 109's "may have expired or been
+    // withdrawn by the client" over a read that had simply thrown, with no
+    // Retry. That copy is false (nobody withdrew anything), it blames the
+    // client for the artist's dropped connection, and it reads as terminal — so
+    // the artist backs out instead of trying again.
+
+    @Test
+    fun aFailedRead_isFailed_notNotFound() {
+        // The whole finding, in one line: an error wins over an absent row,
+        // because a read that threw never learned whether the row exists.
+        assertEquals(
+            GigRequestLoad.Failed,
+            gigRequestLoad(found = null, error = RuntimeException("timeout")),
+        )
+    }
+
+    @Test
+    fun aSuccessfulReadWithNoMatch_isTheOnlyNotFound() {
+        assertEquals(GigRequestLoad.NotFound, gigRequestLoad(found = null, error = null))
+    }
+
+    @Test
+    fun aReadThatReturnedTheRow_isLoaded() {
+        assertEquals(GigRequestLoad.Loaded, gigRequestLoad(found = request(), error = null))
+    }
+
+    @Test
+    fun anErrorOverALoadedRequest_isStillFailed_soTheBannerShows() {
+        // The stale case: a refresh drops while the artist is reading. The row
+        // is kept (blanking it loses the offer they were looking at) but the
+        // screen has to say the numbers may be old.
+        assertEquals(
+            GigRequestLoad.Failed,
+            gigRequestLoad(found = request(), error = RuntimeException("offline")),
+        )
+    }
+
+    @Test
+    fun theDefaultStateIsLoading_andIsLoadingFollowsIt() {
+        // `isLoading` is derived now, so this pins that the spinner and the
+        // load outcome cannot disagree.
+        assertEquals(GigRequestLoad.Loading, GigRequestDetailUiState().load)
+        assertTrue(GigRequestDetailUiState().isLoading)
+        assertFalse(GigRequestDetailUiState(load = GigRequestLoad.Failed).isLoading)
+    }
+
+    @Test
+    fun everyLoadOutcomeIsNamed_soNoneOfThemFallsBackToANullRequest() {
+        // A fifth case added without a branch on the screen is the regression
+        // this pins — the same shape as the dock-action test above.
+        assertEquals(
+            listOf(
+                GigRequestLoad.Loading,
+                GigRequestLoad.Loaded,
+                GigRequestLoad.NotFound,
+                GigRequestLoad.Failed,
+            ),
+            GigRequestLoad.entries.toList(),
+        )
+    }
+
+    private fun request() = StoredRequest(
+        raw = GigRequest(
+            id = "r1",
+            client = null,
+            message = "",
+            date = "Sat, Sep 12, 2026",
+            amount = 38_000,
+        ),
+        status = GigRequestStatus.Open,
+    )
 }
