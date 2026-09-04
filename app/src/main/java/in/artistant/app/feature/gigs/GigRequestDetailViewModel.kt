@@ -23,8 +23,15 @@ import java.util.Locale
 import java.util.TimeZone
 import javax.inject.Inject
 
-/** The three mutations the artist's dock offers on an open request. */
-enum class GigRequestAction { Accept, Decline, Counter }
+/**
+ * The mutations THIS screen performs on an open request.
+ *
+ * Two, not three: the dock still offers a third answer, but Counter is now a
+ * navigation to design screen 61 (`CounterOfferScreen`), which owns the amount
+ * field and the write. Leaving a `Counter` case here would name an action this
+ * ViewModel cannot take.
+ */
+enum class GigRequestAction { Accept, Decline }
 
 /**
  * One-shot side effects — today just the accept buzz.
@@ -59,8 +66,6 @@ data class GigRequestDetailUiState(
      */
     val actingAction: GigRequestAction? = null,
     val actionError: String? = null,
-    val showCounterSheet: Boolean = false,
-    val counterAmount: String = "",
 ) {
     /** Any mutation in flight — every dock control is disabled while one is. */
     val isActing: Boolean get() = actingAction != null
@@ -102,7 +107,6 @@ class GigRequestDetailViewModel @Inject constructor(
                         clashes = clashes,
                         isLoading = false,
                         loadError = if (found == null) "Request not found." else null,
-                        counterAmount = found?.raw?.amount?.toString().orEmpty(),
                     )
                 }
             } catch (e: RequestsRepositoryError) {
@@ -126,34 +130,9 @@ class GigRequestDetailViewModel @Inject constructor(
         return runCatching { f.parse(label)?.time }.getOrNull()
     }
 
-    fun showCounterSheet() {
-        val amount = _state.value.request?.raw?.amount?.toString().orEmpty()
-        _state.update { it.copy(showCounterSheet = true, counterAmount = amount, actionError = null) }
-    }
-
-    fun dismissCounterSheet() {
-        _state.update { it.copy(showCounterSheet = false) }
-    }
-
-    fun setCounterAmount(value: String) {
-        _state.update { it.copy(counterAmount = value.filter { ch -> ch.isDigit() }) }
-    }
-
     fun accept() = mutate(GigRequestAction.Accept) { requestsRepository.accept(requestId) }
 
     fun decline() = mutate(GigRequestAction.Decline) { requestsRepository.decline(requestId) }
-
-    fun sendCounter() {
-        val amount = _state.value.counterAmount.toIntOrNull() ?: 0
-        if (amount <= 0) {
-            _state.update { it.copy(actionError = "Enter a counter amount above ₹0.") }
-            return
-        }
-        mutate(GigRequestAction.Counter) {
-            requestsRepository.counter(requestId, amount)
-            _state.update { it.copy(showCounterSheet = false) }
-        }
-    }
 
     fun showActions(): Boolean =
         _state.value.request?.status == GigRequestStatus.Open

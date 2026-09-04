@@ -338,14 +338,17 @@ fun ArtistTabsScaffold() {
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),
             ) {
                 TabPane(inner) {
-                    GigRequestDetailScreen(onBack = { nav.popBackStack() })
+                    GigRequestDetailScreen(
+                        onBack = { nav.popBackStack() },
+                        onCounter = { id -> nav.navigate(ArtistNavRoutes.counterOffer(id)) },
+                    )
                 }
             }
             // Screen 61. Its own destination rather than a sheet inside the gig
             // detail, because it is a page in the design with its own header and
-            // its own dock. The gig detail's inline counter sheet stays until the
-            // artist-studio section is rewritten; both go through the same
-            // `RequestsRepository.counter`, so they cannot disagree.
+            // its own dock — and, since the artist-studio section landed, the
+            // ONLY way to counter: the detail's inline dialog is gone (BC
+            // follow-up 3).
             composable(
                 route = ArtistNavRoutes.COUNTER_OFFER,
                 arguments = listOf(navArgument("requestId") { type = NavType.StringType }),

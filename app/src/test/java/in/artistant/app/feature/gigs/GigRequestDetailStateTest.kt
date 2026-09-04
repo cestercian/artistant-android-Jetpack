@@ -53,24 +53,12 @@ class GigRequestDetailStateTest {
     }
 
     @Test
-    fun anInFlightCounter_ownsTheSheetsProgressLabel_andNeitherDockButton() {
-        val state = GigRequestDetailUiState(
-            showCounterSheet = true,
-            actingAction = GigRequestAction.Counter,
-        )
-
-        assertEquals(GigRequestAction.Counter, state.actingAction)
-        assertNotEquals(GigRequestAction.Accept, state.actingAction)
-        assertNotEquals(GigRequestAction.Decline, state.actingAction)
-        assertTrue(state.isActing)
-    }
-
-    @Test
-    fun everyDockActionCanBeNamed_soNoneOfThemFallsBackToTheSharedFlag() {
-        // Three buttons, three names. A fourth action added to the dock without a
-        // case here is the regression this pins.
+    fun everyMutationCanBeNamed_soNeitherFallsBackToTheSharedFlag() {
+        // Two mutations, two names — Counter left when it became a navigation to
+        // screen 61 rather than a write this ViewModel makes. A third action
+        // added here without a case is the regression this pins.
         assertEquals(
-            listOf(GigRequestAction.Accept, GigRequestAction.Decline, GigRequestAction.Counter),
+            listOf(GigRequestAction.Accept, GigRequestAction.Decline),
             GigRequestAction.entries.toList(),
         )
     }

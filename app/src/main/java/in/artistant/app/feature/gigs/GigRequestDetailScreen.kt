@@ -1,7 +1,6 @@
 package `in`.artistant.app.feature.gigs
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,6 +75,15 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 fun GigRequestDetailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Countering opens design screen 61 (`feature/booking/CounterOfferScreen`),
+     * which the book-and-confirm section built as a page with its own header and
+     * dock. This screen used to raise an `AlertDialog` with a bare amount field
+     * in it; two ways to send the same counter, one of them without the context
+     * the other has, is exactly the drift the shared-component rule exists to
+     * stop. Both still go through `RequestsRepository.counter`.
+     */
+    onCounter: (requestId: String) -> Unit = {},
     viewModel: GigRequestDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -202,7 +209,7 @@ fun GigRequestDetailScreen(
                             )
                             PrimaryButton(
                                 text = "Counter",
-                                onClick = viewModel::showCounterSheet,
+                                onClick = { request?.let { onCounter(it.id) } },
                                 variant = ButtonVariant.Subtle,
                                 fullWidth = true,
                                 enabled = !state.isActing,
@@ -239,21 +246,6 @@ fun GigRequestDetailScreen(
                     Text("Keep open")
                 }
             },
-        )
-    }
-
-    if (state.showCounterSheet) {
-        CounterDialog(
-            theirOffer = request?.raw?.amount ?: 0,
-            amount = state.counterAmount,
-            // This button's own progress, not "something is running". While the
-            // sheet is up it is the only action that CAN be running — the dialog
-            // is modal and the dock's controls are disabled behind it — so the
-            // two agree here; the label is honest either way.
-            isSending = state.actingAction == GigRequestAction.Counter,
-            onAmountChange = viewModel::setCounterAmount,
-            onDismiss = viewModel::dismissCounterSheet,
-            onSend = viewModel::sendCounter,
         )
     }
 }
@@ -541,64 +533,4 @@ private fun MessageBlock(request: StoredRequest) {
         EyebrowLabel("Their message")
         Text(request.raw.message, style = AppTheme.type.body, color = colors.ink2)
     }
-}
-
-@Composable
-private fun CounterDialog(
-    theirOffer: Int,
-    amount: String,
-    isSending: Boolean,
-    onAmountChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onSend: () -> Unit,
-) {
-    val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
-    val radii = AppTheme.dimens.radii
-    val parsed = amount.toIntOrNull() ?: 0
-
-    AlertDialog(
-        shape = RoundedCornerShape(radii.xxl),
-        onDismissRequest = onDismiss,
-        title = { Text("Counter offer") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(space.md)) {
-                Text(
-                    "Their offer: ${formatInr(theirOffer)}",
-                    style = AppTheme.type.footnote,
-                    color = colors.ink3,
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(radii.control))
-                        .border(
-                            AppTheme.dimens.size.hairline,
-                            colors.line,
-                            RoundedCornerShape(radii.control),
-                        )
-                        .padding(space.md),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Text("₹", style = AppTheme.type.monoLarge, color = colors.ink3)
-                    BasicTextField(
-                        value = amount,
-                        onValueChange = onAmountChange,
-                        textStyle = AppTheme.type.monoLarge.copy(color = colors.ink),
-                        modifier = Modifier.padding(start = space.xs),
-                        singleLine = true,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onSend, enabled = !isSending && parsed > 0) {
-                Text(if (isSending) "Sending…" else "Send counter")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
 }
