@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -313,34 +314,19 @@ private fun ProviderButton(
 @Composable
 private fun LegalLine(onOpenLegal: (LegalDoc) -> Unit) {
     val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Column {
-        Text(
-            buildAnnotatedString {
-                append("By continuing you agree to the ")
-                withAccent(colors.accentInk) { append("Terms") }
-                append(" and ")
-                withAccent(colors.accentInk) { append("Privacy Policy") }
-                append(". Your number is never shown to an artist before a booking is confirmed.")
-            },
-            style = AppTheme.type.caption,
-            color = colors.ink4,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(dimens.space.md)) {
-            InlineLink("Read the Terms", { onOpenLegal(LegalDoc.Terms) }, style = AppTheme.type.caption)
-            InlineLink("Read the Privacy Policy", { onOpenLegal(LegalDoc.Privacy) }, style = AppTheme.type.caption)
-        }
-    }
-}
-
-/** The accent-ink run inside a sentence. Local because two call sites here need it. */
-private inline fun androidx.compose.ui.text.AnnotatedString.Builder.withAccent(
-    color: androidx.compose.ui.graphics.Color,
-    block: androidx.compose.ui.text.AnnotatedString.Builder.() -> Unit,
-) {
-    pushStyle(SpanStyle(color = color, fontWeight = FontWeight.SemiBold))
-    block()
-    pop()
+    Text(
+        buildAnnotatedString {
+            append("By continuing you agree to the ")
+            withLink(legalLink(colors.accentInk) { onOpenLegal(LegalDoc.Terms) }) { append("Terms") }
+            append(" and ")
+            withLink(legalLink(colors.accentInk) { onOpenLegal(LegalDoc.Privacy) }) {
+                append("Privacy Policy")
+            }
+            append(". Your number is never shown to an artist before a booking is confirmed.")
+        },
+        style = AppTheme.type.caption,
+        color = colors.ink4,
+    )
 }
 
 @Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 900)

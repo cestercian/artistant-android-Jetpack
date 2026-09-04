@@ -63,7 +63,6 @@ private val notificationKinds = listOf<Pair<ImageVector, String>>(
  */
 @Composable
 fun NotifPermissionScreen(
-    progress: ProgressBar?,
     onAdvance: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -75,7 +74,6 @@ fun NotifPermissionScreen(
         onAdvance()
     }
     NotifPermissionContent(
-        progress = progress,
         requesting = requesting,
         onAllow = { requesting = true; requestPermission() },
         onSkip = onAdvance,
@@ -85,7 +83,6 @@ fun NotifPermissionScreen(
 
 @Composable
 private fun NotifPermissionContent(
-    progress: ProgressBar?,
     requesting: Boolean,
     onAllow: () -> Unit,
     onSkip: () -> Unit,
@@ -97,11 +94,9 @@ private fun NotifPermissionContent(
 
     SignupScaffold(
         modifier = modifier.semantics { testTag = "screen.notif" },
-        header = if (progress != null) {
-            { SignupHeader(middle = { SignupProgressStrip(progress) }) }
-        } else {
-            null
-        },
+        // No header. The design draws none on screen 13 — the ask IS the screen, and a back
+        // chevron on it would offer a retreat to a step the user has already finished.
+        // The step strip lives on the handle step and nowhere else (see `progressIndex`).
         // The design fills this screen to the viewport: the two actions sit at the bottom of
         // the body rather than in a pinned bar, because there is nothing above them to scroll.
         scrollable = false,
@@ -203,6 +198,6 @@ private fun NotifPermissionContent(
 @Composable
 private fun NotifPermissionPreview() {
     ArtistantTheme {
-        NotifPermissionContent(progress = null, requesting = false, onAllow = {}, onSkip = {})
+        NotifPermissionContent(requesting = false, onAllow = {}, onSkip = {})
     }
 }

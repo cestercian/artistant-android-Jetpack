@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
@@ -157,27 +158,27 @@ fun WelcomeScreen(
             verticalAlignment = Alignment.Top,
         ) {
             ConsentCheckbox(checked = termsAccepted)
-            Column {
-                Text(
-                    buildAnnotatedString {
-                        append("I'm 18 or older and agree to the ")
-                        withStyle(SpanStyle(color = colors.accentInk, fontWeight = FontWeight.SemiBold)) {
-                            append("Terms")
-                        }
-                        append(" and ")
-                        withStyle(SpanStyle(color = colors.accentInk, fontWeight = FontWeight.SemiBold)) {
-                            append("Privacy Policy")
-                        }
-                        append(".")
-                    },
-                    style = AppTheme.type.subtitle,
-                    color = colors.ink2,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(space.md)) {
-                    InlineLink("Read the Terms", { legalDoc = LegalDoc.Terms }, style = AppTheme.type.caption)
-                    InlineLink("Read the Privacy Policy", { legalDoc = LegalDoc.Privacy }, style = AppTheme.type.caption)
-                }
-            }
+            // The two document names are links INSIDE the sentence, as the design draws them
+            // — not a second row of "read this" buttons under it. `withLink` is what makes
+            // that possible without lying to the accessibility tree: each run becomes its own
+            // focusable link node, so a screen reader can reach the Terms without reading the
+            // whole paragraph, and a tap on the words opens the viewer while a tap anywhere
+            // else in the card still toggles the box.
+            Text(
+                buildAnnotatedString {
+                    append("I'm 18 or older and agree to the ")
+                    withLink(legalLink(colors.accentInk) { legalDoc = LegalDoc.Terms }) {
+                        append("Terms")
+                    }
+                    append(" and ")
+                    withLink(legalLink(colors.accentInk) { legalDoc = LegalDoc.Privacy }) {
+                        append("Privacy Policy")
+                    }
+                    append(".")
+                },
+                style = AppTheme.type.subtitle,
+                color = colors.ink2,
+            )
         }
 
         // The inline reason. Present exactly when the CTA is not tappable, so the pair always

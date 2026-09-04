@@ -36,6 +36,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -385,6 +388,27 @@ fun HydrationErrorBanner(
         modifier = modifier.semantics { testTag = "signup.hydrate.errorBanner" },
     )
 }
+
+/**
+ * A tappable document name INSIDE a sentence — "…agree to the **Terms** and
+ * **Privacy Policy**."
+ *
+ * `LinkAnnotation.Clickable` rather than a styled span plus a separate button, because a span
+ * is invisible to the accessibility tree: with one, a screen reader reads the whole paragraph
+ * and offers no way to open either document, which is why the first cut of this had a second
+ * row of "Read the Terms" buttons under the sentence that the design does not draw. A link
+ * annotation is its own focusable node, so the words themselves are the control — and inside
+ * a card that is ALSO clickable (the consent box), the link wins the tap on the words and the
+ * card keeps the rest.
+ */
+fun legalLink(color: Color, onClick: () -> Unit): LinkAnnotation.Clickable =
+    LinkAnnotation.Clickable(
+        tag = "legal",
+        styles = TextLinkStyles(
+            style = SpanStyle(color = color, fontWeight = FontWeight.SemiBold),
+        ),
+        linkInteractionListener = { onClick() },
+    )
 
 /**
  * The circular back affordance the pre-redesign steps used.

@@ -196,7 +196,7 @@ private fun EmailSignUpContent(
             Box(
                 Modifier
                     .size(dimens.size.iconMd)
-                    .clip(RoundedCornerShape(dimens.radii.sm))
+                    .clip(RoundedCornerShape(dimens.radii.xs))
                     .background(if (longEnough) colors.accent else colors.hairline),
                 contentAlignment = Alignment.Center,
             ) {

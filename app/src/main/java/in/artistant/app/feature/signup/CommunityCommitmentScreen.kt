@@ -61,8 +61,10 @@ private val pledgeRules = listOf(
 @Composable
 fun CommunityCommitmentScreen(
     onAgree: () -> Unit,
-    onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Null when there is no earlier step to return to — a signed-in user standing here has
+     *  every pre-auth step retired, and a chevron that does nothing is worse than no chevron. */
+    onBack: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens

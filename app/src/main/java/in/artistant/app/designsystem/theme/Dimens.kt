@@ -15,6 +15,15 @@ data class Space(
 
 /** 8/12/18/24/32 corner radii. */
 data class Radii(
+    /**
+     * The corner of a control small enough that [sm] would round it into a circle.
+     *
+     * The design keeps a squircle's radius at roughly a third of its box: 8 on the 24dp
+     * consent square, 5 on the 16dp "at least 8 characters" tick. Reusing [sm] on the smaller
+     * one produces a 16dp box with an 8dp radius, which is not a rounded square, it is a dot —
+     * and a dot beside a rule reads as a bullet rather than as a checkbox.
+     */
+    val xs: Dp = 5.dp,
     val sm: Dp = 8.dp,
     val md: Dp = 12.dp,
     val lg: Dp = 18.dp,

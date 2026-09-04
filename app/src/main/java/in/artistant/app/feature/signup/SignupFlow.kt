@@ -129,7 +129,7 @@ fun SignupFlow(
                     } else {
                         CommunityCommitmentScreen(
                             onAgree = viewModel::agreeCommunity,
-                            onBack = viewModel::back,
+                            onBack = if (state.canGoBack) viewModel::back else null,
                         )
                     }
 
@@ -158,10 +158,7 @@ fun SignupFlow(
                     onRetryHydration = onRetryHydration,
                 )
 
-                key == SignupStep.Notif.name -> NotifPermissionScreen(
-                    progress = progressIndex(SignupStep.Notif, state.mode),
-                    onAdvance = viewModel::advance,
-                )
+                key == SignupStep.Notif.name -> NotifPermissionScreen(onAdvance = viewModel::advance)
 
                 else -> DoneScreen(
                     firstName = state.firstName,
