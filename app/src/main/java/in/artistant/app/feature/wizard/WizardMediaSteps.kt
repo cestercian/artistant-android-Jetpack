@@ -212,7 +212,13 @@ private fun CoverActions(state: WizardUiState, vm: WizardViewModel) {
     // a String because that is savable everywhere a Bundle goes.
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) cameraUri?.let { vm.onCoverPicked(it.toUri()) }
+        // Both branches matter. `TakePicture` creates the destination before the
+        // camera opens, so a cancelled shutter leaves a file behind exactly like a
+        // successful one does — and a wizard that is never resumed never sweeps it.
+        val uri = cameraUri?.toUri()
+        cameraUri = null
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (ok) vm.onCoverCaptured(uri) else vm.onCoverCaptureCancelled(uri)
     }
     val launchCamera = {
         val file = File(context.cacheDir, "artist-wizard/camera-${UUID.randomUUID()}.jpg")
