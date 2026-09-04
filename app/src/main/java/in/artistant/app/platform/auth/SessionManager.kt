@@ -25,6 +25,7 @@ import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.push.PushService
+import `in`.artistant.app.feature.profile.DataExportStore
 import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +60,7 @@ class SessionManager @Inject constructor(
     private val prefs: AppPreferences,
     private val pushService: PushService,
     private val savedStore: SavedStore,
+    private val dataExportStore: DataExportStore,
     private val uploadQueue: UploadQueue,
 ) : AuthGateway {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
@@ -344,6 +346,10 @@ class SessionManager @Inject constructor(
         crash.setUser(null)
         prefs.wipeAll()
         savedStore.reset()
+        // The DPDP export is account-scoped and the store is a @Singleton, so a Ready state
+        // left behind is the DEPARTING account's whole data export — inline JSON, or a live
+        // signed URL to it — sitting in memory for whoever signs in next.
+        dataExportStore.reset()
         // The staged-media queue is account-scoped too: every task carries the artist id
         // it was enqueued for, so a snapshot left behind is resumed by whoever signs in
         // next, fails against an RLS policy that (rightly) won't let them write another

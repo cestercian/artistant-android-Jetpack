@@ -189,6 +189,7 @@ class ProfileViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
+    private val dataExport: DataExportStore,
     private val draftStore: BookingDraftStore,
     private val bookingsRepository: BookingsRepository,
     private val artists: ArtistsRepository,
@@ -411,7 +412,7 @@ class ProfileViewModel @Inject constructor(
         val message = cleanUpAfterSignOut(
             signOut = { session.signOut() },
             stillSignedIn = { session.currentUserId != null },
-            wipeLocalState = { prefs.wipeAll(); savedStore.reset() },
+            wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
         )
         if (message != null) _state.update { it.copy(actionError = message) }
     }

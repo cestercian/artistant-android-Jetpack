@@ -33,7 +33,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.ExportResult
 import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.BackHeader
@@ -47,9 +46,11 @@ import `in`.artistant.app.designsystem.component.SecondaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -83,50 +84,58 @@ data class DataExportUiState(
     val handoffError: String? = null,
 )
 
+/**
+ * The screen's own transient state — the two facts that belong to THIS visit and no other.
+ *
+ * Everything about the request itself lives in [DataExportStore], because it outlives the
+ * screen. A share handoff does not: it is one intent, launched from one composition, and
+ * carrying it in the singleton would re-fire the chooser on the next visit.
+ */
+private data class ExportHandoff(
+    val pendingShare: ExportResult? = null,
+    val handoffError: String? = null,
+)
+
 @HiltViewModel
 class DataExportViewModel @Inject constructor(
-    private val account: AccountRepository,
+    private val store: DataExportStore,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(DataExportUiState())
-    val state: StateFlow<DataExportUiState> = _state
+    private val handoff = MutableStateFlow(ExportHandoff())
 
-    /**
-     * Ask the server to build the export.
-     *
-     * The Edge Function answers synchronously today — either the JSON inline or a signed URL —
-     * so [ExportState.Requested] is what the screen shows WHILE the call is in flight rather
-     * than a state the server reports. That is not a pretend state: the request genuinely is
-     * with the server at that moment, and the screen's own copy is careful to say the wait can
-     * take up to 24 hours rather than promising the file is seconds away.
-     *
-     * Failure produces [ExportState.Failed] and **no file**. There is deliberately no path that
-     * keeps a previous [ExportState.Ready] alongside a failure: a stale file beside a fresh
-     * error is exactly how someone ends up sharing half their data believing it is all of it.
-     */
-    fun request() = viewModelScope.launch {
-        if (_state.value.export is ExportState.Requested) return@launch
-        _state.update { it.copy(export = ExportState.Requested, handoffError = null) }
-        runCatching { account.requestDataExport() }
-            .onSuccess { result -> _state.update { it.copy(export = ExportState.Ready(result)) } }
-            .onFailure { e ->
-                _state.update {
-                    it.copy(export = ExportState.Failed(e.message ?: "The job stopped partway through."))
-                }
-            }
+    val state: StateFlow<DataExportUiState> = combine(store.state, handoff) { export, local ->
+        DataExportUiState(
+            export = export,
+            pendingShare = local.pendingShare,
+            handoffError = local.handoffError,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        // Eagerly, so `state.value` is the store's answer the instant the screen is built —
+        // including the Requested this ViewModel was created into after the user navigated
+        // away and back. Lazily it would read Idle for one frame and flash screen 81 over a
+        // request that is still running.
+        started = SharingStarted.Eagerly,
+        initialValue = DataExportUiState(export = store.state.value),
+    )
+
+    /** @see DataExportStore.request */
+    fun request() {
+        handoff.update { it.copy(handoffError = null) }
+        store.request()
     }
 
     /** Hand the finished file to the system. Only reachable from [ExportState.Ready]. */
     fun share() {
-        val ready = _state.value.export as? ExportState.Ready ?: return
-        _state.update { it.copy(pendingShare = ready.result, handoffError = null) }
+        val ready = store.state.value as? ExportState.Ready ?: return
+        handoff.value = ExportHandoff(pendingShare = ready.result)
     }
 
-    fun clearPendingShare() = _state.update { it.copy(pendingShare = null) }
+    fun clearPendingShare() = handoff.update { it.copy(pendingShare = null) }
 
-    fun reportHandoffError(message: String) = _state.update { it.copy(handoffError = message) }
+    fun reportHandoffError(message: String) = handoff.update { it.copy(handoffError = message) }
 
-    /** Back to 81 — the request is not cancellable server-side, so this only stops WAITING. */
-    fun stopWaiting() = _state.update { it.copy(export = ExportState.Idle) }
+    /** @see DataExportStore.stopWaiting */
+    fun stopWaiting() = store.stopWaiting()
 }
 
 /**

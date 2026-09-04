@@ -112,6 +112,7 @@ class DeleteAccountViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
+    private val dataExport: DataExportStore,
     private val draftStore: BookingDraftStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DeleteAccountUiState())
@@ -187,7 +188,7 @@ class DeleteAccountViewModel @Inject constructor(
                 val cleanupError = cleanUpAfterAccountDelete(
                     wipeCalendar = { calendarSync.wipeForAccountDelete() },
                     signOut = { session.signOut() },
-                    wipeLocalState = { prefs.wipeAll(); savedStore.reset() },
+                    wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
                 )
                 if (cleanupError != null) _state.update { it.copy(failure = cleanupError) }
                 onDeleted()
