@@ -80,6 +80,16 @@ data class ArtistProfileUiState(
      */
     val failedReport: PendingReport? = null,
     /**
+     * A report is in flight.
+     *
+     * The report sheet closes on submit, so the tap that OPENS a report cannot be
+     * doubled — but the failure banner's "Try again" stays on screen for the whole
+     * round trip, and a second tap on it filed the same report again. Duplicates
+     * are not free here: they are two rows in `public.reports` against one person
+     * for one incident, which is noise in the queue a moderator works from.
+     */
+    val isSubmittingReport: Boolean = false,
+    /**
      * The signed-in user IS this artist (screen 103).
      *
      * Booking controls come off rather than being left to fail against the
@@ -148,6 +158,13 @@ class ArtistProfileViewModel @Inject constructor(
         ),
     )
     val state: StateFlow<ArtistProfileUiState> = _state.asStateFlow()
+
+    /**
+     * Bumped on each report attempt, and in [onCleared], so a completion that is no
+     * longer the current one cannot write state. Same idiom, and the same reason, as
+     * `ChatViewModel.reportGeneration`.
+     */
+    private var reportGeneration = 0
 
     init {
         refresh()
@@ -257,19 +274,30 @@ class ArtistProfileViewModel @Inject constructor(
      * is the failure this branch exists to prevent.
      */
     fun submitReport(reason: String, details: String?) {
-        _state.update { it.copy(showReportSheet = false, failedReport = null) }
+        // One report per tap. The sheet closes on submit so its own CTA cannot be
+        // doubled, but [retryReport]'s banner stays up for the whole round trip.
+        // `startingReport` returns null when one is already out — that is the guard,
+        // and it lives in ArtistProfileFacts because this class cannot be built in a
+        // JVM test (it reaches SavedStore, which reaches DataStore).
+        if (_state.value.startingReport() == null) return
+        reportGeneration += 1
+        val myGeneration = reportGeneration
+        // Applied through `update`, not assigned from the snapshot read above: a
+        // refresh landing in between writes artist/reviews/score into this same
+        // state, and a stale copy would put them back.
+        _state.update { it.startingReport() ?: it }
         viewModelScope.launch {
             val outcome = runCatching { reportsRepository.reportArtist(artistId, reason, details) }
                 // A throw here is a contract violation (the interface promises
                 // not to), so it is the WORST of the three claims, not the
                 // middle one: we know nothing about where the report went.
                 .getOrDefault(ReportOutcome.Failed)
-            _state.update {
-                if (outcome == ReportOutcome.Failed) {
-                    it.copy(failedReport = PendingReport(reason, details))
-                } else {
-                    it.copy(reportOutcome = outcome)
-                }
+            _state.update { state ->
+                state.settlingReport(
+                    outcome = outcome,
+                    pending = PendingReport(reason, details),
+                    superseded = myGeneration != reportGeneration,
+                )
             }
         }
     }
@@ -287,7 +315,14 @@ class ArtistProfileViewModel @Inject constructor(
      * banner states that nothing holds the report, and it must not disappear on
      * its own while that is still true.
      */
-    fun dismissReportFailure() = _state.update { it.copy(failedReport = null) }
+    fun dismissReportFailure() {
+        // Retire any attempt in flight. Otherwise a retry the reader has given up on
+        // completes a moment later, finds itself current, and re-raises the banner
+        // they just discarded — which is the exact resurrection [reportGeneration]
+        // exists to prevent. The completion still releases [isSubmittingReport].
+        reportGeneration += 1
+        _state.update { it.copy(failedReport = null) }
+    }
 
     fun dismissReportToast() = _state.update { it.copy(reportOutcome = null) }
 
@@ -311,5 +346,13 @@ class ArtistProfileViewModel @Inject constructor(
 
     fun toggleSaved() {
         savedStore.toggle(artistId)
+    }
+
+    override fun onCleared() {
+        // Retire any attempt still in flight: `viewModelScope` is cancelled here, but a
+        // pass already past its last suspension point runs on to its writes regardless,
+        // and those writes belong to a screen that is gone.
+        reportGeneration += 1
+        super.onCleared()
     }
 }
