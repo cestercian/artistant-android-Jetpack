@@ -26,13 +26,14 @@ class AccountDeleteCleanupTest {
         var signedOut = false
         var localWiped = false
 
-        val message = cleanUpAfterAccountDelete(
+        val cleanup = cleanUpAfterAccountDelete(
             wipeCalendar = { wiped = true },
             signOut = { signedOut = true },
             wipeLocalState = { localWiped = true },
         )
 
-        assertNull(message)
+        assertNull(cleanup.message)
+        assertNull("nothing failed, so the receipt may tick", cleanup.calendarFailure)
         assertTrue(wiped)
         assertTrue(signedOut)
         // The local wipe is SessionManager.signOut()'s job on this path — doing it
@@ -47,14 +48,17 @@ class AccountDeleteCleanupTest {
         // was enabled throws SecurityException here.
         var signedOut = false
 
-        val message = cleanUpAfterAccountDelete(
+        val cleanup = cleanUpAfterAccountDelete(
             wipeCalendar = { throw SecurityException("no calendar permission") },
             signOut = { signedOut = true },
             wipeLocalState = {},
         )
 
-        assertNull(message)
+        assertNull(cleanup.message)
         assertTrue(signedOut)
+        // Reported, not swallowed: the receipt's third row says "Calendar cleaned" with a tick,
+        // and those events are still sitting in the device owner's calendar.
+        assertEquals("no calendar permission", cleanup.calendarFailure)
     }
 
     @Test
@@ -64,27 +68,39 @@ class AccountDeleteCleanupTest {
         // so when it throws, nothing else on the device has been wiped.
         var localWiped = false
 
-        val message = cleanUpAfterAccountDelete(
+        val cleanup = cleanUpAfterAccountDelete(
             wipeCalendar = {},
             signOut = { throw IOException("airplane mode") },
             wipeLocalState = { localWiped = true },
         )
 
         assertTrue(localWiped)
-        assertNotNull(message)
-        assertTrue(message!!.contains("Restart"))
+        assertNotNull(cleanup.message)
+        assertTrue(cleanup.message!!.contains("Restart"))
     }
 
     @Test
     fun `a local wipe that throws still reports the failed sign-out`() = runTest {
         // DataStore edits throw IOException too. Nothing here may propagate: the
         // account is already gone, so a crash would be pure collateral.
-        val message = cleanUpAfterAccountDelete(
+        val cleanup = cleanUpAfterAccountDelete(
             wipeCalendar = { throw SecurityException("no calendar permission") },
             signOut = { throw IOException("airplane mode") },
             wipeLocalState = { throw IOException("datastore gone") },
         )
 
-        assertEquals("Account deleted. Restart the app to finish signing out.", message)
+        assertEquals("Account deleted. Restart the app to finish signing out.", cleanup.message)
+        assertEquals("no calendar permission", cleanup.calendarFailure)
+    }
+
+    @Test
+    fun `a calendar failure with no message still gets a reason the receipt can print`() = runTest {
+        val cleanup = cleanUpAfterAccountDelete(
+            wipeCalendar = { throw IllegalStateException() },
+            signOut = {},
+            wipeLocalState = {},
+        )
+        // "Calendar not cleaned — null." is not a sentence anybody should read on this screen.
+        assertEquals("this device wouldn't let us", cleanup.calendarFailure)
     }
 }

@@ -1,6 +1,8 @@
 package `in`.artistant.app.data.repository
 
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.SignOutScope
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.functions.functions
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -37,6 +39,22 @@ sealed class AccountRepositoryError(message: String, cause: Throwable? = null) :
 interface AccountRepository {
     suspend fun deleteAccount()
     suspend fun requestDataExport(): ExportResult
+
+    /**
+     * Revoke every OTHER session on this account, keeping this device signed in.
+     *
+     * The one control design screen 128 can honestly offer. Supabase exposes no session LIST
+     * to a client — there is no endpoint and no table behind `auth.sessions` that RLS lets an
+     * app read — so the screen cannot draw the iPad and the other phone the design does. What
+     * it CAN do is end them, which is the action anyone actually came to that screen for.
+     *
+     * [SignOutScope.OTHERS] rather than `GLOBAL`, deliberately: global revokes this device's
+     * refresh token too, which would sign the user out of the screen they are standing on as a
+     * side effect of securing the account, and would skip `SessionManager.signOut()`'s ordered
+     * teardown (push-token handback first, then prefs) on the way. "Sign out everywhere else"
+     * is also the design's own label.
+     */
+    suspend fun signOutOtherDevices()
 }
 
 @Singleton
@@ -72,6 +90,13 @@ class SupabaseAccountRepository @Inject constructor(
         }
     }
 
+    override suspend fun signOutOtherDevices() {
+        try {
+            client.auth.signOut(SignOutScope.OTHERS)
+        } catch (t: Throwable) {
+            throw AccountRepositoryError.Underlying(t)
+        }
+    }
 }
 
 @Serializable
@@ -131,11 +156,14 @@ internal fun parseExportResponse(raw: String): ExportResult {
 class FakeAccountRepository(
     var failDelete: Boolean = false,
     var failExport: Boolean = false,
+    var failSignOutOthers: Boolean = false,
     var exportResult: ExportResult = ExportResult.Inline("""{"user":"fixture"}"""),
 ) : AccountRepository {
     var deleteCallCount: Int = 0
         private set
     var exportCallCount: Int = 0
+        private set
+    var signOutOthersCallCount: Int = 0
         private set
 
     override suspend fun deleteAccount() {
@@ -147,5 +175,12 @@ class FakeAccountRepository(
         exportCallCount++
         if (failExport) throw AccountRepositoryError.Underlying(IllegalStateException("uitest forced failure"))
         return exportResult
+    }
+
+    override suspend fun signOutOtherDevices() {
+        signOutOthersCallCount++
+        if (failSignOutOthers) {
+            throw AccountRepositoryError.Underlying(IllegalStateException("uitest forced failure"))
+        }
     }
 }
