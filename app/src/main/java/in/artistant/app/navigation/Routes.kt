@@ -37,6 +37,16 @@ object ClientNavRoutes {
      * identical way back.
      */
     const val BLOCKED_ACCOUNTS = "blocked_accounts"
+
+    /**
+     * Bookings → the month calendar (design screen 78).
+     *
+     * Its own destination rather than a block on the Bookings tab: the design
+     * makes it a screen because it is the shared component's documentation, and
+     * the artist's Gigs tab will push the identical literal in its own graph for
+     * the same reason [BLOCKED_ACCOUNTS] is spelled twice.
+     */
+    const val MONTH_CALENDAR = "month_calendar"
 }
 
 /** String routes for the artist NavHost. */

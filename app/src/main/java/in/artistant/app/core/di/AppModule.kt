@@ -10,6 +10,8 @@ import `in`.artistant.app.platform.observability.PostHogAnalytics
 import `in`.artistant.app.platform.observability.SentryCrash
 import `in`.artistant.app.platform.storage.AppPreferences
 import `in`.artistant.app.platform.storage.SignupConsentStore
+import `in`.artistant.app.feature.bookings.BookingsLocalStore
+import `in`.artistant.app.feature.bookings.DataStoreBookingsLocalStore
 import `in`.artistant.app.feature.search.DataStoreSearchRecents
 import `in`.artistant.app.feature.search.SearchRecents
 
@@ -38,6 +40,16 @@ abstract class AppModule {
 
     @Binds
     abstract fun bindSearchRecents(impl: DataStoreSearchRecents): SearchRecents
+
+    /**
+     * The Bookings tab's local state: the offline snapshot behind screen 122 —
+     * the essentials of the night, kept so a basement Wi-Fi cannot take the venue
+     * and the load-in note with it — plus the profile nudge's dismissal.
+     */
+    @Binds
+    abstract fun bindBookingsLocalStore(
+        impl: DataStoreBookingsLocalStore,
+    ): BookingsLocalStore
 
     // Real observability wrappers — DARK-UNTIL-KEY: a guarded no-op until the
     // operator sets POSTHOG_API_KEY / SENTRY_DSN (see the wrapper class headers).

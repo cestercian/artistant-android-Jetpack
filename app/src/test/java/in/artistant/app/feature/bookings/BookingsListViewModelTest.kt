@@ -1,8 +1,11 @@
 package `in`.artistant.app.feature.bookings
 
 import `in`.artistant.app.data.model.BookingStatus
+import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.FakeArtistsRepository
 import `in`.artistant.app.data.repository.FakeBookingsRepository
+import `in`.artistant.app.data.repository.FakeUsersRepository
+import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.testsupport.ARTIST_ID
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import `in`.artistant.app.testsupport.OTHER_ARTIST_ID
@@ -17,30 +20,72 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
-/** Client-side bookings list — artist-name hydration, month folding, cancelled hiding, degrade path. */
+/**
+ * Client-side bookings list — artist hydration, the Upcoming/Past split, the
+ * offline snapshot, and the profile nudge.
+ */
 class BookingsListViewModelTest {
 
     @get:Rule val mainDispatcherRule = MainDispatcherRule()
 
-    private fun vm(bookings: FakeBookingsRepository, artists: FakeArtistsRepository = FakeArtistsRepository()) =
-        BookingsViewModel(bookingsRepository = bookings, artistsRepository = artists)
+    /**
+     * A gig far enough ahead that the segment split cannot drift with the wall
+     * clock. `booking()`'s default date is in 2026 and this suite outlives it.
+     */
+    private val FUTURE = "2036-05-16T15:00:00Z"
+
+    private fun vm(
+        bookings: FakeBookingsRepository,
+        artists: FakeArtistsRepository = FakeArtistsRepository(),
+        store: FakeBookingsLocalStore = FakeBookingsLocalStore(),
+        users: FakeUsersRepository = FakeUsersRepository(),
+    ) = BookingsViewModel(
+        bookingsRepository = bookings,
+        artistsRepository = artists,
+        localStore = store,
+        usersRepository = users,
+    )
 
     @Test
-    fun cancelledBookingsAreHidden_pendingAndConfirmedAreKept() = runTest {
+    fun cancelledBookingsAreKept_andFileUnderPast() = runTest {
+        // They used to be filtered out of the list entirely, which left screen 83
+        // (the cancelled record, with its rebooking offer) unreachable and the
+        // client with a booking that had simply vanished. Past is where the
+        // record lives.
         val model = vm(
             FakeBookingsRepository(
                 listOf(
-                    booking(id = "b-pending", status = BookingStatus.PendingConfirm),
-                    booking(id = "b-confirmed", status = BookingStatus.Confirmed),
-                    booking(id = "b-cancelled", status = BookingStatus.Cancelled),
-                    booking(id = "b-done", status = BookingStatus.Completed),
+                    booking(id = "b-pending", status = BookingStatus.PendingConfirm, startIso = FUTURE),
+                    booking(id = "b-cancelled", status = BookingStatus.Cancelled, startIso = FUTURE),
+                    booking(id = "b-done", status = BookingStatus.Completed, startIso = FUTURE),
                 ),
             ),
         )
 
-        val ids = model.state.value.items.map { it.booking.id }
-        assertEquals(listOf("b-pending", "b-confirmed", "b-done"), ids)
-        assertFalse(model.state.value.isLoading)
+        val s = model.state.value
+        assertEquals(3, s.items.size)
+        assertEquals(listOf("b-pending"), s.upcoming.map { it.booking.id })
+        assertEquals(listOf("b-cancelled", "b-done"), s.past.map { it.booking.id })
+        assertFalse(s.isLoading)
+    }
+
+    @Test
+    fun theVisibleListFollowsTheSelectedSegment() = runTest {
+        val model = vm(
+            FakeBookingsRepository(
+                listOf(
+                    booking(id = "b-live", status = BookingStatus.Confirmed, startIso = FUTURE),
+                    booking(id = "b-done", status = BookingStatus.Completed, startIso = FUTURE),
+                ),
+            ),
+        )
+
+        assertEquals(BookingsTab.Upcoming, model.state.value.tab)
+        assertEquals(listOf("b-live"), model.state.value.visible.map { it.booking.id })
+
+        model.selectTab(BookingsTab.Past)
+
+        assertEquals(listOf("b-done"), model.state.value.visible.map { it.booking.id })
     }
 
     @Test
@@ -100,29 +145,6 @@ class BookingsListViewModelTest {
     }
 
     @Test
-    fun groupingFoldsSameMonthRowsUnderOneHeaderAndNeverLosesOrReordersRows() = runTest {
-        // b1/b2 share May, b3 is June: this pins PR #50's fix — same-month rows
-        // fold under ONE header instead of one header per row.
-        val model = vm(
-            FakeBookingsRepository(
-                listOf(
-                    booking(id = "b1", date = "Sat, May 16, 2026"),
-                    booking(id = "b2", date = "Sun, May 17, 2026"),
-                    booking(id = "b3", date = "Fri, Jun 5, 2026"),
-                ),
-            ),
-        )
-
-        val grouped = model.groupedByMonth()
-        assertEquals(listOf("May 2026", "June 2026"), grouped.map { it.first })
-        assertEquals(2, grouped.first().second.size)
-        assertEquals(
-            listOf("b1", "b2", "b3"),
-            grouped.flatMap { it.second }.map { it.booking.id },
-        )
-    }
-
-    @Test
     fun signedOutRepository_surfacesTheErrorInsteadOfAnEmptyList() = runTest {
         val bookings = FakeBookingsRepository(listOf(booking())).apply { signedIn = false }
 
@@ -145,5 +167,132 @@ class BookingsListViewModelTest {
 
         assertNull(model.state.value.error)
         assertEquals(1, model.state.value.items.size)
+    }
+
+    // --- the offline snapshot (screen 122) -----------------------------------
+
+    @Test
+    fun everySuccessfulReadWritesTheEssentialsOfTheNight() = runTest {
+        val store = FakeBookingsLocalStore()
+
+        vm(
+            FakeBookingsRepository(
+                listOf(booking(id = "b-1", venue = "12th Main", status = BookingStatus.Confirmed)),
+            ),
+            store = store,
+        )
+
+        val cached = checkNotNull(store.saved).items.single()
+        assertEquals("b-1", cached.id)
+        assertEquals("12th Main", cached.venue)
+        assertEquals("confirmed", cached.status)
+    }
+
+    @Test
+    fun aFailedReadFallsBackToTheSnapshot() = runTest {
+        val store = FakeBookingsLocalStore(
+            snapshot = BookingsSnapshot(
+                cachedAtMs = 1_000L,
+                items = listOf(
+                    CachedBooking(
+                        id = "b-1",
+                        artistName = "The Tilt Collective",
+                        status = "confirmed",
+                        date = "Sat, Oct 12, 2026",
+                        time = "8:00 PM",
+                        venue = "12th Main",
+                    ),
+                ),
+            ),
+        )
+        val bookings = FakeBookingsRepository(listOf(booking())).apply { signedIn = false }
+
+        val s = vm(bookings, store = store).state.value
+
+        assertTrue(s.showsCached)
+        assertEquals("The Tilt Collective", s.cached?.items?.single()?.artistName)
+    }
+
+    @Test
+    fun anUnreadableCacheDegradesToNothingCached() = runTest {
+        // A DataStore read can fail on its own. It must not turn a network blip
+        // into a crash on the Bookings tab.
+        val store = FakeBookingsLocalStore().apply { failLoad = true }
+        val bookings = FakeBookingsRepository(listOf(booking())).apply { signedIn = false }
+
+        val s = vm(bookings, store = store).state.value
+
+        assertFalse(s.showsCached)
+        assertNull(s.cached)
+        assertNotNull(s.error)
+    }
+
+    @Test
+    fun aSuccessfulReadClearsAnEarlierCachedList() = runTest {
+        val store = FakeBookingsLocalStore(
+            snapshot = BookingsSnapshot(cachedAtMs = 1_000L, items = emptyList()),
+        )
+        val bookings = FakeBookingsRepository(listOf(booking())).apply { signedIn = false }
+        val model = vm(bookings, store = store)
+        assertTrue(model.state.value.showsCached)
+
+        bookings.signedIn = true
+        model.refresh()
+
+        assertFalse(model.state.value.showsCached)
+        assertNull(model.state.value.cached)
+    }
+
+    // --- the profile nudge (screen 89) ---------------------------------------
+
+    @Test
+    fun theNameNudgeAppearsOnlyForAGenuinelyBlankName() = runTest {
+        val store = FakeBookingsLocalStore(dismissed = false)
+        val users = FakeUsersRepository(
+            selfProfile = SelfProfile(
+                role = AppRole.Client,
+                fullName = "  ",
+                city = "Bengaluru",
+                handle = "host",
+                artistSetupComplete = null,
+            ),
+        )
+
+        assertTrue(vm(FakeBookingsRepository(), store = store, users = users).state.value.showNameNudge)
+
+        users.selfProfile = users.selfProfile!!.copy(fullName = "Riya")
+        assertFalse(vm(FakeBookingsRepository(), store = store, users = users).state.value.showNameNudge)
+    }
+
+    @Test
+    fun aProfileWeCouldNotReadNeverRaisesTheNudge() = runTest {
+        // Prompting someone to fix a gap we could not confirm exists is worse
+        // than not prompting at all.
+        val store = FakeBookingsLocalStore(dismissed = false)
+        val users = FakeUsersRepository().apply { failFetch = true }
+
+        assertFalse(vm(FakeBookingsRepository(), store = store, users = users).state.value.showNameNudge)
+    }
+
+    @Test
+    fun dismissingTheNudgeSticks() = runTest {
+        val store = FakeBookingsLocalStore(dismissed = false)
+        val users = FakeUsersRepository(
+            selfProfile = SelfProfile(
+                role = AppRole.Client,
+                fullName = null,
+                city = null,
+                handle = "host",
+                artistSetupComplete = null,
+            ),
+        )
+        val model = vm(FakeBookingsRepository(), store = store, users = users)
+        assertTrue(model.state.value.showNameNudge)
+
+        model.dismissNameNudge()
+
+        assertFalse(model.state.value.showNameNudge)
+        assertTrue(store.dismissed)
+        assertFalse(vm(FakeBookingsRepository(), store = store, users = users).state.value.showNameNudge)
     }
 }

@@ -48,6 +48,7 @@ import `in`.artistant.app.feature.booking.CheckoutScreen
 import `in`.artistant.app.feature.booking.ConfirmedScreen
 import `in`.artistant.app.feature.booking.RequestQuoteScreen
 import `in`.artistant.app.feature.bookings.BookingsScreen
+import `in`.artistant.app.feature.bookings.MonthCalendarScreen
 import `in`.artistant.app.feature.discover.DiscoverScreen
 import `in`.artistant.app.feature.messages.ChatOpenViewModel
 import `in`.artistant.app.feature.messages.ChatScreen
@@ -196,6 +197,20 @@ fun ClientTabsScaffold() {
             composable(ClientTab.Bookings.route) {
                 TabPane(inner) {
                     BookingsScreen(
+                        onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // The empty state's only action, and the nudge's: both
+                        // send the client where the fact they are missing lives.
+                        onFindArtist = { navigateToTab(nav, ClientTab.Search.route) },
+                        onEditProfile = { navigateToTab(nav, ClientTab.Profile.route) },
+                        onOpenCalendar = { nav.navigate(ClientNavRoutes.MONTH_CALENDAR) },
+                        onOpenChat = { threadId -> nav.navigate(ClientNavRoutes.chat(threadId)) },
+                    )
+                }
+            }
+            composable(ClientNavRoutes.MONTH_CALENDAR) {
+                TabPane(inner) {
+                    MonthCalendarScreen(
+                        onBack = { nav.popBackStack() },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                     )
                 }
