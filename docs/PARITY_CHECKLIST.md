@@ -99,7 +99,7 @@ Android file now mirrors.
 | `Screens/ArtistWizard/ArtistTechStep.swift` | `feature/wizard/WizardScreen.kt` (Tech) | done | `replace_tech_rider` on publish |
 | `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | done | |
 | `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | done | Gallery + TakePicture camera + gradient |
-| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder |
+| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | **Redesigned Sep 2026 (design 23/87/76)** — a hub: completion meter + payoff line, cover, gallery strip, six section rows stating the fact or the gap's effect. Empty kit renders the invitation rows (87). Sections open sheets (`EpkSheets.kt`) or in-screen panes (`EpkPanes.kt`) |
 | `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistoryScreen.kt` | done | **Redesigned Sep 2026 (design 51)** — a pushed screen, not a sheet. Per-*recomputation* deltas: `score_history` stores no reason column, so no per-event cause is invented. Route `score_history` |
 | `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
@@ -109,7 +109,14 @@ Android file now mirrors.
 | `Screens/ArtistWizard/ArtistSamplesStep.swift` | `feature/wizard/WizardScreen.kt` (Samples) | done | SAF + UploadQueue after go-live |
 | `Screens/ArtistWizard/ArtistPreviewStep.swift` | `feature/wizard/WizardScreen.kt` (Preview) | done | |
 | `Screens/ArtistWizard/ArtistWizardDoneStep.swift` | `feature/wizard/WizardScreen.kt` (Done) | done | |
-| `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder + wizard CTA |
+| — (design 65) | `feature/epk/EpkSheets.kt` (`AddCoverSheet`) | done | Take a photo / Choose from library; the **video row is disabled and says so** — `ArtistMediaRepository` uploads a normalised JPEG only, `ArtistMediaKind.video` has no writer, Transformer trim is not wired |
+| — (design 67) | `feature/epk/EpkSheets.kt` (`EditBioSheet`) | done | Bio + "What you offer" chips in one sheet; counter quiet until the 200-char cap, guidance beside it. Save flushes the shared debounce rather than opening a second write path |
+| — (design 68) | `feature/epk/EpkSheets.kt` (`AddPersonalitySheet`) | done | Answered cards sort above unanswered so the filled shape is what the empty prompts are read against; 280-char cap (`ArtistPrompts.MAX_ANSWER_LENGTH`) |
+| — (design 74) | `feature/epk/EpkSheets.kt` (`EditLinkSheet`) | done | One component, two titles; Remove only in edit mode; both fields validate through `linkUrlProblem` / `linkLabelProblem` |
+| — (design 75) | `feature/epk/EpkSheets.kt` (`AddAudioSheet`) | done | Picker MIME array IS the bucket's `allowed_mime_types` (mig 0010). One option, not iOS's two — Android's document picker already spans every provider |
+| — (design 66) | `feature/epk/EpkSheets.kt` (`StalledUploadsSheet`) | done | Per-item Retry/Discard then bulk; `UploadQueue.retryFailed(id)` / `discardFailed(id)`. States that the queue is on disk. "stopped at 64%" becomes size + attempts — there is no byte counter to quote |
+| — (design 135 Get verified) | — | **blocked** | No identity-verification path exists server-side. `kyc_records` is PAYOUT KYC (pan, cancelled cheque, bank; mig 0001) with every column `not null`, the `kyc-documents` bucket is PAN cards and cheques (mig 0010), `artists` has no `verified` column, and mig 0065 records that the KYC wizard step was removed from the shipping build. Shipping an Aadhaar upload would collect a government ID with nowhere to put it |
+| `Screens/EPKView.swift` | `feature/epk/EpkPanes.kt` | done | The section editors behind the hub's rows — gallery/reorder + palette, samples, packages, tech rider, links + connected accounts + share link. Moved, not rewritten: each keeps its whole-set-replace wipe guard and hydration gate |
 
 ## Screens — Profile / Settings / Paywall (M6/M7)
 

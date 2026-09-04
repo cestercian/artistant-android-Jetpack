@@ -32,6 +32,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -340,7 +341,13 @@ fun EpkScreen(
 
     // The stalled sheet has nothing to show once the last burned upload is
     // retried or discarded, and an empty sheet is a sheet that looks broken.
-    if (sheet == EpkSheetKind.Stalled && state.stalledUploads.isEmpty()) sheet = null
+    //
+    // In an effect, not inline: writing state during composition schedules
+    // another composition from inside the one that is running, which Compose
+    // reports as a loop rather than doing what it looks like it does.
+    LaunchedEffect(sheet, state.stalledUploads.isEmpty()) {
+        if (sheet == EpkSheetKind.Stalled && state.stalledUploads.isEmpty()) sheet = null
+    }
 }
 
 /** Which sheet is up. Saveable, so a rotation mid-pick does not lose it. */
@@ -450,10 +457,15 @@ private fun PressKitBody(
                     // the samples pane is where a clip lands. A stalled queue has
                     // the sheet that can retry or discard it.
                     onDetails = {
-                        if (banner is EpkUploadBanner.Stalled) {
-                            onOpenSheet(EpkSheetKind.Stalled)
-                        } else {
-                            onOpenPane(EpkPane.Gallery)
+                        when {
+                            banner is EpkUploadBanner.Stalled ->
+                                onOpenSheet(EpkSheetKind.Stalled)
+                            // A clip in flight belongs to the samples pane and a
+                            // photo to the gallery. Sending both to the gallery
+                            // would answer "what is uploading?" with a screen the
+                            // upload will never appear on.
+                            state.samplesUploading > 0 -> onOpenPane(EpkPane.Samples)
+                            else -> onOpenPane(EpkPane.Gallery)
                         }
                     },
                     modifier = gutter,
