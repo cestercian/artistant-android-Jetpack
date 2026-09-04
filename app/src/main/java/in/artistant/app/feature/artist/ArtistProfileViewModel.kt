@@ -16,6 +16,8 @@ import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.feature.booking.BookingDraftStore
 import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.feature.saved.SavedStore
+import `in`.artistant.app.feature.system.ToastController
+import `in`.artistant.app.feature.system.ToastIcon
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,13 +63,16 @@ data class ArtistProfileUiState(
     /** Screen 56. Opened from the action sheet, which closes as it opens. */
     val showReportSheet: Boolean = false,
     /**
-     * A report that reached somewhere — the server or the local log — read by
-     * the toast.
+     * A report that reached somewhere — the server or the local log.
      *
      * [ReportOutcome.Queued] is not a failure and the copy must not call it one
      * (screen 56's note). [ReportOutcome.Failed] never lands here: it is
-     * durable, not momentary, and rides [failedReport] instead. Cleared when the
-     * toast is dismissed so a second report can raise a second toast.
+     * durable, not momentary, and rides [failedReport] instead — the two are
+     * mutually exclusive, which is the invariant `settlingReport` holds.
+     *
+     * The toast it earns is raised on the app's single host through
+     * [in.artistant.app.feature.system.ToastController], so nothing clears this:
+     * the host owns the display window, and each report writes the field fresh.
      */
     val reportOutcome: ReportOutcome? = null,
     /**
@@ -145,6 +150,7 @@ class ArtistProfileViewModel @Inject constructor(
     private val reportsRepository: ReportsRepository,
     private val savedStore: SavedStore,
     private val draftStore: BookingDraftStore,
+    private val toasts: ToastController,
     viewer: ViewerIdentity,
 ) : ViewModel() {
 
@@ -292,12 +298,23 @@ class ArtistProfileViewModel @Inject constructor(
                 // not to), so it is the WORST of the three claims, not the
                 // middle one: we know nothing about where the report went.
                 .getOrDefault(ReportOutcome.Failed)
+            val superseded = myGeneration != reportGeneration
             _state.update { state ->
                 state.settlingReport(
                     outcome = outcome,
                     pending = PendingReport(reason, details),
-                    superseded = myGeneration != reportGeneration,
+                    superseded = superseded,
                 )
+            }
+            // Raised on the app's ONE host (screen 77), not on a host of this
+            // screen's own: the sheet that filed the report has already closed
+            // and the reader can leave the profile before the round trip
+            // finishes, and a toast owned by a screen that is gone goes with it.
+            // Read off the OUTCOME rather than off the settled state — a
+            // superseded attempt claims nothing, and the state it leaves behind
+            // is the PREVIOUS report's, which would toast twice.
+            if (!superseded) {
+                ArtistProfileFacts.reportToast(outcome)?.let { toasts.show(it, ToastIcon.Flag) }
             }
         }
     }
@@ -323,8 +340,6 @@ class ArtistProfileViewModel @Inject constructor(
         reportGeneration += 1
         _state.update { it.copy(failedReport = null) }
     }
-
-    fun dismissReportToast() = _state.update { it.copy(reportOutcome = null) }
 
     fun selectPackage(index: Int) {
         _state.update { it.copy(selectedPackageIndex = index) }

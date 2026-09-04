@@ -79,7 +79,6 @@ import `in`.artistant.app.designsystem.component.SampleRow
 import `in`.artistant.app.designsystem.component.SectionHeader
 import `in`.artistant.app.designsystem.component.SkeletonBlock
 import `in`.artistant.app.designsystem.component.SkeletonCircle
-import `in`.artistant.app.designsystem.component.ToastHost
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.PackagePricing
@@ -201,13 +200,6 @@ fun ArtistProfileScreen(
                 }
             }
         }
-        // "Queued", never "received" — the insert soft-fails into a local log and
-        // the reader is owed the difference (screen 56's note).
-        ToastHost(
-            message = ArtistProfileFacts.reportToast(state.reportOutcome),
-            onDismiss = viewModel::dismissReportToast,
-            icon = Icons.Filled.Flag,
-        )
     }
 }
 
