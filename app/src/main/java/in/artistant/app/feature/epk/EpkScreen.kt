@@ -536,6 +536,22 @@ private fun PressKitBody(
                 )
             }
         }
+        // A photo that failed to upload with its bytes still staged. Retry rather
+        // than Dismiss, because the whole reason the file was kept is that this
+        // banner can finish the job without sending the artist back to the
+        // camera. Picking another photo discards it — see `addPhoto`.
+        if (state.heldPhotoFile != null) {
+            item(key = "heldPhoto") {
+                Banner(
+                    title = "That photo didn't upload",
+                    tone = BannerTone.Failure,
+                    detail = "It's still saved on this device — retry when you're back online.",
+                    actionLabel = "Retry",
+                    onAction = viewModel::retryHeldPhoto,
+                    modifier = gutter,
+                )
+            }
+        }
         if (bare) {
             item(key = "bare") {
                 Banner(

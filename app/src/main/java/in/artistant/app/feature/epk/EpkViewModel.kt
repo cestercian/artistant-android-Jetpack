@@ -216,12 +216,29 @@ data class EpkUiState(
      * attempt budget. Carries the message rather than a flag, because which kind
      * stalled decides which section the artist should look at.
      *
-     * Its own field rather than a [saveError], because it is the one failure on
-     * this screen with somewhere to go: the file is still staged and the queue
-     * can be told to drain it again, so the banner carries a Retry that
-     * [saveError]'s dismiss-only banner has no room for.
+     * Its own field rather than a [saveError], because it is a failure with
+     * somewhere to go: the file is still staged and the queue can be told to
+     * drain it again, so the banner carries a Retry that [saveError]'s
+     * dismiss-only banner has no room for. [heldPhotoFile] is the same idea for
+     * the one upload path that does not go through the queue.
      */
     val uploadFailedMessage: String? = null,
+
+    /**
+     * A gallery photo whose upload failed with its staged bytes still on disk.
+     *
+     * Its own field rather than a [saveError] for [uploadFailedMessage]'s reason
+     * — it is a failure with somewhere to go. The direct photo path does not use
+     * [UploadQueue] (see `onPhotoPicked` for why the queue's cover task is the
+     * wrong shape for a gallery append), so it cannot borrow the queue's stalled
+     * sheet either; it carries its own staged filename and its own Retry.
+     *
+     * The filename alone, because that is the whole of what a retry needs and
+     * `cacheDir` may have reclaimed the file by the time anyone asks — the name
+     * is a claim to verify, which [sendStagedPhoto] does.
+     */
+    val heldPhotoFile: String? = null,
+
     /** Transient confirmation ("Pricing saved.") for writes with no visible result. */
     val statusNote: String? = null,
 ) {
@@ -1294,6 +1311,10 @@ class EpkViewModel @Inject constructor(
      * task would resume. Acceptable for a single image the artist can see did not
      * arrive, and the alternative is a gallery that cannot hold a second photo.
      *
+     * **A failure keeps the bytes.** Giving up the queue also gave up its retry,
+     * so this path holds its own staged copy across a failure and offers Retry on
+     * it — see [sendStagedPhoto] for what deleting it eagerly used to cost.
+     *
      * **Off the main thread, explicitly.** Giving up the queue also gave up its
      * IO scope, and everything this path does before its first suspension point
      * is blocking work on whatever dispatcher it was launched from — which for
@@ -1318,36 +1339,109 @@ class EpkViewModel @Inject constructor(
         val userId = session.currentUserId ?: return
         if (!canAddPhoto(_state.value.photos.size, _state.value.uploadingPhoto)) return
         viewModelScope.launch {
+            // A new pick abandons whatever the last failure was holding. This is
+            // the discard path, and it is a side effect of the artist's own
+            // choice rather than a second control they have to find: they have
+            // picked a different photo, so the held one has no future, and its
+            // banner must not outlive it.
+            releaseHeldPhoto()
             _state.update { it.copy(uploadingPhoto = true, saveError = null) }
-            val result = saveCatching {
-                withContext(Dispatchers.IO) {
-                    val pending = mediaCache.adoptPhoto(uri, consumeSource = ownsSource)
-                    val file = pending.file(mediaCache)
-                    try {
-                        media.uploadPhoto(file, userId, position = null)
-                    } finally {
-                        // The cache copy exists to survive the wizard's
-                        // pick-now-publish-later gap. Here the upload IS the
-                        // commit, so the copy is dead weight the moment it
-                        // returns.
-                        file.delete()
-                    }
+            val staged = saveCatching {
+                withContext(Dispatchers.IO) { mediaCache.adoptPhoto(uri, consumeSource = ownsSource) }
+            }.getOrElse {
+                // Staging failed, so there is nothing on disk to hold and nothing
+                // to retry from — the source is the only copy and re-reading it
+                // means re-picking it. Distinct from a failed UPLOAD, which is
+                // the case that now keeps its bytes.
+                _state.update {
+                    it.copy(
+                        uploadingPhoto = false,
+                        saveError = "Couldn't read that photo — pick it again.",
+                    )
                 }
+                return@launch
             }
-            result
-                .onSuccess {
-                    _state.update { it.copy(uploadingPhoto = false, statusNote = "Photo added.") }
-                    loadMedia(userId)
-                }
-                .onFailure {
-                    _state.update {
-                        it.copy(
-                            uploadingPhoto = false,
-                            saveError = "Couldn't add that photo — check your connection and try again.",
-                        )
-                    }
-                }
+            sendPhoto(staged.fileName, userId)
         }
+    }
+
+    /**
+     * Retry the photo the last failure kept — no re-pick, no retake.
+     *
+     * The whole point of holding the staged copy: a temporary connection failure
+     * used to cost the artist the photo itself, because the staged copy was
+     * deleted in a `finally` and a camera capture's original had already been
+     * unlinked at adoption. Now the bytes are still here and this sends them
+     * again. See [sendStagedPhoto].
+     *
+     * Not gated on [canAddPhoto]'s ceiling: this is finishing an add the artist
+     * already began, not starting a new one, and a Retry that silently did
+     * nothing would be worse than the server's own answer. It IS gated on an
+     * upload in flight, which is the conflict that actually matters.
+     */
+    fun retryHeldPhoto() {
+        val fileName = _state.value.heldPhotoFile ?: return
+        val userId = session.currentUserId ?: return
+        if (_state.value.uploadingPhoto) return
+        viewModelScope.launch {
+            _state.update { it.copy(uploadingPhoto = true, saveError = null) }
+            sendPhoto(fileName, userId)
+        }
+    }
+
+    /**
+     * Send staged bytes, and let the outcome decide what happens to them.
+     *
+     * Shared by the first attempt and every retry so the two cannot drift — a
+     * retry that deleted on failure would reintroduce the bug one call site over.
+     */
+    private suspend fun sendPhoto(fileName: String, userId: String) {
+        val outcome = withContext(Dispatchers.IO) {
+            sendStagedPhoto(WizardMediaCache.PendingPhoto(fileName).file(mediaCache)) { file ->
+                media.uploadPhoto(file, userId, position = null)
+            }
+        }
+        when (outcome) {
+            StagedPhotoOutcome.Sent -> {
+                _state.update {
+                    it.copy(
+                        uploadingPhoto = false,
+                        heldPhotoFile = null,
+                        saveError = null,
+                        statusNote = "Photo added.",
+                    )
+                }
+                loadMedia(userId)
+            }
+
+            is StagedPhotoOutcome.Held -> _state.update {
+                it.copy(uploadingPhoto = false, heldPhotoFile = outcome.fileName)
+            }
+
+            // The cache was reclaimed under us. Saying "retry" here would offer a
+            // button that cannot work, so it says the one thing that can.
+            StagedPhotoOutcome.Gone -> _state.update {
+                it.copy(
+                    uploadingPhoto = false,
+                    heldPhotoFile = null,
+                    saveError = "That photo is no longer on this device — pick it again.",
+                )
+            }
+        }
+    }
+
+    /**
+     * Drop the held photo from state and unlink its staged copy.
+     *
+     * The only discard path, and it hangs off picking another photo rather than
+     * off a control of its own: the banner has one action slot and Retry is what
+     * belongs in it. The other two exits are a retry that lands and a staged file
+     * the cache has already reclaimed, so nothing keeps the banner up forever.
+     */
+    private suspend fun releaseHeldPhoto() {
+        val fileName = _state.value.heldPhotoFile ?: return
+        _state.update { it.copy(heldPhotoFile = null) }
+        withContext(Dispatchers.IO) { mediaCache.delete(listOf(fileName)) }
     }
 
     /**

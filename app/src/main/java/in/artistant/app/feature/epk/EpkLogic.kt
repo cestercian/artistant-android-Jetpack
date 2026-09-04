@@ -9,6 +9,8 @@ import `in`.artistant.app.domain.artist.ServiceTags
 import `in`.artistant.app.platform.media.UploadQueue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import timber.log.Timber
+import java.io.File
 
 /**
  * Every decision the EPK editor makes, extracted from the Composables and the
@@ -519,6 +521,78 @@ fun canAddSample(stored: Int, uploading: Int): Boolean = stored + uploading < MA
 
 fun canAddPhoto(currentCount: Int, uploadInFlight: Boolean): Boolean =
     !uploadInFlight && currentCount < MAX_PHOTOS
+
+// ── Photo uploads ────────────────────────────────────────────────────────────
+
+/**
+ * What became of a staged photo that was handed to the server.
+ *
+ * The three-way distinction the direct upload path used to collapse into "it
+ * either worked or it did not, and either way the bytes are gone". See
+ * [sendStagedPhoto].
+ */
+sealed interface StagedPhotoOutcome {
+    /** It landed. The staging copy has been unlinked; there is nothing to keep. */
+    data object Sent : StagedPhotoOutcome
+
+    /**
+     * It failed, and the staging copy is still on disk under [fileName]. A retry
+     * can send those same bytes — no second pick, no second camera trip.
+     */
+    data class Held(val fileName: String) : StagedPhotoOutcome
+
+    /**
+     * There was nothing to send: the name points at a file that is not there.
+     * This is `cacheDir` — the OS reclaims it whenever it likes, and the wizard's
+     * orphan sweep removes anything the restored draft no longer references — so
+     * a recorded name is a claim to verify, not a fact (`WizardMediaCache.exists`
+     * says the same thing about resume). Only a fresh pick can answer this one,
+     * so it must not be offered as a retry.
+     */
+    data object Gone : StagedPhotoOutcome
+}
+
+/**
+ * Upload a staged photo, and unlink the staging copy **only if it lands**.
+ *
+ * The bug this replaces cost the artist the photo. `WizardMediaCache.adoptPhoto`
+ * unlinks a CAMERA capture as soon as the bytes are staged — which is right, that
+ * file is a temp JPEG the app minted to give the camera somewhere to write, and
+ * the staged copy is meant to be the one that survives. The direct upload path
+ * then deleted that staged copy in a `finally`, and a `finally` runs on the
+ * failure branch too. So one dropped connection unlinked both app-owned copies of
+ * a photo taken seconds earlier, and the only way forward was to shoot it again —
+ * for a failure whose entire character is that it is temporary.
+ *
+ * Success is the only thing that makes staged bytes dead weight, so success is
+ * the only branch that deletes them.
+ *
+ * A **cancellation** still unlinks, and that is not the same call as a failure:
+ * what cancels this is the ViewModel's scope being cleared, which destroys the
+ * state that would have offered the Retry. With no reader left, keeping the file
+ * would leak a multi-megabyte JPEG into the cache for nobody. That is the half of
+ * the old `finally` that was right, kept on purpose.
+ *
+ * `Exception` rather than `Throwable`, for [saveCatching]'s reason: an OOM is not
+ * a "retry when you're back online" state.
+ */
+suspend fun sendStagedPhoto(file: File, upload: suspend (File) -> Unit): StagedPhotoOutcome {
+    if (!file.isFile) return StagedPhotoOutcome.Gone
+    try {
+        upload(file)
+    } catch (e: CancellationException) {
+        file.delete()
+        throw e
+    } catch (e: Exception) {
+        // The bytes stay. `e` is deliberately not carried into the outcome: the
+        // caller's banner says the same sentence for every transport failure, and
+        // a Throwable held in UI state outlives the scope it was thrown in.
+        Timber.w(e, "Photo upload failed; keeping staged copy %s for retry", file.name)
+        return StagedPhotoOutcome.Held(file.name)
+    }
+    file.delete()
+    return StagedPhotoOutcome.Sent
+}
 
 // ── Sample uploads ───────────────────────────────────────────────────────────
 
