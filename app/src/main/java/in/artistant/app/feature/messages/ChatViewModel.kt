@@ -166,6 +166,7 @@ class ChatViewModel @Inject constructor(
     private val requests: RequestsRepository,
     private val flagsStore: ThreadFlagsStore,
     private val blockedUsers: BlockedUsersStore,
+    private val readReceipts: ReadReceiptsPreference,
     private val viewer: ViewerIdentity,
 ) : ViewModel() {
     private val threadId: String = checkNotNull(savedStateHandle["threadId"])
@@ -504,7 +505,20 @@ class ChatViewModel @Inject constructor(
         if (loaded.thread != null) {
             runCatching { messagesRepository.markThreadRead(threadId, loaded.viewerIsArtist) }
         }
-        runCatching { messagesRepository.markThreadReadReceipt(threadId) }
+        // The BROADCAST, gated on the Privacy screen's "Show when I've read
+        // messages" switch (design 62). `markThreadReadReceipt` is the
+        // `mark_thread_read` RPC, which writes `thread_reads` — the row the
+        // COUNTERPARTY reads to render "Read by …". The badge PATCH above is
+        // deliberately NOT gated: that counter is the viewer's own and nobody
+        // else can see it, so hiding receipts must not leave someone staring at
+        // an unread count for a conversation they have read.
+        //
+        // Read per call rather than cached: the switch is on another screen and
+        // can be flipped while this thread is open, which is exactly the moment
+        // someone is watching for it to take effect.
+        if (readReceipts.enabled()) {
+            runCatching { messagesRepository.markThreadReadReceipt(threadId) }
+        }
         // Opening the thread also retires an explicit "mark as unread" — the
         // reader has now, demonstrably, read it.
         runCatching { flagsStore.clearMarkedUnread(threadId) }

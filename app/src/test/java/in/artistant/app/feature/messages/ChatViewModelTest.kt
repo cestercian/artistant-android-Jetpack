@@ -138,7 +138,16 @@ class ChatViewModelTest {
             markedRead++
             readSeats += viewerIsArtist
         }
-        override suspend fun markThreadReadReceipt(threadId: String) = Unit
+        /**
+         * How many times the `mark_thread_read` RPC was called — the BROADCAST,
+         * as distinct from [markedRead] above, which is the viewer's own badge.
+         * The read-receipt preference gates exactly one of the two.
+         */
+        var receiptWrites: Int = 0
+
+        override suspend fun markThreadReadReceipt(threadId: String) {
+            receiptWrites++
+        }
         override suspend fun counterpartLastRead(threadId: String): Long? = counterpartRead
 
         /** Every mute value the ViewModel asked the server to write, in order. */
@@ -168,6 +177,7 @@ class ChatViewModelTest {
         blockedUsers: FakeBlockedUsersStore = FakeBlockedUsersStore(),
         artists: FakeArtistsRepository = FakeArtistsRepository(listOf(artist(name = "Nova Beats"))),
         requests: FakeRequestsRepository = FakeRequestsRepository(),
+        readReceipts: ReadReceiptsPreference = ReadReceiptsPreference { true },
     ) = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("threadId" to threadId)),
         messagesRepository = messages,
@@ -177,6 +187,7 @@ class ChatViewModelTest {
         requests = requests,
         flagsStore = flags,
         blockedUsers = blockedUsers,
+        readReceipts = readReceipts,
         viewer = { viewerId },
     )
 
@@ -241,6 +252,86 @@ class ChatViewModelTest {
         vm(repo)
 
         assertEquals(0, repo.markedRead)
+    }
+
+    // --- read receipts (Privacy → "Show when I've read messages", design 62) ---
+    //
+    // Two writes leave this screen when a thread is read and they mean opposite
+    // things: `markThreadRead` zeroes the VIEWER's own badge, and
+    // `markThreadReadReceipt` (the `mark_thread_read` RPC) writes the row the
+    // COUNTERPARTY reads. Only the second is a broadcast, so only the second is
+    // gated — and getting that backwards in either direction is a real bug:
+    // gating the badge strands someone on an unread count they have read, and
+    // not gating the RPC tells the other side something the switch promised it
+    // wouldn't.
+
+    @Test
+    fun receiptsOnBroadcastsTheReadOnOpen() = runTest {
+        val repo = ScriptedMessages()
+
+        vm(repo, readReceipts = { true })
+
+        assertTrue(repo.receiptWrites > 0)
+    }
+
+    @Test
+    fun receiptsOffNeverCallsMarkThreadReadOnOpen() = runTest {
+        val repo = ScriptedMessages()
+
+        vm(repo, readReceipts = { false })
+
+        assertEquals(0, repo.receiptWrites)
+    }
+
+    /**
+     * The viewer's own badge is NOT the broadcast.
+     *
+     * Turning receipts off must still clear the unread counter, or the person who
+     * asked for privacy is punished with a badge that never goes away for
+     * conversations they have read.
+     */
+    @Test
+    fun receiptsOffStillClearsTheViewersOwnUnreadCount() = runTest {
+        val repo = ScriptedMessages()
+
+        vm(repo, readReceipts = { false })
+
+        assertTrue(repo.markedRead > 0)
+        assertEquals(listOf(false), repo.readSeats)
+    }
+
+    /**
+     * Every path through the choke point, not just the first.
+     *
+     * `markReadBestEffort` is reached on open, on an inbound realtime message,
+     * and on a send that lands. A gate applied at only one of them would leak the
+     * receipt the moment the conversation actually moved — which is exactly when
+     * it matters.
+     */
+    @Test
+    fun receiptsOffAlsoStaysQuietOnInboundAndOnSend() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo, readReceipts = { false })
+
+        repo.emit(serverMessage("in-1", "Hello?", at = 6_000L, mine = false))
+        model.send("On my way")
+        advanceUntilIdle()
+
+        assertEquals(0, repo.receiptWrites)
+    }
+
+    /** The same three paths, with the switch on, do broadcast. */
+    @Test
+    fun receiptsOnBroadcastsOnInboundAndOnSendToo() = runTest {
+        val repo = ScriptedMessages()
+        val model = vm(repo, readReceipts = { true })
+        val afterOpen = repo.receiptWrites
+
+        repo.emit(serverMessage("in-1", "Hello?", at = 6_000L, mine = false))
+        model.send("On my way")
+        advanceUntilIdle()
+
+        assertTrue(repo.receiptWrites > afterOpen)
     }
 
     // --- title: the counterpart, from the viewer's seat ----------------------
@@ -781,6 +872,7 @@ class ChatViewModelTest {
             requests = FakeRequestsRepository(),
             flagsStore = FakeThreadFlagsStore(),
             blockedUsers = FakeBlockedUsersStore(),
+            readReceipts = { true },
             viewer = { CLIENT_ID },
         )
 
@@ -974,6 +1066,7 @@ class ChatViewModelTest {
             requests = FakeRequestsRepository(),
             flagsStore = FakeThreadFlagsStore(),
             blockedUsers = FakeBlockedUsersStore(),
+            readReceipts = { true },
             viewer = { CLIENT_ID },
         )
 
