@@ -14,8 +14,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import `in`.artistant.app.designsystem.component.CalendarMonth
+import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import java.time.LocalDate
-import java.time.YearMonth
 import javax.inject.Inject
 
 data class ManageAvailabilityUiState(
@@ -28,7 +29,7 @@ data class ManageAvailabilityUiState(
     val saved: Boolean = false,
 
     /** The month the calendar (design 22) is showing. */
-    val month: YearMonth = YearMonth.now(),
+    val month: CalendarMonth = currentCalendarMonth(),
     /** Confirmed nights, as IST dates. Empty when [bookingsUnavailable]. */
     val bookedDates: Set<LocalDate> = emptySet(),
     /**
@@ -88,8 +89,13 @@ class ManageAvailabilityViewModel @Inject constructor(
         loadBookedNights()
     }
 
-    fun showMonth(month: YearMonth) {
-        _state.update { it.copy(month = month) }
+    fun stepMonth(delta: Int) {
+        _state.update { it.copy(month = it.month.stepped(delta)) }
+    }
+
+    /** Jump to a month of the displayed year — the header menu's contract. */
+    fun showMonthOfYear(month: Int) {
+        _state.update { it.copy(month = it.month.copy(month = month)) }
     }
 
     /**

@@ -9,7 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
-import java.time.YearMonth
 import java.util.Locale
 
 /**
@@ -21,47 +20,50 @@ import java.util.Locale
  */
 class AvailabilityCalendarLogicTest {
 
-    // ── monthGrid ────────────────────────────────────────────────────────────
+    // ── busyDaysIn ───────────────────────────────────────────────────────────
 
     @Test
-    fun monthGrid_padsLeadingBlanksToTheFirstWeekday() {
-        // 1 Sep 2026 is a Tuesday, so exactly one blank precedes it.
-        val cells = monthGrid(YearMonth.of(2026, 9))
-        assertEquals(1, cells.takeWhile { it.date == null }.size)
-        assertEquals(LocalDate.of(2026, 9, 1), cells[1].date)
+    fun busyDaysIn_rebasesToTheGridsZeroBasedMonth() {
+        // MonthDayGrid speaks Calendar.MONTH; LocalDate speaks 1-12. Getting
+        // this backwards silently shades the wrong month, which looks fine.
+        val dates = setOf(LocalDate.of(2026, 9, 12), LocalDate.of(2026, 9, 30))
+        assertEquals(setOf(12, 30), busyDaysIn(dates, year = 2026, month = 8))
+        assertEquals(emptySet<Int>(), busyDaysIn(dates, year = 2026, month = 9))
     }
 
     @Test
-    fun monthGrid_mondayStartTakesNoBlanks() {
-        // 1 Jun 2026 is a Monday — the one case where a leading pad would push
-        // the whole month a column right.
-        val cells = monthGrid(YearMonth.of(2026, 6))
-        assertEquals(LocalDate.of(2026, 6, 1), cells.first().date)
+    fun busyDaysIn_keepsTheYearsApart() {
+        // Two Septembers a year apart both answer "day 12" — the year has to be
+        // part of the filter or a 2027 gig shades a 2026 tile.
+        val dates = setOf(LocalDate.of(2027, 9, 12))
+        assertEquals(emptySet<Int>(), busyDaysIn(dates, year = 2026, month = 8))
+    }
+
+    // ── closedDaysIn ─────────────────────────────────────────────────────────
+
+    @Test
+    fun closedDaysIn_greysTheWeekdaysTheActDoesNotPlay() {
+        // Sep 2026: Fridays are 4, 11, 18, 25; Saturdays 5, 12, 19, 26.
+        val closed = closedDaysIn(year = 2026, month = 8, days = setOf("Fri", "Sat"))
+        assertFalse(closed.contains(4))
+        assertFalse(closed.contains(26))
+        assertTrue(closed.contains(1))
+        assertEquals(30 - 8, closed.size)
     }
 
     @Test
-    fun monthGrid_sundayStartTakesSixBlanks() {
-        // 1 Feb 2026 is a Sunday: the maximum pad, and the case an "is it 0-6 or
-        // 1-7" mistake gets wrong by a whole week.
-        val cells = monthGrid(YearMonth.of(2026, 2))
-        assertEquals(6, cells.takeWhile { it.date == null }.size)
-        assertEquals(LocalDate.of(2026, 2, 1), cells[6].date)
+    fun closedDaysIn_greysNothingWhenNoDaysArePicked() {
+        // The opposite reading — an all-grey month — would say the artist is
+        // unavailable forever, when in fact they just haven't answered yet. The
+        // summary line says that in words instead.
+        assertEquals(emptySet<Int>(), closedDaysIn(year = 2026, month = 8, days = emptySet()))
     }
 
     @Test
-    fun monthGrid_holdsEveryDayOfALeapFebruary() {
-        val cells = monthGrid(YearMonth.of(2028, 2))
-        val dates = cells.mapNotNull { it.date }
-        assertEquals(29, dates.size)
-        assertEquals(LocalDate.of(2028, 2, 29), dates.last())
-    }
-
-    @Test
-    fun monthGrid_omitsTrailingBlanks() {
-        // Nothing renders past the last day, so the grid ends there rather than
-        // padding out a sixth row of empty boxes and a taller card.
-        val cells = monthGrid(YearMonth.of(2026, 9))
-        assertEquals(LocalDate.of(2026, 9, 30), cells.last().date)
+    fun closedDaysIn_coversAllOfALeapFebruary() {
+        val closed = closedDaysIn(year = 2028, month = 1, days = setOf("Mon"))
+        assertTrue(closed.contains(29))
+        assertEquals(29 - 4, closed.size)
     }
 
     // ── playsOn ──────────────────────────────────────────────────────────────

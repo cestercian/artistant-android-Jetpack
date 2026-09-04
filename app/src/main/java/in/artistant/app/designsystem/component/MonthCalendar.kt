@@ -346,6 +346,17 @@ fun MonthDayGrid(
     selectedDay: Int?,
     onDayClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Days the artist does not work — a weekday their act never plays (design
+     * screen 22, the artist studio's availability calendar).
+     *
+     * Drawn like an adjacent-month cell and inert for the same reason: there is
+     * nothing behind it to open. Distinct from [busyDays], which is a day that
+     * is spoken for; a closed day was never on offer. Empty by default, so every
+     * existing caller (Bookings, Gigs) is unchanged — none of them has a notion
+     * of a day that isn't for sale.
+     */
+    closedDays: Set<Int> = emptySet(),
 ) {
     val colors = AppTheme.colors
     val space = AppTheme.dimens.space
@@ -389,6 +400,12 @@ fun MonthDayGrid(
                     DayTile(
                         cell = cell,
                         busy = cell.inMonth && cell.number in busyDays,
+                        // Busy wins over closed. A gig already agreed on a day
+                        // the act "doesn't play" is a fact, and hiding it behind
+                        // the rule it breaks is how a booking gets forgotten.
+                        closed = cell.inMonth &&
+                            cell.number in closedDays &&
+                            cell.number !in busyDays,
                         selected = cell.inMonth && selectedDay == cell.number,
                         isToday = cell.inMonth && cell.number == todayDay,
                         onClick = { onDayClick(cell.number) },
@@ -408,6 +425,7 @@ private fun DayTile(
     isToday: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    closed: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
@@ -429,14 +447,14 @@ private fun DayTile(
         .clip(shape)
         .background(
             when {
-                !cell.inMonth -> colors.bgCard.copy(alpha = 0.35f)
+                !cell.inMonth || closed -> colors.bgCard.copy(alpha = FADED_TILE)
                 busy -> colors.brand
                 else -> colors.bgCard
             },
         )
 
     Box(
-        if (cell.inMonth) {
+        if (cell.inMonth && !closed) {
             base
                 .border(ringWidth, ring, shape)
                 .semantics {
@@ -464,7 +482,7 @@ private fun DayTile(
                     fontWeight = if (busy || isToday) FontWeight.Bold else FontWeight.Medium,
                 ),
                 color = when {
-                    !cell.inMonth -> colors.ink4
+                    !cell.inMonth || closed -> colors.ink4
                     busy -> colors.brandInk
                     else -> colors.ink
                 },
@@ -476,7 +494,12 @@ private fun DayTile(
                 Modifier
                     .size(dimens.size.gridDot)
                     .clip(CircleShape)
-                    .background(if (cell.inMonth && !busy) colors.ink3 else Color.Transparent),
+                    .background(
+                        // The dot means "open, nothing on it". A closed day is
+                        // not open, so it gets no dot — which is what keeps it
+                        // from reading as a free night.
+                        if (cell.inMonth && !busy && !closed) colors.ink3 else Color.Transparent,
+                    ),
             )
         }
     }
@@ -588,3 +611,6 @@ fun dayOfMonthInMonth(dateLabel: String, year: Int, month: Int): Int? {
     if (c.get(Calendar.YEAR) != year || c.get(Calendar.MONTH) != month) return null
     return c.get(Calendar.DAY_OF_MONTH)
 }
+
+/** Adjacent-month and closed tiles, faded back off the card fill. */
+private const val FADED_TILE = 0.35f
