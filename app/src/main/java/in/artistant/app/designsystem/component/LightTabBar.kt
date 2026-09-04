@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -143,12 +145,18 @@ fun LightTabBar(
             // evenly either side of it. With an even item count that is exactly
             // two and two, which is what the design draws.
             val half = items.size / 2
+            // Labelled cells take an equal SHARE of the bar rather than the 48dp square an
+            // unlabelled glyph needs: "Messages" does not fit in 48dp and would ellipsise to
+            // "Messag…", which is worse than no label at all for the people who turned labels
+            // on. Unlabelled, the square plus `SpaceBetween` is what the design draws.
+            val cell: @Composable RowScope.() -> Modifier =
+                { if (showLabels) Modifier.weight(1f) else Modifier }
             items.take(half).forEach {
-                TabGlyph(it, it.route == selectedRoute, onSelect, showLabels)
+                TabGlyph(it, it.route == selectedRoute, onSelect, showLabels, cell())
             }
             action?.let { CentreAction(it) }
             items.drop(half).forEach {
-                TabGlyph(it, it.route == selectedRoute, onSelect, showLabels)
+                TabGlyph(it, it.route == selectedRoute, onSelect, showLabels, cell())
             }
         }
     }
@@ -160,6 +168,7 @@ private fun TabGlyph(
     selected: Boolean,
     onSelect: (String) -> Unit,
     showLabels: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val chrome = AppTheme.dimens.chrome
@@ -171,9 +180,16 @@ private fun TabGlyph(
         label = "tabTint",
     )
     Box(
-        modifier = Modifier
-            // The glyph is 24; the node is the 48dp tap-target floor around it.
-            .size(AppTheme.dimens.size.controlMin)
+        modifier = modifier
+            // The glyph is 24; the node is the 48dp tap-target floor around it. Labelled, the
+            // width comes from the caller's weight and only the floor height is kept.
+            .then(
+                if (showLabels) {
+                    Modifier.heightIn(min = AppTheme.dimens.size.controlMin)
+                } else {
+                    Modifier.size(AppTheme.dimens.size.controlMin)
+                },
+            )
             .clip(CircleShape)
             .selectable(
                 selected = selected,

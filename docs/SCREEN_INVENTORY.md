@@ -351,16 +351,69 @@ isLoading, error. `SavedStore.refreshFromServer()` now reports whether the SERVE
 copy was read, so a dropped connection renders as "couldn't load" rather than as
 "Nothing saved yet". *Deps:* SavedStore, BookingsRepository, ArtistsRepository.
 
-**ProfileScreen** (C, tab root) → `feature/profile/`. *Compose:* header card
-(`Avatar` 64, "City · Role since YYYY"), 3-col stats, saved carousel→`ArtistProfile`,
-settings hairline rows: Notifications (system settings), Privacy (pushes
-`PrivacyScreen` on both graphs; the hosted policy is one tap further in, from
-that screen's own Privacy-policy row),
-**Export data** (`DataExportScreen`, DPDP), **Calendar sync** (toggle + target
-`DropdownMenu`, `CalendarSyncService`), Help (mailto), **Sign out** (`AlertDialog`→
-`signOut` + wipe prefs + reset stores + role→client), **Delete account** ("DELETE"
-confirm field → `delete-account`). *Deps:* all per-user stores, SessionManager,
-CalendarSyncService.
+**ProfileScreen** (C, tab root) → `feature/profile/`. **Redesigned Sep 2026 —
+design 26.** *Compose:* `ScreenHeader("Profile")` + a settings `IconCircle`→
+`AccountScreen`; identity (initials disc, name, "Host · City · joined YYYY") and
+the **"Switch to artist mode"** capsule — one `users.role` write
+(`users_update_self`, mig 0002) followed by the root gate's `retryRouting`, so an
+existing host becomes an artist without signing up again; `AccountStatBand`
+(Upcoming · Saved · Completed, each column tappable into `artist_list/{kind}` and
+each printing an em dash rather than a zero it never read); rows: **Your
+bookings** (the light bar dropped the calendar glyph, so this is Bookings' front
+door), Saved artists, Notifications, Help and safety, Legal and privacy. The
+design's "Payment and billing" and "Invoices and GST" are NOT drawn — v1 takes no
+money and neither has anything to open. *States:* first-load skeleton / failed
+banner + retry / loaded. *Deps:* `ProfileViewModel`.
+
+**AccountScreen** (C+A, pushed) → `feature/profile/`. **New Sep 2026 — design
+47 / 69, "one implementation, two hosts".** The settings list, reached from
+Profile's gear and from the artist press kit. The ARTIST group (Manage
+availability with a real availability summary · Subscription) is **injected by
+role, never forked** — the fork is what left artist deletion unreachable. Stat
+band swaps columns per role (Gigs · Bookability · Completed). ACCOUNT group:
+calendar sync (`SwitchRow` + target picker when the device has more than one
+writable calendar), Notifications, Language & region, Accessibility, Devices,
+Data export, Privacy, Trust & safety (only when the destination is registered —
+`rememberRouteIfRegistered`), Blocked accounts, Help centre, Sign out
+(`AlertDialog`), Delete account. Route `account` on both graphs. *Deps:*
+`ProfileViewModel`, `CalendarSyncService`, `HelpFeedbackSheet`.
+
+**NotificationSettingsScreen** (S) → `feature/profile/`. **New Sep 2026 — design
+124.** Eight `SwitchRow`s in two groups plus quiet hours, persisted in
+`NotificationPreferences` (DataStore). Marketing defaults OFF — the design's own
+note, and a consent signup never collected. `POST_NOTIFICATIONS` is read on every
+ON_RESUME and a denial becomes a banner with a route to the system screen. The
+footer states that no server-side preference exists, so these are device-local.
+
+**AccessibilityScreen** (S) → `feature/profile/`. **New Sep 2026 — design 129.**
+Two real app-side controls — "Always show labels" (read by both scaffolds and
+passed to `LightTabBar`) and "Autoplay artist videos" (`AccessibilityPreferences`;
+nothing autoplays today and the screen says so). Text size, reduce motion, bold
+text and higher contrast are system-owned on Android, already honoured, and are
+stated as facts with links to the settings that own them rather than faked as
+switches.
+
+**LanguageScreen** (S) → `feature/profile/`. **New Sep 2026 — design 130.**
+Per-app locale through the platform `LocaleManager` (API 33+; `androidx.appcompat`
+is not a dependency and none is added), with an honest note for Android 12 and
+older. All six languages render; the five without `res/values-<tag>` say why they
+cannot be picked (`AppLanguages.TRANSLATED_TAGS`). Region is three read-only
+facts — India and INR only in v1.
+
+**DevicesScreen** (S) → `feature/profile/`. **New Sep 2026 — design 128.** This
+device from `Build.MANUFACTURER`/`MODEL`, and **"Sign out everywhere else"**
+(`AccountRepository.signOutOtherDevices` → `SignOutScope.OTHERS`). Supabase
+exposes no session list to a client and the schema has no activity table, so the
+design's other device rows and its recent-activity log are **not drawn** and the
+absence is stated. The action the screen exists for still works.
+
+**DeleteAccountScreen** (S) → `feature/profile/`. **New Sep 2026 — design
+115 → 48 → 116.** One destination, three stages. Stage 1 is the off-ramp
+(Continue is SECONDARY; Support takes the accent). Stage 2 names every loss from
+counts it actually read, degrading to a sentence rather than to "0 bookings", and
+gates on a typed `DELETE`. Stage 3 is a receipt that itemises the 30-day backup
+window and leaves it **unticked**, because it has not happened yet. Server delete
+first, local wipe after (`cleanUpAfterAccountDelete`).
 
 ---
 
@@ -423,12 +476,17 @@ reconnect (`lifecycle`/scenePhase), teardown on dispose + generation bump. *Nav:
 client's toolbar avatar→`ArtistProfile`. *Deps:* SessionManager, RoleStore,
 BookingStore.
 
-**PaywallScreen** (S, sheet) → `feature/paywall/`. *ViewModel:* uses
-`EntitlementStore`. *Compose:* close-x, role hero + editorial headline, perks,
-price card (`product.displayPrice` + period + intro offer + auto-renew terms +
-T&C links), subscribe CTA (spinner/"Waiting for approval…"), Restore. *APIs:*
-Play Billing (dormant). *Lifecycle:* re-pull products if empty. *State:* purchase
-outcome→onComplete + dismiss.
+**PaywallScreen** (S, sheet) → `feature/paywall/`. **Redesigned Sep 2026 —
+design 25 / 91 / 92 / 93.** One destination, four states, and `proStateFor` is the
+only thing that picks between them: Offer (a price and no entitlement) · Pending
+(a finished flow whose entitlement has not landed — UPI mandates and bank SCA sit
+here, and the CTA disables rather than lying) · Unavailable (no price; **an
+entitled user is never shown this**, which is screen 92's whole note) · Active.
+One plan card, because Play carries one product — the design's "Yearly −33%"
+would be an offer nobody could accept. The active screen drops the design's fee
+arithmetic ("5% not 9%", "payout in 24 hours", "₹18,400 saved"): all three
+describe a product that moves money, and v1 does not. *APIs:* Play Billing
+(dormant → every build today lands on Unavailable, which is the truthful state).
 
 **ScoreExplainerScreen** (A, `ScoreExplainer`) → `feature/score/`. **Redesigned
 Sep 2026 — design 50 / 79 / 80.** *Compose:* `BackHeader` + `SegmentedControl`
@@ -495,10 +553,16 @@ invented; the decay window and the New-tier floor are stated instead. *APIs:*
 `ScoreRepository.historyForSelf`. *States:* loading / failed (banner + retry) /
 genuinely empty.
 
-**DataExportScreen** (S) → `feature/profile/`. *Compose:* single "Export my data"→
-`AccountService.exportData` → write temp JSON → Android **share sheet**
-(`ACTION_SEND`). *State:* `ExportStatus` (stable a11y token); validates signed-URL
-200–299. *Lifecycle:* cancel on dispose.
+**DataExportScreen** (S) → `feature/profile/`. **Redesigned Sep 2026 — design
+81 → 82 → 49 / 113.** One destination, four states in a sealed `ExportState` that
+makes **"failed with a file" unrepresentable** — the design's note is that half an
+export which looks whole is worse than none, so a failed re-request discards the
+file the previous one produced. Idle explains the DPDP right and the contents
+before anyone commits to a 24-hour wait; Requested narrates three steps and gives
+permission to leave; Ready states the SERVER's expiry (never an invented "7 days",
+and no invented file size) and hands off through `ACTION_SEND` / `ACTION_VIEW`;
+Failed names the step that stopped and says nothing partial was sent. *APIs:*
+`AccountRepository.requestDataExport` (`data-export` Edge Function).
 
 **ManageAvailabilityScreen** (A) → `feature/availability/`. *Compose:* two `FlowRow`
 chip grids (days/times) + light haptic, live "HOW CLIENTS SEE YOU" preview pill,

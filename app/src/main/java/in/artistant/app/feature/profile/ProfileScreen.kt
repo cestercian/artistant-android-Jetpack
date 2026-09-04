@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -164,25 +165,33 @@ private fun ProfileContent(
         }
 
         AccountGap()
-        AccountStatBand(
-            stats = listOf(
-                AccountStat("Upcoming", accountStatValue(state.bookingsCount)),
-                AccountStat("Saved", accountStatValue(state.savedCount)),
-                AccountStat("Completed", accountStatValue(state.completedCount)),
-            ),
-            modifier = Modifier.semantics { testTag = "profile.stats" },
-        )
-        // The band is three tap targets, laid over the band rather than inside it so the
-        // dividers stay a single un-clickable rule. Each column stays tappable while its
-        // number is unknown: the drill-down list does its own read and reports its own
-        // failure, so "—" plus a tap is the honest route to the error.
-        Row(Modifier.fillMaxWidth()) {
-            StatTarget("Upcoming bookings", Modifier.weight(1f)) {
-                onArtistList(ArtistListKind.Bookings)
-            }
-            StatTarget("Saved artists", Modifier.weight(1f)) { onArtistList(ArtistListKind.Saved) }
-            StatTarget("Completed bookings", Modifier.weight(1f)) {
-                onArtistList(ArtistListKind.Completed)
+        // Three tap targets laid OVER the band rather than inside it, so the two dividers stay
+        // one un-clickable rule and the band component itself stays free of navigation. They
+        // are `matchParentSize`, not a row beneath — a row beneath would add its own 44dp of
+        // dead space under the numbers and split the target from the thing it targets.
+        //
+        // Each column stays tappable while its number is unknown: the drill-down list does its
+        // own read and reports its own failure, so "—" plus a tap is the honest route to the
+        // error the header used to hide behind a zero.
+        Box(Modifier.fillMaxWidth()) {
+            AccountStatBand(
+                stats = listOf(
+                    AccountStat("Upcoming", accountStatValue(state.bookingsCount)),
+                    AccountStat("Saved", accountStatValue(state.savedCount)),
+                    AccountStat("Completed", accountStatValue(state.completedCount)),
+                ),
+                modifier = Modifier.semantics { testTag = "profile.stats" },
+            )
+            Row(Modifier.matchParentSize()) {
+                StatTarget("Upcoming bookings", Modifier.weight(1f)) {
+                    onArtistList(ArtistListKind.Bookings)
+                }
+                StatTarget("Saved artists", Modifier.weight(1f)) {
+                    onArtistList(ArtistListKind.Saved)
+                }
+                StatTarget("Completed bookings", Modifier.weight(1f)) {
+                    onArtistList(ArtistListKind.Completed)
+                }
             }
         }
 
@@ -310,12 +319,12 @@ private fun ModePill(working: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** An invisible tap target sitting under one column of [AccountStatBand]. */
+/** An invisible tap target covering one column of [AccountStatBand]. */
 @Composable
 private fun StatTarget(label: String, modifier: Modifier, onClick: () -> Unit) {
     Box(
         modifier
-            .height(AppTheme.dimens.size.rowMin)
+            .fillMaxHeight()
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
     )

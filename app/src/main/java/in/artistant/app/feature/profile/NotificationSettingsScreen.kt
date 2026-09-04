@@ -159,10 +159,12 @@ private fun NotificationSettingsContent(
                 modifier = Modifier.semantics { testTag = "notifications.permissionOn" },
             )
             false -> Banner(
-                title = "Notifications are blocked for Artistant",
+                title = "Notifications are blocked",
                 tone = BannerTone.Attention,
-                detail = "Android is dropping every one of these. Turn the permission back on " +
-                    "and the switches below take effect again.",
+                // Short on purpose: `Banner` caps its detail at three lines, and beside the
+                // action pill that is barely a sentence. The full explanation is in the footer,
+                // which has the width for it.
+                detail = "Android drops all of these until you turn the permission back on.",
                 actionLabel = "Open settings",
                 onAction = onOpenSystemSettings,
                 modifier = Modifier.semantics { testTag = "notifications.permissionOff" },

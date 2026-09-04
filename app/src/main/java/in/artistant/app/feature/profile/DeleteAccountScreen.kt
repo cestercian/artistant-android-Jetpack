@@ -486,7 +486,15 @@ private fun ConsequenceCard(title: String, detail: String) {
             .padding(horizontal = dimens.space.lg)
             .semantics { testTag = "delete.consequence" },
     ) {
-        CheckRow(title = title, subtitle = detail, state = MarkState.Failed, showHairline = false)
+        CheckRow(
+            title = title,
+            subtitle = detail,
+            state = MarkState.Failed,
+            showHairline = false,
+            // The mark is the alarm; the sentence beside it is a fact, and the design sets it
+            // in ink4. See CheckRow.subtitleColor.
+            subtitleColor = colors.ink4,
+        )
     }
 }
 

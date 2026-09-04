@@ -123,6 +123,17 @@ fun CheckRow(
     showHairline: Boolean = false,
     /** Pending steps grey their title out (screens 82 / 113); perk bullets never do. */
     dimWhenPending: Boolean = false,
+    /**
+     * Override the subtitle's colour.
+     *
+     * A [MarkState.Failed] subtitle defaults to `danger` because on the export screen it IS the
+     * failure — "Stopped at bookings" is what went wrong (113). On the delete screen the same
+     * mark means "this is what you lose", and the detail beside it is a plain fact ("Both sides
+     * lose the thread history") that the design sets in `ink4`; painting four cards' worth of
+     * body copy red there turns a careful list into an alarm. Hence an override rather than a
+     * second component.
+     */
+    subtitleColor: Color? = null,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
@@ -163,7 +174,8 @@ fun CheckRow(
                 Text(
                     subtitle,
                     style = AppTheme.type.caption,
-                    color = if (state == MarkState.Failed) colors.danger else colors.ink4,
+                    color = subtitleColor
+                        ?: if (state == MarkState.Failed) colors.danger else colors.ink4,
                     modifier = Modifier.padding(top = dimens.space.xs / 2),
                 )
             }
