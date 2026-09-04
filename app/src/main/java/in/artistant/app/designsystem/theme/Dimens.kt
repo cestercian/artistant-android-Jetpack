@@ -301,6 +301,27 @@ data class Components(
     val toastIcon: Dp = 24.dp,
     /** Air between a toast and whatever chrome is under it. */
     val toastGap: Dp = 22.dp,
+
+    // ── Section BN ────────────────────────────────────────────────────────
+    /**
+     * The picture band on a confirmed booking's card (screen 10).
+     *
+     * Its own number rather than a [tileImage] reuse: that one is a rail tile's
+     * band, sized so five artists fit across a scroll, and this is a full-width
+     * card that has to hold a 16:9-ish crop of a stage without becoming the
+     * whole screen. Measured off the markup, where the band is 140 against a
+     * 350-wide card.
+     */
+    val bookingCardImage: Dp = 140.dp,
+    /**
+     * One star in the review rating (screens 20 / 98).
+     *
+     * Deliberately off the [Size] icon ladder, whose top step is 28: the stars
+     * ARE the review — everything else on that screen is optional — and at icon
+     * size a row of five reads as a legend rather than as the control. The tap
+     * target is grown to the 44dp floor around it at the call site.
+     */
+    val reviewStar: Dp = 36.dp,
 )
 
 /**

@@ -312,6 +312,9 @@ fun ArtistTabsScaffold() {
                         isArtistViewer = true,
                         onBack = { nav.popBackStack() },
                         onOpenChat = { threadId -> nav.navigate(ArtistNavRoutes.chat(threadId)) },
+                        // Support lives inside the inbox on both roles — the
+                        // disputed page's only live action leads there.
+                        onOpenSupport = { navigateToTab(nav, ArtistTab.Messages.route) },
                     )
                 }
             }
