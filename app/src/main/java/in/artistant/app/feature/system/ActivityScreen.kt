@@ -76,13 +76,31 @@ fun ActivityScreen(
     role: AppRole,
     onOpenBooking: (bookingId: String) -> Unit,
     onOpenThread: (threadId: String) -> Unit,
-    onOpenGigRequest: (requestId: String) -> Unit,
+    onOpenMessages: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenGigRequest: ((requestId: String) -> Unit)? = null,
+    onOpenGigs: (() -> Unit)? = null,
+    onOpenHome: (() -> Unit)? = null,
     viewModel: ActivityViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
+
+    // A row is tappable only when this graph can actually serve where its
+    // notification would have gone — see [openActivity].
+    val openFor: (ActivityEntry) -> (() -> Unit)? = { entry ->
+        openActivity(
+            entry = entry,
+            role = role,
+            onOpenBooking = onOpenBooking,
+            onOpenThread = onOpenThread,
+            onOpenMessages = onOpenMessages,
+            onOpenGigRequest = onOpenGigRequest,
+            onOpenGigs = onOpenGigs,
+            onOpenHome = onOpenHome,
+        )
+    }
 
     // Read once per composition rather than held in state: it is a fact about
     // the clock, and both the group split and the stamps must use the same one.
@@ -163,9 +181,7 @@ fun ActivityScreen(
                         entry = entry,
                         accented = entry.id == state.accentedId,
                         nowMs = nowMs,
-                        onClick = {
-                            openActivity(entry, role, onOpenBooking, onOpenThread, onOpenGigRequest)
-                        },
+                        onClick = openFor(entry),
                     )
                 }
             }
@@ -184,9 +200,7 @@ fun ActivityScreen(
                         entry = entry,
                         accented = entry.id == state.accentedId,
                         nowMs = nowMs,
-                        onClick = {
-                            openActivity(entry, role, onOpenBooking, onOpenThread, onOpenGigRequest)
-                        },
+                        onClick = openFor(entry),
                     )
                 }
             }
@@ -195,55 +209,110 @@ fun ActivityScreen(
 }
 
 /**
- * Where a row goes, decided by the SAME function the notification tap uses.
+ * Where one row goes.
+ *
+ * The same six places [PushPayloadRouter] routes a notification TAP to, named as
+ * destinations rather than as router actions so the screen can ask two different
+ * questions of one answer: *where does this row go*, and *can this graph take it
+ * there*.
+ */
+internal sealed interface ActivityDestination {
+    data class Booking(val id: String) : ActivityDestination
+    data class Thread(val id: String) : ActivityDestination
+
+    /** The inbox — a chat push whose thread id never arrived. */
+    data object Messages : ActivityDestination
+    data class GigRequest(val id: String) : ActivityDestination
+    data object Gigs : ActivityDestination
+
+    /** The artist's studio, which is also where the gig-request LIST lives. */
+    data object Home : ActivityDestination
+}
+
+/**
+ * A row's destination, decided by the SAME function the notification tap uses.
  *
  * A row that routed by its own rules would eventually disagree with the
  * notification it is a record of — the user taps the row expecting the place the
- * banner would have taken them, and gets somewhere else. Actions this graph
- * cannot serve (an artist-tab jump from the client's Activity screen) simply do
- * nothing rather than navigating somewhere arbitrary.
+ * banner would have taken them, and gets somewhere else.
+ *
+ * The two null-id fallbacks are [TabRouter.apply]'s own, not new policy: a
+ * `message` with no thread id lands on the inbox there, and a `gig_request` with
+ * no request id arms the artist's Home tab. Reproducing them here is what stops
+ * a valid push rendering as a tappable row that does nothing.
+ *
+ * Null means the payload has no destination at all — a server event newer than
+ * this build. Those rows are drawn without an affordance rather than being made
+ * to look tappable.
+ */
+internal fun activityDestination(entry: ActivityEntry, role: AppRole): ActivityDestination? =
+    when (val action = PushPayloadRouter.route(
+        event = entry.event,
+        bookingId = entry.bookingId,
+        threadId = entry.threadId,
+        requestId = entry.requestId,
+        role = role,
+    )) {
+        is PushDeepLinkAction.OpenBookingDetail -> ActivityDestination.Booking(action.bookingId)
+        is PushDeepLinkAction.OpenThread ->
+            action.threadId?.let(ActivityDestination::Thread) ?: ActivityDestination.Messages
+        is PushDeepLinkAction.OpenGigRequest ->
+            action.requestId?.let(ActivityDestination::GigRequest) ?: ActivityDestination.Home
+        PushDeepLinkAction.ArtistGigs -> ActivityDestination.Gigs
+        PushDeepLinkAction.ArtistHome -> ActivityDestination.Home
+        PushDeepLinkAction.Ignore -> null
+    }
+
+/**
+ * The tap handler for one row, or null when this graph cannot serve it.
+ *
+ * The artist-side destinations arrive as nullable lambdas because the client
+ * graph has no gig requests, no Gigs tab and no studio — and a row whose
+ * destination this graph cannot reach must render as a record, not as a control
+ * that swallows a tap.
  */
 private fun openActivity(
     entry: ActivityEntry,
     role: AppRole,
     onOpenBooking: (String) -> Unit,
     onOpenThread: (String) -> Unit,
-    onOpenGigRequest: (String) -> Unit,
-) {
-    val action = PushPayloadRouter.route(
-        event = entry.event,
-        bookingId = entry.bookingId,
-        threadId = entry.threadId,
-        requestId = entry.requestId,
-        role = role,
-    )
-    when (action) {
-        is PushDeepLinkAction.OpenBookingDetail -> onOpenBooking(action.bookingId)
-        is PushDeepLinkAction.OpenThread -> action.threadId?.let(onOpenThread)
-        is PushDeepLinkAction.OpenGigRequest -> action.requestId?.let(onOpenGigRequest)
-        // Tab-only actions and unroutable payloads: the row is a record, not a
-        // promise, and moving the user to a tab they are already looking at is
-        // indistinguishable from the tap doing nothing.
-        PushDeepLinkAction.ArtistGigs,
-        PushDeepLinkAction.ArtistHome,
-        PushDeepLinkAction.Ignore,
-        -> Unit
-    }
+    onOpenMessages: () -> Unit,
+    onOpenGigRequest: ((String) -> Unit)?,
+    onOpenGigs: (() -> Unit)?,
+    onOpenHome: (() -> Unit)?,
+): (() -> Unit)? = when (val destination = activityDestination(entry, role)) {
+    null -> null
+    is ActivityDestination.Booking -> ({ onOpenBooking(destination.id) })
+    is ActivityDestination.Thread -> ({ onOpenThread(destination.id) })
+    ActivityDestination.Messages -> onOpenMessages
+    // A graph that cannot open one request can still open the list it is in.
+    is ActivityDestination.GigRequest ->
+        onOpenGigRequest?.let { open -> ({ open(destination.id) }) } ?: onOpenHome
+    ActivityDestination.Gigs -> onOpenGigs
+    ActivityDestination.Home -> onOpenHome
 }
 
+/**
+ * One row. [onClick] is null when the row has nowhere to go — it then draws
+ * identically but carries no ripple, no button semantics and no tap target, so a
+ * record that cannot be opened does not advertise itself as one that can.
+ */
 @Composable
 private fun ActivityRow(
     entry: ActivityEntry,
     accented: Boolean,
     nowMs: Long,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
+            .then(
+                if (onClick == null) Modifier
+                else Modifier.clickable(role = Role.Button, onClick = onClick),
+            )
             .hairlineBottom()
             .padding(vertical = dimens.space.md)
             .semantics(mergeDescendants = true) {

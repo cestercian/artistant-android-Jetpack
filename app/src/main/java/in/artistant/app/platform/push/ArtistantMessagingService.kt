@@ -14,10 +14,8 @@ import `in`.artistant.app.R
 import `in`.artistant.app.feature.system.ActivityEntry
 import `in`.artistant.app.feature.system.ActivityLog
 import `in`.artistant.app.platform.permissions.isNotificationPermissionGranted
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -31,16 +29,6 @@ class ArtistantMessagingService : FirebaseMessagingService() {
 
     /** Design 123 — the device's own record of what arrived. */
     @Inject lateinit var activityLog: ActivityLog
-
-    /**
-     * Survives this callback, deliberately.
-     *
-     * `onMessageReceived` returns as soon as the notification is posted, and the
-     * log write is a DataStore edit that must not be cancelled with it —
-     * `SupervisorJob` so one failed write cannot take the scope down for the
-     * life of the process.
-     */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
         Timber.d("FCM onNewToken")
@@ -88,13 +76,29 @@ class ArtistantMessagingService : FirebaseMessagingService() {
     }
 
     /**
-     * Append this push to the device's activity log.
+     * Append this push to the device's activity log — **synchronously**.
      *
-     * Fire-and-forget on an IO scope owned by the service: `onMessageReceived`
-     * runs on FCM's own worker thread with a limited window, and a DataStore
-     * write is not something to hold it open for. [ActivityLog.record] swallows
-     * its own failures — a log that cannot be written must never cost the user
-     * the notification.
+     * It used to be a `launch` on an IO scope owned by the service, which is a
+     * write with no owner: `onMessageReceived` returns immediately, and for a
+     * background push the process exists only for the length of this callback.
+     * The system is free to kill it the moment the callback returns, so the
+     * DataStore edit raced the process teardown and lost it often enough to
+     * matter — and the row that goes missing is exactly the background arrival
+     * screen 123 exists to keep.
+     *
+     * `runBlocking` is safe here and is the option the platform intends:
+     * `onMessageReceived` already runs on one of FCM's own worker threads, never
+     * the main thread, and the callback is allowed roughly 10–20 seconds of work
+     * before the OS considers the service stuck. A DataStore edit of a single
+     * capped string is milliseconds. [ACTIVITY_WRITE_TIMEOUT_MS] is a fuse, not
+     * a schedule: if the write ever did block — a contended lock, a disk stall —
+     * the notification still gets posted rather than the whole delivery being
+     * held hostage to bookkeeping. A WorkManager one-shot would also be durable
+     * but costs a scheduled wake-up and a second serialization of the payload to
+     * record something already in hand.
+     *
+     * [ActivityLog.record] swallows its own failures — a log that cannot be
+     * written must never cost the user the notification.
      *
      * The id combines the plan's collapse key with the arrival time, so a second
      * message in the same conversation REPLACES the notification (that is the
@@ -102,22 +106,22 @@ class ArtistantMessagingService : FirebaseMessagingService() {
      */
     private fun logActivity(plan: PushNotificationPlan, data: Map<String, String>) {
         val receivedAt = System.currentTimeMillis()
-        scope.launch {
-            activityLog.record(
-                ActivityEntry(
-                    id = "${plan.notificationId}:$receivedAt",
-                    event = data["artistant_event"]?.trim()?.takeIf { it.isNotEmpty() },
-                    // Titled the way the notification is titled, so the row and
-                    // the banner say the same thing.
-                    title = plan.title ?: getString(R.string.app_name),
-                    body = plan.body,
-                    receivedAtMs = receivedAt,
-                    bookingId = data["artistant_booking_id"]?.trim()?.takeIf { it.isNotEmpty() },
-                    threadId = data["artistant_thread_id"]?.trim()?.takeIf { it.isNotEmpty() },
-                    requestId = data["artistant_request_id"]?.trim()?.takeIf { it.isNotEmpty() },
-                ),
-            )
+        val entry = ActivityEntry(
+            id = "${plan.notificationId}:$receivedAt",
+            event = data["artistant_event"]?.trim()?.takeIf { it.isNotEmpty() },
+            // Titled the way the notification is titled, so the row and the
+            // banner say the same thing.
+            title = plan.title ?: getString(R.string.app_name),
+            body = plan.body,
+            receivedAtMs = receivedAt,
+            bookingId = data["artistant_booking_id"]?.trim()?.takeIf { it.isNotEmpty() },
+            threadId = data["artistant_thread_id"]?.trim()?.takeIf { it.isNotEmpty() },
+            requestId = data["artistant_request_id"]?.trim()?.takeIf { it.isNotEmpty() },
+        )
+        val wrote = runBlocking {
+            withTimeoutOrNull(ACTIVITY_WRITE_TIMEOUT_MS) { activityLog.record(entry) }
         }
+        if (wrote == null) Timber.w("Activity log write timed out; the push is still shown")
     }
 
     private fun build(plan: PushNotificationPlan, data: Map<String, String>): Notification {
@@ -165,5 +169,8 @@ class ArtistantMessagingService : FirebaseMessagingService() {
 
     private companion object {
         const val PAYLOAD_KEY_PREFIX = "artistant_"
+
+        /** See [logActivity] — a fuse on the receive callback's budget, not a schedule. */
+        const val ACTIVITY_WRITE_TIMEOUT_MS = 5_000L
     }
 }

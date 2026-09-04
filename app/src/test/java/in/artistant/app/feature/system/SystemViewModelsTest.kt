@@ -3,6 +3,7 @@ package `in`.artistant.app.feature.system
 import `in`.artistant.app.BuildConfig
 import `in`.artistant.app.data.repository.FakeBookingsRepository
 import `in`.artistant.app.testsupport.MainDispatcherRule
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +17,7 @@ import org.junit.Test
  * The three ViewModels that turn section SH's decisions into screens: What's
  * new, the rating prompt and Feedback.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SystemViewModelsTest {
 
     @get:Rule val mainDispatcherRule = MainDispatcherRule()

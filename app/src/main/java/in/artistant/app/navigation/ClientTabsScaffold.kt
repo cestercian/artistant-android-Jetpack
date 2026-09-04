@@ -303,9 +303,13 @@ fun ClientTabsScaffold() {
                         role = AppRole.Client,
                         onOpenBooking = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                         onOpenThread = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
-                        // Gig requests are the artist's inbox; a client's log can
-                        // never carry one, so there is nothing to route.
-                        onOpenGigRequest = {},
+                        // A chat push whose thread id never arrived still has to
+                        // reach the user's messages — the same fallback
+                        // `TabRouter.apply` makes for the notification tap.
+                        onOpenMessages = { navigateToTab(nav, ClientTab.Messages.route) },
+                        // Gig requests, Gigs and the studio are the artist's
+                        // graph. Left null so a row that would go there renders
+                        // as a record rather than as a control that eats the tap.
                     )
                 }
             }

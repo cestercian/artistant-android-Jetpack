@@ -226,7 +226,13 @@ fun ArtistTabsScaffold() {
                         role = AppRole.Artist,
                         onOpenBooking = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
                         onOpenThread = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
+                        // The three tab-only landings a push can ask for. They
+                        // are the destinations `TabRouter.apply` arms for the
+                        // same payloads, so a row and its notification agree.
+                        onOpenMessages = { navigateToTab(nav, ArtistTab.Messages.route) },
                         onOpenGigRequest = { id -> nav.navigate(ArtistNavRoutes.gigRequest(id)) },
+                        onOpenGigs = { navigateToTab(nav, ArtistTab.Gigs.route) },
+                        onOpenHome = { navigateToTab(nav, ArtistTab.Home.route) },
                     )
                 }
             }

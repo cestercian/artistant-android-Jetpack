@@ -35,4 +35,10 @@ abstract class SystemModule {
     @Binds
     @Singleton
     abstract fun bindFeedbackOutbox(impl: DataStoreFeedbackOutbox): FeedbackOutbox
+
+    @Binds
+    @Singleton
+    abstract fun bindFeedbackDrainScheduler(
+        impl: WorkManagerFeedbackDrainScheduler,
+    ): FeedbackDrainScheduler
 }

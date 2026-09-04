@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -48,31 +51,76 @@ class RatePromptViewModel @Inject constructor(
     val visible: StateFlow<Boolean> = _visible.asStateFlow()
 
     /**
+     * One transition at a time.
+     *
+     * All three entry points are read-modify-write over the same record, and all
+     * three are fired from UI callbacks that can genuinely overlap: the scaffold
+     * arms the prompt from a composition effect that re-runs on a configuration
+     * change, while the sheet's own buttons dismiss it. Unserialized, an arm
+     * whose read happened before a `rated()` write can complete afterwards and
+     * put `asked`/`rated` back to false — and the prompt the user has already
+     * answered comes back.
+     *
+     * The lock is also what makes the "terminal state wins" check below sound:
+     * reading and writing inside it is the only way `asked || rated` can be
+     * trusted between the two.
+     */
+    private val transitions = Mutex()
+
+    /**
      * A review just landed.
      *
-     * Idempotent by construction: the flag is already true after the first call,
-     * so a recomposition that replays the event cannot re-arm a prompt the user
-     * has since dismissed — [shouldPromptForRating] reads `asked` too.
+     * Idempotent, and now explicitly so: a record that is already `asked` or
+     * `rated` has answered this question for good, so a replayed event neither
+     * writes nor re-opens. [shouldPromptForRating] would refuse the prompt
+     * anyway; refusing the WRITE is what stops a stale arm regressing the flags.
      */
     fun recordReviewSubmitted() {
         viewModelScope.launch {
-            val record = prefs.ratePrompt().copy(reviewSubmitted = true)
-            prefs.setRatePrompt(record)
-            _visible.value = shouldPromptForRating(record)
+            transitions.withLock {
+                val record = prefs.ratePrompt()
+                if (record.asked || record.rated) return@withLock
+                val next = record.copy(reviewSubmitted = true)
+                persist(next)
+                _visible.value = shouldPromptForRating(next)
+            }
         }
     }
 
     /** "Rate on Google Play" — the store opens, and we never ask again. */
     fun rated() {
-        _visible.value = false
         viewModelScope.launch {
-            prefs.setRatePrompt(prefs.ratePrompt().copy(asked = true, rated = true))
+            transitions.withLock {
+                // Recorded BEFORE the sheet goes, so there is no window in which
+                // the prompt is invisible and the record still says it was never
+                // answered — which is the state a process death turns into a
+                // second ask.
+                persist(prefs.ratePrompt().copy(asked = true, rated = true))
+                _visible.value = false
+            }
         }
     }
 
     /** "Not now", the close cross, and a scrim tap. All the same answer. */
     fun dismiss() {
-        _visible.value = false
-        viewModelScope.launch { prefs.setRatePrompt(prefs.ratePrompt().copy(asked = true)) }
+        viewModelScope.launch {
+            transitions.withLock {
+                persist(prefs.ratePrompt().copy(asked = true))
+                _visible.value = false
+            }
+        }
+    }
+
+    /**
+     * A failed write must not leave the sheet up.
+     *
+     * The lock cannot make a disk error go away; what it can do is guarantee the
+     * attempt happened before the prompt closes. If the store refuses, the user
+     * still gets the answer they pressed and the worst case is one repeated ask
+     * on a later launch — strictly better than a modal that will not close.
+     */
+    private suspend fun persist(record: RatePromptRecord) {
+        runCatching { prefs.setRatePrompt(record) }
+            .onFailure { Timber.w(it, "Couldn't record the rating prompt state") }
     }
 }

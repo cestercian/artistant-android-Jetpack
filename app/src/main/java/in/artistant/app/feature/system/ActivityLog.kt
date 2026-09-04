@@ -1,11 +1,12 @@
 package `in`.artistant.app.feature.system
 
-import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.auth
+import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.platform.storage.KeyValueStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -25,7 +26,16 @@ import javax.inject.Singleton
 data class ActivityEntry(
     /** Stable within the log; the write assigns it. */
     val id: String,
-    /** The account the device was signed in as when this landed, lowercase. */
+    /**
+     * The account the device was signed in as when this landed, lowercase.
+     *
+     * Nullable only so a blob written by an older build still decodes; nothing
+     * stores a null any more. [ActivityLog.record] drops a push that arrives
+     * with no session rather than filing it under nobody, and the read shows
+     * only rows owned by the account asking — an ownerless row would otherwise
+     * surface the previous account's title, body and route to whoever signs in
+     * next.
+     */
     val userId: String? = null,
     /** `artistant_event`, verbatim. Null for a payload that carried none. */
     val event: String? = null,
@@ -164,12 +174,27 @@ fun groupActivity(
  * never tapped is exactly the one they need to find later.
  */
 interface ActivityLog {
-    /** Newest first, already filtered to the signed-in account. */
+    /**
+     * Newest first, and only the rows the signed-in account owns.
+     *
+     * Empty while signed out. "Received on this device" is not "received by
+     * whoever holds the device": a push landing between one account signing out
+     * and the next signing in used to be stored ownerless and then shown to the
+     * new account, which leaks the previous one's notification title, body and
+     * deep-link ids.
+     */
     val entries: Flow<List<ActivityEntry>>
 
-    /** Record an arriving push. Never throws — a failed log must not drop a notification. */
+    /**
+     * Record an arriving push. Never throws — a failed log must not drop a notification.
+     *
+     * A push that arrives with no session is **dropped**. There is nobody to
+     * attribute it to, and the only alternatives are filing it under nobody
+     * (which is the leak above) or guessing an owner.
+     */
     suspend fun record(entry: ActivityEntry)
 
+    /** Marks the signed-in account's own rows read. Inert while signed out. */
     suspend fun markAllRead()
 
     /** Sign-out and delete-account both go through `AppPreferences.wipeAll`; this is for tests
@@ -180,38 +205,68 @@ interface ActivityLog {
 @Singleton
 class DataStoreActivityLog @Inject constructor(
     private val store: KeyValueStore,
-    private val client: SupabaseClient,
+    private val viewer: ViewerIdentity,
 ) : ActivityLog {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    /**
+     * The transaction boundary for the whole log.
+     *
+     * Every mutation here is a read-modify-write of ONE DataStore string, and
+     * the writers are genuinely concurrent: FCM delivers pushes on its own
+     * worker threads and "Mark all read" runs from the ViewModel at the same
+     * time. Unserialized, two pushes arriving together both read the same list
+     * and the second write silently discards the first — the entry is simply
+     * not in the log, which is the one failure this screen exists to prevent.
+     *
+     * A `@Singleton` binding is what makes one lock enough: every caller shares
+     * this instance, so there is exactly one writer at a time per process.
+     */
+    private val mutex = Mutex()
+
     override val entries: Flow<List<ActivityEntry>> =
         store.getString(KEY).map { raw ->
-            val all = decode(raw)
-            val account = currentUserId()
-            // A row with no account recorded is shown to whoever is signed in:
-            // it was received on this device, the store is wiped on sign-out, and
-            // hiding it would mean the log is silently incomplete.
-            all.filter { it.userId == null || account == null || it.userId == account }
+            // Signed out, the log shows nothing. It is not "empty" — it is not
+            // this session's to read, and the store is wiped on sign-out anyway.
+            val account = viewer.currentUserId() ?: return@map emptyList()
+            decode(raw).filter { it.userId == account }
         }
 
     override suspend fun record(entry: ActivityEntry) {
+        // No session, no owner, no row. A push CAN land here between sign-out
+        // and the next sign-in (the token survives until `send-push` is told
+        // otherwise), and an ownerless row is one the next account would be
+        // shown.
+        val owner = entry.userId?.lowercase() ?: viewer.currentUserId() ?: run {
+            Timber.i("Dropped an arriving push: no signed-in account to file it under")
+            return
+        }
         runCatching {
-            val existing = decode(store.getString(KEY).first())
-            val stamped = entry.copy(userId = entry.userId ?: currentUserId())
-            store.setString(KEY, json.encodeToString(appendActivity(existing, stamped)))
+            mutex.withLock {
+                val existing = decode(store.getString(KEY).first())
+                val stamped = entry.copy(userId = owner)
+                store.setString(KEY, json.encodeToString(appendActivity(existing, stamped)))
+            }
         }.onFailure { Timber.w(it, "Couldn't record activity entry") }
     }
 
     override suspend fun markAllRead() {
+        val account = viewer.currentUserId() ?: return
         runCatching {
-            val updated = decode(store.getString(KEY).first()).map { it.copy(read = true) }
-            store.setString(KEY, json.encodeToString(updated))
+            mutex.withLock {
+                // Only this account's rows. Anything else in the blob is
+                // invisible to this session, and quietly rewriting it would be
+                // touching a record that is not ours to touch.
+                val updated = decode(store.getString(KEY).first())
+                    .map { if (it.userId == account) it.copy(read = true) else it }
+                store.setString(KEY, json.encodeToString(updated))
+            }
         }.onFailure { Timber.w(it, "Couldn't mark activity read") }
     }
 
     override suspend fun clear() {
-        runCatching { store.setString(KEY, "") }
+        runCatching { mutex.withLock { store.setString(KEY, "") } }
             .onFailure { Timber.w(it, "Couldn't clear the activity log") }
     }
 
@@ -229,9 +284,6 @@ class DataStoreActivityLog @Inject constructor(
                 emptyList()
             }
     }
-
-    private fun currentUserId(): String? =
-        client.auth.currentSessionOrNull()?.user?.id?.lowercase()
 
     private companion object {
         const val KEY = "system.activityLog"
