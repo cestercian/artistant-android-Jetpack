@@ -3,16 +3,18 @@ package `in`.artistant.app.feature.discover
 import `in`.artistant.app.testsupport.pkg
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 
 /**
- * Rules behind the Discover masthead + hero carousel. Pure — no Compose runtime.
+ * Rules behind the Discover header, hero card and rails. Pure — no Compose runtime.
  *
  * The interesting cases here are all "the input is technically present but
- * useless": a whitespace-only city, a name that starts with a space, a
- * single-slide carousel. Each of those shipped as a visible bug in some
- * incarnation of this screen, so they get a test rather than a comment.
+ * useless": a whitespace-only city, a name that starts with a space, an
+ * unranked artist with a high raw score. Each of those shipped as a visible bug
+ * in some incarnation of this screen, so they get a test rather than a comment.
  */
 class DiscoverHeroLogicTest {
 
@@ -67,35 +69,109 @@ class DiscoverHeroLogicTest {
         assertEquals("अ", DiscoverHeroLogic.avatarInitial("अनु"))
     }
 
-    // ── auto-advance ─────────────────────────────────────────────────────────
+    // ── header subtitle + rail titles ────────────────────────────────────────
+    //
+    // The design's note for screen 02 is that the city and the date sit in the
+    // header BECAUSE they scope every price under it. Both halves therefore have
+    // to be facts: the city is the profile's, the date is today's, and the rail
+    // title names the same day the rail's own query was scoped to.
 
     @Test
-    fun `carousel advances when there is more than one slide`() {
-        assertTrue(DiscoverHeroLogic.shouldAutoAdvance(pageCount = 5, animationsEnabled = true))
+    fun `header subtitle joins the city and today's date`() {
+        assertEquals(
+            "Chennai \u00b7 Sat 10 Oct",
+            DiscoverHeroLogic.headerSubtitle("Chennai", LocalDate.of(2026, 10, 10)),
+        )
     }
 
     @Test
-    fun `carousel does not advance a single slide`() {
-        assertFalse(DiscoverHeroLogic.shouldAutoAdvance(pageCount = 1, animationsEnabled = true))
-        assertFalse(DiscoverHeroLogic.shouldAutoAdvance(pageCount = 0, animationsEnabled = true))
+    fun `header subtitle still names the country when the city is missing`() {
+        assertTrue(
+            DiscoverHeroLogic.headerSubtitle(null, LocalDate.of(2026, 10, 10))
+                .startsWith(DiscoverHeroLogic.PLACE_FALLBACK),
+        )
     }
 
     @Test
-    fun `carousel does not advance when the user reduced motion`() {
-        assertFalse(DiscoverHeroLogic.shouldAutoAdvance(pageCount = 5, animationsEnabled = false))
+    fun `the availability rail is titled with the day it queried`() {
+        assertEquals(
+            "Available Sat night",
+            DiscoverHeroLogic.availableRailTitle(LocalDate.of(2026, 10, 10)),
+        )
+        assertEquals(
+            "Available Wed night",
+            DiscoverHeroLogic.availableRailTitle(LocalDate.of(2026, 10, 14)),
+        )
     }
 
-    // ── nextPage ─────────────────────────────────────────────────────────────
+    // ── evidencesAvailability ────────────────────────────────────────────────
 
     @Test
-    fun `next page wraps at the end`() {
-        assertEquals(1, DiscoverHeroLogic.nextPage(current = 0, pageCount = 3))
-        assertEquals(0, DiscoverHeroLogic.nextPage(current = 2, pageCount = 3))
+    fun `an artist who published that weekday passes the second gate`() {
+        assertTrue(
+            DiscoverHeroLogic.evidencesAvailability(listOf("Fri", "Sat"), LocalDate.of(2026, 10, 10)),
+        )
     }
 
     @Test
-    fun `next page is zero for an empty carousel instead of dividing by zero`() {
-        assertEquals(0, DiscoverHeroLogic.nextPage(current = 0, pageCount = 0))
+    fun `an artist who published other weekdays is dropped from the rail`() {
+        assertFalse(
+            DiscoverHeroLogic.evidencesAvailability(listOf("Mon", "Tue"), LocalDate.of(2026, 10, 10)),
+        )
+    }
+
+    /**
+     * Silence is not evidence.
+     *
+     * This returned true once, on the reasoning that an empty `days_available` is
+     * an absence of information rather than a statement of unavailability — right
+     * about the artist, wrong about the rail. The repository silently retries a
+     * date-filtered search WITHOUT the 0073 dimensions when the RPC signature is
+     * missing, and the Fake twins ignore the date entirely; on that path a blank
+     * week is exactly what an unfiltered page looks like, and passing it captions
+     * "Available Sat night" over people who never said anything.
+     */
+    @Test
+    fun `an artist who published no week is not evidence of availability`() {
+        assertFalse(DiscoverHeroLogic.evidencesAvailability(emptyList(), LocalDate.of(2026, 10, 10)))
+    }
+
+    /** `days_available` arrives as free text from a shared backend. */
+    @Test
+    fun `a padded weekday still counts`() {
+        assertTrue(
+            DiscoverHeroLogic.evidencesAvailability(listOf(" sat "), LocalDate.of(2026, 10, 10)),
+        )
+    }
+
+    // ── hero badge and rating ────────────────────────────────────────────────
+
+    @Test
+    fun `only a top band earns the hero badge`() {
+        assertEquals("Top rated", DiscoverHeroLogic.heroBadge(score = 94, gigs = 20))
+        assertEquals("Trusted", DiscoverHeroLogic.heroBadge(score = 80, gigs = 20))
+        assertNull(DiscoverHeroLogic.heroBadge(score = 65, gigs = 20))
+        assertNull(DiscoverHeroLogic.heroBadge(score = 0, gigs = 0))
+    }
+
+    /**
+     * A 94-scoring artist with four completed gigs is unranked — ScoreBands says
+     * so — so the badge must not promote them on the busiest screen in the app.
+     */
+    @Test
+    fun `an unranked artist gets no badge however high the raw score`() {
+        assertNull(DiscoverHeroLogic.heroBadge(score = 94, gigs = 4))
+    }
+
+    @Test
+    fun `a fresh act with no rating shows no rating cell rather than zero`() {
+        assertNull(DiscoverHeroLogic.heroRating(rating = 0.0, gigs = 0))
+    }
+
+    @Test
+    fun `the rating cell carries the count it is an average of`() {
+        assertEquals("4.92 (128)", DiscoverHeroLogic.heroRating(rating = 4.92, gigs = 128))
+        assertEquals("4.50", DiscoverHeroLogic.heroRating(rating = 4.5, gigs = 0))
     }
 
     // ── fromPriceLabel ───────────────────────────────────────────────────────

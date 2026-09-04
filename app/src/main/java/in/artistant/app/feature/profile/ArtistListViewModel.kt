@@ -18,6 +18,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -35,9 +36,29 @@ data class ArtistListRow(
 data class ArtistListUiState(
     val kind: ArtistListKind = ArtistListKind.Saved,
     val rows: List<ArtistListRow> = emptyList(),
+    /** null = "All". Filters [rows] down to one act category (screen 32). */
+    val selectedCategory: String? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
-)
+) {
+    /**
+     * The category chips: every act type actually present in the rows.
+     *
+     * Derived rather than fetched, and derived from THESE rows rather than from
+     * the roster's facets: a chip for a category nobody in your saved list plays
+     * is a filter that can only ever empty the screen.
+     */
+    val categories: List<String>
+        get() = rows.mapNotNull { it.artist?.category?.trim()?.takeIf(String::isNotEmpty) }
+            .distinct()
+            .sorted()
+
+    /** The rows the screen draws, after the category chip. */
+    val visibleRows: List<ArtistListRow>
+        get() = selectedCategory?.let { picked ->
+            rows.filter { it.artist?.category.equals(picked, ignoreCase = true) }
+        } ?: rows
+}
 
 @HiltViewModel
 class ArtistListViewModel @Inject constructor(
@@ -53,23 +74,111 @@ class ArtistListViewModel @Inject constructor(
     val state: StateFlow<ArtistListUiState> = _state.asStateFlow()
 
     init {
+        if (kind == ArtistListKind.Saved) observeSaved()
         refresh()
+    }
+
+    /**
+     * Saved rows come from the store's FLOW, for the whole life of the screen.
+     *
+     * They used to come from one read taken immediately after
+     * `savedStore.refreshFromServer()`, which is a read of the wrong moment:
+     * that call issues the network request and then merely ENQUEUES the answer
+     * on the store's command channel, where a single consumer applies it on
+     * another dispatcher. `savedStore.ids.value` right after it returns is
+     * therefore the set from BEFORE the server answered — usually the disk
+     * cache, and on a cold start an empty one. The list rendered that snapshot
+     * and never looked again, so a screen opened during the round trip showed
+     * stale or no rows until something else happened to re-enter it.
+     *
+     * Collecting means every answer the consumer applies — the server's, a
+     * heart tapped on another screen, a sign-out reset — re-derives these rows.
+     * `collectLatest` because [hydrateArtists] suspends on the network: a set
+     * superseded mid-hydration is abandoned rather than raced to completion.
+     */
+    private fun observeSaved() {
+        viewModelScope.launch {
+            savedStore.ids.collectLatest { ids -> applySavedRows(ids.toList()) }
+        }
+    }
+
+    /**
+     * Turn a set of saved ids into rows.
+     *
+     * Deliberately does NOT touch `isLoading` or `error`: those describe the
+     * refresh, which [refresh] owns, and letting the flow clear them would
+     * settle the screen on the pre-answer emission — the very snapshot this
+     * whole mechanism exists to stop trusting.
+     */
+    private suspend fun applySavedRows(ids: List<String>) {
+        hydrateArtists(ids)
+        val rows = ids.map { id ->
+            // Hydrated above, so this is the cache: the full stitch when it
+            // landed, the tile projection when it didn't, null when neither.
+            val artist = artists.find(id)
+            ArtistListRow(
+                id = id,
+                artistId = id,
+                bookingId = null,
+                artist = artist,
+                fallbackTitle = artist?.name ?: "Artist",
+                pills = emptyList(),
+            )
+        }
+        _state.update { it.copy(rows = rows, selectedCategory = surviving(it.selectedCategory, rows)) }
+    }
+
+    /** Narrow to one act type, or back to all with null. */
+    fun selectCategory(category: String?) {
+        _state.update { it.copy(selectedCategory = category) }
     }
 
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(isLoading = true, error = null) }
-        runCatching {
-            when (kind) {
-                ArtistListKind.Saved -> loadSaved()
-                ArtistListKind.Bookings, ArtistListKind.Completed -> loadBookings()
-            }
-        }.onSuccess { rows ->
-            _state.update { it.copy(rows = rows, isLoading = false) }
-        }.onFailure { e ->
-            _state.update {
-                it.copy(isLoading = false, error = e.message ?: "Couldn't load list")
+        when (kind) {
+            ArtistListKind.Saved -> refreshSaved()
+            ArtistListKind.Bookings, ArtistListKind.Completed -> refreshBookings()
+        }
+    }
+
+    /**
+     * Ask the store to re-read the server, then settle loading and failure.
+     *
+     * The ROWS are not this function's business — [observeSaved] delivers those.
+     * All that is decided here is whether the screen may claim an empty list:
+     * only when the server answered. A failed read with nothing cached is
+     * "couldn't load" with a retry, because a dropped connection and a list you
+     * have not filled are the same empty set and the opposite meaning, and the
+     * empty state's only action ("Browse Discover") is exactly the wrong advice
+     * for the first one.
+     */
+    private suspend fun refreshSaved() {
+        val readServer = savedStore.refreshFromServer()
+        _state.update {
+            if (!readServer && it.rows.isEmpty() && savedStore.ids.value.isEmpty()) {
+                it.copy(isLoading = false, error = SAVED_UNREACHABLE)
+            } else {
+                it.copy(isLoading = false, error = null)
             }
         }
+    }
+
+    private suspend fun refreshBookings() {
+        runCatching { loadBookings() }
+            .onSuccess { rows ->
+                _state.update {
+                    it.copy(
+                        rows = rows,
+                        selectedCategory = surviving(it.selectedCategory, rows),
+                        isLoading = false,
+                    )
+                }
+            }
+            .onFailure { e ->
+                _state.update {
+                    it.copy(isLoading = false, error = e.message ?: "Couldn't load list")
+                }
+            }
     }
 
     /**
@@ -90,25 +199,6 @@ class ArtistListViewModel @Inject constructor(
         if (wanted.isEmpty()) return
         coroutineScope {
             wanted.map { id -> async { artists.ensureFull(id) } }.awaitAll()
-        }
-    }
-
-    private suspend fun loadSaved(): List<ArtistListRow> {
-        savedStore.refreshFromServer()
-        val ids = savedStore.ids.value.toList()
-        hydrateArtists(ids)
-        return ids.map { id ->
-            // Hydrated above, so this is the cache: the full stitch when it
-            // landed, the tile projection when it didn't, null when neither.
-            val artist = artists.find(id)
-            ArtistListRow(
-                id = id,
-                artistId = id,
-                bookingId = null,
-                artist = artist,
-                fallbackTitle = artist?.name ?: "Artist",
-                pills = emptyList(),
-            )
         }
     }
 
@@ -154,5 +244,21 @@ class ArtistListViewModel @Inject constructor(
             out += it.uppercase() to PillTone.Neutral
         }
         return out
+    }
+
+    /**
+     * The category chip that survives a reload, or null.
+     *
+     * A selection that no longer matches any row would filter the list to
+     * nothing with no chip lit to explain why.
+     */
+    private fun surviving(selected: String?, rows: List<ArtistListRow>): String? =
+        selected?.takeIf { c -> rows.any { it.artist?.category.equals(c, ignoreCase = true) } }
+
+    companion object {
+        /** The detail line under a saved-list failure. */
+        const val SAVED_UNREACHABLE =
+            "We couldn't reach your saved list. This is a connection problem — " +
+                "it is not that you have saved nobody."
     }
 }
