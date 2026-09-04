@@ -43,6 +43,7 @@ import `in`.artistant.app.designsystem.component.ListRow
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.SheetScaffold
 import `in`.artistant.app.designsystem.component.hairlineBottom
+import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -175,6 +176,11 @@ internal fun ReportArtistSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var reason by rememberSaveable { mutableStateOf<String?>(null) }
     var note by rememberSaveable { mutableStateOf("") }
+    // The two sites iOS's `ReportArtistSheet` buzzes at: picking a reason is a
+    // selection, filing the report is a warning — not a success, because the
+    // thing that just happened is a complaint and the app must not congratulate
+    // anyone for it.
+    val haptics = rememberHaptics()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -221,7 +227,10 @@ internal fun ReportArtistSheet(
                         label = option,
                         selected = option == reason,
                         showHairline = index != ArtistReportReasons.lastIndex,
-                        onClick = { reason = option },
+                        onClick = {
+                            haptics.tap()
+                            reason = option
+                        },
                     )
                 }
                 Spacer(Modifier.height(space.lg))
@@ -237,7 +246,12 @@ internal fun ReportArtistSheet(
             Spacer(Modifier.height(space.lg))
             PrimaryButton(
                 text = "Submit report",
-                onClick = { reason?.let { onSubmit(it, note.trim().ifBlank { null }) } },
+                onClick = {
+                    reason?.let {
+                        haptics.warning()
+                        onSubmit(it, note.trim().ifBlank { null })
+                    }
+                },
                 // A report with no reason is a row a moderator cannot triage, so
                 // the button waits rather than filing "Something else" on the
                 // reporter's behalf.
