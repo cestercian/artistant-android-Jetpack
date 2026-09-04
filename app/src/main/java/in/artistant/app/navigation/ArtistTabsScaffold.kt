@@ -35,6 +35,7 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artisthome.ArtistHomeScreen
+import `in`.artistant.app.feature.artisthome.EarningsScreen
 import `in`.artistant.app.feature.availability.ManageAvailabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.epk.EpkScreen
@@ -133,7 +134,7 @@ fun ArtistTabsScaffold() {
                 // actually changes what the market can see is "open a date", and
                 // that editor already exists. Not a new flow — a shortcut to one.
                 action = LightTabAction(
-                    label = "Manage availability",
+                    label = "Availability",
                     icon = Icons.Filled.PlayArrow,
                     onClick = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
                 ),
@@ -160,6 +161,12 @@ fun ArtistTabsScaffold() {
                         // to change what days are offered; it previously had no
                         // route, so the editor was reachable only from Profile.
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        // "Manage" beside the 14-day strip and the standing pill
+                        // both open the CALENDAR (screen 22), not the weekday
+                        // editor: the artist tapping a strip of dates is asking
+                        // what is spoken for, and the editor hangs off that.
+                        onOpenAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                        onOpenEarnings = { nav.navigate(ArtistNavRoutes.EARNINGS) },
                         onSubscribe = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                     )
                 }
@@ -216,6 +223,14 @@ fun ArtistTabsScaffold() {
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {
                 TabPane(inner) {
                     ManageAvailabilityScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            composable(ArtistNavRoutes.EARNINGS) {
+                TabPane(inner) {
+                    EarningsScreen(
+                        onBack = { nav.popBackStack() },
+                        onBookingClick = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
+                    )
                 }
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {

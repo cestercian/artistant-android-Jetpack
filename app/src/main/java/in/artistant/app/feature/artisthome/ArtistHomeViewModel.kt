@@ -10,6 +10,7 @@ import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.ScoreBreakdown
+import `in`.artistant.app.data.repository.ScoreHistoryPoint
 import `in`.artistant.app.data.repository.ScoreRepository
 import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.feature.messages.ViewerIdentity
@@ -47,6 +48,23 @@ data class ArtistHomeUiState(
     val hero: HeroCounts = HeroCounts(0, 0, 0, true),
     val series: List<Int> = emptyList(),
 
+    /** Screen 09's money card — this calendar month, played and still ahead. */
+    val money: MonthMoney = MonthMoney(0, 0, 0, 0),
+    /**
+     * The "+4" beside the Bookability figure, or null when there is no baseline
+     * a month back to measure against. Never 0-as-a-fallback: see [scoreDelta].
+     */
+    val scoreDelta: Int? = null,
+    /**
+     * The weekdays the artist plays, straight off `artists.days_available`.
+     *
+     * Drives the header's "Taking gigs" pill and the availability screen's
+     * blocked days. Empty means either "none picked" or "not read yet" — the
+     * pill only renders once [hasLoaded] says a read landed, so the two can't be
+     * confused on screen.
+     */
+    val daysAvailable: List<String> = emptyList(),
+
     // Stat row
     val upcomingSnapshot: UpcomingSnapshot = UpcomingSnapshot(0, "No upcoming gigs"),
     val bookings7d: List<Int> = emptyList(),
@@ -81,6 +99,21 @@ data class ArtistHomeUiState(
         get() = hero.headline > 0 && !hasChartData && range == EarningsRange.All
 
     val bookings7dCount: Int get() = bookings7d.sum()
+
+    /**
+     * Which of the three dashboards the design allows right now — screen 09
+     * (money), 85 (cold) or 86 (unavailable). See [dashboardMode]; the failed
+     * first load is the case that matters.
+     */
+    val mode: DashboardMode
+        get() = dashboardMode(
+            hasLoaded = hasLoaded,
+            hasError = error != null,
+            money = money,
+            openRequests = pendingRequests.size + openQuotes.size,
+            upcomingGigs = upcoming.size,
+            bookings7d = bookings7d.sum(),
+        )
 }
 
 @HiltViewModel
@@ -172,11 +205,17 @@ class ArtistHomeViewModel @Inject constructor(
                     // four metric rows collapsed to em-dashes, silently, because
                     // nothing folded it into the failure banner either.
                     val breakdownJob = async { runCatching { scoreRepository.breakdownForSelf() } }
+                    // The delta beside the score. Failure is not news that the
+                    // score hasn't moved, so it stays a Result and a failed read
+                    // keeps whatever the last good refresh decided — same rule as
+                    // the breakdown it sits next to.
+                    val historyJob = async { runCatching { scoreRepository.historyForSelf() } }
                     LoadedDashboard(
                         bookings = bookingsJob.await(),
                         quotes = quotesJob.await(),
                         profile = profileJob.await(),
                         breakdown = breakdownJob.await(),
+                        history = historyJob.await(),
                     )
                 }
 
@@ -252,6 +291,17 @@ class ArtistHomeViewModel @Inject constructor(
                         // news that the artist is new. `NewArtist` is the
                         // pre-hydration default only — never a failure fallback.
                         breakdown = loaded.breakdown.getOrNull() ?: prev.breakdown,
+                        scoreDelta = loaded.history.getOrNull()?.let { history ->
+                            scoreDelta(
+                                history = history,
+                                currentScore = loaded.breakdown.getOrNull()?.score ?: prev.breakdown.score,
+                            )
+                        } ?: prev.scoreDelta,
+                        // Same rule again: a failed artist read is not news that
+                        // the artist plays no days, and painting the pill "not
+                        // taking gigs" off a dropped connection is a lie about
+                        // their own listing.
+                        daysAvailable = if (detailUnknown) prev.daysAvailable else artist?.daysAvailable.orEmpty(),
                         profileGaps = gaps ?: prev.profileGaps,
                         showSubscribeBanner = showSubscribe,
                         isLoading = false,
@@ -280,6 +330,7 @@ class ArtistHomeViewModel @Inject constructor(
         pendingRequests = pendingConfirmBookings(source),
         upcoming = upcomingConfirmed(source),
         hero = heroCounts(source, range),
+        money = monthMoney(source),
         series = bookingCountSeries(source, range.bucketCount),
         upcomingSnapshot = upcomingSnapshot(source),
         // Fixed 7-day window regardless of the range picker: this cell is a
@@ -297,6 +348,8 @@ class ArtistHomeViewModel @Inject constructor(
         val profile: Result<SelfProfile?>,
         /** success = the row was read (zeros included); failure = the read threw. */
         val breakdown: Result<ScoreBreakdown>,
+        /** success = the history is known (empty included); failure = the read threw. */
+        val history: Result<List<ScoreHistoryPoint>>,
     )
 
     private companion object {
