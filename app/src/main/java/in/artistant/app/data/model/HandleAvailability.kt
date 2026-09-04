@@ -39,4 +39,17 @@ object EmailRules {
 object PasswordRules {
     const val MIN_LENGTH = 6
     fun isValid(raw: String): Boolean = raw.length >= MIN_LENGTH
+
+    /**
+     * What a NEW account has to clear — design screen 28 draws "At least 8 characters" with a
+     * tick beside it, and a rule stated on screen has to be a rule enforced.
+     *
+     * Deliberately stricter than [MIN_LENGTH] and deliberately not applied to sign-IN: an
+     * account made before this screen existed may well hold a six-character password, and
+     * raising the bar under a returning user locks them out of their own account for a rule
+     * that was never theirs. Stricter than the server on the way in is always allowed; stricter
+     * than the account on the way back is not.
+     */
+    const val NEW_ACCOUNT_MIN_LENGTH = 8
+    fun isValidForNewAccount(raw: String): Boolean = raw.length >= NEW_ACCOUNT_MIN_LENGTH
 }

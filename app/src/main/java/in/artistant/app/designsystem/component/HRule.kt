@@ -50,3 +50,23 @@ fun Modifier.hairlineBottom(): Modifier {
         )
     }
 }
+
+/**
+ * [hairlineBottom]'s mirror — the rule along a container's TOP edge.
+ *
+ * The one thing that needs it is a bar pinned to the bottom of the window: the
+ * design gives every pinned CTA a `border-top` and nothing else (no shadow, no
+ * fill change), so the hairline is the only thing separating the action from the
+ * content scrolling under it. Drawn rather than laid out for the same reason as
+ * [hairlineBottom] — a sibling rule would add a unit of height to a bar whose
+ * padding is already measured.
+ */
+@Composable
+fun Modifier.hairlineTop(): Modifier {
+    val color = AppTheme.colors.line
+    val thickness = AppTheme.dimens.size.hairline
+    return drawWithContent {
+        drawContent()
+        drawRect(color = color, size = Size(size.width, thickness.toPx()))
+    }
+}

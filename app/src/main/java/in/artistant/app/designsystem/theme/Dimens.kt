@@ -15,6 +15,15 @@ data class Space(
 
 /** 8/12/18/24/32 corner radii. */
 data class Radii(
+    /**
+     * The corner of a control small enough that [sm] would round it into a circle.
+     *
+     * The design keeps a squircle's radius at roughly a third of its box: 8 on the 24dp
+     * consent square, 5 on the 16dp "at least 8 characters" tick. Reusing [sm] on the smaller
+     * one produces a 16dp box with an 8dp radius, which is not a rounded square, it is a dot —
+     * and a dot beside a rule reads as a bullet rather than as a checkbox.
+     */
+    val xs: Dp = 5.dp,
     val sm: Dp = 8.dp,
     val md: Dp = 12.dp,
     val lg: Dp = 18.dp,
@@ -260,6 +269,18 @@ data class Components(
     val statusDot: Dp = 7.dp,
     /** Emphasis stroke on a focused field or a selected OTP box. */
     val focusStroke: Dp = 1.5.dp,
+    /**
+     * A consent checkbox — the 18+/terms square on screen 118 and the pledge
+     * square on screen 27, plus the stroke its unchecked state is drawn with.
+     *
+     * Its own number rather than an icon-ladder reuse because it is not an icon:
+     * it sits at the top-left of a wrapping paragraph and its size is answerable
+     * to the CAP HEIGHT of the copy beside it, not to the glyph ladder. The
+     * stroke is a hair over [focusStroke] for the same reason the design draws it
+     * that way — an unchecked square has nothing but its outline to be seen by.
+     */
+    val checkbox: Dp = 24.dp,
+    val checkboxStroke: Dp = 1.8.dp,
     /** The circle behind an empty state's glyph, and the glyph inside it. */
     val emptyGlyphCircle: Dp = 72.dp,
     val emptyGlyph: Dp = 28.dp,

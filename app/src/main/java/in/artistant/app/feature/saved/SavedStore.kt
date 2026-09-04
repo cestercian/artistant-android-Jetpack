@@ -127,12 +127,23 @@ class SavedStore @Inject constructor(
      * only the answer is a message. A failure leaves local untouched — the iOS
      * contract — and a `NotSignedIn` keeps the cached hearts until a session
      * lands.
+     *
+     * @return whether the SERVER copy was actually read.
+     *
+     * It used to return nothing, and that made two opposite facts look identical
+     * to every caller: "you have saved nobody" and "we could not find out" are
+     * both an empty [ids]. The saved list is a whole screen built on that set, so
+     * a dropped connection rendered as a confident "Nothing saved yet" over
+     * hearts the user had definitely set — and the screen's only action was
+     * "Browse Discover", i.e. go and set them again. Same reasoning, and the same
+     * fix, as `BlockedUsersStore.refresh()`.
      */
-    suspend fun refreshFromServer() {
+    suspend fun refreshFromServer(): Boolean {
         val issuedFor = session
-        try {
+        return try {
             val remote = repository.list().map { it.lowercase() }.toSet()
             commands.trySend(Command.ServerAnswer(remote, issuedFor))
+            true
         } catch (e: CancellationException) {
             // Structured concurrency: the callers are viewModelScope coroutines
             // (ProfileViewModel, ArtistListViewModel), so a cleared ViewModel
@@ -141,8 +152,10 @@ class SavedStore @Inject constructor(
             throw e
         } catch (_: SavedArtistsRepositoryError.NotSignedIn) {
             // Keep local hearts until a session lands.
+            false
         } catch (_: Throwable) {
             // Network/RLS — leave local untouched (iOS contract).
+            false
         }
     }
 

@@ -11,29 +11,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Size
 import `in`.artistant.app.designsystem.theme.AppTheme
-
-/**
- * [hairlineBottom]'s mirror: the rule along the caller's TOP edge, drawn as a
- * zero-height overlay rather than laid out above it.
- *
- * Lives here rather than beside its twin because the only thing in the app with
- * a rule on top is a bottom bar, and a modifier is easier to find next to its
- * one caller than in a file named after a divider.
- */
-@Composable
-fun Modifier.hairlineTop(): Modifier {
-    val color = AppTheme.colors.line
-    val thickness = AppTheme.dimens.size.hairline
-    // Content FIRST, rule second: the bar paints an opaque background inside this
-    // node, so a rule drawn before `drawContent()` would be covered by it.
-    return drawWithContent {
-        drawContent()
-        drawRect(color = color, size = Size(size.width, thickness.toPx()))
-    }
-}
 
 /**
  * The action bar pinned to the bottom of a pushed screen — screens 20 / 52 / 95

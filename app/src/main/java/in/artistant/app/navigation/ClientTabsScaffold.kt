@@ -42,6 +42,8 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artist.ArtistProfileScreen
+import `in`.artistant.app.feature.artist.ArtistReviewsScreen
+import `in`.artistant.app.feature.score.BookabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.booking.BookingScreen
 import `in`.artistant.app.feature.booking.CheckoutScreen
@@ -55,8 +57,12 @@ import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.search.SearchScreen
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.feature.profile.ArtistListKind
 import `in`.artistant.app.feature.profile.ArtistListScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
+import `in`.artistant.app.feature.signup.LegalDoc
+import `in`.artistant.app.feature.signup.LegalScreen
+import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
@@ -187,12 +193,20 @@ fun ClientTabsScaffold() {
             popEnterTransition = navPopEnter(motion, reduceMotion, tabRoutes),
             popExitTransition = navPopExit(motion, reduceMotion, tabRoutes),
         ) {
-            // Discover is the ONE full-bleed destination: its hero photo runs
-            // under the status bar and its rails scroll behind the floating tab
-            // bar, so it takes no scaffold insets and reserves its own tailroom.
-            // Every other destination gets the normal inset pane via [TabPane].
+            // Discover takes the ordinary inset pane now. Its hero used to be a
+            // full-bleed photograph that owned the status-bar area; the light
+            // design makes it a 262dp card on an ordinary page, so the screen has
+            // nothing left that wants to run under the system bars.
             composable(ClientTab.Discover.route) {
-                DiscoverScreen(onArtistClick = { id -> nav.navigate("artist/$id") })
+                TabPane(inner) {
+                    DiscoverScreen(
+                        onArtistClick = { id -> nav.navigate("artist/$id") },
+                        onOpenSearch = { navigateToTab(nav, ClientTab.Search.route) },
+                        onOpenSaved = {
+                            nav.navigate(ClientNavRoutes.artistList(ArtistListKind.Saved.raw))
+                        },
+                    )
+                }
             }
             composable(ClientTab.Bookings.route) {
                 TabPane(inner) {
@@ -229,6 +243,7 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     ProfileScreen(
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
+                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
                         onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
                         onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
                     )
@@ -237,6 +252,32 @@ fun ClientTabsScaffold() {
             composable(ClientNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
                     BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
+            // because neither is role-specific. Reached from the account settings
+            // list's "Privacy" row above; the legal viewer is also reachable from the
+            // signup flow's welcome and sign-in screens.
+            composable(ClientNavRoutes.PRIVACY) {
+                TabPane(inner) {
+                    PrivacyScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenLegal = { doc -> nav.navigate(ClientNavRoutes.legal(doc.name)) },
+                    )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.LEGAL,
+                arguments = listOf(navArgument("doc") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    // An unknown or missing argument opens the terms rather than
+                    // failing: the viewer is segmented, so the wrong opening tab costs
+                    // one tap and a crash costs the screen.
+                    val doc = LegalDoc.entries
+                        .firstOrNull { it.name == entry.arguments?.getString("doc") }
+                        ?: LegalDoc.Terms
+                    LegalScreen(doc = doc, onClose = { nav.popBackStack() })
                 }
             }
             composable(
@@ -248,6 +289,19 @@ fun ClientTabsScaffold() {
                         onBack = { nav.popBackStack() },
                         onArtistClick = { id -> nav.navigate("artist/$id") },
                         onBookingClick = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
+                        // The three kinds are one screen with three row sources
+                        // (screen 32's note), and the kind is a route argument —
+                        // so switching chips REPLACES this entry rather than
+                        // stacking on it. Without the inclusive pop, tapping
+                        // through Saved → Bookings → Completed would leave three
+                        // copies of the same screen on the stack for back to walk
+                        // down one at a time.
+                        onSelectKind = { picked ->
+                            nav.navigate(ClientNavRoutes.artistList(picked.raw)) {
+                                popUpTo(ClientNavRoutes.ARTIST_LIST) { inclusive = true }
+                            }
+                        },
+                        onBrowseDiscover = { navigateToTab(nav, ClientTab.Discover.route) },
                     )
                 }
             }
@@ -294,12 +348,49 @@ fun ClientTabsScaffold() {
                                 nav.navigate(ClientNavRoutes.chat(threadId))
                             }
                         },
+                        // Screen 55's route out. Not `popBackStack` — a stale
+                        // share link opens this destination with nothing under
+                        // it, and popping an empty stack leaves the app on a
+                        // blank frame. Discover is somewhere to be.
+                        onBrowse = {
+                            nav.navigate(ClientTab.Discover.route) {
+                                popUpTo(ClientTab.Discover.route) { inclusive = true }
+                            }
+                        },
+                        onSeeReviews = { artistId ->
+                            nav.navigate(ClientNavRoutes.artistReviews(artistId))
+                        },
+                        onSeeBookability = { artistId ->
+                            nav.navigate(ClientNavRoutes.bookability(artistId))
+                        },
                     )
                     ChatOpenFeedback(
                         opening = openingChat,
                         error = chatError,
                         onDismissError = chatOpen::dismissError,
                     )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.ARTIST_REVIEWS,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    val artistId = entry.arguments?.getString("artistId").orEmpty()
+                    ArtistReviewsScreen(
+                        onBack = { nav.popBackStack() },
+                        onRequestQuote = {
+                            nav.navigate(ClientNavRoutes.requestQuote(artistId))
+                        },
+                    )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.BOOKABILITY,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) {
+                TabPane(inner) {
+                    BookabilityScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(

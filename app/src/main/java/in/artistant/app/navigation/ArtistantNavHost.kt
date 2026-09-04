@@ -7,8 +7,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
-import `in`.artistant.app.designsystem.theme.rememberReduceMotion
 import `in`.artistant.app.feature.signup.SignupFlow
+import `in`.artistant.app.feature.signup.SplashScreen
 import `in`.artistant.app.feature.signup.SignupMode
 import `in`.artistant.app.feature.signup.SignupStep
 import `in`.artistant.app.feature.signup.SignupViewModel
@@ -53,15 +53,14 @@ fun ArtistantNavHost() {
     LaunchedEffect(gate) { if (gate == RootGate.NotSignedIn) signupVm.reset() }
 
     val hydrationError by viewModel.profileHydrationError.collectAsStateWithLifecycle()
-    // Read directly rather than through `AppTheme.reduceMotion`: this sits ABOVE
-    // every `ArtistantTheme` call below, so the CompositionLocal the theme
-    // provides is not in scope yet. Same helper, same answer.
-    val reduceMotion = rememberReduceMotion()
 
     when (val g = gate) {
-        // While the persisted session restores, theme with the client accent and show nothing
-        // (the auth screen would flash for a returning user otherwise).
-        RootGate.Loading -> ArtistantTheme(role = AppRole.Client) {}
+        // While the persisted session restores, hold on design screen 01 — "the one dark
+        // room". It is the same `darkest` the launch window is painted in, so the hand-off
+        // from the pre-Compose window has no seam; the previous empty tree showed the bare
+        // window instead, which flashed white between a black launch screen and whatever
+        // came next.
+        RootGate.Loading -> ArtistantTheme(role = AppRole.Client) { SplashScreen() }
 
         RootGate.NotSignedIn ->
             ArtistantTheme(role = signupState.role) {
@@ -70,7 +69,6 @@ fun ArtistantNavHost() {
                     startMode = SignupMode.Signup,
                     onFinished = viewModel::markSignupComplete,
                     signedIn = false,
-                    reduceMotion = reduceMotion,
                     viewModel = signupVm,
                 )
             }
@@ -92,7 +90,6 @@ fun ArtistantNavHost() {
                     profileHydrationError = hydrationError,
                     onRetryHydration = viewModel::retryRouting,
                     signedIn = true,
-                    reduceMotion = reduceMotion,
                     viewModel = signupVm,
                 )
             }

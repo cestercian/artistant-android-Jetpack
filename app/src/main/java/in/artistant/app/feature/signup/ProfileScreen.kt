@@ -8,22 +8,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,26 +34,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
+import `in`.artistant.app.data.model.HandleRules
+import `in`.artistant.app.designsystem.component.AppTextField
+import `in`.artistant.app.designsystem.component.Banner
+import `in`.artistant.app.designsystem.component.BannerTone
+import `in`.artistant.app.designsystem.component.Chip
+import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
 
 /** Supported booking cities — shared with the artist wizard on iOS (AppEnvironment.supportedCities). */
 private val cities = listOf("Bangalore", "Chennai", "Delhi", "Goa", "Hyderabad", "Kolkata", "Mumbai", "Pune")
 
+/** The handle field's ceiling, from `HandleRules`' own `^[a-z0-9_]{3,24}$`. */
+private const val HANDLE_MAX = 24
+
 /**
- * Profile basics (iOS `SignupProfileView`): handle + name + city. Continue is disabled until the
- * handle is available and name + city are filled; on tap the container upserts the row then
- * advances. Quiet-editorial treatment: mono kicker, heavy-sans italic-accent headline, hairline
- * underline fields with a live handle indicator, an outlined lime CTA.
+ * Screens 29 and 90 — pick a handle, and the same screen with the handle already taken.
+ *
+ * **Four live states, and the fourth is the point.** Checking, available, taken, and
+ * couldn't-check are four different things and the design insists they look like four
+ * different things: "the last one is stated, never faked." So a failed availability call
+ * renders as a warm "Couldn't check" and never as a green tick — while still leaving Continue
+ * tappable, because a network blip is not a reason to wedge someone out of their own signup
+ * and the `users_handle_key` unique constraint is the real backstop (see
+ * [SignupUiState.handleAvailable]). If the handle turns out to be taken, the upsert says so
+ * and the flow bounces straight back to this field.
+ *
+ * **Taken offers a way out.** Screen 90 pairs the red field with four suggestions, which
+ * [HandleSuggestions] generates from the typed name and the chosen city. They are suggestions,
+ * not reservations: tapping one puts it in the field and it goes through the same live check
+ * as anything else.
+ *
+ * The design's "THE OTHER THREE STATES" panel on screen 90 is deliberately NOT drawn — it is
+ * the designer documenting the state set inside the canvas, not a control. What it documents
+ * is implemented instead, which is the same information in the place it belongs.
  */
 @Composable
 fun ProfileScreen(
@@ -68,195 +88,397 @@ fun ProfileScreen(
     onBack: () -> Unit,
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
+    hydrationError: String? = null,
+    onRetryHydration: () -> Unit = {},
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val space = dimens.space
     var cityOpen by remember { mutableStateOf(false) }
+    val bar = progressIndex(SignupStep.Profile, state.mode)
 
-    Column(modifier = modifier.fillMaxSize().background(colors.bg).statusBarsPadding()) {
-        // Top chrome: hairline back chevron over the flow's shared progress bar.
-        //
-        // The bar was a second implementation of it inlined here — narrow
-        // right-aligned segments with a third "past" state — so the indicator
-        // changed shape and colour semantics between consecutive steps of one
-        // flow. One component owns the treatment; this step only names its index.
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = space.xl, end = space.xl, top = space.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                // The 30dp disc sits inside a `rowMin` tap target rather than being
-                // grown to it — the touch floor is a hit area, not a size. Same
-                // shape `SignupBackButton` takes on the other steps.
-                Modifier
-                    .size(dimens.size.rowMin)
-                    .clip(CircleShape)
-                    .clickable(onClick = onBack)
-                    .semantics { testTag = "profile.back"; contentDescription = "Back" },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    // A circle, spelled as one. It used to be a 30dp box under a
-                    // `RoundedCornerShape(15.dp)` — the same shape by arithmetic,
-                    // but one that silently stops being a circle the day the box
-                    // is resized. iOS draws `Circle().stroke(…)` here.
-                    Modifier.size(30.dp).clip(CircleShape).border(dimens.size.hairline, colors.line, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    // A chevron, not a cross. The control goes BACK a signup step —
-                    // it does not close or abandon the flow — and a cross is the
-                    // universal "dismiss this whole thing" glyph. Same glyph the
-                    // other signup steps use (`SignupBackButton`), so the affordance
-                    // does not change meaning halfway through the flow.
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                        contentDescription = null,
-                        tint = colors.ink2,
-                        modifier = Modifier.size(AppTheme.dimens.size.iconLg),
-                    )
-                }
-            }
-        }
-        SignupProgressDots(bar = progressIndex(SignupStep.Profile, state.mode))
-
-        Column(
-            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = space.xl).padding(top = space.lg),
-        ) {
-            Text(
-                "04 — ABOUT YOU",
-                style = AppTheme.type.monoSmall.copy(fontWeight = FontWeight.Bold),
-                color = colors.ink3,
-                modifier = Modifier.semantics { testTag = "profile.kicker" },
-            )
-            Spacer(Modifier.height(space.lg))
-            // Heavy-sans headline with italic-lime "in" accent (iOS uses sans here, not serif).
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = colors.ink)) { append("A few words,\nthen we're ") }
-                    withStyle(SpanStyle(color = colors.accentInk, fontStyle = FontStyle.Italic)) { append("in") }
-                    withStyle(SpanStyle(color = colors.ink)) { append(".") }
-                },
-                style = AppTheme.type.signupDisplay,
-            )
-            Spacer(Modifier.height(space.lg))
-            Text("This is what artists see when you book.", style = AppTheme.type.footnote, color = colors.ink3)
-
-            Spacer(Modifier.height(space.xxl))
-
-            // Handle — with the live availability indicator + status-tinted underline.
-            SignupInputRow(
-                label = "Handle",
-                value = state.handle,
-                onValueChange = onHandleChange,
-                placeholder = "yourname",
-                prefix = "@",
-                keyboardType = KeyboardType.Ascii,
-                underline = handleUnderline(state.handleStatus, colors),
-                modifier = Modifier.semantics { testTag = "profile.handle" },
-                trailing = { HandleIndicator(state.handleStatus) },
-            )
-            Spacer(Modifier.height(space.xl))
-            SignupInputRow(
-                label = "Name",
-                value = state.name,
-                onValueChange = onNameChange,
-                placeholder = "First and last",
-                modifier = Modifier.semantics { testTag = "profile.name" },
-            )
-            Spacer(Modifier.height(space.xl))
-
-            // City — single editorial row opening a dropdown.
-            Column(verticalArrangement = Arrangement.spacedBy(space.sm)) {
-                Text("CITY", style = AppTheme.type.caption, color = colors.ink3)
-                Box {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { cityOpen = true }.padding(vertical = space.sm)
-                            .semantics { testTag = "profile.city" },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+    SignupScaffold(
+        modifier = modifier.semantics { testTag = "screen.profile" },
+        header = {
+            SignupHeader(
+                onBack = onBack,
+                middle = { SignupProgressStrip(bar) },
+                trailing = {
+                    if (bar != null) {
                         Text(
-                            state.city.ifEmpty { "Choose your city" },
-                            // Same step as a field's typed line: the city row is
-                            // one of the three inputs, and it reading a size
-                            // below the other two made it look like a caption.
-                            style = AppTheme.type.headline,
-                            color = if (state.city.isEmpty()) colors.ink4 else colors.ink,
-                            modifier = Modifier.weight(1f),
+                            bar.label,
+                            style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                            color = colors.ink4,
                         )
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.ink3, modifier = Modifier.size(AppTheme.dimens.size.iconMd))
                     }
-                    Box(Modifier.fillMaxWidth().height(dimens.size.hairline).background(if (state.city.isEmpty()) colors.line else colors.brand.copy(alpha = 0.4f)))
-                    DropdownMenu(expanded = cityOpen, onDismissRequest = { cityOpen = false }) {
-                        cities.forEach { c ->
-                            DropdownMenuItem(
-                                text = { Text(c, color = colors.ink) },
-                                trailingIcon = { if (state.city == c) Icon(Icons.Filled.Check, contentDescription = null, tint = colors.accentInk) },
-                                onClick = { onCityChange(c); cityOpen = false },
+                },
+            )
+        },
+        footer = {
+            PrimaryButton(
+                text = if (state.isSaving) "Saving…" else "Continue",
+                onClick = onContinue,
+                fullWidth = true,
+                enabled = !state.isSaving && state.profileValid,
+                modifier = Modifier.semantics { testTag = "profile.continue" },
+            )
+        },
+    ) {
+        // The gate enters the flow here after a failed profile hydration, so this is the screen
+        // that has to carry the failure — see [HydrationErrorBanner]. Design screen 71 draws it
+        // on the role picker, which is one back-press behind this one and shows it too.
+        if (hydrationError != null) {
+            Spacer(Modifier.height(space.sm))
+            HydrationErrorBanner(detail = hydrationError, onRetry = onRetryHydration)
+        }
+        Spacer(Modifier.height(space.md))
+        Text("Pick a handle", style = AppTheme.type.screenTitle, color = colors.ink)
+        Spacer(Modifier.height(space.sm))
+        Text(
+            "Your address on Artistant. Lowercase, numbers and underscores.",
+            style = AppTheme.type.subtitle,
+            color = colors.ink4,
+        )
+
+        Spacer(Modifier.height(space.xl))
+        AppTextField(
+            value = state.handle,
+            onValueChange = onHandleChange,
+            label = "Handle",
+            hint = "yourname",
+            enabled = !state.isSaving,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Next,
+            ),
+            leading = { Text("@", style = AppTheme.type.body, color = colors.ink4) },
+            trailing = { HandleIndicator(state.handleStatus) },
+            modifier = Modifier
+                .handleRing(state.handleStatus)
+                .semantics { testTag = "profile.handle" },
+        )
+        Spacer(Modifier.height(space.sm))
+        HandleHelper(state.handle, state.handleStatus)
+
+        // Screen 90: the alternatives. Only when the handle is genuinely taken — the other
+        // three states have nothing to suggest, and a rail of chips under a field that is
+        // fine would read as a requirement to use one of them.
+        if (state.handleStatus == HandleStatus.Taken) {
+            val alternatives = remember(state.handle, state.city) {
+                HandleSuggestions.alternatives(state.handle, state.city)
+            }
+            if (alternatives.isNotEmpty()) {
+                Spacer(Modifier.height(space.lg))
+                SignupEyebrow("TRY ONE OF THESE")
+                Spacer(Modifier.height(space.sm))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(space.sm),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics { testTag = "profile.handleAlternatives" },
+                ) {
+                    alternatives.take(ALTERNATIVES_PER_ROW).forEach { suggestion ->
+                        Chip(
+                            label = suggestion,
+                            selected = false,
+                            onClick = { onHandleChange(suggestion) },
+                        )
+                    }
+                }
+                if (alternatives.size > ALTERNATIVES_PER_ROW) {
+                    Spacer(Modifier.height(space.sm))
+                    Row(horizontalArrangement = Arrangement.spacedBy(space.sm)) {
+                        alternatives.drop(ALTERNATIVES_PER_ROW).forEach { suggestion ->
+                            Chip(
+                                label = suggestion,
+                                selected = false,
+                                onClick = { onHandleChange(suggestion) },
                             )
                         }
                     }
                 }
             }
-
-            state.saveError?.let {
-                Spacer(Modifier.height(space.lg))
-                Text(it, style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold), color = colors.hot)
-            }
-            Spacer(Modifier.height(space.xl))
         }
 
-        // Outlined lime CTA (kept local so only this step is outlined, matching iOS).
-        //
-        // `navigationBarsPadding().imePadding()` for the same reason WizardFooter
-        // carries them: the window is edge-to-edge and does not resize for the
-        // keyboard, so without the ime inset the CTA — and the bottom of the
-        // scroll region above it, which is weighted against this bar — sit under
-        // the keyboard the moment Handle or Name takes focus.
-        val disabled = state.isSaving || !state.profileValid
-        Box(
-            modifier = Modifier
-                .fillMaxWidth().navigationBarsPadding().imePadding()
-                .padding(horizontal = space.xl).padding(bottom = space.xxl).height(54.dp)
-                .clip(RoundedCornerShape(dimens.radii.buttonLg))
-                .border(dimens.size.strokeEmphasis, if (disabled) colors.line else colors.brand, RoundedCornerShape(dimens.radii.buttonLg))
-                .clickable(enabled = !disabled, onClick = onContinue)
-                .semantics { testTag = "profile.continue" },
-            contentAlignment = Alignment.Center,
+        Spacer(Modifier.height(space.lg))
+        AppTextField(
+            value = state.name,
+            onValueChange = onNameChange,
+            label = "Name",
+            hint = "First and last",
+            enabled = !state.isSaving,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Words,
+                imeAction = ImeAction.Next,
+            ),
+            modifier = Modifier.semantics { testTag = "profile.name" },
+        )
+
+        Spacer(Modifier.height(space.md))
+        FieldLabel("City")
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(dimens.radii.control))
+                    .background(colors.surface2)
+                    .border(
+                        dimens.size.hairline,
+                        colors.hairline,
+                        RoundedCornerShape(dimens.radii.control),
+                    )
+                    .defaultMinSize(minHeight = dimens.component.control)
+                    .clickable(enabled = !state.isSaving, role = Role.Button) { cityOpen = true }
+                    .padding(horizontal = space.lg, vertical = space.md)
+                    .semantics(mergeDescendants = true) {
+                        testTag = "profile.city"
+                        contentDescription = "City. ${state.city.ifEmpty { "Not chosen" }}"
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    state.city.ifEmpty { "Choose your city" },
+                    style = AppTheme.type.body.copy(fontWeight = FontWeight.Medium),
+                    color = if (state.city.isEmpty()) colors.hint else colors.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = colors.ink4,
+                    modifier = Modifier.size(dimens.size.iconLg),
+                )
+            }
+            DropdownMenu(
+                expanded = cityOpen,
+                onDismissRequest = { cityOpen = false },
+                containerColor = colors.surface,
+            ) {
+                cities.forEach { c ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                c,
+                                style = AppTheme.type.body,
+                                color = colors.ink,
+                            )
+                        },
+                        trailingIcon = {
+                            if (state.city == c) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = colors.accentInk,
+                                )
+                            }
+                        },
+                        onClick = { onCityChange(c); cityOpen = false },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(space.sm))
+        Text(
+            "Name is what artists see when you book.",
+            style = AppTheme.type.caption,
+            color = colors.ink4,
+        )
+
+        state.saveError?.let { message ->
+            Spacer(Modifier.height(space.md))
+            Banner(
+                title = message,
+                tone = BannerTone.Failure,
+                modifier = Modifier.semantics { testTag = "profile.saveError" },
+            )
+        }
+
+        Spacer(Modifier.height(space.lg))
+        Banner(
+            title = "Checked live against the server. If we can't reach it we'll say so rather " +
+                "than let you pick a handle that's taken.",
+            tone = BannerTone.Note,
+        )
+        Spacer(Modifier.height(space.xl))
+    }
+}
+
+/** Four chips at most, two to a row — which is how the design wraps them. */
+private const val ALTERNATIVES_PER_ROW = 2
+
+/**
+ * The status ring around the handle field.
+ *
+ * A border on top of [AppTextField]'s own, drawn only for the two states that have a colour to
+ * say — available is accent, taken is danger. The other three keep the field's default chrome,
+ * because "checking" and "couldn't check" are things the CHIP says; painting the whole field
+ * for them would make a transient state look like a rejection.
+ */
+@Composable
+private fun Modifier.handleRing(status: HandleStatus): Modifier {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val ring: Color? = when (status) {
+        HandleStatus.Available -> colors.accent
+        HandleStatus.Taken -> colors.danger
+        else -> null
+    }
+    return if (ring == null) {
+        this
+    } else {
+        this.border(
+            dimens.component.focusStroke,
+            ring,
+            RoundedCornerShape(dimens.radii.control),
+        )
+    }
+}
+
+/** The line under the field: the address the handle becomes, and how much room is left. */
+@Composable
+private fun HandleHelper(handle: String, status: HandleStatus) {
+    val colors = AppTheme.colors
+    if (status == HandleStatus.Taken) {
+        Text(
+            "Someone already has @${HandleRules.normalize(handle)}.",
+            style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.danger,
+            modifier = Modifier.semantics { testTag = "profile.handleTaken" },
+        )
+        return
+    }
+    Text(
+        if (handle.isEmpty()) {
+            "3–24 characters. Letters, numbers and underscores."
+        } else {
+            "artistant.in/@$handle · ${handle.length} of $HANDLE_MAX characters"
+        },
+        style = AppTheme.type.caption,
+        color = colors.ink4,
+    )
+}
+
+/**
+ * The live status chip (iOS `handleStatusIndicator`), in the design's four states.
+ *
+ * `Error` is its own visible state — "Couldn't check", in `warm` — and never borrows the
+ * available tick. That is the whole of the design's note for screen 90: "couldn't check never
+ * masquerades as available."
+ */
+@Composable
+private fun HandleIndicator(status: HandleStatus) {
+    val colors = AppTheme.colors
+    val dimens = AppTheme.dimens
+    val gap = Arrangement.spacedBy(dimens.space.xs)
+    when (status) {
+        HandleStatus.Empty -> Unit
+        HandleStatus.Invalid -> Text(
+            "3–24 · a–z 0–9 _",
+            style = AppTheme.type.caption,
+            color = colors.warm,
+        )
+        HandleStatus.Checking -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = gap,
+            modifier = Modifier.semantics { testTag = "profile.handleChecking" },
         ) {
+            CircularProgressIndicator(
+                color = colors.ink3,
+                strokeWidth = dimens.size.hairline,
+                modifier = Modifier.size(dimens.size.iconSm),
+            )
+            Text("Checking…", style = AppTheme.type.caption, color = colors.ink3)
+        }
+        HandleStatus.Available -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = gap,
+            modifier = Modifier.semantics { testTag = "profile.handleAvailable" },
+        ) {
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = colors.accentDeep,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
             Text(
-                if (state.isSaving) "Saving…" else "Continue →",
-                style = AppTheme.type.body.copy(fontWeight = FontWeight.Black),
-                color = if (disabled) colors.ink4 else colors.brand,
+                "Available",
+                style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                color = colors.accentDeep,
+            )
+        }
+        HandleStatus.Taken -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = gap,
+        ) {
+            Icon(
+                Icons.Filled.ErrorOutline,
+                contentDescription = null,
+                tint = colors.danger,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
+            Text(
+                "Taken",
+                style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                color = colors.danger,
+            )
+        }
+        HandleStatus.Error -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = gap,
+            modifier = Modifier.semantics { testTag = "profile.handleUnchecked" },
+        ) {
+            Icon(
+                Icons.Filled.WarningAmber,
+                contentDescription = null,
+                tint = colors.warm,
+                modifier = Modifier.size(dimens.size.iconMd),
+            )
+            Text(
+                "Couldn't check",
+                style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
+                color = colors.warm,
             )
         }
     }
 }
 
-/** Live handle status chip (iOS `handleStatusIndicator`): spinner / free tick / taken / hint. */
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 900)
 @Composable
-private fun HandleIndicator(status: HandleStatus) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    when (status) {
-        HandleStatus.Empty -> Unit
-        HandleStatus.Invalid -> Text("3–24 · a–z 0–9 _", style = AppTheme.type.caption, color = colors.warm)
-        HandleStatus.Checking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
-            CircularProgressIndicator(color = colors.ink3, strokeWidth = dimens.size.strokeEmphasis, modifier = Modifier.size(dimens.size.iconSm))
-            Text("Checking…", style = AppTheme.type.monoSmall, color = colors.ink3)
-        }
-        HandleStatus.Available -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(dimens.space.xs)) {
-            Icon(Icons.Filled.Check, contentDescription = null, tint = colors.accentInk, modifier = Modifier.size(dimens.size.iconSm))
-            Text("free", style = AppTheme.type.monoSmall, color = colors.accentInk)
-        }
-        HandleStatus.Taken -> Text("Taken", style = AppTheme.type.caption, color = colors.hot)
-        HandleStatus.Error -> Text("Couldn't check", style = AppTheme.type.caption, color = colors.warm)
+private fun HandleAvailablePreview() {
+    ArtistantTheme {
+        ProfileScreen(
+            state = SignupUiState(
+                handle = "rheamenon",
+                handleStatus = HandleStatus.Available,
+                name = "Rhea Menon",
+                city = "Bangalore",
+            ),
+            onHandleChange = {},
+            onNameChange = {},
+            onCityChange = {},
+            onBack = {},
+            onContinue = {},
+        )
     }
 }
 
-private fun handleUnderline(status: HandleStatus, colors: `in`.artistant.app.designsystem.theme.AppColors): Color? = when (status) {
-    HandleStatus.Available -> colors.brand
-    HandleStatus.Taken, HandleStatus.Invalid -> colors.hot.copy(alpha = 0.5f)
-    HandleStatus.Checking, HandleStatus.Error -> colors.brand.copy(alpha = 0.4f)
-    HandleStatus.Empty -> null // let SignupInputRow default (line, or brand-tint on non-empty)
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 900)
+@Composable
+private fun HandleTakenPreview() {
+    ArtistantTheme {
+        ProfileScreen(
+            state = SignupUiState(
+                handle = "tilt",
+                handleStatus = HandleStatus.Taken,
+                name = "Rhea Menon",
+                city = "Bangalore",
+            ),
+            onHandleChange = {},
+            onNameChange = {},
+            onCityChange = {},
+            onBack = {},
+            onContinue = {},
+        )
+    }
 }
