@@ -4,6 +4,7 @@ import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.testsupport.booking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -98,15 +99,112 @@ class InvoiceLogicTest {
     fun shareText_carriesTheDisclaimerWithTheNumbers() {
         // The disclaimer must not be able to travel without the record: this is
         // the whole reason the share is text rather than a PDF.
+        val row = booking(fee = 36_000)
         val text = invoiceShareText(
-            booking(fee = 36_000),
+            row,
             artistName = "The Tilt Collective",
             reference = "AR-3F9A2C",
         )
 
         assertTrue(text.startsWith("Artistant — booking record #AR-3F9A2C"))
         assertTrue(text.contains("Artist fee: ₹36,000"))
-        assertTrue(text.endsWith(INVOICE_DISCLAIMER))
+        assertTrue(text.endsWith(invoiceDisclaimer(row.status)))
+    }
+
+    @Test
+    fun shareText_carriesTheDisclaimerFOR_THAT_BOOKINGSStatus() {
+        // The shared copy is the one a host forwards to someone who cannot see
+        // the status pill, so it has to be the branch the row is actually in.
+        val pending = invoiceShareText(
+            booking(status = BookingStatus.PendingConfirm),
+            artistName = "The Tilt Collective",
+            reference = "AR-1",
+        )
+        val confirmed = invoiceShareText(
+            booking(status = BookingStatus.Confirmed),
+            artistName = "The Tilt Collective",
+            reference = "AR-1",
+        )
+
+        assertTrue(pending.endsWith(invoiceDisclaimer(BookingStatus.PendingConfirm)))
+        assertTrue(confirmed.endsWith(invoiceDisclaimer(BookingStatus.Confirmed)))
+        assertNotEquals(pending, confirmed)
+    }
+
+    // --- the settlement claim -----------------------------------------------
+
+    @Test
+    fun disclaimer_neverClaimsThePaymentHappened() {
+        // NOTHING in `bookings` records settlement. `escrow_status` is written
+        // `held` on every create and never advanced, so any past-tense sentence
+        // here is an assertion about money that no column supports — in every
+        // state, including the two where it would be most tempting.
+        BookingStatus.entries.forEach { status ->
+            val line = invoiceDisclaimer(status)
+            assertFalse(
+                "$status must not claim settlement happened: $line",
+                // The exact sentence this fix removed, plus every other way of
+                // putting the payment in the past. "to be settled directly with
+                // them" is the future tense and is fine, which is why this bans
+                // the opener rather than the phrase.
+                line.startsWith("Settled directly") ||
+                    line.contains("was settled", ignoreCase = true) ||
+                    line.contains("has been settled", ignoreCase = true) ||
+                    line.contains("already settled", ignoreCase = true) ||
+                    line.contains("paid", ignoreCase = true),
+            )
+        }
+    }
+
+    @Test
+    fun disclaimer_saysNothingIsOwedUntilTheArtistAccepts() {
+        // The regression: a client reaches this screen one tap after checkout,
+        // over a row the artist has not seen. It used to open "Settled directly
+        // with the artist."
+        val line = invoiceDisclaimer(BookingStatus.PendingConfirm)
+
+        assertTrue(line.startsWith("Not confirmed yet"))
+        assertTrue(line.contains("nothing is owed until the artist accepts"))
+        assertTrue(line.contains("to be settled directly with them"))
+    }
+
+    @Test
+    fun disclaimer_putsAConfirmedFeeInTheFutureTense() {
+        val confirmed = invoiceDisclaimer(BookingStatus.Confirmed)
+
+        assertTrue(confirmed.startsWith("The fee is to be settled directly with the artist."))
+        // A played show still has no payment record, so it reads the same way.
+        assertEquals(confirmed, invoiceDisclaimer(BookingStatus.Completed))
+    }
+
+    @Test
+    fun disclaimer_saysNothingIsOwedOnACancelledBooking() {
+        val line = invoiceDisclaimer(BookingStatus.Cancelled)
+
+        assertTrue(line.contains("cancelled and nothing is owed"))
+    }
+
+    @Test
+    fun disclaimer_staysNeutralWhenTheStateCannotBeCharacterised() {
+        // Disputed and Unknown must not imply anything about money in either
+        // direction — least of all that it is owed, or that it is not.
+        listOf(BookingStatus.Disputed, BookingStatus.Unknown).forEach { status ->
+            val line = invoiceDisclaimer(status)
+            assertTrue("$status", line.startsWith("Any fee is settled directly between you"))
+        }
+    }
+
+    @Test
+    fun disclaimer_alwaysDisownsTheTaxInvoice() {
+        // The half that is true in every state, and the reason this screen has a
+        // paragraph at all: "a record, not a tax invoice".
+        BookingStatus.entries.forEach { status ->
+            val line = invoiceDisclaimer(status)
+            // "is not a party to" / "was never a party to" — the tense follows
+            // the status, the disavowal does not.
+            assertTrue("$status", line.contains("party to"))
+            assertTrue("$status", line.contains("no tax invoice"))
+        }
     }
 
     @Test

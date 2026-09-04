@@ -225,7 +225,7 @@ fun InvoiceScreen(
                 }
             }
 
-            AccentNote(INVOICE_DISCLAIMER)
+            AccentNote(invoiceDisclaimer(booking.status))
         }
 
         CtaBar {

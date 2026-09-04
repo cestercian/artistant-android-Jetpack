@@ -29,6 +29,19 @@ val QuoteOccasions = listOf("Sangeet", "Brand event", "House show", "Other")
 /** Cap on the free-text brief, matching the counter the design draws under it. */
 const val QUOTE_NOTE_MAX = 500
 
+/**
+ * Digit caps on the two numeric fields.
+ *
+ * Not cosmetic. Both fields filtered to digits and nothing else, so a long paste
+ * or a leaning finger produced a string `toIntOrNull()` cannot parse — and the
+ * guest count then went out as `crowd_size = null`, i.e. the request reached the
+ * artist with the head count silently missing. `Int.MAX_VALUE` is ten digits;
+ * five holds 99,999 guests and nine holds ₹999,999,999, which are both an order
+ * of magnitude past any real event.
+ */
+const val QUOTE_GUESTS_MAX_DIGITS = 5
+const val QUOTE_BUDGET_MAX_DIGITS = 9
+
 data class RequestQuoteUiState(
     val artistName: String = "",
     /**
@@ -154,9 +167,22 @@ class RequestQuoteViewModel @Inject constructor(
         _state.update { it.copy(startTime = if (it.startTime == slot) "" else slot) }
     }
 
-    /** Digits only — the field opens the number pad and the column is an int. */
+    /**
+     * Digits only, and no more of them than an `int` column can hold.
+     *
+     * The length cap lives HERE rather than at the field, so the bound belongs to
+     * the draft instead of to whichever composable happens to be typing into it —
+     * the same reason [setNote] is bounded in its setter. [quoteGuestsError] is
+     * still checked at submit: a cap in a setter is not a guarantee about a value
+     * that reached the state some other way.
+     */
     fun setGuests(value: String) {
-        _state.update { it.copy(guests = value.filter { c -> c.isDigit() }) }
+        _state.update {
+            it.copy(
+                guests = value.filter { c -> c.isDigit() }.take(QUOTE_GUESTS_MAX_DIGITS),
+                errorMessage = null,
+            )
+        }
     }
 
     fun setVenue(value: String) {
@@ -164,7 +190,12 @@ class RequestQuoteViewModel @Inject constructor(
     }
 
     fun setBudget(value: String) {
-        _state.update { it.copy(budgetInr = value.filter { c -> c.isDigit() }) }
+        _state.update {
+            it.copy(
+                budgetInr = value.filter { c -> c.isDigit() }.take(QUOTE_BUDGET_MAX_DIGITS),
+                errorMessage = null,
+            )
+        }
     }
 
     /**
@@ -185,6 +216,15 @@ class RequestQuoteViewModel @Inject constructor(
         }
         if (s.dateLabel.isBlank()) {
             _state.update { it.copy(errorMessage = "Pick a date.") }
+            return
+        }
+        // Checked rather than coerced. `toIntOrNull()` answers null for a value
+        // this app cannot represent, and the write below turns that null into an
+        // omitted `crowd_size` — so an unreadable guest count used to send a
+        // brief that simply did not mention how many people were coming, with
+        // nothing on screen saying so.
+        quoteGuestsError(s.guests)?.let { message ->
+            _state.update { it.copy(errorMessage = message) }
             return
         }
         viewModelScope.launch {
@@ -235,3 +275,29 @@ fun quoteBriefMessage(occasion: String?, startTime: String, note: String): Strin
     val body = note.trim()
     return listOf(facts, body).filter { it.isNotEmpty() }.joinToString("\n")
 }
+
+/**
+ * Why this guest count cannot be sent, or null when it can.
+ *
+ * Blank is fine — `gig_requests.crowd_size` is nullable and the design treats the
+ * head count as optional. What is NOT fine is a string the column cannot hold:
+ * `submit` maps it through `toIntOrNull()`, and a null there is indistinguishable
+ * from "the host left it blank", so an eleven-digit paste reached the artist as a
+ * request with no guest count at all rather than as an error the host could fix.
+ *
+ * Pure and separate from the setter's length cap on purpose: the cap stops the
+ * common case at the keyboard, this stops every case at the write.
+ */
+fun quoteGuestsError(guests: String): String? {
+    val digits = guests.trim()
+    if (digits.isEmpty()) return null
+    val value = digits.toIntOrNull()
+    if (value == null || value <= 0 || value > QUOTE_GUESTS_MAX) {
+        return "Enter a guest count between 1 and $QUOTE_GUESTS_MAX_LABEL."
+    }
+    return null
+}
+
+/** The largest head count [QUOTE_GUESTS_MAX_DIGITS] can express. */
+const val QUOTE_GUESTS_MAX = 99_999
+private const val QUOTE_GUESTS_MAX_LABEL = "99,999"

@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.booking
 
 import `in`.artistant.app.common.util.formatInr
 import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.BookingStatus
 
 /**
  * Screen 132's decisions, kept out of the Composable so they can be tested.
@@ -86,15 +87,47 @@ fun invoiceShareText(booking: Booking, artistName: String, reference: String): S
     ).joinToString(" ")
     val terms = invoiceBookingRows(booking, artistName).map { "${it.label}: ${it.amount}" }
     val money = invoiceLines(booking).map { "${it.label}: ${it.amount}" }
-    return (listOf(header) + terms + money + listOf(INVOICE_DISCLAIMER)).joinToString("\n")
+    return (listOf(header) + terms + money + listOf(invoiceDisclaimer(booking.status)))
+        .joinToString("\n")
 }
 
 /**
- * The one paragraph this whole screen exists to carry.
+ * The paragraph this whole screen exists to carry, in the tense the row can
+ * actually support.
  *
- * Reused verbatim by the screen and by the shared text so the disclaimer cannot
- * travel without the record or drift away from it.
+ * It used to open "Settled directly with the artist." on every booking — and a
+ * client can reach this screen one tap after checkout, over a `pending_confirm`
+ * row the artist has not even seen. That sentence asserted a completed payment
+ * on a booking with no artist agreement behind it and no money moved.
+ *
+ * **Nothing in `bookings` records settlement.** There is an `escrow_status`
+ * column, but v1 writes `held` on every create and no code path ever advances
+ * it, so reading it here would dress a payments-era default up as a fact. Until
+ * a column actually records "the host paid the artist", this document never
+ * uses the past tense: the fee is always something *to be* settled, and what
+ * varies is only whether there is an agreement to settle yet.
+ *
+ * The invariant every branch keeps: Artistant is not a party to the payment and
+ * issues no tax invoice for it. That is the half the design's note ("a record,
+ * not a tax invoice") exists for, and it is true in every state.
  */
-const val INVOICE_DISCLAIMER: String =
-    "Settled directly with the artist. Artistant is not a party to this payment and issues " +
-        "no tax invoice for it — this is your record of what was agreed."
+fun invoiceDisclaimer(status: BookingStatus): String = when (status) {
+    // Not accepted yet: there is no agreement to settle, so the sentence has to
+    // start by saying so rather than by describing a payment.
+    BookingStatus.PendingConfirm ->
+        "Not confirmed yet — nothing is owed until the artist accepts. The fee is then to be " +
+            "settled directly with them: Artistant is not a party to that payment and issues " +
+            "no tax invoice for it."
+    BookingStatus.Confirmed, BookingStatus.Completed ->
+        "The fee is to be settled directly with the artist. Artistant is not a party to that " +
+            "payment and issues no tax invoice for it — this is your record of what was agreed."
+    BookingStatus.Cancelled ->
+        "This booking was cancelled and nothing is owed. Artistant was never a party to the " +
+            "payment and issues no tax invoice for it — this is your record of what was agreed."
+    // Disputed and Unknown both mean "we cannot characterise this booking's
+    // state", and neither may imply anything about money in either direction.
+    BookingStatus.Disputed, BookingStatus.Unknown ->
+        "Any fee is settled directly between you and the artist. Artistant is not a party to " +
+            "that payment and issues no tax invoice for it — this is your record of what was " +
+            "agreed."
+}
