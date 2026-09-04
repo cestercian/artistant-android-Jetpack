@@ -63,21 +63,15 @@ data class ArtistProfileUiState(
     /** Screen 56. Opened from the action sheet, which closes as it opens. */
     val showReportSheet: Boolean = false,
     /**
-     * A report that reached somewhere — the server or the local log.
-     *
-     * [ReportOutcome.Queued] is not a failure and the copy must not call it one
-     * (screen 56's note). [ReportOutcome.Failed] never lands here: it is
-     * durable, not momentary, and rides [failedReport] instead — the two are
-     * mutually exclusive, which is the invariant `settlingReport` holds.
-     *
-     * The toast it earns is raised on the app's single host through
-     * [in.artistant.app.feature.system.ToastController], so nothing clears this:
-     * the host owns the display window, and each report writes the field fresh.
-     */
-    val reportOutcome: ReportOutcome? = null,
-    /**
      * A report that is not held ANYWHERE — the insert failed and so did the
      * local log.
+     *
+     * The only report outcome this state carries. `Sent` and `Queued` are
+     * momentary, so they leave nothing behind: their toast is raised on the app's
+     * single host through
+     * [in.artistant.app.feature.system.ToastController] the moment the round trip
+     * lands, and a screen field mirroring it would be state no one reads and no
+     * one clears.
      *
      * It keeps the reader's own reason and note so the retry does not ask them
      * to write the thing twice, and it is not a toast: a message that fades
