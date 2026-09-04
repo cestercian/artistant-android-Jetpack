@@ -152,14 +152,38 @@ class HarnessFlagsTest {
 
     @Test
     fun `a seed flag on its own activates the harness`() {
-        // `useFakes` reads seedFixtureData OR a role, so a bare seed flag activates the
-        // parser without swapping the repositories — it must not half-activate either.
         assertTrue(HarnessFlags.parse("seed-open-quote").active)
         assertTrue(HarnessFlags.parse("-uitest-seed-disputed-booking").active)
         assertEquals(
             HarnessFlags.parse("seed-read-only-booking"),
             HarnessFlags.parse("SEED-READ-ONLY-BOOKING"),
         )
+    }
+
+    @Test
+    fun `a seed flag on its own turns the fixtures on`() {
+        // The bug this is written against: `useFakes` reads seedFixtureData OR a role, so
+        // `-e uitest "seed-open-quote"` used to activate the harness, keep the REAL
+        // repositories, and seed nothing — an accepted flag that did nothing at all. A
+        // token asking for rows implies the only thing that can hold them.
+        assertTrue(HarnessFlags.parse("seed-open-quote").seedFixtureData)
+        assertTrue(HarnessFlags.parse("seed-disputed-booking").seedFixtureData)
+        assertTrue(HarnessFlags.parse("seed-read-only-booking").seedFixtureData)
+        assertTrue(HarnessFlags.parse("seed-pending-request").seedFixtureData)
+        assertTrue(HarnessFlags.parse("seed-blocked-user").seedFixtureData)
+        assertTrue(HarnessFlags.parse("-uitest-seed-open-quote").seedFixtureData)
+    }
+
+    @Test
+    fun `the implication does not reach flags that seed no rows`() {
+        // `-uitest` alone means "harness on, no behaviour asked for", and the two gate
+        // flags replace the whole app with a gate — none of them wants the fakes forced.
+        assertFalse(HarnessFlags.parse("-uitest").seedFixtureData)
+        assertFalse(HarnessFlags.parse("reset").seedFixtureData)
+        assertFalse(HarnessFlags.parse("force-update").seedFixtureData)
+        assertFalse(HarnessFlags.parse("service-outage").seedFixtureData)
+        assertFalse(HarnessFlags.parse("block-list-unavailable").seedFixtureData)
+        assertFalse(HarnessFlags.parse("skip-signup-as-artist").seedFixtureData)
     }
 
     // --- iOS spelling compatibility ---
@@ -202,6 +226,17 @@ class HarnessFlagsTest {
         assertTrue(HarnessState.useFakes)
 
         // Reset the shared holder so ordering between tests can't leak state.
+        HarnessState.install(HarnessFlags.NONE)
+    }
+
+    @Test
+    fun `useFakes turns on for a bare content seed`() {
+        // The end of the chain the implication exists for: a lone seed token has to reach
+        // the DI module's fake-or-Supabase choice, or the flag seeds into a repository that
+        // was never swapped.
+        HarnessState.install(HarnessFlags.parse("seed-open-quote"))
+        assertTrue(HarnessState.useFakes)
+
         HarnessState.install(HarnessFlags.NONE)
     }
 }

@@ -1,6 +1,7 @@
 package `in`.artistant.app.harness
 
 import `in`.artistant.app.designsystem.theme.AppRole
+import timber.log.Timber
 
 /**
  * Parsed launch-argument set for the DEBUG-only screen-testing harness.
@@ -37,6 +38,13 @@ import `in`.artistant.app.designsystem.theme.AppRole
  *   service-outage .............. show the service-outage gate (design 121) instead of the app
  *   land-in-wizard-at-<step> .... boot an artist into the EPK wizard instead of the tabs
  *
+ * ON THE `seed-*` FLAGS: every one of them asks for ROWS, and only the in-memory fakes can
+ * serve rows — so any of them implies `seed-fixture-data`. Without that implication a lone
+ * `-e uitest "seed-open-quote"` turned the harness on, left [HarnessState.useFakes] false,
+ * and ran the whole app against Supabase seeding nothing: an accepted flag that did nothing.
+ * They still need a ROLE of their own — the seeded rows sit behind the auth gate — and a
+ * seed passed without one logs a warning saying exactly which token is missing.
+ *
  * ON `land-in-wizard-at-<step>`: this reports the artist's EPK setup as incomplete, which is
  * the switch `RootViewModel.gateFor` reads to choose `RootGate.ArtistWizard` over the tab
  * shell — so the flag reliably LANDS YOU IN THE WIZARD, with identity pre-filled from the
@@ -54,6 +62,13 @@ data class HarnessFlags(
     val reset: Boolean = false,
     /** Role to boot into, or null to leave the real auth gate alone. */
     val skipSignupAs: AppRole? = null,
+    /**
+     * Swap the Supabase repositories for the seeded in-memory fakes.
+     *
+     * Set by the `seed-fixture-data` token, and IMPLIED by every other `seed-*`
+     * token: a flag that asks for rows is asking for the only thing that can hold
+     * them. See [Companion.parse].
+     */
     val seedFixtureData: Boolean = false,
     val seedPendingRequest: Boolean = false,
     /**
@@ -134,11 +149,15 @@ data class HarnessFlags(
         private const val WIZARD_PREFIX = "land-in-wizard-at-"
 
         /**
-         * Pure parse of the raw extra. Null/blank/garbage yields [NONE], so a normal debug
+         * Parse of the raw extra. Null/blank/garbage yields [NONE], so a normal debug
          * launch is completely unaffected — the harness is strictly opt-in.
          *
          * Separators are commas or whitespace, so both `"a,b"` and `"a b"` work (adb quoting
          * mangles one or the other depending on the shell).
+         *
+         * Two non-obvious results, both about the `seed-*` family: a content seed turns
+         * [HarnessFlags.seedFixtureData] on for you, and a content seed with no role logs a
+         * warning naming the token you left out.
          */
         fun parse(raw: String?): HarnessFlags {
             if (raw.isNullOrBlank()) return NONE
@@ -198,11 +217,37 @@ data class HarnessFlags(
                 else -> null
             }
 
+            // Every `seed-<state>` token asks for ROWS, and only the in-memory fakes can
+            // hold rows — the real Supabase repositories have nowhere to put them. Before
+            // this implication a lone `-e uitest "seed-open-quote"` parsed clean, turned the
+            // harness on, left `HarnessState.useFakes` FALSE (it reads seedFixtureData or a
+            // role, neither of which was set) and ran the whole app against the network
+            // seeding nothing at all — an accepted flag that silently did nothing. A token
+            // that asks for rows now switches on the only thing that can serve them.
+            val contentSeeds = buildList {
+                if (seedPendingRequest) add("seed-pending-request")
+                if (seedOpenQuote) add("seed-open-quote")
+                if (seedDisputedBooking) add("seed-disputed-booking")
+                if (seedReadOnlyBooking) add("seed-read-only-booking")
+                if (seedBlockedUser) add("seed-blocked-user")
+            }
+            if (contentSeeds.isNotEmpty() && role == null) {
+                // The fakes are on now, but every seeded row lives BEHIND the auth gate, so
+                // the launch stops on signup and none of it is reachable. `seed-fixture-data`
+                // alone is deliberately exempt: forcing the fakes under the real signup flow
+                // is a documented use, not an operator mistake.
+                Timber.w(
+                    "[harness] %s passed with no role — the seeded rows sit behind the auth " +
+                        "gate. Add skip-signup-as-artist (or skip-signup-as-client) to reach them.",
+                    contentSeeds.joinToString(","),
+                )
+            }
+
             return HarnessFlags(
                 active = true,
                 reset = reset,
                 skipSignupAs = role,
-                seedFixtureData = seedFixtureData,
+                seedFixtureData = seedFixtureData || contentSeeds.isNotEmpty(),
                 seedPendingRequest = seedPendingRequest,
                 seedOpenQuote = seedOpenQuote,
                 seedDisputedBooking = seedDisputedBooking,

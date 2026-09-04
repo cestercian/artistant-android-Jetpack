@@ -261,7 +261,7 @@ adb exec-out screencap -p > shot.png
 |---|---|---|
 | `reset` | Start from a clean slate (no cached harness state) | |
 | `skip-signup-as-client` / `skip-signup-as-artist` | Boot signed in, land on that role's tabs | Every screen behind the auth gate needs a session |
-| `seed-fixture-data` | Swap the Supabase repositories for seeded in-memory fakes | No network on the emulator |
+| `seed-fixture-data` | Swap the Supabase repositories for seeded in-memory fakes | No network on the emulator. **Implied by every other `seed-*` flag** — a flag that asks for rows switches on the only thing that can hold them |
 | `seed-pending-request` | +1 `pending_confirm` booking | Drives the artist Accept/Decline surface without disturbing the baseline |
 | `seed-open-quote` | +1 bookingless thread and the `open` gig request standing in it | `ThreadQuote.pick` refuses a thread carrying a `booking_id`, and the baseline thread has one — so the in-thread quote card, its Accept/Counter dock and the narrated accept (designs 08 / 70) have no other path |
 | `seed-disputed-booking` | +1 `disputed` booking (design 96) | Support sets `disputed`; neither client can, so no sequence of taps produces one |
@@ -277,3 +277,9 @@ Tokens are accepted bare (`seed-fixture-data`) or in the iOS spelling
 fatal — a typo must not crash a device someone is mid-demo on. The canonical
 list is [`HarnessFlags`](../app/src/debug/java/in/artistant/app/harness/HarnessFlags.kt);
 keep this table in step with it.
+
+A `seed-*` flag still needs a **role** of its own: it turns the fixtures on, but
+the rows it seeds live behind the auth gate, so without `skip-signup-as-artist`
+(or `-as-client`) the launch stops at signup and you see none of them. That case
+logs `[harness] … passed with no role` at warn — check logcat if a seeded state
+does not show up.
