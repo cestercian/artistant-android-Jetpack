@@ -42,6 +42,8 @@ import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.reduceMotion
 import `in`.artistant.app.feature.artist.ArtistProfileScreen
+import `in`.artistant.app.feature.artist.ArtistReviewsScreen
+import `in`.artistant.app.feature.score.BookabilityScreen
 import `in`.artistant.app.feature.booking.BookingDetailScreen
 import `in`.artistant.app.feature.booking.BookingScreen
 import `in`.artistant.app.feature.booking.CheckoutScreen
@@ -59,6 +61,9 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.feature.profile.ArtistListKind
 import `in`.artistant.app.feature.profile.ArtistListScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
+import `in`.artistant.app.feature.signup.LegalDoc
+import `in`.artistant.app.feature.signup.LegalScreen
+import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 
@@ -225,6 +230,7 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     ProfileScreen(
                         onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
+                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
                         onNavigateToPaywall = { nav.navigate(ClientNavRoutes.PAYWALL) },
                         onArtistList = { kind -> nav.navigate(ClientNavRoutes.artistList(kind.raw)) },
                     )
@@ -233,6 +239,32 @@ fun ClientTabsScaffold() {
             composable(ClientNavRoutes.BLOCKED_ACCOUNTS) {
                 TabPane(inner) {
                     BlockedAccountsScreen(onBack = { nav.popBackStack() })
+                }
+            }
+            // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
+            // because neither is role-specific. Reached from the account settings
+            // list's "Privacy" row above; the legal viewer is also reachable from the
+            // signup flow's welcome and sign-in screens.
+            composable(ClientNavRoutes.PRIVACY) {
+                TabPane(inner) {
+                    PrivacyScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenLegal = { doc -> nav.navigate(ClientNavRoutes.legal(doc.name)) },
+                    )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.LEGAL,
+                arguments = listOf(navArgument("doc") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    // An unknown or missing argument opens the terms rather than
+                    // failing: the viewer is segmented, so the wrong opening tab costs
+                    // one tap and a crash costs the screen.
+                    val doc = LegalDoc.entries
+                        .firstOrNull { it.name == entry.arguments?.getString("doc") }
+                        ?: LegalDoc.Terms
+                    LegalScreen(doc = doc, onClose = { nav.popBackStack() })
                 }
             }
             composable(
@@ -303,12 +335,49 @@ fun ClientTabsScaffold() {
                                 nav.navigate(ClientNavRoutes.chat(threadId))
                             }
                         },
+                        // Screen 55's route out. Not `popBackStack` — a stale
+                        // share link opens this destination with nothing under
+                        // it, and popping an empty stack leaves the app on a
+                        // blank frame. Discover is somewhere to be.
+                        onBrowse = {
+                            nav.navigate(ClientTab.Discover.route) {
+                                popUpTo(ClientTab.Discover.route) { inclusive = true }
+                            }
+                        },
+                        onSeeReviews = { artistId ->
+                            nav.navigate(ClientNavRoutes.artistReviews(artistId))
+                        },
+                        onSeeBookability = { artistId ->
+                            nav.navigate(ClientNavRoutes.bookability(artistId))
+                        },
                     )
                     ChatOpenFeedback(
                         opening = openingChat,
                         error = chatError,
                         onDismissError = chatOpen::dismissError,
                     )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.ARTIST_REVIEWS,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    val artistId = entry.arguments?.getString("artistId").orEmpty()
+                    ArtistReviewsScreen(
+                        onBack = { nav.popBackStack() },
+                        onRequestQuote = {
+                            nav.navigate(ClientNavRoutes.requestQuote(artistId))
+                        },
+                    )
+                }
+            }
+            composable(
+                route = ClientNavRoutes.BOOKABILITY,
+                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+            ) {
+                TabPane(inner) {
+                    BookabilityScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(

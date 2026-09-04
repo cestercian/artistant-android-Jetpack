@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.common.util.formatInr
+import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
@@ -173,7 +174,7 @@ fun CheckoutScreen(
                                     emphasis = true,
                                 )
                             }
-                            NoteBlock(
+                            AccentNote(
                                 "No card, no deposit. The fee is what you agree with the artist " +
                                     "and settle directly — Artistant takes nothing in this version.",
                             )

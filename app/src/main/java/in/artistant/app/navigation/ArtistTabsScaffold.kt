@@ -45,8 +45,13 @@ import `in`.artistant.app.feature.messages.ChatScreen
 import `in`.artistant.app.feature.messages.MessagesScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.profile.BlockedAccountsScreen
+import `in`.artistant.app.feature.signup.LegalDoc
+import `in`.artistant.app.feature.signup.LegalScreen
+import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
+import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
+import `in`.artistant.app.feature.score.ScoreHistoryScreen
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -171,6 +176,7 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     ProfileScreen(
                         onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
+                        onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
                         onBack = { nav.popBackStack() },
                         onNavigateToPaywall = { nav.navigate(ArtistNavRoutes.PAYWALL) },
                         onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
@@ -182,6 +188,32 @@ fun ArtistTabsScaffold() {
                     BlockedAccountsScreen(onBack = { nav.popBackStack() })
                 }
             }
+            // Design screens 62 / 31 / 114 (section GS). Registered on both graphs
+            // because neither is role-specific. Reached from the account settings
+            // list's "Privacy" row above; the legal viewer is also reachable from the
+            // signup flow's welcome and sign-in screens.
+            composable(ArtistNavRoutes.PRIVACY) {
+                TabPane(inner) {
+                    PrivacyScreen(
+                        onBack = { nav.popBackStack() },
+                        onOpenLegal = { doc -> nav.navigate(ArtistNavRoutes.legal(doc.name)) },
+                    )
+                }
+            }
+            composable(
+                route = ArtistNavRoutes.LEGAL,
+                arguments = listOf(navArgument("doc") { type = NavType.StringType }),
+            ) { entry ->
+                TabPane(inner) {
+                    // An unknown or missing argument opens the terms rather than
+                    // failing: the viewer is segmented, so the wrong opening tab costs
+                    // one tap and a crash costs the screen.
+                    val doc = LegalDoc.entries
+                        .firstOrNull { it.name == entry.arguments?.getString("doc") }
+                        ?: LegalDoc.Terms
+                    LegalScreen(doc = doc, onClose = { nav.popBackStack() })
+                }
+            }
             composable(ArtistNavRoutes.MANAGE_AVAILABILITY) {
                 TabPane(inner) {
                     ManageAvailabilityScreen(onBack = { nav.popBackStack() })
@@ -189,7 +221,31 @@ fun ArtistTabsScaffold() {
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
                 TabPane(inner) {
-                    ScoreExplainerScreen(onBack = { nav.popBackStack() })
+                    ScoreExplainerScreen(
+                        onBack = { nav.popBackStack() },
+                        // Every opportunity opens the thing it is about (design
+                        // 50). The press kit owns the listing (samples, photos,
+                        // packages, bio); the wizard owns the steps surfaced
+                        // nowhere else (tech rider, socials); and the two
+                        // score-moving rows that are not "fields" at all go where
+                        // the metric is actually earned — the inbox for reply
+                        // speed, the gig list for the hosts a review is asked
+                        // from.
+                        onOpenEditor = { editor ->
+                            when (editor) {
+                                ScoreEditor.PressKit -> nav.navigate(ArtistTab.Epk.route)
+                                ScoreEditor.Wizard -> nav.navigate(ArtistNavRoutes.WIZARD)
+                                ScoreEditor.Messages -> nav.navigate(ArtistTab.Messages.route)
+                                ScoreEditor.Gigs -> nav.navigate(ArtistTab.Gigs.route)
+                            }
+                        },
+                        onSeeHistory = { nav.navigate(ArtistNavRoutes.SCORE_HISTORY) },
+                    )
+                }
+            }
+            composable(ArtistNavRoutes.SCORE_HISTORY) {
+                TabPane(inner) {
+                    ScoreHistoryScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(ArtistNavRoutes.PAYWALL) {

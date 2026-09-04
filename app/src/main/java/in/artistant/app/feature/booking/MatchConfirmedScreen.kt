@@ -34,6 +34,7 @@ import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.model.BookingStatus
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.HRule
 import `in`.artistant.app.designsystem.component.PrimaryButton
@@ -225,7 +226,7 @@ fun MatchConfirmedScreen(
                 }
             }
 
-            NoteBlock(
+            AccentNote(
                 "Terms are frozen now — date, venue, guests and package can't be edited by " +
                     "either side.",
                 modifier = Modifier.padding(top = space.lg),

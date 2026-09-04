@@ -30,6 +30,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.artistant.app.data.model.Booking
 import `in`.artistant.app.data.repository.ArtistsRepository
 import `in`.artistant.app.data.repository.BookingsRepository
+import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.EyebrowLabel
 import `in`.artistant.app.designsystem.component.HRule
@@ -224,7 +225,7 @@ fun InvoiceScreen(
                 }
             }
 
-            NoteBlock(INVOICE_DISCLAIMER)
+            AccentNote(INVOICE_DISCLAIMER)
         }
 
         CtaBar {

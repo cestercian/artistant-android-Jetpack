@@ -1,24 +1,22 @@
 package `in`.artistant.app.feature.signup
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -30,25 +28,41 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
-import `in`.artistant.app.designsystem.component.ButtonVariant
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.tooling.preview.Preview
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.ArtistantTheme
 
 /**
- * The signup entry (iOS `SignupWelcomeView`): abstract radial-gradient hero, wordmark, editorial
- * italic-accent headline, and a terms-gate checkbox that must be on before either CTA works.
- * "Get started" runs the signup order; "I already have an account" runs the login order.
+ * Screen 118 — the welcome, and the app's first daylight.
+ *
+ * The design's own title for it is "Welcome — **blocked**", and the note says why: "the
+ * disabled CTA is paired with an inline reason instead of failing silently on tap." So the
+ * blocked state is not an edge case bolted onto a happy path — it IS the screen the designer
+ * drew, and the enabled state is the same screen with the reason line gone.
+ *
+ * There are two things that can block it and they are both real conditions, never a
+ * placeholder: the 18+/terms box is unticked, or the app has no route to the server. Nothing
+ * else disables the button, because nothing else can be stated truthfully — a
+ * "signups are paused" reason would need an `app_settings` read the schema does not grant
+ * clients (the table is server-only), so that reason is not offered.
+ *
+ * @param blockedReason a non-null override — currently "no connection" — that outranks the
+ *   terms tick. Null means the only gate is the checkbox.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,177 +72,158 @@ fun WelcomeScreen(
     onGetStarted: () -> Unit,
     onLogin: () -> Unit,
     modifier: Modifier = Modifier,
+    blockedReason: String? = null,
 ) {
     val colors = AppTheme.colors
-    val space = AppTheme.dimens.space
+    val dimens = AppTheme.dimens
+    val space = dimens.space
     val haptic = LocalHapticFeedback.current
     var legalDoc by remember { mutableStateOf<LegalDoc?>(null) }
 
-    Box(modifier = modifier.fillMaxSize().background(colors.bg)) {
-        // Abstract two-tone radial hero, held to the top band; it sits behind the content
-        // column, so it can never push it. A real height, not `heightIn(max =)`: an empty
-        // Box measures to the minimum it is given, which in a fillMaxSize Box is zero, and
-        // both washes then paint into nothing. Drawn in `drawBehind` so the centres and radii
-        // are placed against the MEASURED size — as fixed pixel constants they landed
-        // somewhere different on every density.
-        //
-        // The alphas were 0.35 / 0.18, tuned for lime and violet glowing out of near-black.
-        // On `page` the same numbers are a lime fog over the whole top half of the first
-        // screen anyone sees — the accent stops being a signal and becomes the background.
-        // Dropped to a tint that warms the corner and nothing more; screen 118 draws this
-        // page as plain off-white, so this is already the generous reading of it.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(AppTheme.dimens.size.heroTall)
-                .drawBehind {
-                    drawRect(
-                        Brush.radialGradient(
-                            colors = listOf(colors.accent.copy(alpha = 0.10f), Color.Transparent),
-                            center = Offset(size.width * 0.3f, size.height * 0.2f),
-                            radius = size.width * 0.7f,
-                        ),
-                    )
-                    drawRect(
-                        Brush.radialGradient(
-                            colors = listOf(colors.brand.copy(alpha = 0.06f), Color.Transparent),
-                            center = Offset(size.width * 0.85f, size.height * 0.3f),
-                            radius = size.width * 0.6f,
-                        ),
-                    )
-                },
-        )
+    val reason = blockedReason ?: if (termsAccepted) null else "Tick this to continue"
+    val canContinue = reason == null
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(horizontal = space.xl)
-                .padding(bottom = space.xxl),
-        ) {
-            // Wordmark
-            Row(
-                modifier = Modifier.padding(top = space.xl),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(
-                    Modifier
-                        .size(AppTheme.dimens.size.iconXl)
-                        .clip(CircleShape)
-                        .background(colors.brand),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "A",
-                        color = colors.brandInk,
-                        fontWeight = FontWeight.Black,
-                        style = AppTheme.type.body,
-                    )
-                }
-                Text(
-                    "ARTISTANT",
-                    color = colors.ink,
-                    fontWeight = FontWeight.Black,
-                    style = AppTheme.type.caption,
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            // Editorial headline + subhead — "best" is the italic-lime accent (iOS parity).
-            EditorialHeadline(
-                lead = "Book India's\n",
-                accent = "best",
-                tail = " artists.",
-                style = AppTheme.type.welcomeDisplay,
-            )
-            Spacer(Modifier.height(space.lg))
-            Text(
-                "Transparent pricing. Verified talent. Book with confidence.",
-                style = AppTheme.type.callout,
-                color = colors.ink2,
-                modifier = Modifier.width(320.dp),
-            )
-            Spacer(Modifier.height(space.xl))
-
-            // Terms gate. The checkbox row toggles; the Terms/Privacy words open the sheet.
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onTermsToggle(!termsAccepted)
-                        }
-                        .semantics { testTag = "welcome.terms" },
-                    horizontalArrangement = Arrangement.spacedBy(space.md),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    TermsCheckbox(checked = termsAccepted)
-                    Text(
-                        "I'm 18+ and agree to the platform terms.",
-                        style = AppTheme.type.footnote,
-                        color = colors.ink2,
-                    )
-                }
-                // The two links are 13sp words, so the touch floor has to be added under them:
-                // the size modifiers sit INSIDE the clickable, which grows the tappable node
-                // while `wrapContentHeight` keeps the word itself centred at its own size.
-                Row(
-                    modifier = Modifier.padding(start = AppTheme.dimens.size.iconLg + space.md),
-                    horizontalArrangement = Arrangement.spacedBy(space.md),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Terms",
-                        style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.accentInk,
-                        modifier = Modifier
-                            .clickable(role = Role.Button) { legalDoc = LegalDoc.Terms }
-                            .sizeIn(minHeight = AppTheme.dimens.size.controlMin)
-                            .wrapContentHeight(),
-                    )
-                    Text("·", color = colors.ink3)
-                    Text(
-                        "Privacy",
-                        style = AppTheme.type.footnote.copy(fontWeight = FontWeight.SemiBold),
-                        color = colors.accentInk,
-                        modifier = Modifier
-                            .clickable(role = Role.Button) { legalDoc = LegalDoc.Privacy }
-                            .sizeIn(minHeight = AppTheme.dimens.size.controlMin)
-                            .wrapContentHeight(),
-                    )
-                }
-            }
-            Spacer(Modifier.height(space.md))
-
-            // Both CTAs gate on terms — a disabled "Get started" reads as "not yet".
+    SignupScaffold(
+        modifier = modifier.semantics { testTag = "screen.welcome" },
+        // No header: the design starts this screen at the mark, 40 below the status bar.
+        // Not scrollable: the consent block is pushed to the BOTTOM of the body by a flex
+        // spacer, and a weight has no meaning inside an infinitely-tall scroll. The content
+        // is a mark, two paragraphs and a card, which fits the viewport by construction.
+        scrollable = false,
+        footer = {
             PrimaryButton(
                 text = "Get started",
                 onClick = onGetStarted,
                 fullWidth = true,
-                enabled = termsAccepted,
+                enabled = canContinue,
                 modifier = Modifier.semantics { testTag = "welcome.getStarted" },
             )
-            Spacer(Modifier.height(space.sm))
-            PrimaryButton(
-                text = "I already have an account",
-                onClick = onLogin,
-                variant = ButtonVariant.Ghost,
-                fullWidth = true,
-                enabled = termsAccepted,
-                modifier = Modifier.semantics { testTag = "welcome.login" },
+            Text(
+                "I already have an account",
+                style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+                color = colors.accentInk,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(dimens.radii.sm))
+                    .clickable(role = Role.Button, onClick = onLogin)
+                    .padding(vertical = space.sm)
+                    .semantics { testTag = "welcome.login" },
+            )
+        },
+    ) {
+        Spacer(Modifier.height(space.xxl))
+        AppMark()
+        Spacer(Modifier.height(space.xl + space.xs))
+        Text(
+            "Book the act,\nnot the agency.",
+            style = AppTheme.type.displayHero,
+            color = colors.ink,
+        )
+        Spacer(Modifier.height(space.md))
+        Text(
+            "Transparent pricing. Verified talent. Book with confidence.",
+            style = AppTheme.type.body,
+            color = colors.ink4,
+        )
+
+        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(space.xxl))
+
+        // The consent block. The whole card toggles; the two document words inside it open the
+        // viewer instead, which is why they are separate nodes rather than annotated spans —
+        // an annotated string cannot carry its own tap target's accessibility role.
+        val interaction = remember { MutableInteractionSource() }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(dimens.radii.lg))
+                .background(colors.surface3)
+                .border(
+                    dimens.component.focusStroke,
+                    if (termsAccepted) colors.accent else colors.hairline,
+                    RoundedCornerShape(dimens.radii.lg),
+                )
+                .clickable(interactionSource = interaction, indication = null, role = Role.Checkbox) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onTermsToggle(!termsAccepted)
+                }
+                .padding(space.lg)
+                .semantics {
+                    testTag = "welcome.terms"
+                    contentDescription = "I'm 18 or older and agree to the Terms and Privacy Policy"
+                    toggleableState = if (termsAccepted) ToggleableState.On else ToggleableState.Off
+                },
+            horizontalArrangement = Arrangement.spacedBy(space.md),
+            verticalAlignment = Alignment.Top,
+        ) {
+            ConsentCheckbox(checked = termsAccepted)
+            // The two document names are links INSIDE the sentence, as the design draws them
+            // — not a second row of "read this" buttons under it. `withLink` is what makes
+            // that possible without lying to the accessibility tree: each run becomes its own
+            // focusable link node, so a screen reader can reach the Terms without reading the
+            // whole paragraph, and a tap on the words opens the viewer while a tap anywhere
+            // else in the card still toggles the box.
+            Text(
+                buildAnnotatedString {
+                    append("I'm 18 or older and agree to the ")
+                    withLink(legalLink(colors.accentInk) { legalDoc = LegalDoc.Terms }) {
+                        append("Terms")
+                    }
+                    append(" and ")
+                    withLink(legalLink(colors.accentInk) { legalDoc = LegalDoc.Privacy }) {
+                        append("Privacy Policy")
+                    }
+                    append(".")
+                },
+                style = AppTheme.type.subtitle,
+                color = colors.ink2,
             )
         }
+
+        // The inline reason. Present exactly when the CTA is not tappable, so the pair always
+        // agrees: a disabled button with nothing under it is the silent failure this screen
+        // was drawn to rule out.
+        if (reason != null) {
+            Row(
+                modifier = Modifier
+                    .padding(top = space.md)
+                    .semantics(mergeDescendants = true) { testTag = "welcome.blockedReason" },
+                horizontalArrangement = Arrangement.spacedBy(space.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.WarningAmber,
+                    contentDescription = null,
+                    tint = colors.warm,
+                    modifier = Modifier.size(dimens.size.iconMd),
+                )
+                Text(
+                    reason,
+                    style = AppTheme.type.caption.copy(fontWeight = FontWeight.SemiBold),
+                    color = colors.warm,
+                )
+            }
+        }
+        Spacer(Modifier.height(space.md))
     }
 
     legalDoc?.let { doc ->
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { legalDoc = null }, sheetState = sheetState) {
+        ModalBottomSheet(
+            onDismissRequest = { legalDoc = null },
+            sheetState = sheetState,
+            containerColor = colors.surface,
+        ) {
             LegalScreen(doc = doc, onClose = { legalDoc = null })
         }
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 760)
+@Composable
+private fun WelcomeBlockedPreview() {
+    ArtistantTheme {
+        WelcomeScreen(termsAccepted = false, onTermsToggle = {}, onGetStarted = {}, onLogin = {})
     }
 }

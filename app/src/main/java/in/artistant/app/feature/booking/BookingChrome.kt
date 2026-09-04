@@ -332,48 +332,18 @@ fun FunnelStepBar(
     }
 }
 
-/**
- * An accent-washed note — the funnel's one recurring block of prose (screens 06,
- * 61, 94, 132).
+/*
+ * The funnel's recurring accent-washed note (screens 06, 61, 94, 132) is
+ * `designsystem/component/AccentNote` — one component, not two.
  *
- * It is NOT a [Banner]: a banner states something about the page's state and
- * carries a bold title, and every one of these is a paragraph of terms — "No
- * card, no deposit", "Terms are frozen now", "Artistant is not a party to this
- * payment". So the glyph is top-aligned against the first line rather than
- * centred against a block whose height it cannot know, and the copy is body
- * weight throughout.
- *
- * The wash is the accent at [NOTE_WASH] over a hairline of it at [NOTE_LINE].
- * `brandSoft` (the accent at ~12%) is the pill's wash and is too faint to bound a
- * paragraph; this is the same hue two stops up, which is what the design draws.
+ * This file grew its own `NoteBlock` while the artist-profile section grew
+ * `AccentNote` in the shared library, both against the same markup and, as it
+ * turned out, the same measured alphas. The library one wins on the redesign's
+ * own rule: a block used by more than one section belongs there. Two banner
+ * components that drift apart is exactly the failure the Banner KDoc warns
+ * about, and it is cheaper to delete the second one at the merge than after it
+ * has been styled twice.
  */
-@Composable
-fun NoteBlock(text: String, modifier: Modifier = Modifier) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    val shape = RoundedCornerShape(dimens.radii.buttonLg)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(colors.accent.copy(alpha = NOTE_WASH))
-            .border(dimens.size.hairline, colors.accent.copy(alpha = NOTE_LINE), shape)
-            .padding(dimens.funnel.notePad),
-        horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
-    ) {
-        Icon(
-            Icons.Outlined.Info,
-            contentDescription = null,
-            tint = colors.accentInk,
-            modifier = Modifier.size(dimens.size.iconLg),
-        )
-        Text(text, style = AppTheme.type.subtitle, color = colors.ink2)
-    }
-}
-
-/** The accent's alpha as a note's fill, and as its hairline. */
-private const val NOTE_WASH = 0.22f
-private const val NOTE_LINE = 0.60f
 
 /**
  * One line of a decided term: a quiet label left, the value hard right.

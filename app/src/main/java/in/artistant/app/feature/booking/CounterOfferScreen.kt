@@ -39,6 +39,7 @@ import `in`.artistant.app.data.model.GigRequestStatus
 import `in`.artistant.app.data.model.StoredRequest
 import `in`.artistant.app.data.repository.RequestsRepository
 import `in`.artistant.app.data.repository.RequestsRepositoryError
+import `in`.artistant.app.designsystem.component.AccentNote
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
 import `in`.artistant.app.designsystem.component.EmptyState
@@ -361,7 +362,7 @@ fun CounterOfferScreen(
                                 modifier = Modifier.padding(top = space.md),
                             )
                         }
-                        NoteBlock(
+                        AccentNote(
                             "Countering keeps the request open. They can accept, counter back, " +
                                 "or decline.",
                             modifier = Modifier.padding(top = space.lg),

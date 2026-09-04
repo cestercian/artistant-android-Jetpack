@@ -20,19 +20,28 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 
 ## Screens — Signup / Auth
 
-| iOS path | Android target | Status | Notes |
-|---|---|---|---|
-| `Screens/Signup/SignupWelcomeView.swift` | `feature/signup/WelcomeScreen.kt` | done | M1 |
-| `Screens/Signup/SignupRoleView.swift` | `feature/signup/RoleScreen.kt` | done | M1 |
-| `Screens/Signup/SignupAuthView.swift` | `feature/signup/SignupAuthScreen.kt` | done | M1 |
-| `Screens/Signup/EmailAuthView.swift` | `ui/auth/AuthScreen.kt` (email branch) | done | M1 |
-| `Screens/Signup/SignupProfileView.swift` | `feature/signup/ProfileScreen.kt` | done | M1 |
-| `Screens/Signup/SignupNotifPermissionView.swift` | `feature/signup/NotifPermissionScreen.kt` | done | M1; FCM register via PushService (soft without google-services.json) |
-| `Screens/Signup/SignupDoneView.swift` | `feature/signup/DoneScreen.kt` | done | M1 |
-| `Screens/Signup/LegalView.swift` | `feature/signup/LegalScreen.kt` | done | M1 |
-| `Screens/Signup/SignupFlowView.swift` | `feature/signup/SignupFlow.kt` + `SignupViewModel` | done | M1 |
-| `Services/AuthService.swift` / Root gate | `SessionManager` + `ArtistantNavHost` / `RootViewModel` | done | M1 |
-| `Services/AppleSignInController.swift` | `SessionManager` Custom Tabs + deep link | done | #12 deepLinkError surface on OAuth denial |
+Re-implemented against the Sep-2026 light design (section **GS**, screens 01 · 11 ·
+12 · 13 · 27 · 28 · 29 · 30 · 31 · 62 · 71 · 90 · 114 · 118 · 119) —
+`docs/REDESIGN_2026-09.md` §P2. The "design" column is the extracted screen the
+Android file now mirrors.
+
+| iOS path | Design | Android target | Status | Notes |
+|---|---|---|---|---|
+| — (launch window) | 01 Onboarding | `feature/signup/SplashScreen.kt` | done | "The one dark room" — the only dark surface in the app, rendered on `RootGate.Loading` in `darkest` so the pre-Compose launch window hands off with no seam. Carries no actions: the markup's two CTAs belong to 118 |
+| `Screens/Signup/SignupWelcomeView.swift` | 118 Welcome — blocked | `feature/signup/WelcomeScreen.kt` | done | Disabled CTA always paired with an inline reason ("Tick this to continue"). Only real conditions gate it — the terms tick, plus a caller-supplied connectivity reason. No "signups paused" state: `app_settings` is server-only, so it cannot be stated truthfully |
+| `Screens/Signup/CommunityCommitmentView` | 27 Community pledge | `feature/signup/CommunityCommitmentScreen.kt` | done | Four numbered rules, a required tick, "Shown once — you won't see this again". The Decline dead-end screen is gone; back is the decline |
+| `Screens/Signup/SignupRoleView.swift` | 11 Role picker · 71 Hydration error | `feature/signup/RoleScreen.kt` | done | Select on tap, move on Continue (was: commit-and-self-advance). 71 is the same screen with a failure banner + Retry, which also renders on the handle step — the one the gate actually enters on |
+| `Screens/Signup/SignupAuthView.swift` | 12 Sign in | `feature/signup/SignupAuthScreen.kt` | done | Phone OTP first, then Apple / Google / password. Only three number shapes are accepted (10 digits, 91+10, +91+10) and anything else gets the inline reason — a longer paste is never trimmed to its last ten digits. LOGIN sends with `createUser = false`, so that door cannot mint an account behind an un-ticked consent box; GoTrue's refusal becomes "No account for this number — create one?" back to the welcome screen. Apple and Google marks not bundled yet, so those rows are labelled buttons |
+| — (new) | 119 Enter code | `feature/signup/EnterCodeScreen.kt` | done | `SignupStep.Code`, 6-box `OtpField`, 30s resend, "Change number", email escape after two sends. Every way back out calls `AuthViewModel.clearOtp()` — including the system gesture, which `SignupFlow` handles, since the activity-scoped VM otherwise carried the spent send count into the next number |
+| `Screens/Signup/EmailAuthView.swift` | 28 Email sign-up | `feature/signup/EmailSignUpScreen.kt` | done | A modal over the auth step (`emailSignUp` flag), not a step. One button, two acts: the password is offered to sign-IN first and only creates an account when nothing matched it, which is what the banner above it promises. Sign-in opens at GoTrue's 6 characters (an older account may hold one); the 8 the tick draws is enforced on the branch that creates. "Forgot password?" calls `resetPasswordForEmail` |
+| `Screens/Signup/SignupProfileView.swift` | 29 Handle & city · 90 Handle taken | `feature/signup/ProfileScreen.kt` | done | Four live states; "Couldn't check" never borrows the available tick, while still leaving Continue tappable (the unique constraint is the backstop). Taken offers `HandleSuggestions`. 90's "THE OTHER THREE STATES" panel is design documentation, not a control, and is deliberately not drawn |
+| `Screens/Signup/SignupNotifPermissionView.swift` | 13 Notifications | `feature/signup/NotifPermissionScreen.kt` | done | Names the loss ("Quotes expire. We'll tell you first."), three kinds. FCM register via PushService (soft without google-services.json) |
+| `Screens/Signup/SignupDoneView.swift` | 30 You're in | `feature/signup/DoneScreen.kt` | partial | Ends on the score. The design's "412 acts play your city" has no count endpoint behind it, so the sentence keeps its shape and drops its number |
+| `Screens/Signup/LegalView.swift` | 31 Terms · 114 Privacy policy | `feature/signup/LegalScreen.kt` | done | One segmented viewer, both documents one tap apart. Copy rewritten to the redesign's — the old 11-section terms described platform fees and refunds on a product that takes no payment |
+| — (new) | 62 Privacy | `feature/signup/PrivacyScreen.kt` | partial | ONE switch (read receipts), stored in `PrivacyPreferences` (DataStore) because it has no column in the 107 canonical migrations, and the screen says so. Nothing reads it yet — enforcement is `feature/messages`, under the key `privacy.read_receipts`. The design's second switch, "Show my city", is a stated fact instead: `users.city` has no visibility column, so a device flag could only have hidden the city from its owner. Reached from the account settings list's Privacy row |
+| `Screens/Signup/SignupFlowView.swift` | — | `feature/signup/SignupFlow.kt` + `SignupViewModel` | done | Step machine gains `.Code`, retired by a live session exactly like `.Auth`. The floating hydration strip is gone — the banner lives in the screens now |
+| `Services/AuthService.swift` / Root gate | — | `SessionManager` + `ArtistantNavHost` / `RootViewModel` | done | `sendPhoneOtp` / `verifyPhoneOtp` / `sendEmailOtp` / `verifyEmailOtp` / `sendPasswordReset` added, the two sends taking `createUser` from the entrance; `signUpWithEmail` also reports `AlreadyRegistered` (GoTrue's empty-identities answer). `AuthGateway` is the interface the auth VM injects, so its branches are unit-testable; every prior method is otherwise unchanged |
+| `Services/AppleSignInController.swift` | — | `SessionManager` Custom Tabs + deep link | done | #12 deepLinkError surface on OAuth denial |
 
 ## Screens — Browse (M2)
 
@@ -43,11 +52,13 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Screens/SearchView.swift` | `feature/search/SearchScreen.kt` | **redesigned (DS)** | Screens 14 / 03 / 57 / 58 in one destination. Browse-vs-results is `hasActiveQuery` × a local `editing` flag. Suggestions carry `search_facets`' real counts; "Notify me when one joins" omitted (no alert store); "Map view" omitted (no coordinates) |
 | `Screens/SearchFilterSheet.swift` | `feature/search/SearchFilterSheet.kt` + `CompareByServiceSheet.kt` | **redesigned (DS)** | Screens 15 / 104 (one sheet, two states: chip summary + disclosure rows + histogram + pinned CTA) and 53 (radio compare-by-service). "Must have" toggles omitted — no PA / verification / travel columns |
 | `State/SearchStore.swift` | `feature/search/SearchViewModel.kt` | **redesigned (DS)** | Debounce + pagination + filter/histogram, plus `selectService` (radio), `dropFilter(kind)` and the `SearchSeed` collector. Every computed string is a pure function in `SearchLabels.kt`, unit-tested |
-| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | Hero/bio/packages/reviews/dock + saved heart + score breakdown sheet; About gallery strip + Sound Spotify embed (#18). Hero pager (PROF-10) still open |
-| `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | Self metrics + history; Home → Score |
-| `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | Client real-world rows from profile chip |
+| `Screens/ArtistView.swift` | `feature/artist/ArtistProfileScreen.kt` | done | **Redesigned Sep 2026 (AP, design 04/54/55/101/103).** Round portrait + rating pill + three-cell stat strip; packages replace the rate card and the price rides the CTA; skeleton with no nav bar (54); named not-found with a route to Discover (55); no-audio redirect (101); self view swaps the verbs and drops the booking controls (103). Hero pager (PROF-10) still open |
+| `Screens/ScoreExplainerView.swift` | `feature/score/ScoreExplainerScreen.kt` | done | **Redesigned Sep 2026 (design 50/79/80).** Score · Stats · Opportunities segments; New is a gig counter and says "not a low score, no score"; a failed read leads with "This isn't your real score"; every opportunity opens the press kit or the wizard |
+| `Screens/ScoreBreakdownSheet.swift` | `feature/score/ScoreBreakdownSheet.kt` | done | **Redesigned Sep 2026 (design 99).** Degraded state keeps the server's number and itemises only what the artist row can back (`total_gigs`, `on_time_rate`, the loaded reviews); the rest go under NOT LOADED with no bar to misread as a zero |
+| — (new, design 16) | `feature/score/BookabilityScreen.kt` | done | Client-facing audit of one artist's score, pushed from the breakdown sheet. Route `bookability/{artistId}` |
+| — (new, design 102) | `feature/artist/ArtistReviewsScreen.kt` | done | Every review for one artist + search + All/5 star/Recent lenses. Three distinct empties: no corpus, nothing in this lens, no match for a query (which quotes the corpus size). Route `artist_reviews/{artistId}` |
+| iOS `ReportArtistSheet` | `feature/artist/ArtistProfileSheets.kt` (`ReportArtistSheet`) | done | Design 56. Real `reports` insert via `ReportsRepository.reportArtist`; five profile-specific reasons + optional note; the toast says Sent or Queued and never "received" |
 | `Screens/ArtistListView.swift` | `feature/profile/ArtistListScreen.kt` | **redesigned (DS)** | Screens 32 + 112. Kind chips are permanent navigation (switching replaces the destination); a within-list category rail derived from the rows; rows carry the accent score chip and "from ₹x". Failure ≠ empty |
-| `Screens/Signup/CommunityCommitmentView` (in SignupFlowView) | `feature/signup/CommunityCommitmentScreen.kt` | done | ACCT-05 pledge gate |
 
 ## Screens — Booking (M3)
 
@@ -92,7 +103,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Screens/ArtistWizard/ArtistAvailabilityStep.swift` | `feature/wizard/WizardScreen.kt` (Availability) | done | |
 | `Screens/ArtistWizard/ArtistCoverStep.swift` | `feature/wizard/WizardScreen.kt` (Cover) | done | Gallery + TakePicture camera + gradient |
 | `Screens/EPKView.swift` | `feature/epk/EpkScreen.kt` | done | Packages/tech/links/samples + photo grid/reorder |
-| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistorySheet.kt` | done | Sparkline + delta sheet from explainer |
+| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistoryScreen.kt` | done | **Redesigned Sep 2026 (design 51)** — a pushed screen, not a sheet. Per-*recomputation* deltas: `score_history` stores no reason column, so no per-event cause is invented. Route `score_history` |
 | `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
@@ -110,7 +121,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Screens/ProfileView.swift` | `feature/profile/ProfileScreen.kt` | done | Identity + settings + calendar + Help/Feedback sheet |
 | `Screens/Settings/DataExportView.swift` | `feature/profile/ProfileScreen.kt` (export row) | partial | Inline JSON share + signed URL open; no dedicated sheet |
 | `Screens/Settings/ManageAvailabilityView.swift` | `feature/availability/ManageAvailabilityScreen.kt` | done | Days/times chips + seed-failure Save guard |
-| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistorySheet.kt` | done | Sparkline + delta sheet from explainer |
+| `Screens/Settings/ScoreHistorySheet.swift` | `feature/score/ScoreHistoryScreen.kt` | done | **Redesigned Sep 2026 (design 51)** — a pushed screen, not a sheet. Per-*recomputation* deltas: `score_history` stores no reason column, so no per-event cause is invented. Route `score_history` |
 | `Screens/PaywallView.swift` | `feature/paywall/PaywallScreen.kt` | done | Play Billing wired; inert until subscriptionsEnabled |
 
 ## Navigation / shells
@@ -212,7 +223,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 | `Components/ScoreRing.swift` | `designsystem/component/ScoreRing.kt` | done | New-tier nil handling |
 | `Components/Sparkline` | `designsystem/component/Sparkline.kt` | done | |
 | `Components/HeaderBar.swift` | `designsystem/component/ScreenTitleBar.kt` + `feature/booking/BookingChrome.kt` (`FunnelHeader`) | done | Tab roots use `ScreenTitleBar`; pushed screens use `FunnelHeader` (back control + centred title). Deliberately not a Material `TopAppBar` |
-| `Components/Haptic.swift` | `designsystem/Haptics.kt` | done | 7 verbs + `rememberHaptics()`. Fired at 22 of iOS's 26 non-signup sites; the 4 gaps have no Android surface (ReportArtistSheet ×2, per-category review dots, and the thread report picker, which files on the reason tap so there is no separate select moment) |
+| `Components/Haptic.swift` | `designsystem/Haptics.kt` | done | 7 verbs + `rememberHaptics()`. Fired at 24 of iOS's 26 non-signup sites. `ReportArtistSheet` closed its two on the Sep-2026 AP redesign (reason tap = selection, submit = warning — not success: the app must not congratulate anyone for filing a complaint). The 2 remaining gaps have no Android surface: per-category review dots, and the thread report picker, which files on the reason tap so there is no separate select moment |
 | Theme tokens | `designsystem/theme/*` | **redesigned** | **Sep 2026 — the dark, dual-accent language is retired.** `docs/REDESIGN_2026-09.md` is the token sheet (§2 palette/type/geometry, §4 old→new mapping). Light surfaces, ONE lime accent for both roles (`withRole` is identity), Plus Jakarta Sans + JetBrains Mono in `res/font/`; the editorial serif is gone and `SerifFamily` is a deprecated alias of the sans. Old `AppType`/`AppColors` names survive as aliases so inherited screens compile — the eleven P2 section PRs retire them. Over-media chrome (`glass*`, `inkOnMedia*`, `ArtistGradient`) is deliberately unchanged: photos are still photos |
 | Component library v2 | `designsystem/component/*` | done (P1) | `PrimaryButton`, `SecondaryButton`, `IconCircle`, `SearchBar`/`SearchBarButton`, `Chip`/`ChipRail`, `SectionHeader`/`EyebrowLabel`, `Tile`/`MediaSlot`, `HeroCard`, `ListRow`, `Banner` (absorbs `InlineBanner`), `StatusPill`, `EmptyState`, `Skeleton*`, `Toast`/`ToastHost`, `LightTabBar`, `ScreenHeader`, `BackHeader`, `SheetScaffold`, `AppTextField`, `OtpField`. Each has a `@Preview`; none is wired into a screen yet — that is P2's job |
 | Global chrome | `designsystem/component/LightTabBar.kt` | done (P1) | Replaces the floating blurred pill. Opaque, hairline top, four glyphs + a raised accent action circle. Client: Home · Search · [+] · Messages · Profile. Artist: Studio · Gigs · [+] · Messages · Profile. `FloatingTabBar` and `AmbientRoleWash` are deleted |
@@ -222,7 +233,7 @@ Home dashboard, Messages filters, MonthDayGrid, Help/Feedback, SearchRecents).
 ## Explicitly deferred (not this wave)
 
 - Operator Google/Apple dashboard config + `google-services.json` / FCM server path
-- Artist profile PROF-* Airbnb extras (hero pager, review search/sort)
+- Artist profile PROF-10 hero pager (review search/sort shipped Sep 2026 as `ArtistReviewsScreen`)
 
 ---
 
