@@ -17,48 +17,68 @@ import java.io.IOException
  * nothing. A throw there escaped `viewModelScope` (no CoroutineExceptionHandler)
  * and crashed the app seconds after the account was deleted, which is the worst
  * possible moment for the local wipe to stop half-way.
+ *
+ * The two halves are separate functions because they now happen at different TIMES: the
+ * calendar wipe runs before the receipt so its row can report a real answer, and the sign-out
+ * waits for the receipt's Close button so a 30-second logout does not replace stage 3 while
+ * somebody is still reading it.
  */
 class AccountDeleteCleanupTest {
 
+    // ── The calendar wipe: before the receipt, and honest about what it managed ──────────
+
+    @Test
+    fun `a clean wipe reports no reason, so the receipt may tick`() = runTest {
+        var wiped = false
+
+        val failure = wipeMirroredCalendar { wiped = true }
+
+        assertTrue(wiped)
+        assertNull("nothing failed, so the receipt may tick", failure)
+    }
+
+    @Test
+    fun `a revoked calendar permission is reported rather than swallowed`() = runTest {
+        // wipeForAccountDelete deletes through the calendar provider with no
+        // permission check of its own, so a permission revoked since the toggle
+        // was enabled throws SecurityException here.
+        val failure = wipeMirroredCalendar { throw SecurityException("no calendar permission") }
+
+        // Those events are still sitting in the device owner's calendar, and the receipt's
+        // third row says so instead of ticking over an erasure that did not happen.
+        assertEquals("no calendar permission", failure)
+    }
+
+    @Test
+    fun `a failure with no message still gets a reason the receipt can print`() = runTest {
+        val failure = wipeMirroredCalendar { throw IllegalStateException() }
+
+        // "Calendar not cleaned — null." is not a sentence anybody should read on this screen.
+        assertEquals("this device wouldn't let us", failure)
+    }
+
+    @Test
+    fun `a blank message is treated as no message`() = runTest {
+        assertEquals("this device wouldn't let us", wipeMirroredCalendar { error("   ") })
+    }
+
+    // ── The sign-out: on Close, with the DPDP §11 backstop behind it ────────────────────
+
     @Test
     fun `the happy path reports nothing to the user`() = runTest {
-        var wiped = false
         var signedOut = false
         var localWiped = false
 
-        val cleanup = cleanUpAfterAccountDelete(
-            wipeCalendar = { wiped = true },
+        val message = cleanUpAfterAccountDelete(
             signOut = { signedOut = true },
             wipeLocalState = { localWiped = true },
         )
 
-        assertNull(cleanup.message)
-        assertNull("nothing failed, so the receipt may tick", cleanup.calendarFailure)
-        assertTrue(wiped)
+        assertNull(message)
         assertTrue(signedOut)
         // The local wipe is SessionManager.signOut()'s job on this path — doing it
         // twice would be the only way this could go wrong.
         assertFalse(localWiped)
-    }
-
-    @Test
-    fun `a revoked calendar permission does not stop the sign-out`() = runTest {
-        // wipeForAccountDelete deletes through the calendar provider with no
-        // permission check of its own, so a permission revoked since the toggle
-        // was enabled throws SecurityException here.
-        var signedOut = false
-
-        val cleanup = cleanUpAfterAccountDelete(
-            wipeCalendar = { throw SecurityException("no calendar permission") },
-            signOut = { signedOut = true },
-            wipeLocalState = {},
-        )
-
-        assertNull(cleanup.message)
-        assertTrue(signedOut)
-        // Reported, not swallowed: the receipt's third row says "Calendar cleaned" with a tick,
-        // and those events are still sitting in the device owner's calendar.
-        assertEquals("no calendar permission", cleanup.calendarFailure)
     }
 
     @Test
@@ -68,39 +88,25 @@ class AccountDeleteCleanupTest {
         // so when it throws, nothing else on the device has been wiped.
         var localWiped = false
 
-        val cleanup = cleanUpAfterAccountDelete(
-            wipeCalendar = {},
+        val message = cleanUpAfterAccountDelete(
             signOut = { throw IOException("airplane mode") },
             wipeLocalState = { localWiped = true },
         )
 
         assertTrue(localWiped)
-        assertNotNull(cleanup.message)
-        assertTrue(cleanup.message!!.contains("Restart"))
+        assertNotNull(message)
+        assertTrue(message!!.contains("Restart"))
     }
 
     @Test
     fun `a local wipe that throws still reports the failed sign-out`() = runTest {
         // DataStore edits throw IOException too. Nothing here may propagate: the
         // account is already gone, so a crash would be pure collateral.
-        val cleanup = cleanUpAfterAccountDelete(
-            wipeCalendar = { throw SecurityException("no calendar permission") },
+        val message = cleanUpAfterAccountDelete(
             signOut = { throw IOException("airplane mode") },
             wipeLocalState = { throw IOException("datastore gone") },
         )
 
-        assertEquals("Account deleted. Restart the app to finish signing out.", cleanup.message)
-        assertEquals("no calendar permission", cleanup.calendarFailure)
-    }
-
-    @Test
-    fun `a calendar failure with no message still gets a reason the receipt can print`() = runTest {
-        val cleanup = cleanUpAfterAccountDelete(
-            wipeCalendar = { throw IllegalStateException() },
-            signOut = {},
-            wipeLocalState = {},
-        )
-        // "Calendar not cleaned — null." is not a sentence anybody should read on this screen.
-        assertEquals("this device wouldn't let us", cleanup.calendarFailure)
+        assertEquals("Account deleted. Restart the app to finish signing out.", message)
     }
 }

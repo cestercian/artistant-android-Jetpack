@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.profile
 
 import `in`.artistant.app.data.repository.AccountRepository
+import `in`.artistant.app.platform.storage.AccountScopedStore
 import `in`.artistant.app.platform.storage.KeyValueStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,11 +69,14 @@ fun exportRestoreFor(requestedAtMillis: Long?, nowMillis: Long): ExportRestore =
  *    screen is rebuilt.
  *  - *Process death* is covered by the timestamp in [KeyValueStore]. On the next construction
  *    [exportRestoreFor] decides whether that request still means anything, and a young one is
- *    **re-issued** rather than merely re-displayed. That is not a shortcut: `data-export` is a
- *    synchronous Edge Function that BUILDS the export in the call and returns it (inline JSON or
- *    a one-hour signed URL). There is no job id to poll and no server-side job to poll for, so a
- *    call the process death interrupted produced nothing and left nothing behind — restoring
- *    "Requested" without re-issuing would be a spinner over a job that no longer exists.
+ *    restored as [ExportState.Requested] and eventually **re-issued** rather than merely
+ *    re-displayed. Re-issuing is not a shortcut: `data-export` is a synchronous Edge Function
+ *    that BUILDS the export in the call and returns it (inline JSON or a one-hour signed URL).
+ *    There is no job id to poll and no server-side job to poll for, so a call the process death
+ *    interrupted produced nothing and left nothing behind — a "Requested" that is never
+ *    re-issued is a spinner over a job that no longer exists. But the re-issue is the SCREEN's,
+ *    via [resumeRestored], not the constructor's: this singleton is built before supabase-kt
+ *    has restored the session, and the call it used to fire from `init` went out with no JWT.
  *
  * **Stopping is not cancelling.** "Stop waiting here" says exactly what it does: [stopWaiting]
  * orphans the in-flight call rather than aborting it, because the call is doing the work and
@@ -87,7 +91,7 @@ class DataExportStore internal constructor(
     private val prefs: KeyValueStore,
     private val scope: CoroutineScope,
     private val now: () -> Long,
-) {
+) : AccountScopedStore {
     @Inject constructor(account: AccountRepository, prefs: KeyValueStore) : this(
         account = account,
         prefs = prefs,
@@ -117,28 +121,82 @@ class DataExportStore internal constructor(
     @Volatile
     private var inFlight: Job? = null
 
-    init {
-        scope.launch {
-            val requestedAt = runCatching { prefs.getString(KEY_REQUESTED_AT).first() }
-                .getOrNull()
-                ?.toLongOrNull()
-            when (exportRestoreFor(requestedAt, now())) {
-                ExportRestore.Resume -> request()
-                ExportRestore.Expired -> clearOutstanding()
-                ExportRestore.None -> Unit
+    /**
+     * Read back what a previous process left outstanding — as STATE, never as a request.
+     *
+     * This used to call [request] straight out of `init`, which is a DPDP export issued in
+     * somebody's name at CONSTRUCTION time. The store is a `@Singleton` built by Hilt the first
+     * time anything asks for the graph, which is before supabase-kt has restored the session
+     * off disk — so the re-issued call went out with no JWT, 401'd, and screen 113 was waiting
+     * with "couldn't build your export" for a user who had opened the app and touched nothing.
+     * Worse, it fired for whoever the process belonged to next, not necessarily the account
+     * that asked.
+     *
+     * So the restore only puts the state back. Re-issuing is [resumeRestored]'s job and the
+     * screen's decision — by which point there is a session, and somebody is looking at it.
+     *
+     * A [Job] rather than an `init` block so [resumeRestored] can wait for it: the screen can
+     * be built before this has read a single byte, and a resume that observed [ExportState.Idle]
+     * because the read had not landed yet would leave a restored request sitting forever.
+     */
+    private val restore: Job = scope.launch {
+        val mine = generation.get()
+        val requestedAt = runCatching { prefs.getString(KEY_REQUESTED_AT).first() }
+            .getOrNull()
+            ?.toLongOrNull()
+        // The read suspends, so anything can happen across it — a tap, a "stop waiting", or a
+        // sign-out. The same generation guard every other write in this class uses: a restore
+        // that has been overtaken must neither publish a state nor clear a timestamp that is
+        // now somebody else's.
+        if (generation.get() != mine) return@launch
+        when (exportRestoreFor(requestedAt, now())) {
+            // Only over Idle: a request the user started in the meantime outranks a restored one.
+            ExportRestore.Resume -> if (_state.value is ExportState.Idle) {
+                _state.value = ExportState.Requested
             }
+            ExportRestore.Expired -> clearOutstanding()
+            ExportRestore.None -> Unit
+        }
+    }
+
+    /**
+     * Re-issue a request that [restore] put back, now that a screen is looking at it.
+     *
+     * `data-export` is a synchronous Edge Function: the call IS the job, it builds the export
+     * and returns it. There is no job id to poll and no server-side job to poll for, so a call
+     * that a process death interrupted produced nothing and left nothing behind — which is why
+     * restoring "Requested" without eventually re-issuing would be a spinner over a job that no
+     * longer exists.
+     *
+     * Idempotent and cheap: it does nothing unless the state really is a restored
+     * [ExportState.Requested] with no live call under it, so the screen can call it on every
+     * composition.
+     */
+    fun resumeRestored() {
+        scope.launch {
+            restore.join()
+            if (_state.value !is ExportState.Requested) return@launch
+            if (inFlight?.isActive == true) return@launch
+            issue()
         }
     }
 
     /**
      * Ask the server to build the export. A no-op while one is already in flight.
      *
+     * Guarded on the JOB rather than on the state, because [ExportState.Requested] is now also
+     * what a restored-but-unissued request looks like, and that one has to be startable.
+     *
      * Failure produces [ExportState.Failed] and **no file**: there is deliberately no path that
      * keeps a previous [ExportState.Ready] alongside a failure, because a stale file beside a
      * fresh error is how someone shares half their data believing it is all of it.
      */
     fun request() {
-        if (_state.value is ExportState.Requested) return
+        if (inFlight?.isActive == true) return
+        issue()
+    }
+
+    private fun issue() {
         val mine = generation.incrementAndGet()
         _state.value = ExportState.Requested
         inFlight = scope.launch {
@@ -194,7 +252,7 @@ class DataExportStore internal constructor(
      * write before it went. Writing the empty string into a just-wiped store is harmless — it
      * parses to "nothing outstanding", which is the truth.
      */
-    suspend fun reset() {
+    override suspend fun reset() {
         generation.incrementAndGet()
         val job = inFlight
         inFlight = null

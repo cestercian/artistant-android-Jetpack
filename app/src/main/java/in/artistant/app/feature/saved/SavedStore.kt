@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.saved
 
 import `in`.artistant.app.data.repository.SavedArtistsRepository
 import `in`.artistant.app.data.repository.SavedArtistsRepositoryError
+import `in`.artistant.app.platform.storage.AccountScopedStore
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -44,7 +45,7 @@ import javax.inject.Singleton
 class SavedStore @Inject constructor(
     private val repository: SavedArtistsRepository,
     private val prefs: AppPreferences,
-) {
+) : AccountScopedStore {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _ids = MutableStateFlow<Set<String>>(emptySet())
     val ids: StateFlow<Set<String>> = _ids.asStateFlow()
@@ -159,7 +160,12 @@ class SavedStore @Inject constructor(
         }
     }
 
-    fun reset() {
+    /**
+     * @see AccountScopedStore.reset — `suspend` only to satisfy the interface every
+     * account-scoped singleton shares; the work is a message on the command channel, which is
+     * UNLIMITED precisely so this never has to wait for one.
+     */
+    override suspend fun reset() {
         commands.trySend(Command.Reset)
     }
 

@@ -185,7 +185,6 @@ class ProfileViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
-    private val dataExport: DataExportStore,
     private val draftStore: BookingDraftStore,
     private val bookingsRepository: BookingsRepository,
     private val artists: ArtistsRepository,
@@ -382,7 +381,10 @@ class ProfileViewModel @Inject constructor(
         val message = cleanUpAfterSignOut(
             signOut = { session.signOut() },
             stillSignedIn = { session.currentUserId != null },
-            wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
+            // The same teardown `signOut()` runs, not a second hand-written copy of it: the
+            // copy that used to live here was already a store behind (see [AccountScopedStore]),
+            // so a logout that landed and then threw left the staged uploads resident.
+            wipeLocalState = { session.wipeLocalState() },
         )
         if (message != null) _state.update { it.copy(actionError = message) }
     }
@@ -429,28 +431,6 @@ class ProfileViewModel @Inject constructor(
 }
 
 /**
- * The local cleanup that follows a SUCCESSFUL server-side account delete.
- *
- * Non-throwing by construction, because the call site sits inside
- * `runCatching { … }.onSuccess { }` — an inline lambda that catches nothing. A
- * throw there escapes `viewModelScope`, which installs no
- * CoroutineExceptionHandler, so it reaches the thread's uncaught handler and
- * kills the app moments AFTER the account was erased, with the local wipe
- * half-done. Neither step is hypothetical: [wipeCalendar] deletes through the
- * calendar provider with no permission check of its own, so a calendar
- * permission revoked since the toggle was enabled throws SecurityException, and
- * [signOut] posts a logout carrying a JWT whose user has just been deleted, over
- * a link that may already be gone.
- *
- * [wipeLocalState] is the DPDP §11 backstop. `SessionManager.signOut()` does the
- * network logout FIRST and clears prefs / saved ids after it returns, so a failed
- * logout skips the local wipe entirely and the deleted account's role, saved ids
- * and thread flags survive on the device. That half is done here when sign-out
- * fails, and the user is told to restart — the one part of this they can act on.
- *
- * @return the message to surface, or null when the cleanup finished cleanly.
- */
-/**
  * The result of a role switch: whether the ACCOUNT changed, and what to say if it did not.
  */
 internal data class RoleSwitchOutcome(val switched: Boolean, val failure: String?)
@@ -488,44 +468,58 @@ internal suspend fun switchRoleOnServerThenDevice(
     return RoleSwitchOutcome(switched = true, failure = null)
 }
 
-internal suspend fun cleanUpAfterAccountDelete(
-    wipeCalendar: suspend () -> Unit,
-    signOut: suspend () -> Unit,
-    wipeLocalState: suspend () -> Unit,
-): AccountDeleteCleanup {
-    // The mirrored gigs are the device owner's own calendar events. Failing to remove them
-    // cannot un-delete the account, so it does not stop anything below — but it is REPORTED
-    // now rather than swallowed. The receipt on stage 3 itemises "Calendar cleaned" with a
-    // tick, and a tick over a wipe that threw is the screen claiming an erasure that did not
-    // happen, on the one screen in the app whose entire job is telling the truth about what
-    // was deleted.
-    val calendarFailure = runCatching { wipeCalendar() }.exceptionOrNull()
-    val message = if (runCatching { signOut() }.isSuccess) {
-        null
-    } else {
-        runCatching { wipeLocalState() }
-        "Account deleted. Restart the app to finish signing out."
+/**
+ * Take the mirrored gigs off this device's calendar, and say whether it worked.
+ *
+ * Runs BEFORE the receipt goes up, which is the whole change: it used to run after, alongside a
+ * sign-out that swaps the entire graph out from under the screen, so stage 3's third row was
+ * still reading "Clearing your calendar" when the root gate replaced it. The row that reports
+ * this is the one row on the receipt that can be false, and nobody ever saw its answer.
+ *
+ * It is also the fast half — a local content-provider delete, not a network logout — so putting
+ * it first costs the receipt nothing.
+ *
+ * Never throws: `wipeForAccountDelete` deletes through the calendar provider with no permission
+ * check of its own, so a calendar permission revoked since the toggle was enabled throws
+ * SecurityException, and the call site is an inline `onSuccess` lambda inside `runCatching`,
+ * which catches nothing. A throw there escapes `viewModelScope` — no CoroutineExceptionHandler —
+ * and kills the app moments after the account was erased.
+ *
+ * @return null when the events really were removed, or the reason they were not. A reason is
+ * never blank: "Calendar not cleaned — null." is not a sentence anybody should read here.
+ */
+internal suspend fun wipeMirroredCalendar(wipeCalendar: suspend () -> Unit): String? =
+    runCatching { wipeCalendar() }.exceptionOrNull()?.let {
+        it.message?.takeIf(String::isNotBlank) ?: "this device wouldn't let us"
     }
-    return AccountDeleteCleanup(
-        calendarFailure = calendarFailure?.let {
-            it.message?.takeIf(String::isNotBlank) ?: "this device wouldn't let us"
-        },
-        message = message,
-    )
-}
 
 /**
- * What the local half of a delete managed, once the server row is already gone.
+ * End the session after a SUCCESSFUL server-side account delete.
  *
- * Two independent facts, because the receipt states them separately: whether the mirrored
- * calendar events came off this device, and whether the session teardown finished.
+ * Deferred to the receipt's Close button rather than run underneath it. The row is already gone
+ * server-side and nothing here can change that, so there is nothing to hold a screen for — and
+ * a 30-second logout timeout running under a receipt is how stage 3 got replaced before it had
+ * finished saying what it was for.
+ *
+ * [wipeLocalState] is the DPDP §11 backstop. `SessionManager.signOut()` does the network logout
+ * FIRST and wipes the device after it returns, so a failed logout skips the wipe entirely and
+ * the deleted account's role, saved ids, export payload and staged uploads survive on the phone.
+ * That half is done here when sign-out fails, and the user is told to restart — the one part of
+ * this they can act on, and the reason the receipt's Close button falls back to closing the app.
+ *
+ * Non-throwing, for the same reason as [wipeMirroredCalendar]: [signOut] posts a logout carrying
+ * a JWT whose user has just been deleted, over a link that may already be gone.
+ *
+ * @return the message to surface, or null when the teardown finished cleanly.
  */
-internal data class AccountDeleteCleanup(
-    /** null when the mirrored events really were removed; the reason when they were not. */
-    val calendarFailure: String?,
-    /** A sentence for the user, or null when there is nothing left to tell them. */
-    val message: String?,
-)
+internal suspend fun cleanUpAfterAccountDelete(
+    signOut: suspend () -> Unit,
+    wipeLocalState: suspend () -> Unit,
+): String? {
+    if (runCatching { signOut() }.isSuccess) return null
+    runCatching { wipeLocalState() }
+    return "Account deleted. Restart the app to finish signing out."
+}
 
 /**
  * The local cleanup that follows a PLAIN sign-out attempt.

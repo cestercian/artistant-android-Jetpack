@@ -124,6 +124,13 @@ class DataExportViewModel @Inject constructor(
         store.request()
     }
 
+    /**
+     * @see DataExportStore.resumeRestored — the screen is where a request the process death
+     * interrupted gets re-issued, because the screen is the first point at which there is
+     * certainly a session and somebody actually waiting on the answer.
+     */
+    fun resumeRestored() = store.resumeRestored()
+
     /** Hand the finished file to the system. Only reachable from [ExportState.Ready]. */
     fun share() {
         val ready = store.state.value as? ExportState.Ready ?: return
@@ -170,6 +177,11 @@ fun DataExportScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // A request that a process death interrupted is restored as Requested but not re-issued —
+    // the store is built before the session is. Here there is a session and a screen, so this
+    // is where it actually starts again. Idempotent; see DataExportStore.resumeRestored.
+    LaunchedEffect(Unit) { viewModel.resumeRestored() }
 
     LaunchedEffect(state.pendingShare) {
         val pending = state.pendingShare ?: return@LaunchedEffect

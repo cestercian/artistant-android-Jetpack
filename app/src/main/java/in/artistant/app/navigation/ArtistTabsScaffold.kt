@@ -259,9 +259,9 @@ fun ArtistTabsScaffold() {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
                         onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
-                        // Nothing to navigate TO: the account is gone, so the cleared session
-                        // propagates to the root gate and replaces this whole graph.
-                        onFinished = {},
+                        // See [ClientTabsScaffold]: only a sign-out that would not land gets
+                        // here, and closing the app is what the receipt's own copy promises.
+                        onFinished = { context.finishAfterDelete() },
                     )
                 }
             }

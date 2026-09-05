@@ -51,7 +51,6 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.feature.booking.BookingDraftStore
-import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
@@ -78,15 +77,19 @@ enum class DeleteReason(val label: String) {
 /**
  * Whether the mirrored gigs came off this device's calendar.
  *
- * Three states because there are three, and the receipt on stage 3 must not flatten them: the
- * wipe runs AFTER that screen is already up (the server row is gone, and holding a spinner
- * through a 30-second logout would read as a delete that never happened), so [Pending] is what
- * the row shows for the moment it takes, and [Failed] is what it shows when the calendar
- * provider refused. A tick over a wipe that threw is the one screen in the app whose whole job
- * is honesty claiming an erasure that did not happen.
+ * Three states because there are three, and the receipt on stage 3 must not flatten them.
+ * [Failed] is what the row shows when the calendar provider refused — a tick over a wipe that
+ * threw is the one screen in the app whose whole job is honesty claiming an erasure that did not
+ * happen.
+ *
+ * The wipe now runs BEFORE the receipt goes up (it is a local provider delete, measured in
+ * milliseconds; the slow half is the sign-out, which waits for Close), so [Pending] is the
+ * value the state carries on the two stages ahead of the receipt rather than a row anybody
+ * reads. It stays, because "not asked yet" is a real third answer and the alternative is
+ * defaulting the field to a claim.
  */
 sealed interface CalendarOutcome {
-    /** The wipe has not answered yet. */
+    /** The wipe has not been asked for yet — stages 1 and 2. */
     data object Pending : CalendarOutcome
 
     /** The mirrored events are off this device. */
@@ -137,8 +140,6 @@ class DeleteAccountViewModel @Inject constructor(
     private val session: SessionManager,
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
-    private val savedStore: SavedStore,
-    private val dataExport: DataExportStore,
     private val draftStore: BookingDraftStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DeleteAccountUiState())
@@ -188,36 +189,58 @@ class DeleteAccountViewModel @Inject constructor(
      * repo. So the question is asked because the design's off-ramp needs it asked — the answer
      * is what decides whether Support is offered — and the screen never claims it was sent.
      */
-    fun deleteAccount(onDeleted: () -> Unit) = viewModelScope.launch {
+    fun deleteAccount() = viewModelScope.launch {
         if (!_state.value.canDelete) return@launch
         _state.update { it.copy(working = true, failure = null) }
         runCatching { account.deleteAccount() }
             .onSuccess {
-                // Stage 3 goes up BEFORE the cleanup: the row is already erased server-side,
-                // nothing below can change that outcome, and holding a spinner through a 30s
-                // logout timeout would read as a delete that never happened.
-                _state.update { it.copy(working = false, stage = DeleteStage.Receipt) }
                 draftStore.clear()
-                val cleanup = cleanUpAfterAccountDelete(
-                    wipeCalendar = { calendarSync.wipeForAccountDelete() },
-                    signOut = { session.signOut() },
-                    wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
-                )
+                // The device-calendar wipe FIRST, and its answer recorded, because stage 3's
+                // third row is what reports it. It used to run after the receipt was already up
+                // — alongside a sign-out that swaps this whole graph out from under it — so the
+                // row that can be false was still saying "Clearing your calendar" when the root
+                // gate replaced the screen, and nobody ever saw the outcome. It is a local
+                // provider delete, so the receipt waits milliseconds for it, not a logout.
+                val calendarFailure = wipeMirroredCalendar { calendarSync.wipeForAccountDelete() }
                 _state.update {
                     it.copy(
-                        calendar = cleanup.calendarFailure
+                        working = false,
+                        stage = DeleteStage.Receipt,
+                        calendar = calendarFailure
                             ?.let(CalendarOutcome::Failed)
                             ?: CalendarOutcome.Cleaned,
-                        failure = cleanup.message ?: it.failure,
                     )
                 }
-                onDeleted()
             }
             .onFailure { e ->
                 _state.update {
                     it.copy(working = false, failure = e.message ?: "Account deletion failed")
                 }
             }
+    }
+
+    /**
+     * "Close Artistant" on the receipt — where the session actually ends.
+     *
+     * The sign-out is the slow, network half and it is deliberately here rather than under the
+     * receipt: the row is already erased server-side, nothing this does can change that, and a
+     * 30-second logout timeout running beneath stage 3 is what replaced the receipt before it
+     * had finished saying what it was for.
+     *
+     * [onExit] is called ONLY when the session would not clear. A cleared one propagates to the
+     * root gate, which swaps this entire graph for the signup flow — an exit on top of that
+     * would only race it. A session still standing has no such swap coming, so closing the app
+     * is the only honest end, and it is the one the receipt's own copy already names.
+     */
+    fun finish(onExit: () -> Unit) = viewModelScope.launch {
+        if (_state.value.working) return@launch
+        _state.update { it.copy(working = true) }
+        val message = cleanUpAfterAccountDelete(
+            signOut = { session.signOut() },
+            wipeLocalState = { session.wipeLocalState() },
+        )
+        _state.update { it.copy(working = false, failure = message ?: it.failure) }
+        if (session.currentUserId != null) onExit()
     }
 }
 
@@ -257,12 +280,12 @@ fun DeleteAccountScreen(
         onPick = viewModel::pick,
         onContinue = viewModel::continueToConsequences,
         onConfirmationChange = viewModel::setConfirmation,
-        // The receipt replaces this screen; navigating away is the host's job, and it happens
-        // anyway the moment the cleared session propagates to the root gate.
-        onDelete = { viewModel.deleteAccount(onFinished) },
+        // The delete raises the receipt and stops there. The session ends on Close — see
+        // [DeleteAccountViewModel.finish] — and [onFinished] is only reached when it wouldn't.
+        onDelete = viewModel::deleteAccount,
         onKeep = onBack,
         onContactSupport = onContactSupport,
-        onClose = onFinished,
+        onClose = { viewModel.finish(onFinished) },
         modifier = modifier,
     )
 }
@@ -447,9 +470,13 @@ private fun DeleteReceiptStage(
         modifier = modifier.semantics { testTag = "screen.deleteReceipt" },
         footer = {
             PrimaryButton(
-                text = "Close Artistant",
+                // The sign-out happens on this tap, so the button reports it. It is normally
+                // instant; on a dead link it is a 30-second timeout, and a button that looked
+                // inert for half a minute would read as a receipt that had stopped working.
+                text = if (state.working) "Signing out…" else "Close Artistant",
                 onClick = onClose,
                 fullWidth = true,
+                enabled = !state.working,
                 modifier = Modifier.semantics { testTag = "delete.close" },
             )
         },

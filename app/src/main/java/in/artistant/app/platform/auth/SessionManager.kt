@@ -21,12 +21,10 @@ import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import `in`.artistant.app.BuildConfig
-import `in`.artistant.app.platform.media.UploadQueue
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.push.PushService
-import `in`.artistant.app.feature.profile.DataExportStore
-import `in`.artistant.app.feature.saved.SavedStore
+import `in`.artistant.app.platform.storage.AccountScopedStore
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -59,9 +57,14 @@ class SessionManager @Inject constructor(
     private val crash: Crash,
     private val prefs: AppPreferences,
     private val pushService: PushService,
-    private val savedStore: SavedStore,
-    private val dataExportStore: DataExportStore,
-    private val uploadQueue: UploadQueue,
+    /**
+     * Every singleton holding state that belongs to the signed-in account, filled by Hilt.
+     *
+     * Was three named fields, which is how the three teardown lists in this app drifted apart —
+     * see [AccountScopedStore]. It also let the auth layer import `feature.profile`, naming one
+     * screen's store from inside the session machinery.
+     */
+    private val accountScopedStores: Set<@JvmSuppressWildcards AccountScopedStore>,
 ) : AuthGateway {
     // Long-lived scope for the status observer + prefs wipe. SupervisorJob so one failed
     // child (a stray analytics call) doesn't tear the observer down.
@@ -344,19 +347,36 @@ class SessionManager @Inject constructor(
         client.auth.signOut()
         analytics.reset()
         crash.setUser(null)
-        prefs.wipeAll()
-        savedStore.reset()
-        // The DPDP export is account-scoped and the store is a @Singleton, so a Ready state
-        // left behind is the DEPARTING account's whole data export — inline JSON, or a live
-        // signed URL to it — sitting in memory for whoever signs in next.
-        dataExportStore.reset()
-        // The staged-media queue is account-scoped too: every task carries the artist id
-        // it was enqueued for, so a snapshot left behind is resumed by whoever signs in
-        // next, fails against an RLS policy that (rightly) won't let them write another
-        // artist's media, and strands itself in `failed` — where the EPK offers the new
-        // artist a Retry for a cover photo they never picked. Ports iOS
-        // `ArtistOnboardingStore.reset()` → `UploadQueue.cancelAll()`.
-        uploadQueue.clearAll()
+        wipeLocalState()
+    }
+
+    /**
+     * Erase everything on this device that belongs to the account — the DPDP §11 half.
+     *
+     * Public because it is also the BACKSTOP the two account screens apply when the network
+     * logout above throws: supabase-kt only reaches `clearSession()` on a logout it swallowed,
+     * so a logout that threw skipped every line under it and left the departed account's role,
+     * saved ids, export payload and staged uploads sitting on the phone. Both call sites used to
+     * hand-write that list — and both had already fallen a store behind this one.
+     *
+     * Preferences first, then the stores, which is the order [DataExportStore.reset] documents
+     * itself against: it clears whatever a cancelled request managed to write AFTER the wipe.
+     *
+     * Every step is guarded. A DataStore edit throws IOException on a preferences file it cannot
+     * write, and this runs on a path where the account may already be erased server-side — one
+     * store that throws must not cost the others their turn, and none of it may propagate to a
+     * `viewModelScope` that installs no handler.
+     */
+    suspend fun wipeLocalState() {
+        runCatching { prefs.wipeAll() }
+        // What each of these is holding, and why none of it may be inherited: the saved-artist
+        // ids; the DPDP export — a Ready state is the DEPARTING account's whole record, inline
+        // JSON or a live signed URL to it; and the staged-media queue, whose every task carries
+        // the artist id it was enqueued for, so a snapshot left behind is resumed by whoever
+        // signs in next, fails against an RLS policy that (rightly) refuses another artist's
+        // media, and strands itself in `failed` — where the EPK offers the new artist a Retry
+        // for a cover photo they never picked.
+        accountScopedStores.forEach { store -> runCatching { store.reset() } }
     }
 
     // MARK: - Deep link
