@@ -103,8 +103,14 @@ class ArtistantMessagingService : FirebaseMessagingService() {
             return
         }
         val channelId = when (delivery) {
-            PushDelivery.Silent -> NotificationChannels.quietTwinOf(plan.channelId)
+            // Not `quietTwinOf` outright: the twin exists to make quiet hours possible, not to
+            // post through a channel the user has blocked. See NotificationChannels.
+            PushDelivery.Silent -> NotificationChannels.quietChannelFor(this, plan.channelId)
             else -> plan.channelId
+        }
+        if (channelId == null) {
+            Timber.i("Push '%s' dropped — its channel is blocked in system settings", event)
+            return
         }
         NotificationManagerCompat.from(this).notify(plan.notificationId, build(plan, channelId, data))
     }
@@ -118,13 +124,30 @@ class ArtistantMessagingService : FirebaseMessagingService() {
      * the DEFAULTS rather than to a drop: the defaults are what the screen shows for a user who
      * has never touched it, and losing somebody's booking confirmation because a preferences
      * file was corrupt is a far worse failure than making a sound they had asked us not to.
+     *
+     * **A read that never answers falls back the same way**, which needs saying separately
+     * because it is not the same failure. `first()` on a DataStore flow has no timeout of its
+     * own: a contended lock or a disk stall parks this callback until the OS decides the
+     * service is stuck — and then the notification is not merely late, it is never posted at
+     * all, along with every other push queued behind it. [logActivity] already carries this
+     * fuse; the same reasoning applies twice as hard here, because this read gates the delivery
+     * rather than the bookkeeping.
      */
-    private fun currentSettings(): NotificationSettings =
-        runCatching { runBlocking { notificationPrefs.all.first() } }
-            .getOrElse {
-                Timber.w(it, "Couldn't read notification preferences — using defaults")
-                NotificationSettings()
+    private fun currentSettings(): NotificationSettings {
+        val read = runCatching {
+            runBlocking {
+                withTimeoutOrNull(SETTINGS_READ_TIMEOUT_MS) { notificationPrefs.all.first() }
             }
+        }
+        read.exceptionOrNull()?.let {
+            Timber.w(it, "Couldn't read notification preferences — using defaults")
+        }
+        val settings = read.getOrNull()
+        if (settings == null && read.isSuccess) {
+            Timber.w("Notification preferences didn't answer in time — using defaults")
+        }
+        return settings ?: NotificationSettings()
+    }
 
     /**
      * Append this push to the device's activity log — **synchronously**.
@@ -227,5 +250,11 @@ class ArtistantMessagingService : FirebaseMessagingService() {
 
         /** See [logActivity] — a fuse on the receive callback's budget, not a schedule. */
         const val ACTIVITY_WRITE_TIMEOUT_MS = 5_000L
+
+        /**
+         * See [currentSettings] — the same fuse, shorter, because this one is upstream of the
+         * notification itself rather than of the log beside it.
+         */
+        const val SETTINGS_READ_TIMEOUT_MS = 2_000L
     }
 }
