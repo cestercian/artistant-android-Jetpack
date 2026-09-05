@@ -159,9 +159,15 @@ private fun DevicesContent(
 
         AccountGap()
         Text(
+            // Not "loses it immediately", which is what this said and is not how the provider
+            // works: signing out elsewhere revokes the REFRESH tokens, and an access token
+            // already issued stays valid until it expires. Nor "change your password" — the
+            // identity here is a phone number and a one-time code, most accounts have no
+            // password at all, and this app has no screen to change one.
             "If you don't think you should be signed in anywhere else, sign out everywhere " +
-                "else and then change your password. Anyone still holding a session loses it " +
-                "immediately.",
+                "else. Those sessions can't refresh after that, so they're signed out within " +
+                "the hour rather than the second. Come back and check here again later if " +
+                "anything still looks wrong.",
             style = AppTheme.type.body,
             color = colors.ink3,
             modifier = Modifier.fillMaxWidth(),
@@ -172,7 +178,9 @@ private fun DevicesContent(
             Banner(
                 title = "Every other session is signed out",
                 tone = BannerTone.Info,
-                detail = "This device stays signed in. Anywhere else has to sign in again.",
+                detail = "This device stays signed in. Everywhere else has lost the ability " +
+                    "to refresh, so those sessions end within the hour and have to sign in " +
+                    "again.",
                 modifier = Modifier.semantics { testTag = "devices.signedOut" },
             )
         }
