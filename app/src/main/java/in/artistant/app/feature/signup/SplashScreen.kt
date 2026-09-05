@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
+import `in`.artistant.app.ui.SessionDegradedBanner
 
 /**
  * Screen 01 — **the one dark room**.
@@ -47,9 +48,15 @@ import `in`.artistant.app.designsystem.theme.ArtistantTheme
  * What it replaces is worse than what it is: the gate used to render an empty themed tree while
  * loading, which showed the bare window — a white flash between a black launch screen and
  * whatever came next.
+ *
+ * @param onSignInAgain non-null for [in.artistant.app.ui.RootGate.Reconnecting] — the one
+ *   variant of this screen that DOES carry an action, because it is the one that can be on
+ *   screen indefinitely. A cold start that meets an expired token with no network never
+ *   leaves `RefreshFailure` on its own, so the splash without an exit is a dead end. The
+ *   banner says what is happening; the action is for someone who would rather not wait.
  */
 @Composable
-fun SplashScreen(modifier: Modifier = Modifier) {
+fun SplashScreen(modifier: Modifier = Modifier, onSignInAgain: (() -> Unit)? = null) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Column(
@@ -108,6 +115,12 @@ fun SplashScreen(modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(dimens.space.xl))
+        // The reconnect variant. Below the copy rather than over it: the screen still says
+        // what it always says, and this adds why it is still saying it.
+        if (onSignInAgain != null) {
+            SessionDegradedBanner(onSignInAgain = onSignInAgain)
+            Spacer(Modifier.height(dimens.space.md))
+        }
     }
 }
 

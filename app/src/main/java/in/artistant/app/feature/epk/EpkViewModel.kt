@@ -487,7 +487,10 @@ class EpkViewModel @Inject constructor(
     }
 
     private suspend fun loadSamples() {
-        val userId = session.currentUserId ?: return
+        // A read, so it lands on the loader's line rather than the editor's — and it lands
+        // on one at all: `?: return` left the samples block claiming an empty list for an
+        // artist whose clips we simply never asked for.
+        val userId = session.currentUserId ?: return failLoad()
         runCatching { samples.list(userId) }
             .onSuccess { rows -> _state.update { it.copy(samples = rows) } }
             .onFailure { failLoad() }
@@ -516,6 +519,26 @@ class EpkViewModel @Inject constructor(
         _state.update {
             it.copy(loadError = "Couldn't load your profile — check your connection and retry.")
         }
+    }
+
+    /**
+     * The artist's own id for a WRITE, or null **with the reason on screen**.
+     *
+     * Every editor on this screen used to open with `session.currentUserId ?: return`, which
+     * reads as "impossible, we are inside the artist tabs". It is not impossible: through a
+     * [SessionStatus.RefreshFailure] supabase-kt keeps the session but
+     * `currentSessionOrNull()` answers null, so `currentUserId` is null for as long as the
+     * device is offline — and offline is exactly when someone sits editing their press kit.
+     * The bare `return` made every one of those taps a no-op with no banner, no spinner and
+     * no error: the artist deleted a link, watched it stay, and tried again.
+     *
+     * So the drop is stated. [EpkUiState.saveError] is the line the whole editor already uses
+     * for "that didn't land", and the tab shell is carrying the reconnect banner above it.
+     */
+    private fun writerUserId(): String? {
+        val id = session.currentUserId
+        if (id == null) _state.update { it.copy(saveError = SESSION_UNAVAILABLE) }
+        return id
     }
 
     fun dismissSaveError() = _state.update { it.copy(saveError = null) }
@@ -1253,7 +1276,7 @@ class EpkViewModel @Inject constructor(
      */
     fun saveLinkEditor() {
         val editor = _state.value.linkEditor ?: return
-        val userId = session.currentUserId ?: return
+        val userId = writerUserId() ?: return
         val label = editor.label.trim()
         val url = normalizeLinkUrl(editor.url)
         if (!linkIsSavable(label, url)) return
@@ -1276,7 +1299,7 @@ class EpkViewModel @Inject constructor(
     }
 
     fun deleteLink(id: String) {
-        val userId = session.currentUserId ?: return
+        val userId = writerUserId() ?: return
         viewModelScope.launch {
             _state.update { it.copy(busyLinks = true) }
             runCatching { links.delete(id) }
@@ -1336,7 +1359,7 @@ class EpkViewModel @Inject constructor(
     fun onPhotoCaptured(uri: Uri) = addPhoto(uri, ownsSource = true)
 
     private fun addPhoto(uri: Uri, ownsSource: Boolean) {
-        val userId = session.currentUserId ?: return
+        val userId = writerUserId() ?: return
         if (!canAddPhoto(_state.value.photos.size, _state.value.uploadingPhoto)) return
         viewModelScope.launch {
             // A new pick abandons whatever the last failure was holding. This is
@@ -1381,7 +1404,7 @@ class EpkViewModel @Inject constructor(
      */
     fun retryHeldPhoto() {
         val fileName = _state.value.heldPhotoFile ?: return
-        val userId = session.currentUserId ?: return
+        val userId = writerUserId() ?: return
         if (_state.value.uploadingPhoto) return
         viewModelScope.launch {
             _state.update { it.copy(uploadingPhoto = true, saveError = null) }
@@ -1463,7 +1486,7 @@ class EpkViewModel @Inject constructor(
     }
 
     fun deletePhoto(item: ArtistMediaItem) {
-        val userId = session.currentUserId ?: return
+        val userId = writerUserId() ?: return
         viewModelScope.launch {
             runCatching { media.delete(item) }
                 .onSuccess {
@@ -1521,7 +1544,7 @@ class EpkViewModel @Inject constructor(
      * is why the body runs on IO rather than on `Main.immediate`.
      */
     fun onSamplePicked(uri: Uri) {
-        val userId = session.currentUserId ?: return
+        val userId = writerUserId() ?: return
         val current = _state.value
         if (!canAddSample(
                 stored = current.samples.size,
@@ -1710,5 +1733,17 @@ class EpkViewModel @Inject constructor(
     private companion object {
         /** Matches iOS. Long enough to swallow a typed number, short enough to feel saved. */
         const val SAVE_DEBOUNCE_MS = 1_200L
+
+        /**
+         * What a write asked for while the session cannot answer says for itself.
+         *
+         * Deliberately not "check your connection": the connection may be fine and the
+         * account is not gone — the token refresh is what failed, and until it lands
+         * `auth.uid()` is null and RLS refuses the row. The tab shell is already carrying
+         * [in.artistant.app.ui.SessionDegradedBanner] saying the same thing; this is the
+         * sentence for the artist who tapped anyway.
+         */
+        const val SESSION_UNAVAILABLE =
+            "Not saved — we've lost your session. It'll save once you're reconnected."
     }
 }

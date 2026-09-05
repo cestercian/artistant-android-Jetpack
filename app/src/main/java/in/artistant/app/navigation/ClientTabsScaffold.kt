@@ -89,6 +89,7 @@ import `in`.artistant.app.feature.system.RatePromptViewModel
 import `in`.artistant.app.feature.system.ToastViewModel
 import `in`.artistant.app.feature.system.WhatsNewViewModel
 import `in`.artistant.app.ui.RootViewModel
+import `in`.artistant.app.ui.SessionDegradedTopBar
 
 /**
  * Client navigation: five top-level routes, four of which are glyphs in the bar.
@@ -214,6 +215,10 @@ fun ClientTabsScaffold() {
         // has no wash — one flat warm off-white, with the accent appearing once
         // per screen wherever that screen decides.
         containerColor = AppTheme.colors.page,
+        // Nothing at all unless the session has stopped refreshing, in which case
+        // every destination below gets told before it loses a write. See
+        // [SessionDegradedTopBar].
+        topBar = { SessionDegradedTopBar() },
         bottomBar = {
             if (!showBottomBar) return@Scaffold
             LightTabBar(
