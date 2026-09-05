@@ -261,7 +261,7 @@ fun ArtistTabsScaffold() {
                         onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
                         // See [ClientTabsScaffold]: only a sign-out that would not land gets
                         // here, and closing the app is what the receipt's own copy promises.
-                        onFinished = { context.finishAfterDelete() },
+                        onFinished = rememberDeleteAccountExit(),
                     )
                 }
             }

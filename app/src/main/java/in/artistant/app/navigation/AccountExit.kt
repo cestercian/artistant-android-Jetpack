@@ -3,6 +3,9 @@ package `in`.artistant.app.navigation
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 
 /**
  * What "Close Artistant" does when the account is gone but the session would not go with it.
@@ -23,6 +26,20 @@ import android.content.ContextWrapper
  */
 internal fun Context.finishAfterDelete() {
     findActivity()?.finishAffinity()
+}
+
+/**
+ * [finishAfterDelete] bound to the composition's context — what both graphs pass as the delete
+ * screen's `onFinished`.
+ *
+ * A helper rather than two `LocalContext.current` locals, because the exit is one decision and
+ * the two graphs must not be able to drift on it: the delete screen is the one place where the
+ * artist side has historically been the copy nobody updated.
+ */
+@Composable
+internal fun rememberDeleteAccountExit(): () -> Unit {
+    val context = LocalContext.current
+    return remember(context) { { context.finishAfterDelete() } }
 }
 
 /** Compose hands out a wrapped context; the Activity is somewhere under it. */

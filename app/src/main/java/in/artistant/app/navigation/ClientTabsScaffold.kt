@@ -391,7 +391,7 @@ fun ClientTabsScaffold() {
                         // replaces this whole graph with the signup flow — an exit on top of
                         // that would just race it. One that did not has no swap coming, and
                         // the receipt already says to restart the app.
-                        onFinished = { context.finishAfterDelete() },
+                        onFinished = rememberDeleteAccountExit(),
                     )
                 }
             }
