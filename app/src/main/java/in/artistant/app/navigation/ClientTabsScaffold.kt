@@ -332,7 +332,7 @@ fun ClientTabsScaffold() {
                 }
             }
             composable(ClientTab.Profile.route) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     ProfileScreen(
                         onAccount = { nav.navigate(ClientNavRoutes.ACCOUNT) },
                         // Profile is Bookings' front door: the light bar dropped the calendar
@@ -355,7 +355,7 @@ fun ClientTabsScaffold() {
             // Design 47 — the client's half of the ONE account list. Wired by
             // [AccountDestination], which the artist graph shares; see its note.
             composable(ClientNavRoutes.ACCOUNT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     AccountDestination(
                         nav = nav,
                         routes = AccountRoutes.Client,
@@ -365,19 +365,19 @@ fun ClientTabsScaffold() {
                 }
             }
             composable(ClientNavRoutes.NOTIFICATIONS) {
-                TabPane(inner) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ClientNavRoutes.ACCESSIBILITY) {
-                TabPane(inner) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ClientNavRoutes.LANGUAGE) {
-                TabPane(inner) { LanguageScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { LanguageScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ClientNavRoutes.DEVICES) {
-                TabPane(inner) { DevicesScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { DevicesScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ClientNavRoutes.DATA_EXPORT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     DataExportScreen(
                         onBack = { nav.popBackStack() },
                         // The scripted support assistant, not the safety centre: a failed
@@ -387,7 +387,7 @@ fun ClientTabsScaffold() {
                 }
             }
             composable(ClientNavRoutes.DELETE_ACCOUNT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
                         onContactSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
@@ -455,7 +455,7 @@ fun ClientTabsScaffold() {
             // list's "Privacy" row above; the legal viewer is also reachable from the
             // signup flow's welcome and sign-in screens.
             composable(ClientNavRoutes.PRIVACY) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     PrivacyScreen(
                         onBack = { nav.popBackStack() },
                         onOpenLegal = { doc -> nav.navigate(ClientNavRoutes.legal(doc.name)) },
@@ -502,7 +502,7 @@ fun ClientTabsScaffold() {
                 }
             }
             composable(ClientNavRoutes.PAYWALL) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     PaywallScreen(
                         role = AppRole.Client,
                         onClose = { nav.popBackStack() },
@@ -571,7 +571,7 @@ fun ClientTabsScaffold() {
                 route = ClientNavRoutes.ARTIST_REVIEWS,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) { entry ->
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     val artistId = entry.arguments?.getString("artistId").orEmpty()
                     ArtistReviewsScreen(
                         onBack = { nav.popBackStack() },
@@ -585,7 +585,7 @@ fun ClientTabsScaffold() {
                 route = ClientNavRoutes.BOOKABILITY,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     BookabilityScreen(onBack = { nav.popBackStack() })
                 }
             }
@@ -608,7 +608,7 @@ fun ClientTabsScaffold() {
                 route = ClientNavRoutes.BOOKING,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     BookingScreen(
                         onBack = { nav.popBackStack() },
                         onContinue = { nav.navigate(ClientNavRoutes.CHECKOUT) },
@@ -616,7 +616,7 @@ fun ClientTabsScaffold() {
                 }
             }
             composable(ClientNavRoutes.CHECKOUT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     CheckoutScreen(
                         onBack = { nav.popBackStack() },
                         // The WHOLE funnel goes, not just this step. Popping only
@@ -651,7 +651,7 @@ fun ClientTabsScaffold() {
                 val confirmChat: ChatOpenViewModel = hiltViewModel()
                 val confirmOpening by confirmChat.opening.collectAsStateWithLifecycle()
                 val confirmError by confirmChat.error.collectAsStateWithLifecycle()
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     Box(Modifier.fillMaxSize()) {
                         ConfirmedScreen(
                             bookingId = bookingId,
@@ -689,7 +689,7 @@ fun ClientTabsScaffold() {
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) { entry ->
                 val bookingId = entry.arguments?.getString("bookingId").orEmpty()
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     MatchConfirmedScreen(
                         bookingId = bookingId,
                         onViewBooking = { id ->
@@ -708,7 +708,7 @@ fun ClientTabsScaffold() {
                 route = ClientNavRoutes.INVOICE,
                 arguments = listOf(navArgument("bookingId") { type = NavType.StringType }),
             ) { entry ->
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     InvoiceScreen(
                         bookingId = entry.arguments?.getString("bookingId").orEmpty(),
                         onBack = { nav.popBackStack() },
@@ -757,7 +757,7 @@ fun ClientTabsScaffold() {
                 route = ClientNavRoutes.REQUEST_QUOTE,
                 arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
             ) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     RequestQuoteScreen(
                         onBack = { nav.popBackStack() },
                         onSuccess = { nav.popBackStack() },

@@ -1,5 +1,6 @@
 package `in`.artistant.app.navigation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -225,7 +226,7 @@ fun ArtistTabsScaffold() {
             // role rather than forked into a second implementation, which is the design's own
             // note on this pair and the reason artist deletion is reachable at all.
             composable(ArtistNavRoutes.ACCOUNT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     AccountDestination(
                         nav = nav,
                         routes = AccountRoutes.Artist,
@@ -240,19 +241,19 @@ fun ArtistTabsScaffold() {
                 }
             }
             composable(ArtistNavRoutes.NOTIFICATIONS) {
-                TabPane(inner) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ArtistNavRoutes.ACCESSIBILITY) {
-                TabPane(inner) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { AccessibilityScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ArtistNavRoutes.LANGUAGE) {
-                TabPane(inner) { LanguageScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { LanguageScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ArtistNavRoutes.DEVICES) {
-                TabPane(inner) { DevicesScreen(onBack = { nav.popBackStack() }) }
+                TabPane(inner, background = AppTheme.colors.surface) { DevicesScreen(onBack = { nav.popBackStack() }) }
             }
             composable(ArtistNavRoutes.DATA_EXPORT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     DataExportScreen(
                         onBack = { nav.popBackStack() },
                         onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
@@ -260,7 +261,7 @@ fun ArtistTabsScaffold() {
                 }
             }
             composable(ArtistNavRoutes.DELETE_ACCOUNT) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
                         onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
@@ -327,7 +328,7 @@ fun ArtistTabsScaffold() {
             // list's "Privacy" row above; the legal viewer is also reachable from the
             // signup flow's welcome and sign-in screens.
             composable(ArtistNavRoutes.PRIVACY) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     PrivacyScreen(
                         onBack = { nav.popBackStack() },
                         onOpenLegal = { doc -> nav.navigate(ArtistNavRoutes.legal(doc.name)) },
@@ -362,7 +363,7 @@ fun ArtistTabsScaffold() {
                 }
             }
             composable(ArtistNavRoutes.SCORE_EXPLAINER) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     ScoreExplainerScreen(
                         onBack = { nav.popBackStack() },
                         // Every opportunity opens the thing it is about (design
@@ -386,12 +387,12 @@ fun ArtistTabsScaffold() {
                 }
             }
             composable(ArtistNavRoutes.SCORE_HISTORY) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     ScoreHistoryScreen(onBack = { nav.popBackStack() })
                 }
             }
             composable(ArtistNavRoutes.PAYWALL) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     PaywallScreen(
                         role = AppRole.Artist,
                         onClose = { nav.popBackStack() },
@@ -457,7 +458,7 @@ fun ArtistTabsScaffold() {
                 }
             }
             composable(ArtistNavRoutes.WIZARD) {
-                TabPane(inner) {
+                TabPane(inner, background = AppTheme.colors.surface) {
                     WizardScreen(onFinished = { nav.popBackStack() })
                 }
             }
@@ -545,8 +546,21 @@ internal fun navigateToTab(nav: androidx.navigation.NavController, route: String
  * [inner] carries the status-bar inset on top and, on a tab route, the tab bar's
  * full height on the bottom, so a screen wrapped here reserves exactly the space
  * the bar occupies.
+ *
+ * [background] is what shows THROUGH the status-bar strip. The pane pads the
+ * screen below the status bar, so whatever the screen paints stops there and
+ * the strip shows the tab Scaffold's ground — `page`, which is right for the
+ * `page` screens and a faint off-white band over every `surface` (white) one:
+ * Profile, the whole account section, the booking funnel, the score screens.
+ * The design's fake status bar sits on the screen's own ground; pass that
+ * ground here and the strip matches. Painted before the padding so it covers
+ * the inset, and a no-op for the default.
  */
 @Composable
-internal fun TabPane(inner: PaddingValues, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().padding(inner)) { content() }
+internal fun TabPane(
+    inner: PaddingValues,
+    background: Color = AppTheme.colors.page,
+    content: @Composable () -> Unit,
+) {
+    Box(Modifier.fillMaxSize().background(background).padding(inner)) { content() }
 }
