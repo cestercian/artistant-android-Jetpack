@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -94,6 +95,11 @@ fun ActivityScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
+
+    // Opening the screen is reading it. The rows keep their unread treatment
+    // for the length of the visit; the store does not — which is what finally
+    // clears the bell on Discover. See [ActivityViewModel.markSeen].
+    LaunchedEffect(Unit) { viewModel.markSeen() }
 
     // A row is tappable only when this graph can actually serve where its
     // notification would have gone — see [openActivity].
@@ -197,6 +203,7 @@ fun ActivityScreen(
                 items(today, key = { it.id }) { entry ->
                     ActivityRow(
                         entry = entry,
+                        unread = state.showsUnread(entry),
                         accented = entry.id == state.accentedId,
                         nowMs = nowMs,
                         onClick = openFor(entry),
@@ -216,6 +223,7 @@ fun ActivityScreen(
                 items(earlier, key = { it.id }) { entry ->
                     ActivityRow(
                         entry = entry,
+                        unread = state.showsUnread(entry),
                         accented = entry.id == state.accentedId,
                         nowMs = nowMs,
                         onClick = openFor(entry),
@@ -318,6 +326,11 @@ private fun openActivity(
 @Composable
 private fun ActivityRow(
     entry: ActivityEntry,
+    /**
+     * Whether the row still DRAWS as unread, which outlives the stored flag by
+     * one visit — see [ActivityUiState.unreadOnArrival].
+     */
+    unread: Boolean,
     accented: Boolean,
     nowMs: Long,
     onClick: (() -> Unit)?,
@@ -338,7 +351,7 @@ private fun ActivityRow(
                     entry.title,
                     entry.body,
                     relativeStamp(entry.receivedAtMs, nowMs),
-                    if (entry.read) "" else "unread",
+                    if (unread) "unread" else "",
                 ).filter { it.isNotBlank() }.joinToString(". ")
             },
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
@@ -366,7 +379,7 @@ private fun ActivityRow(
                 // sets an unread row at 700 and a read one at 600, which survives
                 // a glance where a 8dp dot on the far edge does not.
                 style = AppTheme.type.rowTitle.copy(
-                    fontWeight = if (entry.read) FontWeight.SemiBold else FontWeight.Bold,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
                 ),
                 color = colors.ink,
                 maxLines = 2,
@@ -393,7 +406,7 @@ private fun ActivityRow(
                 color = colors.ink3,
                 maxLines = 1,
             )
-            if (!entry.read) {
+            if (unread) {
                 Box(
                     Modifier
                         .size(dimens.dashboard.bannerDot)
@@ -436,6 +449,7 @@ private fun ActivityRowPreview() {
                     body = "Fri 25 Oct is held",
                     receivedAtMs = 0L,
                 ),
+                unread = true,
                 accented = true,
                 nowMs = 120_000L,
                 onClick = {},
@@ -450,6 +464,7 @@ private fun ActivityRowPreview() {
                     receivedAtMs = 0L,
                     read = true,
                 ),
+                unread = false,
                 accented = false,
                 nowMs = 172_800_000L,
                 onClick = {},
