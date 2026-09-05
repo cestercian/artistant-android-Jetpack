@@ -30,9 +30,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
@@ -101,6 +103,24 @@ class SessionManager @Inject constructor(
      */
     val sessionStatus: StateFlow<SessionStatus> = client.auth.sessionStatus
     val isSignedIn: Flow<Boolean> = client.auth.sessionStatus.map { it is SessionStatus.Authenticated }
+
+    /**
+     * The session is present but **unusable**: a token refresh could not reach the server.
+     *
+     * Not a sign-out — supabase-kt keeps the session and keeps retrying — and not a
+     * transparent blip either, which is how it used to be treated. `currentSessionOrNull()`
+     * hands back a session only while `sessionStatus.value is Authenticated`, so through a
+     * `RefreshFailure` [currentUserId] is null, Postgrest sends the anon key, and every write
+     * RLS gates on `auth.uid()` is refused. Offline, auth-kt re-emits `RefreshFailure` about
+     * every ten seconds and publishes nothing else in between, so this can be the app's state
+     * for as long as the user stays offline.
+     *
+     * Surfaced rather than swallowed: the tab shells draw a banner off this flow, so "your
+     * changes will not save" is a sentence the user reads instead of a write they lose.
+     */
+    val sessionDegraded: StateFlow<Boolean> = client.auth.sessionStatus
+        .map { it is SessionStatus.RefreshFailure }
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     /** The signed-in user's lowercase UUID, or null. Read synchronously from the cached session. */
     val currentUserId: String?
@@ -350,6 +370,39 @@ class SessionManager @Inject constructor(
         // previews, gig requests and booking pushes.
         pushService.onSigningOut()
         client.auth.signOut()
+        wipeLocalSessionState()
+    }
+
+    /**
+     * Sign out of a session that is already [sessionDegraded] — the "Sign in again" on the
+     * reconnect gate.
+     *
+     * Separate from [signOut] because the two are recovering from different things, and the
+     * difference decides what a failed logout POST means. On the account screen a logout that
+     * cannot reach the server leaves a WORKING session, so `cleanUpAfterSignOut` deliberately
+     * reports the failure and wipes nothing — stripping a live session's own role and saved
+     * ids over a blip would be worse than the failure. Here the session is already refusing
+     * every write, the user has asked to get out of it, and a rethrown POST would leave them
+     * exactly where they were: on a reconnect screen whose only control does nothing. Offline
+     * that is guaranteed, since auth-kt swallows only `RestException` and lets the transport
+     * failure through, never reaching its own `clearSession()`.
+     *
+     * So the local end of the session is unconditional: `clearSession()` drops the stored
+     * session, cancels the refresh job and publishes `NotAuthenticated`, which is what moves
+     * the gate to the auth screen. The rest of [signOut]'s teardown follows it, because the
+     * throw skipped that too and the departing account's prefs, saved ids, export and staged
+     * uploads must not meet whoever signs in next.
+     */
+    suspend fun signOutDegraded() {
+        val failure = runCatching { signOut() }.exceptionOrNull() ?: return
+        Timber.w(failure, "sign-out from a degraded session failed; clearing it locally")
+        runCatching { client.auth.clearSession() }
+            .onFailure { Timber.e(it, "clearSession() failed; the gate may not advance") }
+        runCatching { wipeLocalSessionState() }
+    }
+
+    /** The local half of a sign-out: everything that is this account's and not the server's. */
+    private suspend fun wipeLocalSessionState() {
         analytics.reset()
         crash.setUser(null)
         wipeLocalState()

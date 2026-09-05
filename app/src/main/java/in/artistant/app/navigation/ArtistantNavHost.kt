@@ -97,7 +97,7 @@ fun ArtistantNavHost() {
         RootGate.NotSignedIn, RootGate.Onboarding -> signupState.role
         RootGate.ArtistWizard -> AppRole.Artist
         is RootGate.Tabs -> g.role
-        RootGate.Loading -> AppRole.Client
+        RootGate.Loading, RootGate.Reconnecting -> AppRole.Client
     }
 
     ArtistantTheme(role = themeRole) {
@@ -122,6 +122,15 @@ fun ArtistantNavHost() {
                     // tree showed the bare window instead, which flashed white between a black
                     // launch screen and whatever came next.
                     RootGate.Loading -> SplashScreen()
+
+                    // The same screen, plus the reason it is still up. A cold start that
+                    // meets an expired token with no network sits on `RefreshFailure`
+                    // indefinitely — supabase-kt retries every ten seconds and publishes
+                    // nothing else — so this variant is the one splash that carries an
+                    // action, and it is the one that ends the session cleanly rather than
+                    // leaving the user tapping a screen with nothing on it.
+                    RootGate.Reconnecting ->
+                        SplashScreen(onSignInAgain = viewModel::signOutFromDegradedSession)
 
                     RootGate.NotSignedIn -> SignupFlow(
                         startStep = SignupStep.Welcome,

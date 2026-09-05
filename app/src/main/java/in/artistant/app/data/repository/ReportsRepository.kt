@@ -78,6 +78,114 @@ enum class ReportOutcome {
 data class PendingReport(val reason: String, val details: String?)
 
 /**
+ * Filing a report, as a state machine — **one** of them, for both surfaces.
+ *
+ * The artist profile (screen 56) and the chat details sheet (73) file the same row through
+ * the same repository and owe the reader the same three answers, and they each grew their own
+ * copy of this: two in-flight guards, two generation counters, two settle branches. They had
+ * already drifted — one kept the failure banner up across a retry, the other blinked it out —
+ * and the tests only held one of them. So the rules live here, once, with the outcome type
+ * they are about.
+ *
+ * It lives in `data/repository` rather than in either feature for the same reason
+ * [PendingReport] does: it is the shape of an answer this layer gives, not a screen's idea
+ * about it. Nothing in it is Compose- or Android-flavoured, so it is a JVM test away from
+ * every rule below — which is the point, since neither ViewModel can be built in a unit test.
+ *
+ * @property inFlight an attempt is out. The guard: a second tap is swallowed rather than
+ *   filing a second row in `public.reports` against one person for one incident, which the
+ *   moderation queue reads as a pattern.
+ * @property failed a report nothing is holding — the insert failed AND so did the local log.
+ *   Durable state with the reader's own words kept for the retry, never a toast: "your safety
+ *   report was lost" must not fade after three seconds.
+ * @property outcome the momentary receipt, for the surface that renders one in place (chat).
+ *   The artist profile raises its receipt as a toast on the app's single host and leaves this
+ *   null; [ReportOutcome.Failed] never lands here, it lands in [failed].
+ * @property generation stamps the attempt. A completion that is not the current generation
+ *   claims nothing — see [settling].
+ */
+data class ReportSubmission(
+    val inFlight: Boolean = false,
+    val failed: PendingReport? = null,
+    val outcome: ReportOutcome? = null,
+    val generation: Int = 0,
+) {
+
+    /**
+     * The state an attempt STARTS from, or null when the tap must be swallowed.
+     *
+     * Null is the in-flight guard, and returning it rather than mutating is what lets a test
+     * state "a double tap files once" as a two-call sequence.
+     *
+     * **[failed] is carried through unchanged** — the rule the two surfaces disagreed about.
+     * The profile kept it, the chat cleared it, and keeping it is right: on a first submit it
+     * is already null, and on a retry it is the banner the reader is looking at. Dropping it
+     * for the length of the round trip made that banner blink out and — when the retry failed
+     * too — come straight back. What the reader sees instead is the same banner with its
+     * action locked and saying "Sending report…" (`Banner`'s `actionEnabled`).
+     *
+     * A standing [outcome] IS cleared: a receipt for the previous attempt sitting over a new
+     * one is a claim about a report that has not landed yet.
+     */
+    fun starting(): ReportSubmission? =
+        if (inFlight) null else copy(inFlight = true, outcome = null, generation = generation + 1)
+
+    /**
+     * The state a finished attempt lands on — **or the state untouched**, if the attempt
+     * finishing is no longer the current one.
+     *
+     * A stale completion changes NOTHING, and that includes [inFlight]. Releasing the flag
+     * "because it belongs to the attempt that is finishing" was wrong on both counts: the
+     * flag belongs to whatever is in flight NOW, and after a discard-then-new-report the
+     * answer to that is the new report. The old attempt's late completion unlocked the new
+     * one's duplicate guard mid-flight, and a second tap on Submit filed a second row in
+     * `public.reports`.
+     *
+     * The fear that motivated the release — a stale completion leaving the form wedged shut
+     * — is answered by the two things that can make a completion stale in the first place.
+     * A later attempt owns the flag and will release it when IT settles. A discard releases
+     * it in [dismissing]. And [retired] happens at `onCleared`, where there is no form left
+     * to wedge.
+     *
+     * Claiming an OUTCOME is refused for the same reason: a report the reader has moved on
+     * from must not re-raise the banner they dismissed.
+     *
+     * @param pending what was filed, kept for the retry if it turns out nothing holds it.
+     */
+    fun settling(outcome: ReportOutcome, pending: PendingReport, generation: Int): ReportSubmission {
+        if (generation != this.generation) return this
+        val settled = copy(inFlight = false)
+        return if (outcome == ReportOutcome.Failed) {
+            settled.copy(failed = pending, outcome = null)
+        } else {
+            // A retry that lands is the end of the loss it retried, so it takes the banner
+            // down as well as raising its receipt.
+            settled.copy(failed = null, outcome = outcome)
+        }
+    }
+
+    /**
+     * Give up on a lost report — the banner's "Discard".
+     *
+     * Retires whatever is in flight (the bumped generation makes its completion inert) AND
+     * releases [inFlight]. Leaving the flag set was a real bug: the abandoned attempt's
+     * completion is ignored BY that same stamp, so nothing else would ever clear it, and the
+     * next report the reader wrote — from the sheet, about someone else — was swallowed by an
+     * in-flight guard held by an attempt no one was waiting for.
+     */
+    fun dismissing(): ReportSubmission =
+        copy(inFlight = false, failed = null, generation = generation + 1)
+
+    /**
+     * The screen is gone: retire the attempt without touching what is on screen.
+     *
+     * `viewModelScope` is cancelled at `onCleared`, but a pass already past its last
+     * suspension point runs on to its writes regardless.
+     */
+    fun retired(): ReportSubmission = copy(generation = generation + 1)
+}
+
+/**
  * Why someone reports a CONVERSATION (design 73).
  *
  * A separate list from [ReportReasons] because the two surfaces are reporting

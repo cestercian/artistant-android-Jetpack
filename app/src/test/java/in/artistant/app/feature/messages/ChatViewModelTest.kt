@@ -1278,15 +1278,15 @@ class ChatViewModelTest {
 
         model.reportConversation("Scam or spam")
 
-        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
-        assertNull(model.state.value.failedReport)
+        assertEquals(ReportOutcome.Sent, model.state.value.report.outcome)
+        assertNull(model.state.value.report.failed)
         assertEquals("Scam or spam", reports.conversation.single().second)
     }
 
     /**
      * A report that only reached THIS DEVICE is not a report the safety team has.
      *
-     * `Queued` still lands in `reportOutcome` — it is not a failure and the copy
+     * `Queued` still lands in `ReportSubmission.outcome` — it is not a failure and the copy
      * must not call it one — but it is a different receipt and, on screen, a
      * different sentence. The failure this pins is the one where all three
      * outcomes flipped one boolean and printed "the report is with our safety
@@ -1300,8 +1300,8 @@ class ChatViewModelTest {
         model.reportConversation("Spam or a scam")
         advanceUntilIdle()
 
-        assertEquals(ReportOutcome.Queued, model.state.value.reportOutcome)
-        assertNull("queued is not lost", model.state.value.failedReport)
+        assertEquals(ReportOutcome.Queued, model.state.value.report.outcome)
+        assertNull("queued is not lost", model.state.value.report.failed)
     }
 
     /**
@@ -1320,10 +1320,10 @@ class ChatViewModelTest {
         model.reportConversation("Pressuring or aggressive messages", "he keeps calling")
         advanceUntilIdle()
 
-        assertNull("nothing landed, so nothing may be confirmed", model.state.value.reportOutcome)
+        assertNull("nothing landed, so nothing may be confirmed", model.state.value.report.outcome)
         assertEquals(
             PendingReport("Pressuring or aggressive messages", "he keeps calling"),
-            model.state.value.failedReport,
+            model.state.value.report.failed,
         )
     }
 
@@ -1345,8 +1345,8 @@ class ChatViewModelTest {
             Triple(threadId, "Spam or a scam", "link in every message"),
             reports.conversation.last(),
         )
-        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
-        assertNull(model.state.value.failedReport)
+        assertEquals(ReportOutcome.Sent, model.state.value.report.outcome)
+        assertNull(model.state.value.report.failed)
     }
 
     /**
@@ -1367,7 +1367,7 @@ class ChatViewModelTest {
         advanceUntilIdle()
         assertTrue(
             "the form has to lock itself while the write is out",
-            model.state.value.isSubmittingReport,
+            model.state.value.report.inFlight,
         )
 
         model.reportConversation("Spam or a scam", "same link twice")
@@ -1379,10 +1379,10 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         assertEquals(1, reports.conversation.size)
-        assertEquals(ReportOutcome.Sent, model.state.value.reportOutcome)
+        assertEquals(ReportOutcome.Sent, model.state.value.report.outcome)
         assertFalse(
             "and the form unlocks when the answer lands",
-            model.state.value.isSubmittingReport,
+            model.state.value.report.inFlight,
         )
     }
 
@@ -1402,8 +1402,8 @@ class ChatViewModelTest {
         reports.gate.complete(Unit)
         advanceUntilIdle()
 
-        assertNotNull(model.state.value.failedReport)
-        assertFalse(model.state.value.isSubmittingReport)
+        assertNotNull(model.state.value.report.failed)
+        assertFalse(model.state.value.report.inFlight)
     }
 
     /**
@@ -1421,7 +1421,7 @@ class ChatViewModelTest {
 
         model.dismissDetails()
 
-        assertNull(model.state.value.reportOutcome)
+        assertNull(model.state.value.report.outcome)
 
         val lost = FakeReportsRepository(outcome = ReportOutcome.Failed)
         val second = vm(ScriptedMessages(), reports = lost)
@@ -1432,10 +1432,10 @@ class ChatViewModelTest {
 
         assertNotNull(
             "a lost report must survive the sheet closing",
-            second.state.value.failedReport,
+            second.state.value.report.failed,
         )
         second.discardFailedReport()
-        assertNull("and only an explicit discard clears it", second.state.value.failedReport)
+        assertNull("and only an explicit discard clears it", second.state.value.report.failed)
     }
 
     // --- foreground resync ---------------------------------------------------

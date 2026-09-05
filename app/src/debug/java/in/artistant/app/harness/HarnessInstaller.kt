@@ -19,13 +19,14 @@ import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
 import `in`.artistant.app.designsystem.theme.AppRole
+import `in`.artistant.app.platform.auth.SessionBootstrapHold
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 
 /**
@@ -167,12 +168,12 @@ private object HarnessSession {
     }
 
     /**
-     * How long the activity-create thread will wait for the synthetic session.
+     * How long the GATE will hold the splash for the synthetic session.
      *
      * The wait is a `SharedPreferences`-shaped read of an empty store, so in practice it
-     * costs single-digit milliseconds. The cap is there for the case where it does not —
-     * a stall on the create path is worth a bounded couple of seconds against a harness
-     * that silently boots to the wrong screen, but it is not worth an ANR.
+     * costs single-digit milliseconds. The cap is there for the case where it does not: past
+     * it the app carries on with whatever the real session says, which is the behaviour this
+     * whole method used to have unconditionally.
      */
     private const val IMPORT_TIMEOUT_MS = 2_000L
 
@@ -188,49 +189,57 @@ private object HarnessSession {
             return
         }
 
-        // BLOCKING, on the activity-create thread, for the same reason everything else in
-        // this file is installed there: `RootViewModel` reads `sessionStatus` — a StateFlow,
-        // so it sees whatever the CURRENT value is the instant Compose builds it — and it
-        // renders `NotSignedIn` for anything that is not `Authenticated`.
+        // The ordering problem, and why it is solved at the GATE rather than here.
         //
-        // The import cannot simply happen earlier: supabase-kt restores a persisted session
-        // asynchronously on client creation and publishes the result, so an import that beat
-        // the restore would be overwritten by it. The wait for a settled value is therefore
-        // load-bearing — but done on a background dispatcher it was a race against composition,
-        // and the value it waits for is `NotAuthenticated`. Whenever composition won, the app
-        // rendered the signup flow for the width of that gap, which is how a `skip-signup-as-*`
-        // launch could put the auth screen in front of the operator and then behave on the
-        // next try. Blocking here makes the ordering a fact rather than a coin flip.
+        // `RootViewModel` reads `sessionStatus` — a StateFlow, so it sees whatever the
+        // CURRENT value is the instant Compose builds it — and anything that is not
+        // `Authenticated` sends it to the signup flow. The import cannot simply happen
+        // earlier: supabase-kt restores a persisted session asynchronously on client creation
+        // and publishes the result, so an import that beat the restore would be overwritten
+        // by it. Waiting for a settled value is therefore load-bearing, and on a background
+        // dispatcher it is a race against composition: whenever composition won, a
+        // `skip-signup-as-*` launch put the auth screen in front of the operator for the
+        // width of the gap and then behaved on the next try.
         //
-        // `withTimeout` inside `runBlocking` is honest here: the timer runs on `runBlocking`'s
-        // own event loop, so it fires and releases the thread even if the awaited work wanted
-        // this one.
-        val imported = runCatching {
-            runBlocking {
-                withTimeout(IMPORT_TIMEOUT_MS) {
+        // This used to be closed by `runBlocking` HERE — on the activity-create thread,
+        // inside `onActivityPreCreated`, for up to two seconds. That is an ANR budget being
+        // spent by debug-only code, and a `withTimeout` around a blocked main thread is a
+        // promise about the deadline, not about the stall.
+        //
+        // So the wait moved to the only place that actually needs it: the gate. The hold goes
+        // up before the import starts and comes down when it lands or times out, and while it
+        // is up `RootGate` stays on `Loading` — the same splash the operator would see
+        // anyway. `onActivityPreCreated` returns immediately.
+        SessionBootstrapHold.begin()
+        scope.launch {
+            try {
+                val settled = withTimeoutOrNull(IMPORT_TIMEOUT_MS) {
                     client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
                     client.auth.importSession(fakeSession(role), autoRefresh = false)
+                    true
                 }
-            }
-            true
-        }.onFailure { Timber.e(it, "[harness] blocking session import failed") }.getOrDefault(false)
-
-        if (imported) {
-            Timber.i("[harness] synthetic $role session installed before first composition")
-            return
-        }
-
-        // The restore took longer than the create path is willing to wait. Fall back to the
-        // old asynchronous install: the gate may show the signup flow for a moment first,
-        // which is the behaviour this method used to have unconditionally, and is still far
-        // better than a harness launch with no session at all.
-        Timber.w("[harness] session import did not settle in ${IMPORT_TIMEOUT_MS}ms; retrying async")
-        scope.launch {
-            runCatching {
+                if (settled == true) {
+                    Timber.i("[harness] synthetic $role session installed before first frame")
+                    return@launch
+                }
+                // The restore is taking longer than the gate is willing to hold the splash
+                // for. Drop the hold and finish the import late: the operator may see the
+                // signup flow for a moment first — the behaviour this method used to have
+                // unconditionally — which is still far better than a harness launch with no
+                // session at all. The timeout bounds the HOLD, not the import.
+                Timber.w("[harness] session import did not settle in ${IMPORT_TIMEOUT_MS}ms")
+                SessionBootstrapHold.end()
                 client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
                 client.auth.importSession(fakeSession(role), autoRefresh = false)
-                Timber.i("[harness] synthetic $role session installed (async)")
-            }.onFailure { Timber.e(it, "[harness] session import failed") }
+                Timber.i("[harness] synthetic $role session installed (late)")
+            } catch (t: Throwable) {
+                // Including a cancellation: the hold below must come down either way, or the
+                // harness leaves the app holding the splash for the rest of the process.
+                Timber.e(t, "[harness] session import failed")
+                if (t is CancellationException) throw t
+            } finally {
+                SessionBootstrapHold.end()
+            }
         }
     }
 

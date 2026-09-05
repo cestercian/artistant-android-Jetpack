@@ -133,7 +133,13 @@ class ActivityViewModel @Inject constructor(
         viewModelScope.launch {
             val unread = log.entries.first().filter { !it.read }.map { it.id }.toSet()
             unreadOnArrival.value = unread
-            if (unread.isNotEmpty()) log.markAllRead()
+            // Exactly the rows this snapshot speaks for — `markAllRead()` spoke for rows it
+            // had never seen. The read is a suspending DataStore collect and the write is
+            // another, so a push CAN land between them; it is not in the snapshot, so the
+            // screen never draws it unread, and marking it read anyway retired a notification
+            // the account had demonstrably not seen. The header's own "Mark all read" is
+            // still the control that speaks for everything, including that push.
+            if (unread.isNotEmpty()) log.markRead(unread)
         }
     }
 

@@ -9,6 +9,7 @@ import `in`.artistant.app.data.repository.UsersRepository
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.domain.auth.ReturningLoginRoute
 import `in`.artistant.app.domain.auth.returningLoginRoute
+import `in`.artistant.app.platform.auth.SessionBootstrapHold
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.Job
@@ -35,6 +36,17 @@ class RootViewModel @Inject constructor(
 
     private val _gate = MutableStateFlow<RootGate>(RootGate.Loading)
     val gate: StateFlow<RootGate> = _gate
+
+    /**
+     * The session is live but cannot be refreshed, so nothing can be written.
+     *
+     * Read straight off [SessionManager.sessionDegraded] rather than mirrored into a field:
+     * there is one source of truth for it and it is the auth status. Both tab shells draw a
+     * banner from this, and [RootGate.Reconnecting] is the same fact met before we ever
+     * routed. See [SessionManager.sessionDegraded] for why a `RefreshFailure` is not merely
+     * cosmetic — `currentUserId` is null through it.
+     */
+    val sessionDegraded: StateFlow<Boolean> = session.sessionDegraded
 
     /** The last successfully-fetched profile, so the signup flow (Onboarding tier) can prefill a
      *  returning user's name/city/handle for a personalized Done screen. Null before the first
@@ -77,67 +89,80 @@ class RootViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Re-run routing whenever EITHER the session status OR the sign-in generation
-            // changes — folding the generation in is what advances a same-uuid re-auth.
-            combine(session.sessionStatus, session.signInGeneration) { status, gen -> status to gen }
-                .collect { (status, gen) ->
+            // Re-run routing whenever the session status, the sign-in generation OR the
+            // harness's import hold changes — folding the generation in is what advances a
+            // same-uuid re-auth, and folding the hold in is what stops the gate from
+            // deciding anything against a session that is about to be replaced.
+            combine(
+                session.sessionStatus,
+                session.signInGeneration,
+                SessionBootstrapHold.pending,
+            ) { status, gen, held -> Triple(status, gen, held) }
+                .collect { (status, gen, held) ->
                     // Which key we hold afterwards, and whether this status starts a pass.
                     // Pure and tested — including "a refresh failure forgets the key, so the
                     // recovery re-routes" (see [routingStep]).
-                    val step = routingStep(status, gen, lastRoutedKey)
+                    val step = routingStep(status, gen, lastRoutedKey, held)
                     lastRoutedKey = step.key
-                    when (status) {
-                        is SessionStatus.Authenticated -> {
-                            if (step.route) {
-                                // LAUNCHED, not awaited. Awaiting it here parked this
-                                // collector inside `fetchWithRetry`, so the sign-out
-                                // emission queued behind it and could not reach the
-                                // `else` branch below to cancel the pass or bump
-                                // [routingGeneration] — the two things that are supposed
-                                // to invalidate it. The departed pass then resumed with
-                                // its generation still current and wrote `prefs.setRole`
-                                // and `uploadQueue.resumeAfterLaunch()` AFTER
-                                // `SessionManager.signOut()` had wiped prefs and cleared
-                                // the queue, handing the next account on this device the
-                                // previous one's role and re-queued uploads. `_profile`
-                                // and `_gate` were survivable — the else branch resets
-                                // them a moment later — but those two are not.
-                                launchRouting()
-                            }
-                        }
-                        else -> {
-                            // Tear the session's payload down ONLY for the status that
-                            // actually ended it. Initializing and RefreshFailure are
-                            // still-hydrating states — supabase-kt has not dropped the
-                            // session in either — so they must not cancel the routing
-                            // pass, bump the generation, or clear the profile. Doing
-                            // that on a RefreshFailure is what turned a token refresh
-                            // that could not reach the server into a sign-out.
-                            //
-                            // The routing KEY is a different question and [routingStep]
-                            // already answered it above: every non-authenticated status
-                            // forgets it, so whatever a pass settled during the outage is
-                            // re-decided the moment the session is authenticated again.
-                            if (status is SessionStatus.NotAuthenticated) {
-                                // A pass still in flight belongs to the session that just
-                                // ended: stop it and invalidate its writes (routingGeneration).
-                                routingJob?.cancel()
-                                routingGeneration++
-                                // The hydration payload leaves with the session. `profile`
-                                // feeds the signup flow's prefill and the error feeds its
-                                // Retry banner, so keeping either past a sign-out means the
-                                // NEXT person to reach onboarding on this device can be
-                                // shown the previous account's name, city and @handle
-                                // (see SignupViewModel.reset).
-                                _profile.value = null
-                                _profileHydrationError.value = null
-                            }
-                            // One place decides the gate, and it is pure and tested.
-                            gateForSessionStatus(status, _gate.value)?.let { _gate.value = it }
-                        }
+                    // Tear the session's payload down ONLY for the status that actually
+                    // ended it. Initializing and RefreshFailure are not sign-outs —
+                    // supabase-kt has not dropped the session in either — so they must not
+                    // cancel the routing pass, bump the generation, or clear the profile.
+                    // Doing that on a RefreshFailure is what turned a token refresh that
+                    // could not reach the server into a sign-out, and it is also what threw
+                    // away the signup draft (`ArtistantNavHost` resets the flow on every
+                    // arrival at NotSignedIn).
+                    //
+                    // The routing KEY is a different question and [routingStep] already
+                    // answered it above: every non-authenticated status forgets it, so
+                    // whatever a pass settled during the outage is re-decided the moment the
+                    // session is authenticated again.
+                    if (status is SessionStatus.NotAuthenticated) {
+                        // A pass still in flight belongs to the session that just ended:
+                        // stop it and invalidate its writes (routingGeneration).
+                        routingJob?.cancel()
+                        routingGeneration++
+                        // The hydration payload leaves with the session. `profile` feeds the
+                        // signup flow's prefill and the error feeds its Retry banner, so
+                        // keeping either past a sign-out means the NEXT person to reach
+                        // onboarding on this device can be shown the previous account's
+                        // name, city and @handle (see SignupViewModel.reset).
+                        _profile.value = null
+                        _profileHydrationError.value = null
                     }
+                    if (step.route) {
+                        // LAUNCHED, not awaited. Awaiting it here parked this collector
+                        // inside `fetchWithRetry`, so the sign-out emission queued behind it
+                        // and could not reach the teardown above to cancel the pass or bump
+                        // [routingGeneration] — the two things that are supposed to
+                        // invalidate it. The departed pass then resumed with its generation
+                        // still current and wrote `prefs.setRole` and
+                        // `uploadQueue.resumeAfterLaunch()` AFTER `SessionManager.signOut()`
+                        // had wiped prefs and cleared the queue, handing the next account on
+                        // this device the previous one's role and re-queued uploads.
+                        // `_profile` and `_gate` were survivable — the teardown resets them
+                        // a moment later — but those two are not.
+                        launchRouting()
+                    }
+                    // One place decides the gate, and it is pure and tested. Null means "an
+                    // authenticated session, so the routing pass above owns the answer".
+                    gateForSessionStatus(status, _gate.value, held)?.let { _gate.value = it }
                 }
         }
+    }
+
+    /**
+     * "Sign in again", from [RootGate.Reconnecting].
+     *
+     * The exit from a cold start that met an expired token with no network. Everything
+     * about that state is out of the user's hands — supabase-kt retries on its own timer and
+     * publishes nothing but `RefreshFailure` until it succeeds — so the screen owes them a
+     * control that always resolves, and this is it: the session ends locally whether or not
+     * the logout POST lands (see [SessionManager.signOutDegraded]), which publishes
+     * `NotAuthenticated` and drops the gate to the auth screen.
+     */
+    fun signOutFromDegradedSession() {
+        viewModelScope.launch { session.signOutDegraded() }
     }
 
     /**

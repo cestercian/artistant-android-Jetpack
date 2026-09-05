@@ -135,7 +135,7 @@ class CalendarSyncService @Inject constructor(
             persisted = persisted.copy(
                 calendarId = id,
                 enabled = true,
-                ownerUserId = session.currentUserId,
+                ownerUserId = mirrorOwner(),
             )
             save()
         }
@@ -186,10 +186,34 @@ class CalendarSyncService @Inject constructor(
         // owner check (iOS plan-016: a second account's gigs must never reach the
         // first account's calendar).
         cache.ingest(me, bookings)
-        if (persisted.ownerUserId != me) return
+        // `me != null` is half the gate, not pedantry. Through a token-refresh failure
+        // `currentUserId` answers null for as long as the device is offline, and a null owner
+        // matching a null `me` would let the mirror run for "nobody" — see [mirrorOwner],
+        // which is why a null can no longer be STORED either.
+        if (me == null || persisted.ownerUserId != me) return
         if (!persisted.enabled || !hasWritePermission()) return
         scheduleReconcile()
     }
+
+    /**
+     * Who the mirror belongs to, as recorded when it is armed.
+     *
+     * Never null over a known owner. `session.currentUserId` reads
+     * `currentSessionOrNull()`, which answers only while the status is `Authenticated`: on a
+     * `RefreshFailure` — an expired token with no network, the state the app can sit in for
+     * minutes — it returns null while the user is still very much signed in and still tapping
+     * this toggle. Writing that null into [PersistedState.ownerUserId] disowned the mirror:
+     * the gate in [ingest] compares the owner against the live uuid, so once the session came
+     * back, every reconcile was skipped and the artist's gigs silently stopped appearing in
+     * their calendar until they toggled it off and on again.
+     *
+     * Keeping the previous owner is safe because a DIFFERENT user cannot get here: signing
+     * out runs `clearSessionState()`, and the gate refuses to mirror for anyone but the
+     * recorded owner. If there has never been an owner (first arm, degraded session) it stays
+     * null and the mirror stays inert until a live session adopts it — a mirror that does
+     * nothing is recoverable; one pointed at the wrong account is not.
+     */
+    private fun mirrorOwner(): String? = session.currentUserId ?: persisted.ownerUserId
 
     /**
      * Sign-out / account switch. Drops the in-memory bookings and the pending
@@ -225,7 +249,7 @@ class CalendarSyncService @Inject constructor(
         }
         if (!hasWritePermission()) return false
         mutex.withLock {
-            persisted = persisted.copy(enabled = true, ownerUserId = session.currentUserId)
+            persisted = persisted.copy(enabled = true, ownerUserId = mirrorOwner())
             save()
         }
         refreshUi()

@@ -7,7 +7,9 @@ import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
 import `in`.artistant.app.designsystem.theme.AppRole
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -28,6 +30,9 @@ class SessionGateOrderingTest {
         tokenType = "bearer",
         user = UserInfo(id = "9f8e7d6c-0000-4000-8000-000000000001", aud = "authenticated"),
     )
+
+    /** Offline. The only RefreshFailure cause the app meets in the field. */
+    private val cause = RefreshFailureCause.NetworkError(java.io.IOException("no route to host"))
 
     @Test
     fun `initializing holds the splash`() {
@@ -69,7 +74,6 @@ class SessionGateOrderingTest {
         // still retrying, so a token refresh that could not reach the server is a network
         // blip, not a sign-out. It used to fall into the same branch as NotAuthenticated and
         // drop a working session onto the auth screen.
-        val cause = RefreshFailureCause.NetworkError(java.io.IOException("no route to host"))
         for (current in listOf(
             RootGate.Tabs(AppRole.Artist),
             RootGate.Tabs(AppRole.Client),
@@ -81,24 +85,36 @@ class SessionGateOrderingTest {
     }
 
     @Test
-    fun `a refresh failure before any routing holds the splash`() {
-        val cause = RefreshFailureCause.NetworkError(java.io.IOException("no route to host"))
+    fun `a refresh failure before any routing gets a screen with a way out`() {
+        // The cold-start case: an expired token and no network. It used to hold `Loading`,
+        // which is the splash — and the splash has no controls, while auth-kt re-emits
+        // RefreshFailure every ten seconds offline and publishes nothing else. That is a dead
+        // end, so it gets [RootGate.Reconnecting]: the same splash, plus a banner that says
+        // what is happening and a "Sign in again" that ends the session cleanly.
         assertEquals(
-            RootGate.Loading,
+            RootGate.Reconnecting,
             gateForSessionStatus(SessionStatus.RefreshFailure(cause), RootGate.Loading),
         )
     }
 
     @Test
-    fun `a refresh failure never promotes the auth screen back to a session`() {
-        // The other direction of the hold: if we are legitimately signed out and a stale
-        // refresh fails afterwards, "keep the current gate" must not be read as "stay on
-        // NotSignedIn forever" in a way that hides a genuine re-auth — it degrades to
-        // Loading, which the next settled status immediately corrects.
-        val cause = RefreshFailureCause.NetworkError(java.io.IOException("no route to host"))
+    fun `a refresh failure at the auth screen is still not a session`() {
+        // Barely reachable — nothing refreshes once the session is gone — but the rule has to
+        // answer it, and the answer must not be a gate that claims a session. Reconnecting
+        // says exactly as much as we know and its action lands back here.
         assertEquals(
-            RootGate.Loading,
+            RootGate.Reconnecting,
             gateForSessionStatus(SessionStatus.RefreshFailure(cause), RootGate.NotSignedIn),
+        )
+    }
+
+    @Test
+    fun `the reconnect screen stays put while the failures repeat`() {
+        // auth-kt re-emits RefreshFailure on its own timer for as long as the device is
+        // offline. Each one must be a no-op, not a re-entry that resets anything.
+        assertEquals(
+            RootGate.Reconnecting,
+            gateForSessionStatus(SessionStatus.RefreshFailure(cause), RootGate.Reconnecting),
         )
     }
 
@@ -111,5 +127,54 @@ class SessionGateOrderingTest {
                 RootGate.Loading,
             ),
         )
+    }
+
+    @Test
+    fun `recovery from a refresh failure re-routes rather than resuming`() {
+        // The whole loop, in the order the collector sees it: a routed artist loses the
+        // refresh, keeps their tabs, and comes back.
+        val authenticated = SessionStatus.Authenticated(session, SessionSource.Storage)
+        val routed = routingStep(authenticated, generation = 3, lastRoutedKey = null)
+        assertTrue("the first authenticated emission routes", routed.route)
+
+        // Offline. The gate holds and the key is forgotten — that second half is what makes
+        // the recovery re-fetch instead of skipping a key it is still holding.
+        val degraded = routingStep(SessionStatus.RefreshFailure(cause), 3, routed.key)
+        assertNull(degraded.key)
+        assertFalse(degraded.route)
+        assertEquals(
+            RootGate.Tabs(AppRole.Artist),
+            gateForSessionStatus(SessionStatus.RefreshFailure(cause), RootGate.Tabs(AppRole.Artist)),
+        )
+
+        // Back. Same uuid, same generation — supabase-kt just re-emits Authenticated — and it
+        // routes because nothing is remembered.
+        val recovered = routingStep(authenticated, generation = 3, lastRoutedKey = degraded.key)
+        assertTrue("the recovery must route, or the user is stuck on the degraded read", recovered.route)
+        assertEquals(routed.key, recovered.key)
+        assertNull(gateForSessionStatus(authenticated, RootGate.Tabs(AppRole.Artist)))
+    }
+
+    @Test
+    fun `a harness import in flight decides nothing`() {
+        // `SessionBootstrapHold` — the debug harness is about to replace whatever the session
+        // says. Rendering the signup flow into that gap is the bug the blocking wait in
+        // HarnessInstaller used to paper over; now the gate simply holds the splash.
+        val authenticated = SessionStatus.Authenticated(session, SessionSource.Storage)
+        for (status in listOf(
+            authenticated,
+            SessionStatus.NotAuthenticated(isSignOut = false),
+            SessionStatus.RefreshFailure(cause),
+            SessionStatus.Initializing,
+        )) {
+            assertEquals(
+                RootGate.Loading,
+                gateForSessionStatus(status, RootGate.Loading, bootstrapPending = true),
+            )
+            assertFalse(
+                "a session about to be replaced must not start a routing pass",
+                routingStep(status, generation = 1, lastRoutedKey = null, bootstrapPending = true).route,
+            )
+        }
     }
 }

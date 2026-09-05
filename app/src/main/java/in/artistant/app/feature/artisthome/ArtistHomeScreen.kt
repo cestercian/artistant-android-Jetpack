@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -53,6 +54,7 @@ import `in`.artistant.app.designsystem.component.ScreenHeader
 import `in`.artistant.app.designsystem.component.SectionHeader
 import `in`.artistant.app.designsystem.component.SkeletonPage
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.designsystem.theme.cappedFontScale
 
 /**
  * The artist studio — design screens 09 (money), 85 (cold) and 86 (unavailable).
@@ -805,16 +807,23 @@ private fun StripCell(day: StripDay, booked: Boolean, modifier: Modifier = Modif
         Text(
             day.dayOfMonth.toString(),
             style = AppTheme.type.monoStripDay,
-            color = if (booked) colors.onAccent else colors.ink4,
             // The strip is fourteen equal cells across one row, so a cell can
             // never be widened to suit its contents — a date that does not fit
-            // must overflow its cell, never wrap inside it. Without this a
-            // two-digit date broke as "1" over "0", which reads as two dates.
-            // [monoStripDay] fits at every normal density; this is what holds at
-            // a large system font scale, where the numeral outgrows the cell
-            // whatever token it is drawn in.
+            // must overflow its cell, never wrap inside it. Without `softWrap`
+            // a two-digit date broke as "1" over "0", which reads as two dates.
+            //
+            // The other two thirds of that are here too, because a numeral that
+            // does not fit is not a cosmetic problem — it is the wrong date.
+            // `Clip`, the default, cuts mid-glyph and shows half a digit; the
+            // cap stops the numeral outgrowing its ~21dp cell in the first
+            // place (see [cappedFontScale]), and `Visible` is the honest last
+            // resort for whatever still overhangs.
+            fontSize = AppTheme.type.monoStripDay.fontSize *
+                cappedFontScale(LocalDensity.current.fontScale, STRIP_MAX_FONT_SCALE),
+            color = if (booked) colors.onAccent else colors.ink4,
             maxLines = 1,
             softWrap = false,
+            overflow = TextOverflow.Visible,
         )
     }
 }
@@ -956,6 +965,16 @@ private fun quoteMeta(quote: StoredRequest): String = listOfNotNull(
 
 /** 14, matching [ArtistHomeViewModel]'s strip window — the grey cells on 86. */
 private const val STRIP_DAYS = 14
+
+/**
+ * The largest system font scale a strip cell can hold a two-digit date at.
+ *
+ * Measured against the geometry, not picked: fourteen cells and thirteen `xs` gaps share the
+ * page's 350dp of width, so a cell is ~21dp, and JetBrains Mono's digits advance at 0.6em —
+ * two of them at 10sp × 1.3 need ~15.6dp, which clears the cell with room for the rounding.
+ * Everything below 1.3 scales the way the reader asked for.
+ */
+private const val STRIP_MAX_FONT_SCALE = 1.3f
 
 /** The eyebrow and the secondary line on the accent card, at reading weight. */
 private const val ON_ACCENT_SOFT = 0.6f
