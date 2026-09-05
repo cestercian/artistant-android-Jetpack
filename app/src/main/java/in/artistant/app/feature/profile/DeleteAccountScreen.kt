@@ -33,6 +33,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.UsersRepository
@@ -55,6 +57,7 @@ import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -154,29 +157,16 @@ class DeleteAccountViewModel @Inject constructor(
      * [deleteConsequences] renders the generic sentence for a null rather than "0".
      */
     private fun loadConsequences() = viewModelScope.launch {
-        runCatching { users.fetchSelfProfile() }.onSuccess { profile ->
-            _state.update {
-                it.copy(
-                    consequences = it.consequences.copy(
-                        handle = profile?.handle?.trim()?.takeIf { h -> h.isNotEmpty() },
-                        isArtist = profile?.role == AppRole.Artist,
-                    ),
-                )
-            }
-        }
-        val isArtist = _state.value.consequences.isArtist
-        runCatching {
-            if (isArtist) bookings.listForArtist() else bookings.listForClient()
-        }.onSuccess { list ->
-            _state.update {
-                it.copy(
-                    consequences = it.consequences.copy(
-                        bookings = list.size,
-                        upcoming = liveBookingsCount(list),
-                    ),
-                )
-            }
-        }
+        loadDeleteConsequences(
+            fetchProfile = { users.fetchSelfProfile() },
+            cachedRole = { prefs.role.first() },
+            listBookings = { role ->
+                if (role == AppRole.Artist) bookings.listForArtist() else bookings.listForClient()
+            },
+            publish = { transform ->
+                _state.update { it.copy(consequences = transform(it.consequences)) }
+            },
+        )
     }
 
     fun pick(reason: DeleteReason) = _state.update { it.copy(reason = reason) }
@@ -560,6 +550,47 @@ private fun DestructiveButton(text: String, enabled: Boolean, onClick: () -> Uni
 
 /** One line of the itemised list on stage 2 or stage 3. */
 data class DeleteItem(val title: String, val detail: String)
+
+/**
+ * Read the facts stage 2 names, without inventing one.
+ *
+ * **The role is the load-bearing part, and it used to be assumed.** [DeleteConsequences.isArtist]
+ * defaults to false, so a `fetchSelfProfile()` that failed — or answered a row whose role is
+ * null — sent an ARTIST down `listForClient()`. That query does not fail: it succeeds and
+ * returns an honest empty list about the wrong question, so stage 2 printed "Your bookings ·
+ * nothing is upcoming, so nothing gets cancelled" to an artist with gigs booked, on the last
+ * screen before an irreversible action.
+ *
+ * So the role comes from the fetch, and from the device's cached role only when the fetch could
+ * not answer. When NEITHER can, the bookings are not read at all — null means unknown the whole
+ * way through, and [deleteConsequences] already renders a null as the sentence without a number.
+ *
+ * Never throws, by construction: the call site is a bare `viewModelScope.launch`, which installs
+ * no CoroutineExceptionHandler, and no stat query may stop a DPDP §11 erasure.
+ *
+ * [publish] is applied per FIELD GROUP rather than once at the end, so a slow or failed bookings
+ * read cannot hold back the handle that stage 2 and the receipt both print.
+ */
+internal suspend fun loadDeleteConsequences(
+    fetchProfile: suspend () -> SelfProfile?,
+    cachedRole: suspend () -> AppRole?,
+    listBookings: suspend (AppRole) -> List<Booking>,
+    publish: ((DeleteConsequences) -> DeleteConsequences) -> Unit,
+) {
+    val profile = runCatching { fetchProfile() }.getOrNull()
+    val role = profile?.role ?: runCatching { cachedRole() }.getOrNull()
+    publish { facts ->
+        facts.copy(
+            handle = profile?.handle?.trim()?.takeIf { it.isNotEmpty() },
+            isArtist = role == AppRole.Artist,
+        )
+    }
+    // Neither source could answer. The bookings list is not read at all rather than read
+    // against a guess: null is what "we don't know" looks like everywhere else on this screen.
+    if (role == null) return
+    val list = runCatching { listBookings(role) }.getOrNull() ?: return
+    publish { it.copy(bookings = list.size, upcoming = liveBookingsCount(list)) }
+}
 
 /**
  * What stage 2 itemises — every loss, named.
