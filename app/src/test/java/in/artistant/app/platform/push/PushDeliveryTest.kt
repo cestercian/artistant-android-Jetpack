@@ -1,9 +1,12 @@
 package `in`.artistant.app.platform.push
 
+import android.app.NotificationManager
 import `in`.artistant.app.platform.preferences.NotificationSettings
 import `in`.artistant.app.platform.preferences.NotificationToggle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -167,6 +170,37 @@ class PushDeliveryTest {
     @Test
     fun `an unknown channel falls back to a registered quiet one, never to nothing`() {
         assertEquals(NotificationChannels.BOOKINGS_QUIET, NotificationChannels.quietTwinOf("invented"))
+    }
+
+    // ── Quiet hours must not post through a channel the user blocked ──────────────────
+
+    @Test
+    fun `a blocked loud channel drops the notification instead of using its twin`() {
+        // Blocking a channel in system settings is the strongest "no" Android offers, and it
+        // applies to the channel the builder NAMES. A Messages channel set to IMPORTANCE_NONE
+        // stayed blocked all day and then started posting through `messages_quiet` — which the
+        // user had never seen and never blocked — for the eight hours the app deliberately
+        // makes quieter.
+        assertTrue(NotificationChannels.silentDeliveryIsBlocked(NotificationManager.IMPORTANCE_NONE))
+    }
+
+    @Test
+    fun `every importance that is not a block still routes to the twin`() {
+        listOf(
+            NotificationManager.IMPORTANCE_MIN,
+            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
+            NotificationManager.IMPORTANCE_HIGH,
+        ).forEach { importance ->
+            assertFalse("$importance is not a block", NotificationChannels.silentDeliveryIsBlocked(importance))
+        }
+    }
+
+    @Test
+    fun `an unregistered channel is not a block`() {
+        // Null is "we couldn't read one", which is a different fact and must not silently
+        // swallow a booking confirmation. The twin is registered either way.
+        assertFalse(NotificationChannels.silentDeliveryIsBlocked(null))
     }
 
     @Test

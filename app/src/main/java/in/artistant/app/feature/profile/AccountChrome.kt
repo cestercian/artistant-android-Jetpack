@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -23,6 +23,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import `in`.artistant.app.designsystem.component.hairlineTop
@@ -83,11 +85,16 @@ fun AccountScaffold(
                     .fillMaxWidth()
                     .background(AppTheme.colors.surface)
                     .hairlineTop()
-                    // The bar owns the navigation-bar inset AND the keyboard inset: the window
-                    // is edge-to-edge and does not resize for the IME, so without `imePadding`
-                    // the delete screen's confirm button would sit under the keyboard the
-                    // moment its "type DELETE" field takes focus.
-                    .navigationBarsPadding()
+                    // The keyboard inset, and ONLY the keyboard inset. The window is
+                    // edge-to-edge and does not resize for the IME, so without `imePadding` the
+                    // delete screen's confirm button sits under the keyboard the moment its
+                    // "type DELETE" field takes focus.
+                    //
+                    // The navigation-bar inset is NOT applied here. Every screen using this
+                    // scaffold is hosted inside `TabPane`, which pads by the tab Scaffold's own
+                    // `PaddingValues` — and that bottom value already includes the light tab
+                    // bar's home-indicator zone. Applying it again lifted every CTA on the
+                    // account section a whole navigation bar above the design's bottom offset.
                     .imePadding()
                     .padding(horizontal = gutter)
                     .padding(top = dimens.space.lg, bottom = dimens.space.xl),
@@ -192,6 +199,33 @@ fun AccountStatBand(stats: List<AccountStat>, modifier: Modifier = Modifier) {
  * the artist band and the client band end up disagreeing about what "unknown" looks like.
  */
 fun accountStatValue(count: Int?): String = profileStatValue(count)
+
+/**
+ * A tap-to-dismiss line under a body — the affordance every action failure in this section gets.
+ *
+ * Lives here rather than in `AccountScreen` because three screens now report one: a settings row
+ * whose system handoff found no activity (no display settings, no accessibility settings, no
+ * Play listing) has to say so somewhere, and `startActivity` throwing out of a click handler
+ * takes the tab with it.
+ */
+@Composable
+fun AccountFeedbackLine(
+    message: String,
+    color: Color,
+    onDismiss: () -> Unit,
+    tag: String,
+) {
+    Text(
+        message,
+        style = AppTheme.type.caption,
+        color = color,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onDismiss)
+            .padding(vertical = AppTheme.dimens.space.sm)
+            .semantics { testTag = tag },
+    )
+}
 
 /** Vertical air between two blocks in an account body. */
 @Composable

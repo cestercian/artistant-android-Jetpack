@@ -250,8 +250,9 @@ private fun NotificationSettingsContent(
                 "off by default and stays off unless you turn it on — the signup opt-in is " +
                 "separate from permission. These choices live on this device: Artistant has " +
                 "no server-side notification setting, so they don't follow you to another " +
-                "phone. Three rows say \"nothing sends this yet\": those are waiting on the " +
-                "server, not on you.",
+                "phone — and they stay put when you sign out, because they describe the phone " +
+                "rather than the account. Three rows say \"nothing sends this yet\": those " +
+                "are waiting on the server, not on you.",
             style = AppTheme.type.caption,
             color = colors.ink4,
             modifier = Modifier.fillMaxWidth(),

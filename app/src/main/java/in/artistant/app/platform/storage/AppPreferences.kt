@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.artistant.app.designsystem.theme.AppRole
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,6 +24,31 @@ private val Context.dataStore by preferencesDataStore(name = "artistant.state")
 // delete-account (wipeCalendar) clears it. This mirrors iOS keeping the calendar
 // Persistence blob across sign-out and wiping it only on account deletion.
 private val Context.calendarStore by preferencesDataStore(name = "artistant.calendar")
+
+/**
+ * Key prefixes whose values belong to the DEVICE, not to the signed-in account.
+ *
+ * `a11y.` is [in.artistant.app.platform.preferences.AccessibilityPreferences], `notify.` is
+ * [in.artistant.app.platform.preferences.NotificationPreferences], and `privacy.` is
+ * `PrivacyPreferences` — whose own screen says so out loud ("This switch is saved on this
+ * device. Artistant has no server-side privacy setting, so it doesn't follow you to another
+ * phone"), which made a sign-out that reset it the screen contradicting itself.
+ *
+ * Kept as prefixes rather than as a list of the seventeen key constants so a new switch does
+ * not have to remember to register itself here, and pinned to those classes by a test that
+ * walks their real keys.
+ */
+private val DEVICE_SCOPED_PREFIXES = listOf("a11y.", "notify.", "privacy.")
+
+/**
+ * Whether a preference key survives [AppPreferences.wipeAll] — see its contract.
+ *
+ * A top-level function so the rule is assertable in a JVM test: `wipeAll` itself needs an
+ * Android `Context` and a real DataStore file, and the property that matters ("signing out does
+ * not undo an accessibility choice") is a property of this predicate.
+ */
+internal fun isDeviceScopedKey(key: String): Boolean =
+    DEVICE_SCOPED_PREFIXES.any { key.startsWith(it) }
 
 /**
  * The two consents the signup flow collects, both persisted.
@@ -106,21 +132,46 @@ class AppPreferences @Inject constructor(
         context.dataStore.edit { it[roleKey] = role.name }
     }
 
-    /** Generic string read for the small persisted snapshots (search recents, hints). */
+    /**
+     * Generic string read for the small persisted snapshots (search recents, hints).
+     *
+     * `distinctUntilChanged` because DataStore emits the whole preferences object on every
+     * write to ANY key: without it, saving a search recent re-emitted the notification switches,
+     * the accessibility flags and the export timestamp, and every collector downstream did its
+     * work again over a value that had not moved.
+     */
     override fun getString(key: String): Flow<String?> {
         val k = stringPreferencesKey(key)
-        return context.dataStore.data.map { it[k] }
+        return context.dataStore.data.map { it[k] }.distinctUntilChanged()
     }
 
     override suspend fun setString(key: String, value: String) {
         context.dataStore.edit { it[stringPreferencesKey(key)] = value }
     }
 
-    /** DPDP §11: wipe all persisted state on delete-account / sign-out. Does NOT touch the
-     *  calendar store — that survives sign-out on purpose (see [calendarStore]); use
-     *  [wipeCalendar] for the delete-account path. */
+    /**
+     * DPDP §11: wipe the persisted ACCOUNT state on delete-account / sign-out.
+     *
+     * Two exceptions, and both are the same rule — a preference that describes the DEVICE is
+     * not the departing account's to take with it.
+     *
+     * The calendar store is one, and it is a separate DataStore file (see [calendarStore]) that
+     * only [wipeCalendar] clears, because the mirrored gigs are the device owner's own events
+     * and that map is the only handle left to clean them up.
+     *
+     * The other is [isDeviceScopedKey] — the accessibility and notification switches. Somebody
+     * who turned on "always show labels" because they cannot read an unlabelled tab bar, or who
+     * silenced marketing pushes, did not undo that by signing out; erasing it made the app
+     * hostile to exactly the person it was for, and the two screens now say out loud that the
+     * choices stay. Nothing under these prefixes identifies an account: they are eight booleans
+     * about this phone.
+     */
     suspend fun wipeAll() {
-        context.dataStore.edit { it.clear() }
+        context.dataStore.edit { prefs ->
+            prefs.asMap().keys.toList()
+                .filterNot { isDeviceScopedKey(it.name) }
+                .forEach { prefs.remove(it) }
+        }
     }
 
     // --- Calendar-sync blob (CalendarSyncService's PersistedState as one JSON string) ---

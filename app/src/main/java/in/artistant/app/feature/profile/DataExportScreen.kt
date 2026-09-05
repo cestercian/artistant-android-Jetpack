@@ -63,10 +63,10 @@ import javax.inject.Inject
  * unrepresentable is cheaper than testing for it.
  */
 sealed interface ExportState {
-    /** 81 — the right and the contents, before anyone commits to a 24-hour wait. */
+    /** 81 — the right and the contents, before anyone asks for anything. */
     data object Idle : ExportState
 
-    /** 82 — the job is on the server and does not depend on the app staying open. */
+    /** 82 — the call is out. It survives leaving the screen; it does not survive the process. */
     data object Requested : ExportState
 
     /** 49 — a file exists, and it expires. */
@@ -124,6 +124,13 @@ class DataExportViewModel @Inject constructor(
         store.request()
     }
 
+    /**
+     * @see DataExportStore.resumeRestored — the screen is where a request the process death
+     * interrupted gets re-issued, because the screen is the first point at which there is
+     * certainly a session and somebody actually waiting on the answer.
+     */
+    fun resumeRestored() = store.resumeRestored()
+
     /** Hand the finished file to the system. Only reachable from [ExportState.Ready]. */
     fun share() {
         val ready = store.state.value as? ExportState.Ready ?: return
@@ -170,6 +177,11 @@ fun DataExportScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // A request that a process death interrupted is restored as Requested but not re-issued —
+    // the store is built before the session is. Here there is a session and a screen, so this
+    // is where it actually starts again. Idempotent; see DataExportStore.resumeRestored.
+    LaunchedEffect(Unit) { viewModel.resumeRestored() }
 
     LaunchedEffect(state.pendingShare) {
         val pending = state.pendingShare ?: return@LaunchedEffect
@@ -296,8 +308,13 @@ private fun ExportIdle() {
     }
     AccountGap()
     AccentNote(
-        text = "One JSON file. Requests take up to 24 hours to assemble and we notify you " +
-            "here — nothing is emailed unprompted.",
+        // Not "up to 24 hours, and we'll notify you here", which is what this promised and
+        // what the app cannot do: `data-export` is a synchronous Edge Function that BUILDS the
+        // export inside the call and hands it back, there is no job to wait on, and there is no
+        // notification path for one. It answers in seconds, on this screen, or it fails.
+        text = "One JSON file, built when you ask for it — usually in a few seconds. It comes " +
+            "back to this screen and nowhere else: nothing is emailed, and nothing is sent on " +
+            "unless you send it.",
     )
 }
 
@@ -327,7 +344,7 @@ private fun ExportRequested() {
         Column(Modifier.weight(1f)) {
             Text("Assembling your file", style = AppTheme.type.sectionTitle, color = colors.ink)
             Text(
-                "Usually under an hour, up to 24",
+                "Usually a few seconds",
                 style = AppTheme.type.subtitle,
                 color = colors.ink4,
                 modifier = Modifier.padding(top = dimens.space.xs / 2),
@@ -340,13 +357,21 @@ private fun ExportRequested() {
     CheckRow(
         "File ready to download",
         MarkState.Pending,
-        subtitle = "We'll notify you here",
+        // Not "we'll notify you here": nothing notifies. The file appears on this screen when
+        // the call returns, and that is the whole of it.
+        subtitle = "Appears on this screen",
         dimWhenPending = true,
     )
     AccountGap()
     AccentNote(
-        text = "You can leave this screen. The request keeps running on our side and does not " +
-            "depend on the app staying open.",
+        // Half of this was true and the half that mattered was not. The request survives
+        // LEAVING the screen — it belongs to a singleton with its own scope, not to this
+        // ViewModel — but it is an HTTP call made by this app, so closing Artistant ends it.
+        // "Does not depend on the app staying open" described a server-side job that does not
+        // exist.
+        text = "You can leave this screen and come back — the request carries on and this " +
+            "screen picks it up again. Closing Artistant stops it, and you can simply ask " +
+            "again.",
     )
 }
 
@@ -412,8 +437,8 @@ private fun ExportReady(result: ExportResult, onShare: () -> Unit) {
     }
     AccountGap()
     AccentNote(
-        text = "Requests take up to 24 hours to assemble. We'll notify you here — nothing is " +
-            "emailed unprompted.",
+        text = "This file stays on this device until you sign out, so you can share it again " +
+            "from here. Nothing was emailed and nothing was sent anywhere on its own.",
     )
 }
 
@@ -443,8 +468,12 @@ private fun ExportFailed(reason: String) {
     EyebrowLabel("Your right is unaffected", color = colors.ink4)
     Spacer(Modifier.height(dimens.space.sm))
     Text(
-        "Under the DPDP Act we owe you this file. If it fails twice, Support can raise it " +
-            "manually — the request is logged either way.",
+        // Not "logged either way": a failed export writes nothing, here or on the server, so
+        // there is no record for Support to look up. Telling someone their failure was filed
+        // when it was not is how they arrive at Support with nothing to point at.
+        "Under the DPDP Act we owe you this file. If it keeps failing, Support can raise it " +
+            "by hand — tell them roughly when you tried, because a failed request leaves no " +
+            "record on this device or on the server.",
         style = AppTheme.type.body,
         color = colors.ink3,
         modifier = Modifier.fillMaxWidth(),
@@ -467,9 +496,14 @@ internal fun exportSubtitle(export: ExportState): String = when (export) {
  * actually true about it rather than borrowing the URL's seven days. Neither prints a SIZE: the
  * design draws "2.4 MB" and the function does not report one, and a plausible number on a
  * privacy export is still a made-up number.
+ *
+ * "Until you leave the screen" was wrong about the inline payload and had been since the
+ * request moved into [DataExportStore]: the store is a `@Singleton`, so the JSON survives
+ * navigation and backgrounding and is cleared by the sign-out teardown. Someone who read the old
+ * line and left the screen believed their export was gone when it was still in memory.
  */
 internal fun exportReadyDetail(result: ExportResult): String = when (result) {
-    is ExportResult.Inline -> "Ready · in this app until you leave the screen"
+    is ExportResult.Inline -> "Ready · held on this device until you sign out"
     is ExportResult.SignedUrl -> "Ready · link expires in ${expiryLabel(result.expiresInSeconds)}"
 }
 

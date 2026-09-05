@@ -3,11 +3,9 @@ package `in`.artistant.app.feature.profile
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +23,6 @@ import `in`.artistant.app.designsystem.component.BackHeader
 import `in`.artistant.app.designsystem.component.EyebrowLabel
 import `in`.artistant.app.designsystem.component.ListRow
 import `in`.artistant.app.designsystem.component.SwitchRow
-import `in`.artistant.app.designsystem.component.hairlineBottom
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.designsystem.theme.reduceMotion
@@ -37,27 +34,50 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * The two switches, plus the one thing that can go wrong on a screen with no network calls.
+ *
+ * [actionError] is a system handoff this device could not complete: both non-switch rows push
+ * into Android's own settings, and neither `ACTION_DISPLAY_SETTINGS` nor
+ * `ACTION_ACCESSIBILITY_SETTINGS` is guaranteed to resolve on every OEM or Go build.
+ */
+data class AccessibilityUiState(
+    val settings: AccessibilitySettings = AccessibilitySettings(),
+    val actionError: String? = null,
+)
+
 @HiltViewModel
 class AccessibilityViewModel @Inject constructor(
     private val prefs: AccessibilityPreferences,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(AccessibilitySettings())
-    val state: StateFlow<AccessibilitySettings> = _state
+    private val _state = MutableStateFlow(AccessibilityUiState())
+    val state: StateFlow<AccessibilityUiState> = _state
 
     init {
-        viewModelScope.launch { prefs.all.collect { _state.value = it } }
+        viewModelScope.launch { prefs.all.collect { s -> _state.update { it.copy(settings = s) } } }
     }
 
     /** State first, then persist — see `NotificationSettingsViewModel.set`. */
     fun setAlwaysShowLabels(enabled: Boolean) {
-        _state.update { it.copy(alwaysShowLabels = enabled) }
+        _state.update { it.copy(settings = it.settings.copy(alwaysShowLabels = enabled)) }
         viewModelScope.launch { runCatching { prefs.setAlwaysShowLabels(enabled) } }
     }
 
     fun setAutoplayVideos(enabled: Boolean) {
-        _state.update { it.copy(autoplayVideos = enabled) }
+        _state.update { it.copy(settings = it.settings.copy(autoplayVideos = enabled)) }
         viewModelScope.launch { runCatching { prefs.setAutoplayVideos(enabled) } }
     }
+
+    /**
+     * A settings screen this device could not open.
+     *
+     * Reported rather than swallowed: a row that does nothing on tap, twice, is
+     * indistinguishable from a broken app — and this is the accessibility screen, where the
+     * two rows it happens to are the ones pointing at the settings that actually matter.
+     */
+    fun reportActionError(message: String) = _state.update { it.copy(actionError = message) }
+
+    fun clearActionError() = _state.update { it.copy(actionError = null) }
 }
 
 /**
@@ -97,21 +117,37 @@ fun AccessibilityScreen(
         onBack = onBack,
         onAlwaysShowLabels = viewModel::setAlwaysShowLabels,
         onAutoplayVideos = viewModel::setAutoplayVideos,
-        onOpenTextSize = { openSystemSettings(context, Settings.ACTION_DISPLAY_SETTINGS) },
-        onOpenMotion = { openSystemSettings(context, Settings.ACTION_ACCESSIBILITY_SETTINGS) },
+        onOpenTextSize = {
+            openSystemSettings(
+                context,
+                Settings.ACTION_DISPLAY_SETTINGS,
+                "This device has no display settings screen to open. Text size lives in " +
+                    "Settings › Display.",
+            )?.let(viewModel::reportActionError)
+        },
+        onOpenMotion = {
+            openSystemSettings(
+                context,
+                Settings.ACTION_ACCESSIBILITY_SETTINGS,
+                "This device has no accessibility settings screen to open. Reduce motion " +
+                    "lives in Settings › Accessibility.",
+            )?.let(viewModel::reportActionError)
+        },
+        onDismissError = viewModel::clearActionError,
         modifier = modifier,
     )
 }
 
 @Composable
 private fun AccessibilityContent(
-    state: AccessibilitySettings,
+    state: AccessibilityUiState,
     systemReduceMotion: Boolean,
     onBack: () -> Unit,
     onAlwaysShowLabels: (Boolean) -> Unit,
     onAutoplayVideos: (Boolean) -> Unit,
     onOpenTextSize: () -> Unit,
     onOpenMotion: () -> Unit,
+    onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
@@ -146,15 +182,19 @@ private fun AccessibilityContent(
             onClick = onOpenMotion,
             modifier = Modifier.semantics { testTag = "a11y.reduceMotion" },
         )
-        AccessibilityFact(
+        // A row with no control: `ListRow` without an `onClick` draws no chevron and takes no
+        // tap, which is the whole of what the bespoke `AccessibilityFact` did. The alternative,
+        // a disabled switch, states the same fact and invites the tap anyway.
+        ListRow(
             title = "Bold text and higher contrast",
-            detail = "Android applies both across every app, including this one. There's " +
-                "nothing to switch on here.",
+            subtitle = "Android applies both to every app, including this one — nothing to " +
+                "switch on here.",
+            modifier = Modifier.semantics { testTag = "a11y.systemFact" },
         )
         SwitchRow(
             title = "Always show labels",
             subtitle = "Adds text under the tab-bar icons",
-            checked = state.alwaysShowLabels,
+            checked = state.settings.alwaysShowLabels,
             onCheckedChange = onAlwaysShowLabels,
             showHairline = false,
             modifier = Modifier.semantics { testTag = "a11y.alwaysShowLabels" },
@@ -166,17 +206,23 @@ private fun AccessibilityContent(
         SwitchRow(
             title = "Autoplay artist videos",
             subtitle = "Off means tap to play, always muted first",
-            checked = state.autoplayVideos,
+            checked = state.settings.autoplayVideos,
             onCheckedChange = onAutoplayVideos,
             showHairline = false,
             modifier = Modifier.semantics { testTag = "a11y.autoplay" },
         )
 
+        state.actionError?.let { message ->
+            AccountGap()
+            AccountFeedbackLine(message, colors.danger, onDismissError, "a11y.actionError")
+        }
+
         AccountGap(2)
         Text(
             "Nothing in this version of Artistant starts playing on its own — samples and " +
                 "videos wait for a tap. This switch is what an autoplaying screen would read " +
-                "if one ever ships.",
+                "if one ever ships. Both switches are saved on this device and stay put when " +
+                "you sign out: they describe the phone, not the account.",
             style = AppTheme.type.caption,
             color = colors.ink4,
             modifier = Modifier.fillMaxWidth(),
@@ -186,57 +232,31 @@ private fun AccessibilityContent(
 }
 
 /**
- * A row that reads like the rows around it and carries no control.
- *
- * Same title/detail typography and the same hairline as [ListRow] and [SwitchRow], so it sits
- * IN the list rather than under it — but with nothing on the right, because there is nothing to
- * tap. The alternative, a disabled switch, states the same fact and invites the tap anyway.
- * Same pattern (and same reasoning) as `PrivacyScreen`'s city fact.
- */
-@Composable
-private fun AccessibilityFact(title: String, detail: String) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .hairlineBottom()
-            .padding(vertical = dimens.space.md)
-            .semantics(mergeDescendants = true) { testTag = "a11y.systemFact" },
-    ) {
-        Text(
-            title,
-            style = AppTheme.type.rowTitle.copy(fontSize = AppTheme.type.body.fontSize),
-            color = colors.ink,
-        )
-        Spacer(Modifier.height(dimens.space.xs))
-        Text(detail, style = AppTheme.type.caption, color = colors.ink4)
-    }
-}
-
-/**
- * Open a system settings screen, swallowing the failure.
+ * Open a system settings screen, or return the line to show when this device has none.
  *
  * `startActivity` throws ActivityNotFoundException on the main thread straight out of a click
- * handler, and neither of these actions is guaranteed on every OEM/Go build. A settings screen
- * that will not open is a disappointment; a crash from tapping a settings row is a bug.
+ * handler, and neither of these actions is guaranteed on every OEM/Go build. A crash from
+ * tapping a settings row is a bug — but so is swallowing it: the row then does nothing at all,
+ * twice, which reads as a broken app, and it is these two rows that point at the settings this
+ * screen is actually about. So the failure is caught AND said out loud, with where to go
+ * instead.
  */
-private fun openSystemSettings(context: Context, action: String) {
-    runCatching { context.startActivity(Intent(action)) }
-}
+private fun openSystemSettings(context: Context, action: String, failure: String): String? =
+    runCatching { context.startActivity(Intent(action)); null }.getOrElse { failure }
 
 @Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 800)
 @Composable
 private fun AccessibilityPreview() {
     ArtistantTheme {
         AccessibilityContent(
-            state = AccessibilitySettings(alwaysShowLabels = true),
+            state = AccessibilityUiState(AccessibilitySettings(alwaysShowLabels = true)),
             systemReduceMotion = false,
             onBack = {},
             onAlwaysShowLabels = {},
             onAutoplayVideos = {},
             onOpenTextSize = {},
             onOpenMotion = {},
+            onDismissError = {},
         )
     }
 }

@@ -54,7 +54,7 @@ enum class MarkState { Done, Active, Pending, Failed }
  * about a step.
  */
 @Composable
-fun CheckDot(
+private fun CheckDot(
     state: MarkState,
     modifier: Modifier = Modifier,
     size: Dp = AppTheme.dimens.component.checkbox,
@@ -125,7 +125,6 @@ fun CheckRow(
     state: MarkState,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
-    dotSize: Dp = AppTheme.dimens.component.checkbox,
     onClick: (() -> Unit)? = null,
     showHairline: Boolean = false,
     /** Pending steps grey their title out (screens 82 / 113); perk bullets never do. */
@@ -175,7 +174,7 @@ fun CheckRow(
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
         verticalAlignment = Alignment.Top,
     ) {
-        CheckDot(state = state, size = dotSize)
+        CheckDot(state = state)
         Column(Modifier.weight(1f)) {
             Text(title, style = AppTheme.type.rowTitle, color = titleColor)
             if (!subtitle.isNullOrBlank()) {
@@ -194,9 +193,9 @@ fun CheckRow(
 /**
  * The glyph inside the disc, as a share of the disc.
  *
- * A fraction rather than a Dp because [CheckDot] is drawn at two sizes (22 for a step or a
- * radio, 24 for a perk bullet) and a fixed glyph would be visibly off-centre-weight at one of
- * them. 0.6 is what the design's SVGs measure at both.
+ * A fraction rather than a Dp because [CheckDot] takes a size at all — a fixed glyph would be
+ * visibly off-centre-weight the first time one is drawn at anything but the default. 0.6 is what
+ * the design's SVGs measure.
  */
 private const val GLYPH_SHARE = 0.6f
 

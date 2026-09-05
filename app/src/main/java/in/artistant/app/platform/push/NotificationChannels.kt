@@ -51,6 +51,35 @@ object NotificationChannels {
         else -> BOOKINGS_QUIET
     }
 
+    /**
+     * Where a quiet-hours delivery actually goes — the twin, or nowhere.
+     *
+     * The twins are a way to make quiet hours possible, not a way around the user. Blocking a
+     * channel in system settings is the strongest "no" Android offers, and it applies to the
+     * channel the app names in the builder — so a Messages channel the user had set to
+     * IMPORTANCE_NONE stayed blocked all day and then, between 10pm and 8am, started posting
+     * through `messages_quiet`, which they had never seen and never blocked. The one window the
+     * app deliberately makes quieter was the one window it got louder.
+     *
+     * Null means the channel is not registered, which is not a block and cannot be read as one;
+     * the twin is registered, so the notification still lands.
+     *
+     * @return the channel to post on, or null to drop the notification.
+     */
+    fun quietChannelFor(context: Context, loudChannelId: String): String? {
+        val manager = context.getSystemService<NotificationManager>()
+        val importance = manager
+            ?.let { runCatching { it.getNotificationChannel(loudChannelId) }.getOrNull() }
+            ?.importance
+        return if (silentDeliveryIsBlocked(importance)) null else quietTwinOf(loudChannelId)
+    }
+
+    /**
+     * @see quietChannelFor — the decision, without the system service, so it is assertable.
+     */
+    internal fun silentDeliveryIsBlocked(loudImportance: Int?): Boolean =
+        loudImportance == NotificationManager.IMPORTANCE_NONE
+
     fun register(context: Context) {
         val manager = context.getSystemService<NotificationManager>() ?: return
         manager.createNotificationChannel(

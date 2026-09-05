@@ -63,24 +63,41 @@ class NotificationPreferences @Inject constructor(
      * renders one list and a partial snapshot would flicker a switch into its default on every
      * process start. Note DataStore emits the whole preferences object per write, so this is
      * one upstream read either way.
+     *
+     * `combine` tops out at five flows, hence the nesting — but each half now carries a NAMED
+     * type rather than a `List<Boolean>` indexed at the join. Positional lists here are two
+     * places to make the same mistake: swapping `loadInReminder` and `showDayReminder` in either
+     * the producer or the `rest[2]`-style reader compiles, type-checks, and silently posts a
+     * load-in reminder to somebody who asked for a show-day one. The compiler cannot see it;
+     * with fields it cannot miss it.
      */
     val all: Flow<NotificationSettings> = combine(
         combine(quotesAndReplies, bookingUpdates, showDayReminder, loadInReminder) { a, b, c, d ->
-            listOf(a, b, c, d)
+            TransactionalSwitches(
+                quotesAndReplies = a,
+                bookingUpdates = b,
+                showDayReminder = c,
+                loadInReminder = d,
+            )
         },
         combine(newActs, tipsAndOffers, reviewReminders, quietHours) { a, b, c, d ->
-            listOf(a, b, c, d)
+            RemainingSwitches(
+                newActs = a,
+                tipsAndOffers = b,
+                reviewReminders = c,
+                quietHours = d,
+            )
         },
-    ) { bookings, rest ->
+    ) { transactional, rest ->
         NotificationSettings(
-            quotesAndReplies = bookings[0],
-            bookingUpdates = bookings[1],
-            showDayReminder = bookings[2],
-            loadInReminder = bookings[3],
-            newActs = rest[0],
-            tipsAndOffers = rest[1],
-            reviewReminders = rest[2],
-            quietHours = rest[3],
+            quotesAndReplies = transactional.quotesAndReplies,
+            bookingUpdates = transactional.bookingUpdates,
+            showDayReminder = transactional.showDayReminder,
+            loadInReminder = transactional.loadInReminder,
+            newActs = rest.newActs,
+            tipsAndOffers = rest.tipsAndOffers,
+            reviewReminders = rest.reviewReminders,
+            quietHours = rest.quietHours,
         )
     }
 
@@ -98,6 +115,22 @@ class NotificationPreferences @Inject constructor(
         const val KEY_QUIET_HOURS = "notify.quiet_hours"
     }
 }
+
+/** Half of [NotificationPreferences.all]'s join — see there for why it is not a list. */
+private data class TransactionalSwitches(
+    val quotesAndReplies: Boolean,
+    val bookingUpdates: Boolean,
+    val showDayReminder: Boolean,
+    val loadInReminder: Boolean,
+)
+
+/** The other half. @see TransactionalSwitches */
+private data class RemainingSwitches(
+    val newActs: Boolean,
+    val tipsAndOffers: Boolean,
+    val reviewReminders: Boolean,
+    val quietHours: Boolean,
+)
 
 /** One switch on screen 124, named so a ViewModel can pass it around without a string. */
 enum class NotificationToggle(val key: String) {

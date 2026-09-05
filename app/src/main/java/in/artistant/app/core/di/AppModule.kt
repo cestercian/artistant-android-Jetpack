@@ -4,6 +4,11 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.IntoSet
+import `in`.artistant.app.feature.profile.DataExportStore
+import `in`.artistant.app.feature.saved.SavedStore
+import `in`.artistant.app.platform.media.UploadQueue
+import `in`.artistant.app.platform.storage.AccountScopedStore
 import `in`.artistant.app.platform.observability.Analytics
 import `in`.artistant.app.platform.observability.Crash
 import `in`.artistant.app.platform.observability.PostHogAnalytics
@@ -69,4 +74,23 @@ abstract class AppModule {
 
     @Binds
     abstract fun bindCrash(impl: SentryCrash): Crash
+
+    // ── Account-scoped teardown ────────────────────────────────────────────────────────
+    //
+    // The set `SessionManager.wipeLocalState()` iterates. Adding a `@Singleton` that outlives
+    // the session means adding ONE line here, and the sign-out, the sign-out backstop and the
+    // delete-account backstop all pick it up — see [AccountScopedStore] for the three
+    // hand-written lists this replaces, and how far apart they had already drifted.
+
+    @Binds
+    @IntoSet
+    abstract fun bindSavedStoreTeardown(impl: SavedStore): AccountScopedStore
+
+    @Binds
+    @IntoSet
+    abstract fun bindDataExportTeardown(impl: DataExportStore): AccountScopedStore
+
+    @Binds
+    @IntoSet
+    abstract fun bindUploadQueueTeardown(impl: UploadQueue): AccountScopedStore
 }

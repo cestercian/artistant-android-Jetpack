@@ -34,6 +34,17 @@ sealed class AccountRepositoryError(message: String, cause: Throwable? = null) :
     class DeleteFailed(detail: String) : AccountRepositoryError("Account deletion failed: $detail")
     class Underlying(cause: Throwable) :
         AccountRepositoryError(cause.message ?: "Account action failed", cause)
+
+    /**
+     * There is no live session to revoke the OTHER ones with — see [requireLiveSession].
+     *
+     * The message is the one design screen 128 shows, and it is written to say what did NOT
+     * happen: "couldn't sign out your other devices" over a banner claiming success is the
+     * failure this class exists to make impossible.
+     */
+    class NoSession : AccountRepositoryError(
+        "Couldn't reach the server — nothing was signed out yet.",
+    )
 }
 
 interface AccountRepository {
@@ -53,6 +64,8 @@ interface AccountRepository {
      * side effect of securing the account, and would skip `SessionManager.signOut()`'s ordered
      * teardown (push-token handback first, then prefs) on the way. "Sign out everywhere else"
      * is also the design's own label.
+     *
+     * Throws — see [requireLiveSession] — rather than reporting a revoke it could not perform.
      */
     suspend fun signOutOtherDevices()
 }
@@ -92,7 +105,17 @@ class SupabaseAccountRepository @Inject constructor(
 
     override suspend fun signOutOtherDevices() {
         try {
+            requireLiveSession(
+                // The EXPIRY, not merely the presence of a session: supabase-kt keeps the
+                // cached `UserSession` after its access token has lapsed, so a null check
+                // answered "live" for exactly the token the revoke would 401 on.
+                expiresAtEpochSeconds = { client.auth.currentSessionOrNull()?.expiresAt?.epochSeconds },
+                nowEpochSeconds = { System.currentTimeMillis() / 1000 },
+                refresh = { client.auth.refreshCurrentSession() },
+            )
             client.auth.signOut(SignOutScope.OTHERS)
+        } catch (e: AccountRepositoryError) {
+            throw e
         } catch (t: Throwable) {
             throw AccountRepositoryError.Underlying(t)
         }
@@ -126,6 +149,62 @@ internal fun requireDeleted(body: String) {
         ?: throw AccountRepositoryError.DeleteFailed("Unreadable response: ${body.take(120)}")
     if (!parsed.deleted) {
         throw AccountRepositoryError.DeleteFailed("Server returned deleted=false")
+    }
+}
+
+/**
+ * How stale an access token may be before this treats it as spent.
+ *
+ * A minute, and it is a floor rather than a guess: the check happens here and the token is used
+ * one network round trip later, so a token expiring inside that window is a token the server
+ * will reject. Erring early costs one refresh; erring late costs the screen its only guarantee.
+ */
+internal const val SESSION_EXPIRY_SKEW_SECONDS = 60L
+
+/**
+ * Whether the cached session can still authorise a request.
+ *
+ * A null [expiresAtEpochSeconds] means there is no session at all. Anything already past — or
+ * within [SESSION_EXPIRY_SKEW_SECONDS] of — expiry is NOT usable, which is the half the first
+ * version of this got wrong: `currentSessionOrNull()` keeps returning the cached `UserSession`
+ * after its access token has lapsed, so a null check reported "live" for precisely the token
+ * the revoke was about to be 401'd on, the refresh was skipped, and the swallowed 401 became
+ * "Every other session is signed out".
+ */
+internal fun sessionIsUsable(expiresAtEpochSeconds: Long?, nowEpochSeconds: Long): Boolean =
+    expiresAtEpochSeconds != null &&
+        expiresAtEpochSeconds - SESSION_EXPIRY_SKEW_SECONDS > nowEpochSeconds
+
+/**
+ * Refuse "sign out everywhere else" unless there is a LIVE session to do it with.
+ *
+ * `Auth.signOut(SignOutScope.OTHERS)` is not a success signal on its own. supabase-kt swallows
+ * 401 / 403 / 404 on the logout POST — a revoked or expired token reads exactly like a server
+ * that agreed — and with no session at all it never issues the request in the first place and
+ * returns normally. Screen 128 then raised "Every other session is signed out" over an account
+ * whose other sessions were untouched, to somebody who came to that screen because they think
+ * they have been compromised. That is the one banner in the app that must never be a guess.
+ *
+ * A refresh first, because an app in the background long enough for the access token to lapse is
+ * the ordinary case and re-issuing it is exactly what supabase-kt is holding a refresh token
+ * for. What is left after a refresh that could not restore a usable token is a device with no
+ * credentials, and the honest answer there is a failure the screen shows — not silence dressed
+ * as success. A refresh that THROWS is that same answer: it is caught here only so the caller
+ * gets [AccountRepositoryError.NoSession] rather than a transport exception, never so the
+ * revoke can be attempted anyway.
+ *
+ * The session is passed in as lambdas so the decision is reachable without a live
+ * `SupabaseClient`: it is the one rule in this file that decides whether a revoke happened.
+ */
+internal suspend fun requireLiveSession(
+    expiresAtEpochSeconds: () -> Long?,
+    nowEpochSeconds: () -> Long,
+    refresh: suspend () -> Unit,
+) {
+    if (sessionIsUsable(expiresAtEpochSeconds(), nowEpochSeconds())) return
+    runCatching { refresh() }
+    if (!sessionIsUsable(expiresAtEpochSeconds(), nowEpochSeconds())) {
+        throw AccountRepositoryError.NoSession()
     }
 }
 

@@ -226,7 +226,7 @@ fun ClientTabsScaffold() {
                 // nothing to compose until an artist is picked — the funnel
                 // starts on a profile. A dedicated "new booking" flow is a
                 // section-PR decision, not a P1 invention.
-                showLabels = a11ySettings.alwaysShowLabels,
+                showLabels = a11ySettings.settings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Find an artist",
                     icon = Icons.Filled.Add,
@@ -391,10 +391,12 @@ fun ClientTabsScaffold() {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
                         onContactSupport = { nav.navigate(ClientNavRoutes.SUPPORT) },
-                        // Nothing to navigate TO: the account is gone, so the cleared session
-                        // propagates to the root gate and replaces this whole graph with the
-                        // signup flow. Popping the stack here would only race that.
-                        onFinished = {},
+                        // Reached ONLY when the sign-out on the receipt's Close button would
+                        // not land. A session that cleared propagates to the root gate, which
+                        // replaces this whole graph with the signup flow — an exit on top of
+                        // that would just race it. One that did not has no swap coming, and
+                        // the receipt already says to restart the app.
+                        onFinished = rememberDeleteAccountExit(),
                     )
                 }
             }

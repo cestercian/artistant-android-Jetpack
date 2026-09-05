@@ -59,6 +59,14 @@ import `in`.artistant.app.platform.calendar.CalendarSyncService
  *   the other; on Android the row also has to say WHERE it is writing once it is on, because
  *   the device can have several writable calendars and picking the Google-account one is how
  *   "sync to Google Calendar" works with no Google API.
+ * - "Subscription" is in the ACCOUNT group, not the ARTIST one the design draws it in, and it
+ *   renders for both roles. Artistant Pro is not an artist-only product — "Manage availability"
+ *   is the only row on that list an account has to BE an artist to have — and under the ARTIST
+ *   eyebrow it was invisible to every host on the platform. It is gated on
+ *   `AppEnvironment.subscriptionsEnabled` instead of carrying a "Not available yet" subtitle:
+ *   with Play Billing dormant there is no plan, no price and no entitlement to check, and a
+ *   settings row for a product nobody can buy answers nothing. The paywall keeps its other two
+ *   entrances (checkout's entitlement gate, the artist dashboard).
  * - Rows the design does not draw — Notifications, Language & region, Accessibility, Devices
  *   (124 / 130 / 129 / 128), and the System section's Activity, Send feedback, What's new and
  *   Rate Artistant (123 / 64 / 137 / 138) — live here, because their screens exist and the
@@ -266,14 +274,8 @@ private fun AccountContent(
                 title = "Manage availability",
                 subtitle = state.availabilitySummary,
                 onClick = onManageAvailability,
-                modifier = Modifier.semantics { testTag = "account.availability" },
-            )
-            ListRow(
-                title = "Subscription",
-                subtitle = state.subscriptionSubtitle,
-                onClick = onSubscription,
                 showHairline = false,
-                modifier = Modifier.semantics { testTag = "account.subscription" },
+                modifier = Modifier.semantics { testTag = "account.availability" },
             )
         }
 
@@ -281,6 +283,24 @@ private fun AccountContent(
         EyebrowLabel("Account", color = colors.ink4)
         Spacer(Modifier.height(dimens.space.sm))
 
+        // Not inside the ARTIST group, which is where the design draws it and where it made
+        // Pro invisible to every host on the platform: Artistant Pro is not an artist-only
+        // product, and "Manage availability" is the only row on that list an account has to BE
+        // an artist to have. So the row is here, for both roles, and it is the same single call
+        // site the design's own note asks for ("injected, not forked").
+        //
+        // Gated on the flag rather than shown with "Not available yet" beside it: with Play
+        // Billing dormant there is no plan, no price and no entitlement to check, and a settings
+        // row for a product that cannot be bought is a row that answers nothing. The paywall
+        // stays reachable from checkout and the artist dashboard, so nothing is orphaned.
+        if (state.subscriptionsEnabled) {
+            ListRow(
+                title = "Subscription",
+                subtitle = state.subscriptionSubtitle,
+                onClick = onSubscription,
+                modifier = Modifier.semantics { testTag = "account.subscription" },
+            )
+        }
         SwitchRow(
             title = "Sync gigs to calendar",
             subtitle = calendarSubtitle(
@@ -381,25 +401,6 @@ private fun AccountContent(
     }
 }
 
-/** A tap-to-dismiss line under the list — the same affordance every action failure here gets. */
-@Composable
-private fun AccountFeedbackLine(
-    message: String,
-    color: androidx.compose.ui.graphics.Color,
-    onDismiss: () -> Unit,
-    tag: String,
-) {
-    Text(
-        message,
-        style = AppTheme.type.caption,
-        color = color,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onDismiss)
-            .padding(vertical = AppTheme.dimens.space.sm)
-            .semantics { testTag = tag },
-    )
-}
 
 /**
  * Which calendar the mirror writes to, when there is more than one to choose from.

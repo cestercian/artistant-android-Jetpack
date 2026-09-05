@@ -2,8 +2,10 @@ package `in`.artistant.app.feature.saved
 
 import `in`.artistant.app.data.repository.SavedArtistsRepository
 import `in`.artistant.app.data.repository.SavedArtistsRepositoryError
-import `in`.artistant.app.platform.storage.AppPreferences
+import `in`.artistant.app.platform.storage.AccountScopedStore
+import `in`.artistant.app.platform.storage.KeyValueStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,11 +43,19 @@ import javax.inject.Singleton
  * slow read never blocks a tap.
  */
 @Singleton
-class SavedStore @Inject constructor(
+class SavedStore internal constructor(
     private val repository: SavedArtistsRepository,
-    private val prefs: AppPreferences,
-) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val prefs: KeyValueStore,
+    private val scope: CoroutineScope,
+) : AccountScopedStore {
+    @Inject constructor(repository: SavedArtistsRepository, prefs: KeyValueStore) : this(
+        repository = repository,
+        prefs = prefs,
+        // SupervisorJob so one failed write cannot take the consumer — and every later tap —
+        // down with it; IO because everything on it is a network call or a preferences edit.
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
+
     private val _ids = MutableStateFlow<Set<String>>(emptySet())
     val ids: StateFlow<Set<String>> = _ids.asStateFlow()
 
@@ -59,8 +69,12 @@ class SavedStore @Inject constructor(
         /** A write finished (or was cancelled); stop calling it in flight. */
         data class WriteSettled(val id: String, val job: Job) : Command
 
-        /** Sign-out or delete-account: this device knows nothing now. */
-        data object Reset : Command
+        /**
+         * Sign-out or delete-account: this device knows nothing now.
+         *
+         * Carries an acknowledgement because the sender has to WAIT for it — see [reset].
+         */
+        data class Reset(val applied: CompletableDeferred<Unit>) : Command
     }
 
     /**
@@ -159,8 +173,30 @@ class SavedStore @Inject constructor(
         }
     }
 
-    fun reset() {
-        commands.trySend(Command.Reset)
+    /**
+     * @see AccountScopedStore.reset
+     *
+     * **Waits for the consumer to have applied it**, which is the whole reason this is
+     * `suspend`. Posting the message and returning was not a teardown: `SessionManager.
+     * wipeLocalState()` went on to finish, `signOut()` returned, and the root gate swapped to
+     * the auth screen while [ids] still held the departing account's saved artists — visible to
+     * the next account for however long the consumer took to get to the message, and written
+     * back to disk by any read that landed in between.
+     *
+     * The acknowledgement is completed inside [applyReset], so what the caller is promised is
+     * exactly what the consumer decided: the set empty, the in-flight writes cancelled, the
+     * session counter bumped so a read issued for the departing account cannot be applied.
+     */
+    override suspend fun reset() {
+        val applied = CompletableDeferred<Unit>()
+        if (commands.trySend(Command.Reset(applied)).isFailure) {
+            // Only reachable if the consumer's scope is gone, in which case nobody is coming to
+            // acknowledge anything and awaiting would hang the sign-out. Clear what the caller
+            // can see and return — that is the part of this that must not survive.
+            _ids.value = emptySet()
+            return
+        }
+        applied.await()
     }
 
     private suspend fun consume() {
@@ -170,7 +206,7 @@ class SavedStore @Inject constructor(
                 is Command.ServerAnswer -> applyAnswer(command)
                 is Command.WriteSettled ->
                     if (writes[command.id] === command.job) writes.remove(command.id)
-                Command.Reset -> applyReset()
+                is Command.Reset -> applyReset(command)
             }
         }
     }
@@ -213,13 +249,16 @@ class SavedStore @Inject constructor(
         persist(next)
     }
 
-    private fun applyReset() {
+    private fun applyReset(command: Command.Reset) {
         session += 1
         writes.values.forEach { it.cancel() }
         writes.clear()
         unconfirmed.clear()
         _ids.value = emptySet()
         persist(emptySet())
+        // Last, and unconditionally: the sender is parked on this, and everything it was
+        // promised has happened by the time this line runs.
+        command.applied.complete(Unit)
     }
 
     /**

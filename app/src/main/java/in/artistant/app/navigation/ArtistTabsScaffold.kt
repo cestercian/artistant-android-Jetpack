@@ -174,7 +174,7 @@ fun ArtistTabsScaffold() {
                 // It goes to the availability editor: the artist-side verb that
                 // actually changes what the market can see is "open a date", and
                 // that editor already exists. Not a new flow — a shortcut to one.
-                showLabels = a11ySettings.alwaysShowLabels,
+                showLabels = a11ySettings.settings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Availability",
                     icon = Icons.Filled.PlayArrow,
@@ -264,9 +264,9 @@ fun ArtistTabsScaffold() {
                     DeleteAccountScreen(
                         onBack = { nav.popBackStack() },
                         onContactSupport = { nav.navigate(ArtistNavRoutes.SUPPORT) },
-                        // Nothing to navigate TO: the account is gone, so the cleared session
-                        // propagates to the root gate and replaces this whole graph.
-                        onFinished = {},
+                        // See [ClientTabsScaffold]: only a sign-out that would not land gets
+                        // here, and closing the app is what the receipt's own copy promises.
+                        onFinished = rememberDeleteAccountExit(),
                     )
                 }
             }

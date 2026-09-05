@@ -2,6 +2,7 @@ package `in`.artistant.app.platform.preferences
 
 import `in`.artistant.app.platform.storage.KeyValueStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 /**
@@ -21,9 +22,14 @@ import kotlinx.coroutines.flow.map
  * Same shape as `PrivacyPreferences.toBoolOrDefault`, generalised because three preference
  * classes now need it. It is a top-level extension rather than a member so a unit test can
  * exercise it against a fake store without constructing any of them.
+ *
+ * `distinctUntilChanged` because DataStore emits the WHOLE preferences object on every write,
+ * so a switch on screen 124 re-emitted all eight of its neighbours plus both accessibility
+ * flags — and `NotificationSettings.all` combines eight of these, so one tap recomposed the
+ * list eight times and re-ran the push-delivery read behind it.
  */
 internal fun KeyValueStore.bool(key: String, default: Boolean): Flow<Boolean> =
-    getString(key).map { it.toBoolOrDefault(default) }
+    getString(key).map { it.toBoolOrDefault(default) }.distinctUntilChanged()
 
 /** @see bool — the parse, extracted so it is directly testable. */
 internal fun String?.toBoolOrDefault(default: Boolean): Boolean = when (this) {

@@ -20,6 +20,9 @@ import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -114,9 +117,6 @@ data class ProfileUiState(
                 .joinToString(" · ")
         }
 
-    val handleLabel: String?
-        get() = profile?.handle?.trim()?.takeIf { it.isNotEmpty() }?.let { "@$it" }
-
     /** The email row's rendered value, or null when there is no email to show. */
     val maskedEmail: String?
         get() = email?.trim()?.takeIf { it.isNotEmpty() }?.let(::maskEmail)
@@ -185,7 +185,6 @@ class ProfileViewModel @Inject constructor(
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
     private val savedStore: SavedStore,
-    private val dataExport: DataExportStore,
     private val draftStore: BookingDraftStore,
     private val bookingsRepository: BookingsRepository,
     private val artists: ArtistsRepository,
@@ -195,6 +194,9 @@ class ProfileViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(ProfileUiState())
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
+
+    /** @see refresh — the guard against two overlapping reloads. */
+    private var refreshJob: Job? = null
 
     init {
         refresh()
@@ -220,9 +222,17 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
-    fun refresh() = viewModelScope.launch {
+    fun refresh() {
+        // One at a time. Every read below writes the same fields, so two overlapping refreshes
+        // race each other — and `onRetry` sits one tap under the failure banner, which is
+        // exactly where somebody taps twice.
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch { load() }
+    }
+
+    private suspend fun load() {
         _state.update { it.copy(isLoading = true, error = null) }
-        val role = prefs.role.first()
+        val role = runCatching { prefs.role.first() }.getOrDefault(AppRole.Client)
         // Off the cached session, not a network call — safe to read on every
         // refresh, and it is the only place the account email and the signup
         // date exist (the `public.users` row carries neither). Published BEFORE
@@ -232,6 +242,13 @@ class ProfileViewModel @Inject constructor(
         val user = session.currentUser
         _state.update {
             it.copy(
+                // The cached role, published BEFORE the fetch for the same reason as the two
+                // fields beside it: it is already known locally. The settings list renders the
+                // whole ARTIST group off it, so publishing it only after the profile came back
+                // meant an artist watched two rows appear a network round trip into the screen.
+                // It is also the role the root gate routed on to get here, so seeding it cannot
+                // disagree with the graph the user is standing in; the fetch below settles it.
+                role = role,
                 email = user?.email,
                 joinedYear = user?.createdAt?.toEpochMilliseconds()?.let { ms ->
                     Calendar.getInstance().apply { timeInMillis = ms }.get(Calendar.YEAR)
@@ -291,22 +308,28 @@ class ProfileViewModel @Inject constructor(
      * the gig counts, and an availability read that fails must not blank either. Each writes
      * only its own fields.
      */
-    private suspend fun refreshArtistStats() {
-        runCatching { bookingsRepository.listForArtist() }
-            .onSuccess { bookings ->
-                _state.update {
-                    it.copy(
-                        gigsCount = liveBookingsCount(bookings),
-                        completedCount = completedBookingsCount(bookings),
-                    )
-                }
+    private suspend fun refreshArtistStats() = coroutineScope {
+        // Three requests to three tables that know nothing about each other, and the artist
+        // account list waits for all three before it is complete — so they go out together
+        // rather than one after another. Each still writes only its own fields, and each still
+        // fails on its own: a score that 500s must not blank the gig counts.
+        val bookings = async { runCatching { bookingsRepository.listForArtist() } }
+        val score = async { runCatching { scores.breakdownForSelf() } }
+        val availability = async { runCatching { artists.fetchSelfAvailability() } }
+
+        bookings.await().onSuccess { list ->
+            _state.update {
+                it.copy(
+                    gigsCount = liveBookingsCount(list),
+                    completedCount = completedBookingsCount(list),
+                )
             }
-        runCatching { scores.breakdownForSelf() }
+        }
+        score.await()
             .onSuccess { breakdown -> _state.update { it.copy(bookabilityScore = breakdown.score) } }
-        runCatching { artists.fetchSelfAvailability() }
-            .onSuccess { availability ->
-                _state.update { it.copy(availabilitySummary = availabilitySummary(availability)) }
-            }
+        availability.await().onSuccess { draft ->
+            _state.update { it.copy(availabilitySummary = availabilitySummary(draft)) }
+        }
     }
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
@@ -382,21 +405,16 @@ class ProfileViewModel @Inject constructor(
         val message = cleanUpAfterSignOut(
             signOut = { session.signOut() },
             stillSignedIn = { session.currentUserId != null },
-            wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
+            // The same teardown `signOut()` runs, not a second hand-written copy of it: the
+            // copy that used to live here was already a store behind (see [AccountScopedStore]),
+            // so a logout that landed and then threw left the staged uploads resident.
+            wipeLocalState = { session.wipeLocalState() },
         )
         if (message != null) _state.update { it.copy(actionError = message) }
     }
 
     /** Tap-to-dismiss for the two transient lines under the settings list. */
     fun clearActionFeedback() = _state.update { it.copy(actionMessage = null, actionError = null) }
-
-    /**
-     * A system handoff the screen could not complete — no browser, no
-     * notification-settings activity, no share target for the export. Reported
-     * on the same line as every other action failure instead of throwing
-     * ActivityNotFoundException out of a click handler and taking the tab with it.
-     */
-    fun reportActionError(message: String) = _state.update { it.copy(actionError = message) }
 
     fun manageAvailabilityMissingNav() {
         _state.update {
@@ -428,28 +446,6 @@ class ProfileViewModel @Inject constructor(
     }
 }
 
-/**
- * The local cleanup that follows a SUCCESSFUL server-side account delete.
- *
- * Non-throwing by construction, because the call site sits inside
- * `runCatching { … }.onSuccess { }` — an inline lambda that catches nothing. A
- * throw there escapes `viewModelScope`, which installs no
- * CoroutineExceptionHandler, so it reaches the thread's uncaught handler and
- * kills the app moments AFTER the account was erased, with the local wipe
- * half-done. Neither step is hypothetical: [wipeCalendar] deletes through the
- * calendar provider with no permission check of its own, so a calendar
- * permission revoked since the toggle was enabled throws SecurityException, and
- * [signOut] posts a logout carrying a JWT whose user has just been deleted, over
- * a link that may already be gone.
- *
- * [wipeLocalState] is the DPDP §11 backstop. `SessionManager.signOut()` does the
- * network logout FIRST and clears prefs / saved ids after it returns, so a failed
- * logout skips the local wipe entirely and the deleted account's role, saved ids
- * and thread flags survive on the device. That half is done here when sign-out
- * fails, and the user is told to restart — the one part of this they can act on.
- *
- * @return the message to surface, or null when the cleanup finished cleanly.
- */
 /**
  * The result of a role switch: whether the ACCOUNT changed, and what to say if it did not.
  */
@@ -488,44 +484,58 @@ internal suspend fun switchRoleOnServerThenDevice(
     return RoleSwitchOutcome(switched = true, failure = null)
 }
 
-internal suspend fun cleanUpAfterAccountDelete(
-    wipeCalendar: suspend () -> Unit,
-    signOut: suspend () -> Unit,
-    wipeLocalState: suspend () -> Unit,
-): AccountDeleteCleanup {
-    // The mirrored gigs are the device owner's own calendar events. Failing to remove them
-    // cannot un-delete the account, so it does not stop anything below — but it is REPORTED
-    // now rather than swallowed. The receipt on stage 3 itemises "Calendar cleaned" with a
-    // tick, and a tick over a wipe that threw is the screen claiming an erasure that did not
-    // happen, on the one screen in the app whose entire job is telling the truth about what
-    // was deleted.
-    val calendarFailure = runCatching { wipeCalendar() }.exceptionOrNull()
-    val message = if (runCatching { signOut() }.isSuccess) {
-        null
-    } else {
-        runCatching { wipeLocalState() }
-        "Account deleted. Restart the app to finish signing out."
+/**
+ * Take the mirrored gigs off this device's calendar, and say whether it worked.
+ *
+ * Runs BEFORE the receipt goes up, which is the whole change: it used to run after, alongside a
+ * sign-out that swaps the entire graph out from under the screen, so stage 3's third row was
+ * still reading "Clearing your calendar" when the root gate replaced it. The row that reports
+ * this is the one row on the receipt that can be false, and nobody ever saw its answer.
+ *
+ * It is also the fast half — a local content-provider delete, not a network logout — so putting
+ * it first costs the receipt nothing.
+ *
+ * Never throws: `wipeForAccountDelete` deletes through the calendar provider with no permission
+ * check of its own, so a calendar permission revoked since the toggle was enabled throws
+ * SecurityException, and the call site is an inline `onSuccess` lambda inside `runCatching`,
+ * which catches nothing. A throw there escapes `viewModelScope` — no CoroutineExceptionHandler —
+ * and kills the app moments after the account was erased.
+ *
+ * @return null when the events really were removed, or the reason they were not. A reason is
+ * never blank: "Calendar not cleaned — null." is not a sentence anybody should read here.
+ */
+internal suspend fun wipeMirroredCalendar(wipeCalendar: suspend () -> Unit): String? =
+    runCatching { wipeCalendar() }.exceptionOrNull()?.let {
+        it.message?.takeIf(String::isNotBlank) ?: "this device wouldn't let us"
     }
-    return AccountDeleteCleanup(
-        calendarFailure = calendarFailure?.let {
-            it.message?.takeIf(String::isNotBlank) ?: "this device wouldn't let us"
-        },
-        message = message,
-    )
-}
 
 /**
- * What the local half of a delete managed, once the server row is already gone.
+ * End the session after a SUCCESSFUL server-side account delete.
  *
- * Two independent facts, because the receipt states them separately: whether the mirrored
- * calendar events came off this device, and whether the session teardown finished.
+ * Deferred to the receipt's Close button rather than run underneath it. The row is already gone
+ * server-side and nothing here can change that, so there is nothing to hold a screen for — and
+ * a 30-second logout timeout running under a receipt is how stage 3 got replaced before it had
+ * finished saying what it was for.
+ *
+ * [wipeLocalState] is the DPDP §11 backstop. `SessionManager.signOut()` does the network logout
+ * FIRST and wipes the device after it returns, so a failed logout skips the wipe entirely and
+ * the deleted account's role, saved ids, export payload and staged uploads survive on the phone.
+ * That half is done here when sign-out fails, and the user is told to restart — the one part of
+ * this they can act on, and the reason the receipt's Close button falls back to closing the app.
+ *
+ * Non-throwing, for the same reason as [wipeMirroredCalendar]: [signOut] posts a logout carrying
+ * a JWT whose user has just been deleted, over a link that may already be gone.
+ *
+ * @return the message to surface, or null when the teardown finished cleanly.
  */
-internal data class AccountDeleteCleanup(
-    /** null when the mirrored events really were removed; the reason when they were not. */
-    val calendarFailure: String?,
-    /** A sentence for the user, or null when there is nothing left to tell them. */
-    val message: String?,
-)
+internal suspend fun cleanUpAfterAccountDelete(
+    signOut: suspend () -> Unit,
+    wipeLocalState: suspend () -> Unit,
+): String? {
+    if (runCatching { signOut() }.isSuccess) return null
+    runCatching { wipeLocalState() }
+    return "Account deleted. Restart the app to finish signing out."
+}
 
 /**
  * The local cleanup that follows a PLAIN sign-out attempt.

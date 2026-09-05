@@ -15,6 +15,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import `in`.artistant.app.data.repository.ArtistMediaRepository
 import `in`.artistant.app.data.repository.SamplesRepository
+import `in`.artistant.app.platform.storage.AccountScopedStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +58,7 @@ class UploadQueue @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
     private val media: ArtistMediaRepository,
     private val samples: SamplesRepository,
-) {
+) : AccountScopedStore {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
 
@@ -344,6 +345,14 @@ class UploadQueue @Inject constructor(
             }
         }
     }
+
+    /**
+     * @see AccountScopedStore.reset — the teardown every account-scoped singleton shares.
+     *
+     * An alias for [clearAll] rather than a rename: the queue's own callers say "clear all"
+     * about a queue, and the session teardown says "reset" about an account. Both are this.
+     */
+    override suspend fun reset() = clearAll()
 
     /** Every drain waits for [restored] — see [resumeAfterLaunch] for why. */
     private fun pump(): Job = scope.launch {

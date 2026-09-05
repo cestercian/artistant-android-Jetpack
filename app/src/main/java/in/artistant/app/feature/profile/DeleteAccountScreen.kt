@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.profile
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -33,6 +35,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import `in`.artistant.app.data.model.Booking
+import `in`.artistant.app.data.model.SelfProfile
 import `in`.artistant.app.data.repository.AccountRepository
 import `in`.artistant.app.data.repository.BookingsRepository
 import `in`.artistant.app.data.repository.UsersRepository
@@ -49,12 +53,12 @@ import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.feature.booking.BookingDraftStore
-import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -75,15 +79,19 @@ enum class DeleteReason(val label: String) {
 /**
  * Whether the mirrored gigs came off this device's calendar.
  *
- * Three states because there are three, and the receipt on stage 3 must not flatten them: the
- * wipe runs AFTER that screen is already up (the server row is gone, and holding a spinner
- * through a 30-second logout would read as a delete that never happened), so [Pending] is what
- * the row shows for the moment it takes, and [Failed] is what it shows when the calendar
- * provider refused. A tick over a wipe that threw is the one screen in the app whose whole job
- * is honesty claiming an erasure that did not happen.
+ * Three states because there are three, and the receipt on stage 3 must not flatten them.
+ * [Failed] is what the row shows when the calendar provider refused — a tick over a wipe that
+ * threw is the one screen in the app whose whole job is honesty claiming an erasure that did not
+ * happen.
+ *
+ * The wipe now runs BEFORE the receipt goes up (it is a local provider delete, measured in
+ * milliseconds; the slow half is the sign-out, which waits for Close), so [Pending] is the
+ * value the state carries on the two stages ahead of the receipt rather than a row anybody
+ * reads. It stays, because "not asked yet" is a real third answer and the alternative is
+ * defaulting the field to a claim.
  */
 sealed interface CalendarOutcome {
-    /** The wipe has not answered yet. */
+    /** The wipe has not been asked for yet — stages 1 and 2. */
     data object Pending : CalendarOutcome
 
     /** The mirrored events are off this device. */
@@ -134,8 +142,6 @@ class DeleteAccountViewModel @Inject constructor(
     private val session: SessionManager,
     private val prefs: AppPreferences,
     private val calendarSync: CalendarSyncService,
-    private val savedStore: SavedStore,
-    private val dataExport: DataExportStore,
     private val draftStore: BookingDraftStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DeleteAccountUiState())
@@ -154,29 +160,16 @@ class DeleteAccountViewModel @Inject constructor(
      * [deleteConsequences] renders the generic sentence for a null rather than "0".
      */
     private fun loadConsequences() = viewModelScope.launch {
-        runCatching { users.fetchSelfProfile() }.onSuccess { profile ->
-            _state.update {
-                it.copy(
-                    consequences = it.consequences.copy(
-                        handle = profile?.handle?.trim()?.takeIf { h -> h.isNotEmpty() },
-                        isArtist = profile?.role == AppRole.Artist,
-                    ),
-                )
-            }
-        }
-        val isArtist = _state.value.consequences.isArtist
-        runCatching {
-            if (isArtist) bookings.listForArtist() else bookings.listForClient()
-        }.onSuccess { list ->
-            _state.update {
-                it.copy(
-                    consequences = it.consequences.copy(
-                        bookings = list.size,
-                        upcoming = liveBookingsCount(list),
-                    ),
-                )
-            }
-        }
+        loadDeleteConsequences(
+            fetchProfile = { users.fetchSelfProfile() },
+            cachedRole = { prefs.role.first() },
+            listBookings = { role ->
+                if (role == AppRole.Artist) bookings.listForArtist() else bookings.listForClient()
+            },
+            publish = { transform ->
+                _state.update { it.copy(consequences = transform(it.consequences)) }
+            },
+        )
     }
 
     fun pick(reason: DeleteReason) = _state.update { it.copy(reason = reason) }
@@ -198,36 +191,69 @@ class DeleteAccountViewModel @Inject constructor(
      * repo. So the question is asked because the design's off-ramp needs it asked — the answer
      * is what decides whether Support is offered — and the screen never claims it was sent.
      */
-    fun deleteAccount(onDeleted: () -> Unit) = viewModelScope.launch {
+    fun deleteAccount() = viewModelScope.launch {
         if (!_state.value.canDelete) return@launch
         _state.update { it.copy(working = true, failure = null) }
         runCatching { account.deleteAccount() }
             .onSuccess {
-                // Stage 3 goes up BEFORE the cleanup: the row is already erased server-side,
-                // nothing below can change that outcome, and holding a spinner through a 30s
-                // logout timeout would read as a delete that never happened.
-                _state.update { it.copy(working = false, stage = DeleteStage.Receipt) }
                 draftStore.clear()
-                val cleanup = cleanUpAfterAccountDelete(
-                    wipeCalendar = { calendarSync.wipeForAccountDelete() },
-                    signOut = { session.signOut() },
-                    wipeLocalState = { prefs.wipeAll(); savedStore.reset(); dataExport.reset() },
-                )
+                // Everything local goes NOW, not on Close. The receipt deliberately precedes the
+                // sign-out, and that left a window where the process could die still holding the
+                // erased account's session, saved ids and export payload — and the next launch
+                // would restore a session for a row that no longer exists. `onAccountDeleted`
+                // wipes the device and leaves the marker `SessionManager` finishes at the next
+                // launch; the AUTH sign-out still waits for Close (see [finish]).
+                session.onAccountDeleted()
+                // The device-calendar wipe next, and its answer recorded, because stage 3's
+                // third row is what reports it. It used to run after the receipt was already up
+                // — alongside a sign-out that swaps this whole graph out from under it — so the
+                // row that can be false was still saying "Clearing your calendar" when the root
+                // gate replaced the screen, and nobody ever saw the outcome. It is a local
+                // provider delete, so the receipt waits milliseconds for it, not a logout.
+                val calendarFailure = wipeMirroredCalendar { calendarSync.wipeForAccountDelete() }
                 _state.update {
                     it.copy(
-                        calendar = cleanup.calendarFailure
+                        working = false,
+                        stage = DeleteStage.Receipt,
+                        calendar = calendarFailure
                             ?.let(CalendarOutcome::Failed)
                             ?: CalendarOutcome.Cleaned,
-                        failure = cleanup.message ?: it.failure,
                     )
                 }
-                onDeleted()
             }
             .onFailure { e ->
                 _state.update {
                     it.copy(working = false, failure = e.message ?: "Account deletion failed")
                 }
             }
+    }
+
+    /**
+     * "Close Artistant" on the receipt — where the session actually ends.
+     *
+     * The sign-out is the slow, network half and it is deliberately here rather than under the
+     * receipt: the row is already erased server-side, nothing this does can change that, and a
+     * 30-second logout timeout running beneath stage 3 is what replaced the receipt before it
+     * had finished saying what it was for.
+     *
+     * [onExit] is called ONLY when the session would not clear. A cleared one propagates to the
+     * root gate, which swaps this entire graph for the signup flow — an exit on top of that
+     * would only race it. A session still standing has no such swap coming, so closing the app
+     * is the only honest end, and it is the one the receipt's own copy already names.
+     */
+    fun finish(onExit: () -> Unit) = viewModelScope.launch {
+        if (_state.value.working) return@launch
+        _state.update { it.copy(working = true) }
+        val message = cleanUpAfterAccountDelete(
+            signOut = { session.signOut() },
+            // `onAccountDeleted`, not a bare `wipeLocalState`: the backstop clears the
+            // preferences file, and the pending-sign-out marker lives in it. A sign-out that
+            // could not land is exactly the case the next launch has to finish, so erasing the
+            // note while cleaning up after it is the one path that would silently give up.
+            wipeLocalState = { session.onAccountDeleted() },
+        )
+        _state.update { it.copy(working = false, failure = message ?: it.failure) }
+        if (session.currentUserId != null) onExit()
     }
 }
 
@@ -249,13 +275,22 @@ class DeleteAccountViewModel @Inject constructor(
  * here would be the worst fabrication in the app.
  *
  * **Stage 3 is a receipt, not a goodbye**, including the 30-day backup window — which is the
- * honest part, and the part every "your account is gone" screen leaves out.
+ * honest part, and the part every "your account is gone" screen leaves out. It goes up as soon
+ * as the server row is gone and the device calendar has answered; the SIGN-OUT waits for its
+ * Close button, so a 30-second logout cannot replace the receipt while somebody is reading it.
  */
 @Composable
 fun DeleteAccountScreen(
     onBack: () -> Unit,
     /** The scripted support assistant (design 34) — stage 1's off-ramp. */
     onContactSupport: () -> Unit,
+    /**
+     * Leave the app, and ONLY when the sign-out on Close would not land.
+     *
+     * A session that cleared propagates to the root gate, which replaces this whole graph on
+     * its own — see [DeleteAccountViewModel.finish]. One that did not has no swap coming, and
+     * the receipt already tells the user to restart.
+     */
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: DeleteAccountViewModel = hiltViewModel(),
@@ -267,12 +302,12 @@ fun DeleteAccountScreen(
         onPick = viewModel::pick,
         onContinue = viewModel::continueToConsequences,
         onConfirmationChange = viewModel::setConfirmation,
-        // The receipt replaces this screen; navigating away is the host's job, and it happens
-        // anyway the moment the cleared session propagates to the root gate.
-        onDelete = { viewModel.deleteAccount(onFinished) },
+        // The delete raises the receipt and stops there. The session ends on Close — see
+        // [DeleteAccountViewModel.finish] — and [onFinished] is only reached when it wouldn't.
+        onDelete = viewModel::deleteAccount,
         onKeep = onBack,
         onContactSupport = onContactSupport,
-        onClose = onFinished,
+        onClose = { viewModel.finish(onFinished) },
         modifier = modifier,
     )
 }
@@ -453,13 +488,22 @@ private fun DeleteReceiptStage(
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
+    // Back IS Close on this stage. The receipt draws no back affordance, and now that the
+    // sign-out waits for Close, a system back that merely popped the destination would drop
+    // somebody into a live-looking app on a session belonging to a row that no longer exists.
+    // Disabled while the sign-out is in flight, so a back tap cannot start a second one.
+    BackHandler(enabled = !state.working, onBack = onClose)
     AccountScaffold(
         modifier = modifier.semantics { testTag = "screen.deleteReceipt" },
         footer = {
             PrimaryButton(
-                text = "Close Artistant",
+                // The sign-out happens on this tap, so the button reports it. It is normally
+                // instant; on a dead link it is a 30-second timeout, and a button that looked
+                // inert for half a minute would read as a receipt that had stopped working.
+                text = if (state.working) "Signing out…" else "Close Artistant",
                 onClick = onClose,
                 fullWidth = true,
+                enabled = !state.working,
                 modifier = Modifier.semantics { testTag = "delete.close" },
             )
         },
@@ -544,7 +588,11 @@ private fun DestructiveButton(text: String, enabled: Boolean, onClick: () -> Uni
         Modifier
             .fillMaxWidth()
             .height(dimens.component.cta)
-            .background(if (enabled) colors.danger else colors.hairline, shape)
+            // Clipped before the fill, like `PrimaryButton` and BookingDetail's own destructive
+            // button: `background(shape)` rounds the paint but not the layer, so the ripple the
+            // `clickable` draws squares off the corners on press.
+            .clip(shape)
+            .background(if (enabled) colors.danger else colors.hairline)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { testTag = "delete.confirm" },
         contentAlignment = Alignment.Center,
@@ -560,6 +608,47 @@ private fun DestructiveButton(text: String, enabled: Boolean, onClick: () -> Uni
 
 /** One line of the itemised list on stage 2 or stage 3. */
 data class DeleteItem(val title: String, val detail: String)
+
+/**
+ * Read the facts stage 2 names, without inventing one.
+ *
+ * **The role is the load-bearing part, and it used to be assumed.** [DeleteConsequences.isArtist]
+ * defaults to false, so a `fetchSelfProfile()` that failed — or answered a row whose role is
+ * null — sent an ARTIST down `listForClient()`. That query does not fail: it succeeds and
+ * returns an honest empty list about the wrong question, so stage 2 printed "Your bookings ·
+ * nothing is upcoming, so nothing gets cancelled" to an artist with gigs booked, on the last
+ * screen before an irreversible action.
+ *
+ * So the role comes from the fetch, and from the device's cached role only when the fetch could
+ * not answer. When NEITHER can, the bookings are not read at all — null means unknown the whole
+ * way through, and [deleteConsequences] already renders a null as the sentence without a number.
+ *
+ * Never throws, by construction: the call site is a bare `viewModelScope.launch`, which installs
+ * no CoroutineExceptionHandler, and no stat query may stop a DPDP §11 erasure.
+ *
+ * [publish] is applied per FIELD GROUP rather than once at the end, so a slow or failed bookings
+ * read cannot hold back the handle that stage 2 and the receipt both print.
+ */
+internal suspend fun loadDeleteConsequences(
+    fetchProfile: suspend () -> SelfProfile?,
+    cachedRole: suspend () -> AppRole?,
+    listBookings: suspend (AppRole) -> List<Booking>,
+    publish: ((DeleteConsequences) -> DeleteConsequences) -> Unit,
+) {
+    val profile = runCatching { fetchProfile() }.getOrNull()
+    val role = profile?.role ?: runCatching { cachedRole() }.getOrNull()
+    publish { facts ->
+        facts.copy(
+            handle = profile?.handle?.trim()?.takeIf { it.isNotEmpty() },
+            isArtist = role == AppRole.Artist,
+        )
+    }
+    // Neither source could answer. The bookings list is not read at all rather than read
+    // against a guess: null is what "we don't know" looks like everywhere else on this screen.
+    if (role == null) return
+    val list = runCatching { listBookings(role) }.getOrNull() ?: return
+    publish { it.copy(bookings = list.size, upcoming = liveBookingsCount(list)) }
+}
 
 /**
  * What stage 2 itemises — every loss, named.
