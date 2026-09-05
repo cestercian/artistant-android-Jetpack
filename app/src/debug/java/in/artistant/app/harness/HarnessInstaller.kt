@@ -103,7 +103,14 @@ private class HarnessLifecycleCallbacks(
     // Deliberately NOT latched on a flagless create. `adb install -r` triggers a package-update
     // restart of the activity with no extras, which lands microseconds before the operator's own
     // flagged `am start`; latching there would silently swallow the flags and boot the app as if
-    // the harness had never been asked for. Staying unlatched lets the real flagged launch win.
+    // the harness had never been asked for. Staying unlatched lets the real flagged launch win —
+    // PROVIDED it still creates an activity. `MainActivity` is `singleTop`, so a flagged start
+    // against an instance that has already reached the foreground is delivered to `onNewIntent`
+    // instead: no pre-create, no install, and the DI graph has long since resolved against the
+    // real repositories. That launch shows the real auth gate with nothing to say why, which is
+    // what [onActivityResumed] diagnoses. The operator-side rule is `am start -S` — force-stop
+    // before starting — and to repeat it if adb reports the intent was delivered to a running
+    // instance (RELEASE.md §10).
     private var installed = false
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -136,7 +143,20 @@ private class HarnessLifecycleCallbacks(
     }
 
     override fun onActivityStarted(activity: Activity) = Unit
-    override fun onActivityResumed(activity: Activity) = Unit
+    override fun onActivityResumed(activity: Activity) {
+        if (installed) return
+        // `MainActivity.onNewIntent` calls `setIntent`, so a flagged start that was routed to a
+        // running instance is visible here — and too late to honour: nothing was created, so
+        // nothing can be swapped. Say so loudly instead of quietly showing the real auth gate.
+        val raw = runCatching { activity.intent?.getStringExtra(HarnessFlags.EXTRA) }.getOrNull()
+        if (!raw.isNullOrBlank() && HarnessFlags.parse(raw).active) {
+            Timber.e(
+                "[harness] flags arrived on an already-running activity (singleTop → onNewIntent) " +
+                    "after the DI graph was built against the real repositories; ignored. " +
+                    "Launch again with `am start -S` (force-stop first); see RELEASE.md §10.",
+            )
+        }
+    }
     override fun onActivityPaused(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
     override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit

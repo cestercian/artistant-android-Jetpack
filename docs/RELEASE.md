@@ -252,10 +252,20 @@ arrive as one comma-separated string extra because adb has no argv:
 
 ```bash
 adb install -r -t app/build/outputs/apk/dev/debug/app-dev-debug.apk
-adb shell am start -n in.artistant.app/.MainActivity \
+adb shell am start -S -n in.artistant.app/.MainActivity \
   -e uitest "reset,skip-signup-as-artist,seed-fixture-data,seed-open-quote"
 adb exec-out screencap -p > shot.png
 ```
+
+The `-S` (force-stop the app before starting) is load-bearing. `MainActivity`
+is `singleTop`, so a flagged `am start` against an instance that is already in
+the foreground — the package-update restart `install -r` triggers, which can
+land a moment AFTER install returns, or the previous harness run — is delivered
+to `onNewIntent`: nothing is created, the harness never installs, and the
+launch shows the real auth gate with no hint why. The tell-tales are adb's own
+`Warning: Activity not started, intent has been delivered to currently running
+top-most instance.` and `[harness] flags arrived on an already-running activity`
+in logcat. Either one means: run the same `am start -S` command again.
 
 | Flag | What it does | Why it needs a flag |
 |---|---|---|
