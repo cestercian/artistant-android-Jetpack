@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import `in`.artistant.app.designsystem.theme.AppRole
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -126,10 +127,17 @@ class AppPreferences @Inject constructor(
         context.dataStore.edit { it[roleKey] = role.name }
     }
 
-    /** Generic string read for the small persisted snapshots (search recents, hints). */
+    /**
+     * Generic string read for the small persisted snapshots (search recents, hints).
+     *
+     * `distinctUntilChanged` because DataStore emits the whole preferences object on every
+     * write to ANY key: without it, saving a search recent re-emitted the notification switches,
+     * the accessibility flags and the export timestamp, and every collector downstream did its
+     * work again over a value that had not moved.
+     */
     override fun getString(key: String): Flow<String?> {
         val k = stringPreferencesKey(key)
-        return context.dataStore.data.map { it[k] }
+        return context.dataStore.data.map { it[k] }.distinctUntilChanged()
     }
 
     override suspend fun setString(key: String, value: String) {

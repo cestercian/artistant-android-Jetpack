@@ -154,10 +154,13 @@ private fun PrivacyContent(
         )
         // Where the design's second switch was. It is a stated fact rather than a control
         // because there is nothing behind it to control — see this file's header.
-        PrivacyFact(
+        // A row with no control: `ListRow` without an `onClick` draws no chevron and takes no
+        // tap. The alternative, a disabled Switch, states the same fact and invites the tap.
+        ListRow(
             title = "Your city is shown on your profile",
-            detail = "Artists and hosts see the city on your profile so they know who they're " +
-                "matching with. It isn't adjustable in this version.",
+            subtitle = "Artists and hosts see it so they know who they're matching with. Not " +
+                "adjustable in this version.",
+            modifier = Modifier.semantics { testTag = "privacy.cityFact" },
         )
 
         ListRow(
@@ -208,34 +211,6 @@ private fun PrivacyContent(
             color = colors.ink4,
         )
         Spacer(Modifier.height(space.xl))
-    }
-}
-
-/**
- * One row that reads like a switch row and carries no switch.
- *
- * Same title/detail typography and the same hairline, so it sits in the list the design draws
- * rather than under it — but with nothing on the right, because there is nothing to tap. The
- * alternative, a disabled Switch, states the same fact and invites the tap anyway.
- */
-@Composable
-private fun PrivacyFact(title: String, detail: String) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .hairlineBottom()
-            .padding(vertical = dimens.space.lg)
-            .semantics(mergeDescendants = true) { testTag = "privacy.cityFact" },
-    ) {
-        Text(
-            title,
-            style = AppTheme.type.rowTitle.copy(fontSize = AppTheme.type.body.fontSize),
-            color = colors.ink,
-        )
-        Spacer(Modifier.height(dimens.space.xs))
-        Text(detail, style = AppTheme.type.caption, color = colors.ink4)
     }
 }
 

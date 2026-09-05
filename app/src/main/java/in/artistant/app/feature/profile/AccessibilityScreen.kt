@@ -3,11 +3,9 @@ package `in`.artistant.app.feature.profile
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +23,6 @@ import `in`.artistant.app.designsystem.component.BackHeader
 import `in`.artistant.app.designsystem.component.EyebrowLabel
 import `in`.artistant.app.designsystem.component.ListRow
 import `in`.artistant.app.designsystem.component.SwitchRow
-import `in`.artistant.app.designsystem.component.hairlineBottom
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
 import `in`.artistant.app.designsystem.theme.reduceMotion
@@ -185,10 +182,14 @@ private fun AccessibilityContent(
             onClick = onOpenMotion,
             modifier = Modifier.semantics { testTag = "a11y.reduceMotion" },
         )
-        AccessibilityFact(
+        // A row with no control: `ListRow` without an `onClick` draws no chevron and takes no
+        // tap, which is the whole of what the bespoke `AccessibilityFact` did. The alternative,
+        // a disabled switch, states the same fact and invites the tap anyway.
+        ListRow(
             title = "Bold text and higher contrast",
-            detail = "Android applies both across every app, including this one. There's " +
-                "nothing to switch on here.",
+            subtitle = "Android applies both to every app, including this one — nothing to " +
+                "switch on here.",
+            modifier = Modifier.semantics { testTag = "a11y.systemFact" },
         )
         SwitchRow(
             title = "Always show labels",
@@ -227,35 +228,6 @@ private fun AccessibilityContent(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(dimens.size.listTailroom))
-    }
-}
-
-/**
- * A row that reads like the rows around it and carries no control.
- *
- * Same title/detail typography and the same hairline as [ListRow] and [SwitchRow], so it sits
- * IN the list rather than under it — but with nothing on the right, because there is nothing to
- * tap. The alternative, a disabled switch, states the same fact and invites the tap anyway.
- * Same pattern (and same reasoning) as `PrivacyScreen`'s city fact.
- */
-@Composable
-private fun AccessibilityFact(title: String, detail: String) {
-    val colors = AppTheme.colors
-    val dimens = AppTheme.dimens
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .hairlineBottom()
-            .padding(vertical = dimens.space.md)
-            .semantics(mergeDescendants = true) { testTag = "a11y.systemFact" },
-    ) {
-        Text(
-            title,
-            style = AppTheme.type.rowTitle.copy(fontSize = AppTheme.type.body.fontSize),
-            color = colors.ink,
-        )
-        Spacer(Modifier.height(dimens.space.xs))
-        Text(detail, style = AppTheme.type.caption, color = colors.ink4)
     }
 }
 

@@ -21,6 +21,8 @@ import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -114,9 +116,6 @@ data class ProfileUiState(
                 .filter { it.isNotBlank() }
                 .joinToString(" · ")
         }
-
-    val handleLabel: String?
-        get() = profile?.handle?.trim()?.takeIf { it.isNotEmpty() }?.let { "@$it" }
 
     /** The email row's rendered value, or null when there is no email to show. */
     val maskedEmail: String?
@@ -309,22 +308,28 @@ class ProfileViewModel @Inject constructor(
      * the gig counts, and an availability read that fails must not blank either. Each writes
      * only its own fields.
      */
-    private suspend fun refreshArtistStats() {
-        runCatching { bookingsRepository.listForArtist() }
-            .onSuccess { bookings ->
-                _state.update {
-                    it.copy(
-                        gigsCount = liveBookingsCount(bookings),
-                        completedCount = completedBookingsCount(bookings),
-                    )
-                }
+    private suspend fun refreshArtistStats() = coroutineScope {
+        // Three requests to three tables that know nothing about each other, and the artist
+        // account list waits for all three before it is complete — so they go out together
+        // rather than one after another. Each still writes only its own fields, and each still
+        // fails on its own: a score that 500s must not blank the gig counts.
+        val bookings = async { runCatching { bookingsRepository.listForArtist() } }
+        val score = async { runCatching { scores.breakdownForSelf() } }
+        val availability = async { runCatching { artists.fetchSelfAvailability() } }
+
+        bookings.await().onSuccess { list ->
+            _state.update {
+                it.copy(
+                    gigsCount = liveBookingsCount(list),
+                    completedCount = completedBookingsCount(list),
+                )
             }
-        runCatching { scores.breakdownForSelf() }
+        }
+        score.await()
             .onSuccess { breakdown -> _state.update { it.copy(bookabilityScore = breakdown.score) } }
-        runCatching { artists.fetchSelfAvailability() }
-            .onSuccess { availability ->
-                _state.update { it.copy(availabilitySummary = availabilitySummary(availability)) }
-            }
+        availability.await().onSuccess { draft ->
+            _state.update { it.copy(availabilitySummary = availabilitySummary(draft)) }
+        }
     }
 
     fun showSignOutConfirm() = _state.update { it.copy(showSignOutConfirm = true) }
@@ -410,14 +415,6 @@ class ProfileViewModel @Inject constructor(
 
     /** Tap-to-dismiss for the two transient lines under the settings list. */
     fun clearActionFeedback() = _state.update { it.copy(actionMessage = null, actionError = null) }
-
-    /**
-     * A system handoff the screen could not complete — no browser, no
-     * notification-settings activity, no share target for the export. Reported
-     * on the same line as every other action failure instead of throwing
-     * ActivityNotFoundException out of a click handler and taking the tab with it.
-     */
-    fun reportActionError(message: String) = _state.update { it.copy(actionError = message) }
 
     fun manageAvailabilityMissingNav() {
         _state.update {

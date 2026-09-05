@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -561,7 +562,11 @@ private fun DestructiveButton(text: String, enabled: Boolean, onClick: () -> Uni
         Modifier
             .fillMaxWidth()
             .height(dimens.component.cta)
-            .background(if (enabled) colors.danger else colors.hairline, shape)
+            // Clipped before the fill, like `PrimaryButton` and BookingDetail's own destructive
+            // button: `background(shape)` rounds the paint but not the layer, so the ripple the
+            // `clickable` draws squares off the corners on press.
+            .clip(shape)
+            .background(if (enabled) colors.danger else colors.hairline)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { testTag = "delete.confirm" },
         contentAlignment = Alignment.Center,
