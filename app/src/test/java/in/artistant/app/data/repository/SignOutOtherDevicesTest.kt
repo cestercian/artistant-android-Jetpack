@@ -19,28 +19,55 @@ import java.io.IOException
  */
 class SignOutOtherDevicesTest {
 
-    /** A session that is simply there. */
+    private val now = 1_700_000_000L
+
+    /** A session with plenty of life left in it. */
     @Test
     fun `a live session is revoked without a refresh`() = runTest {
         var refreshed = false
 
-        requireLiveSession(hasSession = { true }, refresh = { refreshed = true })
+        requireLiveSession(
+            expiresAtEpochSeconds = { now + 3600 },
+            nowEpochSeconds = { now },
+            refresh = { refreshed = true },
+        )
 
         assertFalse("a session in hand needs no round trip", refreshed)
     }
 
     @Test
-    fun `a lapsed access token is refreshed, and the revoke goes ahead`() = runTest {
-        // The ordinary case: the app was in the background long enough for the access token to
-        // expire, and the refresh token is exactly what supabase-kt is holding for it.
-        var session = false
+    fun `an EXPIRED access token is refreshed rather than used`() = runTest {
+        // The finding: `currentSessionOrNull()` keeps returning the cached UserSession after its
+        // access token has lapsed, so a presence check reported "live" for exactly the token the
+        // revoke was about to be 401'd on — and supabase-kt swallows that 401.
+        var expiresAt = now - 5
         var refreshes = 0
 
         requireLiveSession(
-            hasSession = { session },
+            expiresAtEpochSeconds = { expiresAt },
+            nowEpochSeconds = { now },
             refresh = {
                 refreshes++
-                session = true
+                expiresAt = now + 3600
+            },
+        )
+
+        assertEquals("an expired token must be refreshed, not used", 1, refreshes)
+    }
+
+    @Test
+    fun `a token expiring inside the skew window is refreshed too`() = runTest {
+        // The check happens here and the token is used a round trip later. A token with seconds
+        // left is a token the server will reject by the time it arrives.
+        var refreshes = 0
+        var expiresAt = now + SESSION_EXPIRY_SKEW_SECONDS - 1
+
+        requireLiveSession(
+            expiresAtEpochSeconds = { expiresAt },
+            nowEpochSeconds = { now },
+            refresh = {
+                refreshes++
+                expiresAt = now + 3600
             },
         )
 
@@ -48,21 +75,49 @@ class SignOutOtherDevicesTest {
     }
 
     @Test
-    fun `no session and no refresh is a FAILURE, never a silent success`() = runTest {
+    fun `the usability rule, stated directly`() {
+        assertFalse("no session at all", sessionIsUsable(null, now))
+        assertFalse("expired", sessionIsUsable(now - 1, now))
+        assertFalse("expiring now", sessionIsUsable(now, now))
+        assertFalse("inside the skew", sessionIsUsable(now + SESSION_EXPIRY_SKEW_SECONDS, now))
+        assertTrue("outside the skew", sessionIsUsable(now + SESSION_EXPIRY_SKEW_SECONDS + 1, now))
+    }
+
+    @Test
+    fun `a lapsed token the refresh could not restore is a FAILURE, never a silent success`() =
+        runTest {
+            val error = runCatching {
+                requireLiveSession(
+                    expiresAtEpochSeconds = { now - 5 },
+                    nowEpochSeconds = { now },
+                    refresh = { },
+                )
+            }.exceptionOrNull()
+
+            assertTrue("expected NoSession, was $error", error is AccountRepositoryError.NoSession)
+            // The line screen 128 prints. It says what did not happen, which is the whole point.
+            assertEquals("Couldn't reach the server — nothing was signed out yet.", error?.message)
+        }
+
+    @Test
+    fun `no session at all is the same failure`() = runTest {
         val error = runCatching {
-            requireLiveSession(hasSession = { false }, refresh = { })
+            requireLiveSession(
+                expiresAtEpochSeconds = { null },
+                nowEpochSeconds = { now },
+                refresh = { },
+            )
         }.exceptionOrNull()
 
-        assertTrue("expected NoSession, was $error", error is AccountRepositoryError.NoSession)
-        // The line screen 128 prints. It says what did not happen, which is the whole point.
-        assertEquals("Couldn't reach the server — nothing was signed out yet.", error?.message)
+        assertTrue(error is AccountRepositoryError.NoSession)
     }
 
     @Test
     fun `a refresh that throws is a failure, not a reason to try the revoke anyway`() = runTest {
         val error = runCatching {
             requireLiveSession(
-                hasSession = { false },
+                expiresAtEpochSeconds = { null },
+                nowEpochSeconds = { now },
                 refresh = { throw IOException("offline") },
             )
         }.exceptionOrNull()

@@ -31,6 +31,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -110,6 +111,10 @@ class SessionManager @Inject constructor(
         get() = client.auth.currentSessionOrNull()?.user
 
     init {
+        // A delete whose sign-out never landed — see [completePendingAccountDeleteSignOut].
+        // First, because everything else about this session is moot if it belongs to a row the
+        // server has already erased.
+        scope.launch { completePendingAccountDeleteSignOut() }
         // Drive analytics identity off the session status for the app's lifetime. Mirrors the
         // iOS observeAuthState: identify on a live session, reset on sign-out. Also bumps the
         // generation on a genuine sign-in (SignIn/SignUp source) but NOT on a background
@@ -367,6 +372,54 @@ class SessionManager @Inject constructor(
      * store that throws must not cost the others their turn, and none of it may propagate to a
      * `viewModelScope` that installs no handler.
      */
+    /**
+     * The server row is gone: erase the device now, and leave a note that the session has not
+     * been torn down yet.
+     *
+     * The receipt goes up before the sign-out on purpose (a 30-second logout must not replace
+     * stage 3 while somebody is reading it) — but that left a window in which the process could
+     * die with the deleted account's session, saved ids and export payload still on the phone,
+     * and nothing to say they should not be there. The next launch would restore a session for a
+     * row that no longer exists.
+     *
+     * So the local half happens HERE, immediately after the server confirms the delete, and the
+     * marker written after it is what [completePendingAccountDeleteSignOut] finishes on the next
+     * launch. The order matters: [wipeLocalState] clears the preferences file, so a marker
+     * written before it would be the first thing erased.
+     */
+    suspend fun onAccountDeleted() {
+        wipeLocalState()
+        runCatching { prefs.setString(DELETE_SIGN_OUT_PENDING_KEY, DELETE_SIGN_OUT_PENDING) }
+    }
+
+    /**
+     * Finish a sign-out the delete flow could not: called once, at construction.
+     *
+     * Waits for supabase-kt to say what it restored before deciding — at construction the
+     * session status is [SessionStatus.Initializing], and both "there is a session" and "there
+     * is none" are wrong answers to act on then. See [pendingDeleteActionFor] for the decision.
+     *
+     * The marker is cleared by [signOut]'s own `prefs.wipeAll()` on success, so a logout that
+     * throws leaves it standing and the launch after this one tries again — which is exactly the
+     * behaviour a device that was offline at Close needs.
+     */
+    private suspend fun completePendingAccountDeleteSignOut() {
+        val marker = runCatching { prefs.getString(DELETE_SIGN_OUT_PENDING_KEY).first() }.getOrNull()
+        if (pendingDeleteActionFor(marker, hasSession = true) == PendingDeleteAction.Nothing) return
+        client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
+        when (pendingDeleteActionFor(marker, hasSession = currentUserId != null)) {
+            PendingDeleteAction.Nothing -> Unit
+            // Nothing left to tear down — the session went with the process. Clear the note so
+            // the next launch does not keep re-deciding a question that is already answered.
+            PendingDeleteAction.ClearMarker ->
+                runCatching { prefs.setString(DELETE_SIGN_OUT_PENDING_KEY, "") }
+            PendingDeleteAction.SignOut -> {
+                Timber.i("Finishing a sign-out left pending by an account delete")
+                runCatching { signOut() }
+            }
+        }
+    }
+
     suspend fun wipeLocalState() {
         runCatching { prefs.wipeAll() }
         // What each of these is holding, and why none of it may be inherited: the saved-artist
@@ -455,7 +508,42 @@ class SessionManager @Inject constructor(
     /** GoTrue matches the stored (lowercased, trimmed) email; normalize before every call so a
      *  stray capital/space doesn't produce a spurious "invalid credentials". */
     private fun normalizeEmail(email: String): String = email.trim().lowercase()
+
+    companion object {
+        /** @see onAccountDeleted — account state, so a completed sign-out's wipe clears it. */
+        const val DELETE_SIGN_OUT_PENDING_KEY = "account.deletePendingSignOut"
+
+        /** The only value [DELETE_SIGN_OUT_PENDING_KEY] ever holds; "" means nothing pending. */
+        const val DELETE_SIGN_OUT_PENDING = "true"
+    }
 }
+
+/** What a launch owes a delete whose sign-out never finished. @see pendingDeleteActionFor */
+enum class PendingDeleteAction {
+    /** No delete is outstanding. */
+    Nothing,
+
+    /** One is, but the session is already gone; only the note is left to tidy. */
+    ClearMarker,
+
+    /** One is, and the deleted account's session is still on this device. */
+    SignOut,
+}
+
+/**
+ * The decision [SessionManager.completePendingAccountDeleteSignOut] makes, as a function.
+ *
+ * Pure, because the interesting case is the one that is hard to stage: a process that died
+ * between "the server erased the account" and "the user tapped Close", leaving a live session
+ * for a row that does not exist. Everything around it — a `SupabaseClient`, a DataStore file, a
+ * restored session — is exactly what a JVM test cannot own.
+ */
+internal fun pendingDeleteActionFor(marker: String?, hasSession: Boolean): PendingDeleteAction =
+    when {
+        marker != SessionManager.DELETE_SIGN_OUT_PENDING -> PendingDeleteAction.Nothing
+        !hasSession -> PendingDeleteAction.ClearMarker
+        else -> PendingDeleteAction.SignOut
+    }
 
 /**
  * Read a key from an OAuth callback URL fragment (`a=1&b=2`). Pure / JVM-testable.

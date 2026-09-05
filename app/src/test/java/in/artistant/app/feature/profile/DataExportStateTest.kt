@@ -249,6 +249,60 @@ class DataExportStateTest {
     }
 
     @Test
+    fun `two concurrent resumes issue ONE request`() = runTest {
+        // The check-and-launch was a `@Volatile` read followed by a write, which makes each half
+        // atomic and the sequence not: two resumes could both find the store idle and both
+        // assign. On the DPDP path that is two full copies of somebody's account built and
+        // handed out for one request.
+        val prefs = FakeKeyValueStore(mapOf(DataExportStore.KEY_REQUESTED_AT to "1000"))
+        val gate = CompletableDeferred<ExportResult>()
+        val repo = GatedAccountRepository(gate)
+        val s = store(repo, prefs, now = { 1000L + EXPORT_REQUEST_TTL_MILLIS / 2 })
+
+        // Both queued before either runs a line — the screen calls this on every composition.
+        s.resumeRestored()
+        s.resumeRestored()
+        advanceUntilIdle()
+
+        assertEquals("one request, not two", 1, repo.calls)
+        gate.complete(ExportResult.Inline("{}"))
+        advanceUntilIdle()
+        assertTrue(s.state.value is ExportState.Ready)
+    }
+
+    @Test
+    fun `a resume racing a tap still issues once`() = runTest {
+        val prefs = FakeKeyValueStore(mapOf(DataExportStore.KEY_REQUESTED_AT to "1000"))
+        val gate = CompletableDeferred<ExportResult>()
+        val repo = GatedAccountRepository(gate)
+        val s = store(repo, prefs, now = { 1000L + EXPORT_REQUEST_TTL_MILLIS / 2 })
+
+        s.resumeRestored()
+        s.request()
+        advanceUntilIdle()
+
+        assertEquals(1, repo.calls)
+        gate.complete(ExportResult.Inline("{}"))
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `a reset that interleaves a resume leaves nothing running`() = runTest {
+        val prefs = FakeKeyValueStore(mapOf(DataExportStore.KEY_REQUESTED_AT to "1000"))
+        val repo = FakeAccountRepository()
+        val s = store(repo, prefs, now = { 1000L + EXPORT_REQUEST_TTL_MILLIS / 2 })
+
+        s.resumeRestored()
+        s.reset()
+        advanceUntilIdle()
+
+        // Whichever order they land in, the store ends signed-out: Idle, and with no timestamp
+        // for the next account's launch to restore.
+        assertEquals(ExportState.Idle, s.state.value)
+        assertEquals("", prefs.raw(DataExportStore.KEY_REQUESTED_AT))
+    }
+
+    @Test
     fun `resuming does nothing when nothing was outstanding`() = runTest {
         val repo = FakeAccountRepository()
         val s = store(repo)

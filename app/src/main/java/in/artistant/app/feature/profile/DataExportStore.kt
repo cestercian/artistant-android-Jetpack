@@ -119,10 +119,27 @@ class DataExportStore internal constructor(
     /**
      * The request currently in flight, so [reset] can end it rather than merely disown it.
      *
-     * `@Volatile` because it is written on whichever thread tapped and read on [scope].
+     * Read and written only under [lock] — see there for why `@Volatile` was not enough.
      */
-    @Volatile
     private var inFlight: Job? = null
+
+    /**
+     * Serialises the check-and-launch that decides whether a call goes out.
+     *
+     * `@Volatile` on [inFlight] made each read and write atomic and the SEQUENCE was still not:
+     * `request` and `resumeRestored` both read `inFlight`, find it idle, and then both assign —
+     * two exports for one request, and on the DPDP path that is two full copies of somebody's
+     * account built and handed out. [resumeRestored] made it reachable in the ordinary way,
+     * because it launches on an IO scope and the screen calls it on every composition.
+     *
+     * A monitor rather than a `Mutex`, so [request] and [stopWaiting] stay SYNCHRONOUS — the tap
+     * handler has to leave the screen in its new state before it returns, and a suspending lock
+     * would put a frame of the old one on screen. Nothing inside a critical section suspends or
+     * blocks: they are three field writes and a `launch`, which only dispatches. [reset] takes
+     * the lock for the swap and joins the cancelled job OUTSIDE it, so a slow cancellation
+     * cannot hold a monitor.
+     */
+    private val lock = Any()
 
     /**
      * Read back what a previous process left outstanding — as STATE, never as a request.
@@ -178,9 +195,10 @@ class DataExportStore internal constructor(
     fun resumeRestored() {
         scope.launch {
             restore.join()
-            if (_state.value !is ExportState.Requested) return@launch
-            if (inFlight?.isActive == true) return@launch
-            issue()
+            synchronized(lock) {
+                if (_state.value !is ExportState.Requested) return@synchronized
+                issueLocked()
+            }
         }
     }
 
@@ -194,12 +212,11 @@ class DataExportStore internal constructor(
      * keeps a previous [ExportState.Ready] alongside a failure, because a stale file beside a
      * fresh error is how someone shares half their data believing it is all of it.
      */
-    fun request() {
-        if (inFlight?.isActive == true) return
-        issue()
-    }
+    fun request() = synchronized(lock) { issueLocked() }
 
-    private fun issue() {
+    /** The body of [request], for a caller that already holds [lock]. */
+    private fun issueLocked() {
+        if (inFlight?.isActive == true) return
         val mine = generation.incrementAndGet()
         _state.value = ExportState.Requested
         inFlight = scope.launch {
@@ -225,9 +242,11 @@ class DataExportStore internal constructor(
      * the class note on why that is a generation bump and not a `Job.cancel()`.
      */
     fun stopWaiting() {
-        generation.incrementAndGet()
-        inFlight = null
-        _state.value = ExportState.Idle
+        synchronized(lock) {
+            generation.incrementAndGet()
+            inFlight = null
+            _state.value = ExportState.Idle
+        }
         // Deliberately not cancelled — see the class note. The generation bump above is what
         // stops the completion writing state, and `markOutstanding`'s second check is what stops
         // a timestamp write still in flight from outliving this.
@@ -256,10 +275,16 @@ class DataExportStore internal constructor(
      * parses to "nothing outstanding", which is the truth.
      */
     override suspend fun reset() {
-        generation.incrementAndGet()
-        val job = inFlight
-        inFlight = null
-        _state.value = ExportState.Idle
+        // The swap under the lock, the join outside it: `cancelAndJoin` waits for a coroutine
+        // that may be mid-network-call, and holding a monitor across that would block every tap
+        // on this store — including the [request] a newly signed-in account makes.
+        val job = synchronized(lock) {
+            generation.incrementAndGet()
+            val running = inFlight
+            inFlight = null
+            _state.value = ExportState.Idle
+            running
+        }
         runCatching { job?.cancelAndJoin() }
         clearOutstanding()
     }

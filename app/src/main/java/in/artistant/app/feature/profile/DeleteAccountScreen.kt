@@ -197,7 +197,14 @@ class DeleteAccountViewModel @Inject constructor(
         runCatching { account.deleteAccount() }
             .onSuccess {
                 draftStore.clear()
-                // The device-calendar wipe FIRST, and its answer recorded, because stage 3's
+                // Everything local goes NOW, not on Close. The receipt deliberately precedes the
+                // sign-out, and that left a window where the process could die still holding the
+                // erased account's session, saved ids and export payload — and the next launch
+                // would restore a session for a row that no longer exists. `onAccountDeleted`
+                // wipes the device and leaves the marker `SessionManager` finishes at the next
+                // launch; the AUTH sign-out still waits for Close (see [finish]).
+                session.onAccountDeleted()
+                // The device-calendar wipe next, and its answer recorded, because stage 3's
                 // third row is what reports it. It used to run after the receipt was already up
                 // — alongside a sign-out that swaps this whole graph out from under it — so the
                 // row that can be false was still saying "Clearing your calendar" when the root
@@ -239,7 +246,11 @@ class DeleteAccountViewModel @Inject constructor(
         _state.update { it.copy(working = true) }
         val message = cleanUpAfterAccountDelete(
             signOut = { session.signOut() },
-            wipeLocalState = { session.wipeLocalState() },
+            // `onAccountDeleted`, not a bare `wipeLocalState`: the backstop clears the
+            // preferences file, and the pending-sign-out marker lives in it. A sign-out that
+            // could not land is exactly the case the next launch has to finish, so erasing the
+            // note while cleaning up after it is the one path that would silently give up.
+            wipeLocalState = { session.onAccountDeleted() },
         )
         _state.update { it.copy(working = false, failure = message ?: it.failure) }
         if (session.currentUserId != null) onExit()

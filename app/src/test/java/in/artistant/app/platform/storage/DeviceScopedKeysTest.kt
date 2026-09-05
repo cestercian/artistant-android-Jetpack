@@ -1,6 +1,7 @@
 package `in`.artistant.app.platform.storage
 
 import `in`.artistant.app.feature.profile.DataExportStore
+import `in`.artistant.app.feature.signup.PrivacyPreferences
 import `in`.artistant.app.platform.preferences.AccessibilityPreferences
 import `in`.artistant.app.platform.preferences.NotificationToggle
 import org.junit.Assert.assertFalse
@@ -37,6 +38,13 @@ class DeviceScopedKeysTest {
     }
 
     @Test
+    fun `the read-receipts switch survives a sign-out`() {
+        // Its own screen says "This switch is saved on this device… so it doesn't follow you to
+        // another phone" — a sign-out that reset it was the screen contradicting itself.
+        assertTrue(isDeviceScopedKey(PrivacyPreferences.KEY_READ_RECEIPTS))
+    }
+
+    @Test
     fun `account state is still wiped`() {
         // The exemption is narrow on purpose. Everything that describes the ACCOUNT — the role
         // it routes on, the consents it collected, the DPDP export it was handed — is what
@@ -53,6 +61,7 @@ class DeviceScopedKeysTest {
     fun `the prefix is a prefix, not a substring`() {
         // A key that merely MENTIONS one of the namespaces is account state and goes.
         assertFalse(isDeviceScopedKey("search.notify.recents"))
+        assertFalse(isDeviceScopedKey("privacyPolicySeen"))
         assertFalse(isDeviceScopedKey("notifyLater"))
         assertTrue(isDeviceScopedKey("notify.anything_new"))
         assertTrue(isDeviceScopedKey("a11y.anything_new"))

@@ -29,11 +29,16 @@ private val Context.calendarStore by preferencesDataStore(name = "artistant.cale
  * Key prefixes whose values belong to the DEVICE, not to the signed-in account.
  *
  * `a11y.` is [in.artistant.app.platform.preferences.AccessibilityPreferences], `notify.` is
- * [in.artistant.app.platform.preferences.NotificationPreferences] — kept as prefixes rather
- * than as a list of the sixteen key constants so a ninth switch does not have to remember to
- * register itself here, and pinned to those classes by a test that walks their real keys.
+ * [in.artistant.app.platform.preferences.NotificationPreferences], and `privacy.` is
+ * `PrivacyPreferences` — whose own screen says so out loud ("This switch is saved on this
+ * device. Artistant has no server-side privacy setting, so it doesn't follow you to another
+ * phone"), which made a sign-out that reset it the screen contradicting itself.
+ *
+ * Kept as prefixes rather than as a list of the seventeen key constants so a new switch does
+ * not have to remember to register itself here, and pinned to those classes by a test that
+ * walks their real keys.
  */
-private val DEVICE_SCOPED_PREFIXES = listOf("a11y.", "notify.")
+private val DEVICE_SCOPED_PREFIXES = listOf("a11y.", "notify.", "privacy.")
 
 /**
  * Whether a preference key survives [AppPreferences.wipeAll] — see its contract.
