@@ -1,6 +1,12 @@
 package `in`.artistant.app.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -69,15 +75,71 @@ fun SessionDegradedTopBar() {
     val viewModel: RootViewModel = hiltViewModel()
     val degraded by viewModel.sessionDegraded.collectAsStateWithLifecycle()
     if (!degraded) return
-    SessionDegradedBanner(
-        modifier = Modifier
-            .statusBarsPadding()
-            .padding(
-                horizontal = AppTheme.dimens.component.gutter,
-                vertical = AppTheme.dimens.space.sm,
-            ),
-    )
+    SessionDegradedBanner(modifier = Modifier.statusBarsPadding().degradedInset())
 }
+
+/**
+ * The same notice for a screen that has already dealt with the status bar itself.
+ *
+ * The wizard's root column takes the inset and then draws its own top bar, so the notice
+ * belongs UNDER that chrome with no inset of its own — adding a second `statusBarsPadding()`
+ * there would push it down by the height of a status bar that is already accounted for.
+ */
+@Composable
+fun SessionDegradedNotice(modifier: Modifier = Modifier) {
+    val viewModel: RootViewModel = hiltViewModel()
+    val degraded by viewModel.sessionDegraded.collectAsStateWithLifecycle()
+    if (!degraded) return
+    SessionDegradedBanner(modifier = modifier.degradedInset())
+}
+
+/**
+ * The banner over a tier that owns the whole window and insets its own chrome — the signup
+ * flow, whose every step applies `statusBarsPadding()` inside [content].
+ *
+ * The gate holds `Onboarding` and `ArtistWizard` through a refresh failure exactly as it holds
+ * `Tabs`, which is right — the alternative is throwing away a half-typed profile over a
+ * network blip — but it left those two tiers as the only signed-in surfaces that said nothing.
+ * A form that looks writable and silently is not is worse on a setup walk than anywhere else,
+ * because the user is being ASKED to type into it.
+ *
+ * The layout is constant whether or not the banner is up: the same [Column] and the same
+ * weighted [Box] every time, so the steps inside keep their composition identity and a
+ * `rememberSaveable` field does not lose what someone typed the moment the network drops —
+ * which would be this fix causing the very loss the gate exists to prevent. Only the banner
+ * and the inset consumption switch, and they switch together: when the banner is up it has
+ * already spent the status-bar area, so the steps below must stop adding it again.
+ */
+@Composable
+fun SessionDegradedFrame(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val viewModel: RootViewModel = hiltViewModel()
+    val degraded by viewModel.sessionDegraded.collectAsStateWithLifecycle()
+    Column(modifier.fillMaxSize()) {
+        if (degraded) {
+            SessionDegradedBanner(modifier = Modifier.statusBarsPadding().degradedInset())
+        }
+        Box(
+            Modifier
+                .weight(1f)
+                .then(
+                    if (degraded) {
+                        Modifier.consumeWindowInsets(WindowInsets.statusBars)
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            content()
+        }
+    }
+}
+
+/** The page gutter, and enough air above and below to read as a band rather than a row. */
+@Composable
+private fun Modifier.degradedInset(): Modifier = padding(
+    horizontal = AppTheme.dimens.component.gutter,
+    vertical = AppTheme.dimens.space.sm,
+)
 
 /**
  * The copy. Present tense and specific about the consequence, because "connection lost" tells

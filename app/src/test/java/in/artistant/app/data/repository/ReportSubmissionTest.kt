@@ -113,10 +113,11 @@ class ReportSubmissionTest {
     }
 
     @Test
-    fun `a superseded completion claims nothing but still unlocks`() {
+    fun `a superseded completion claims nothing, and the discard is what unlocked`() {
         // The reader discarded the report while the retry was in the air, which bumps the
         // generation. The write that lands afterwards must not re-raise the banner they just
-        // dismissed — and must not leave the screen locked either.
+        // dismissed — and the screen is not locked, because `dismissing()` released the flag
+        // at the moment they discarded, not because the late completion did.
         val discarded = ReportSubmission(inFlight = true, failed = pending).dismissing()
         val settled = discarded.settling(ReportOutcome.Failed, pending, generation = 0)
         assertNull("a discarded banner must not come back from the dead", settled.failed)
@@ -124,15 +125,42 @@ class ReportSubmissionTest {
     }
 
     @Test
-    fun `a superseded landing leaves the standing banner alone`() {
-        // The mirror of the case above, and the reason a stale generation returns early
-        // rather than clearing: a stale Sent must not take down a banner raised by the report
-        // that replaced it.
+    fun `a superseded landing leaves the standing state entirely alone`() {
+        // The mirror of the case above: a stale Sent must not take down a banner raised by
+        // the report that replaced it — AND must not release the guard that report is
+        // holding. The newer attempt is still out; it releases the flag when it settles.
         val standing = ReportSubmission(inFlight = true, failed = pending, generation = 4)
         val settled = standing.settling(ReportOutcome.Sent, pending, generation = 3)
-        assertEquals(pending, settled.failed)
-        assertNull(settled.outcome)
+        assertEquals(standing, settled)
+        assertTrue("the guard belongs to the attempt still in flight", settled.inFlight)
+    }
+
+    @Test
+    fun `a stale completion cannot unlock a report the reader started after discarding`() {
+        // The whole sequence, in the order it happens on screen: a report fails, the reader
+        // retries, gives up on the retry, and files a fresh one from the sheet about someone
+        // else. The abandoned retry then lands.
+        val lost = ReportSubmission()
+            .starting()!!
+            .let { it.settling(ReportOutcome.Failed, pending, it.generation) }
+        val retry = lost.starting()!!
+        val discarded = retry.dismissing()
+        val fresh = discarded.starting()!!
+
+        // The retry's answer arrives late, stamped with the retry's generation.
+        val afterStale = fresh.settling(ReportOutcome.Sent, pending, retry.generation)
+
+        assertTrue(
+            "releasing the fresh report's guard files a second row in public.reports",
+            afterStale.inFlight,
+        )
+        assertEquals("and a second tap must still be swallowed", 0, tapsThatFile(1, afterStale))
+        assertNull("the abandoned attempt claims no receipt either", afterStale.outcome)
+
+        // The fresh report's own answer still lands, and still unlocks.
+        val settled = afterStale.settling(ReportOutcome.Failed, other, fresh.generation)
         assertFalse(settled.inFlight)
+        assertEquals(other, settled.failed)
     }
 
     @Test
@@ -165,7 +193,7 @@ class ReportSubmissionTest {
         val first = ReportSubmission().starting()!!
         val second = first.settling(ReportOutcome.Failed, pending, first.generation).starting()!!
         val stale = second.settling(ReportOutcome.Sent, pending, first.generation)
-        assertEquals("the older attempt's receipt must not clear the newer state", pending, stale.failed)
+        assertEquals("the older attempt's receipt must not touch the newer state", second, stale)
         val current = stale.settling(ReportOutcome.Failed, other, second.generation)
         assertEquals(other, current.failed)
     }

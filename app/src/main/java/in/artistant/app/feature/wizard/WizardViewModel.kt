@@ -122,6 +122,16 @@ data class WizardUiState(
      */
     val mediaError: String? = null,
     /**
+     * Save & exit could not keep its promise.
+     *
+     * The control's whole contract is "your progress is saved, and you can pick up right
+     * here" — so an exit that cannot write the draft must not sign the artist out. It used to:
+     * the owner id came from `session.currentUserId`, which answers null through a
+     * token-refresh failure, and the `?.let` around the write skipped it in silence before
+     * signing out anyway. A ten-step setup walk, gone, behind a button that said it was saved.
+     */
+    val exitError: String? = null,
+    /**
      * What the background upload queue is doing right now.
      *
      * Surfaced on the Samples step because the queue outlives the wizard: an
@@ -736,13 +746,31 @@ class WizardViewModel @Inject constructor(
         val snapshot = _state.value
         viewModelScope.launch {
             if (wizardExitMaySaveDraft(snapshot)) {
-                session.currentUserId?.lowercase()?.let { ownerId ->
-                    runCatching { draftStore.save(snapshot.toDraft(ownerId)) }
+                // The draft is owner-keyed, and through a token-refresh failure the session
+                // cannot say who the owner is — `currentSessionOrNull()` answers only while
+                // the status is Authenticated. Signing out on top of that is the one
+                // irreversible thing this screen can do, and it would take the walk with it,
+                // so the exit is REFUSED and says why. Nothing is lost by staying: the
+                // debounced writer saves the same draft as soon as the session is back.
+                val ownerId = session.currentUserId?.lowercase()
+                if (ownerId == null) {
+                    _state.update { it.copy(exitError = EXIT_SESSION_UNAVAILABLE) }
+                    return@launch
+                }
+                // A throwing DataStore write is the same broken promise arriving by another
+                // road, and it was swallowed by the same `runCatching`.
+                if (runCatching { draftStore.save(snapshot.toDraft(ownerId)) }.isFailure) {
+                    _state.update { it.copy(exitError = EXIT_SAVE_FAILED) }
+                    return@launch
                 }
             }
+            _state.update { it.copy(exitError = null) }
             runCatching { session.signOut() }
         }
     }
+
+    /** Tap-to-clear for the exit banner — the artist has read it and wants the form back. */
+    fun dismissExitError() = _state.update { it.copy(exitError = null) }
 
     // ── Publish ──────────────────────────────────────────────────────────────
 
@@ -765,7 +793,10 @@ class WizardViewModel @Inject constructor(
      */
     private fun publish() {
         val userId = session.currentUserId?.lowercase() ?: run {
-            _state.update { it.copy(publishError = "Sign in again to publish.") }
+            // Not "sign in again": on the path that actually reaches this — a token refresh
+            // that could not reach the server — the artist IS signed in, and telling them to
+            // sign in again invites them to end the session that is about to come back.
+            _state.update { it.copy(publishError = PUBLISH_SESSION_UNAVAILABLE) }
             return
         }
         val snap = _state.value
@@ -895,5 +926,29 @@ class WizardViewModel @Inject constructor(
         // the same message leave that field unchanged, and the second attempt is
         // the one the artist most needs acknowledged.
         viewModelScope.launch { _events.send(WizardEvent.PublishFailed) }
+    }
+
+    private companion object {
+        /**
+         * Save & exit, refused because the session cannot say whose draft this is.
+         *
+         * States the consequence and the recovery in the artist's terms. It does not say
+         * "sign in again", which is what the publish path used to say on the same condition:
+         * the session is live and usually seconds from working, and ending it here would
+         * destroy the walk this button was pressed to protect.
+         */
+        const val EXIT_SESSION_UNAVAILABLE =
+            "We can't save your progress right now — we've lost your session. " +
+                "Stay here; it'll save as soon as we're reconnected."
+
+        /** The same broken promise, arriving as a failed write rather than a missing owner. */
+        const val EXIT_SAVE_FAILED =
+            "We couldn't save your progress to this device, so we haven't signed you out. " +
+                "Try again in a moment."
+
+        /** @see EXIT_SESSION_UNAVAILABLE */
+        const val PUBLISH_SESSION_UNAVAILABLE =
+            "We've lost your session, so nothing was sent. Your setup is safe — " +
+                "publish again once you're reconnected."
     }
 }

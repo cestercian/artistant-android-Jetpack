@@ -96,6 +96,10 @@ class FakeActivityLog(seed: List<ActivityEntry> = emptyList()) : ActivityLog {
         rows.value = rows.value.map { it.copy(read = true) }
     }
 
+    override suspend fun markRead(ids: Set<String>) {
+        rows.value = rows.value.map { if (it.id in ids) it.copy(read = true) else it }
+    }
+
     override suspend fun clear() {
         rows.value = emptyList()
     }

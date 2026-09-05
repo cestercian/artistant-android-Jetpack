@@ -50,6 +50,8 @@ import `in`.artistant.app.designsystem.component.IconCircle
 import `in`.artistant.app.designsystem.component.PrimaryButton
 import `in`.artistant.app.designsystem.component.SecondaryButton
 import `in`.artistant.app.designsystem.component.SheetScaffold
+import `in`.artistant.app.ui.RootViewModel
+import `in`.artistant.app.ui.SessionDegradedNotice
 import `in`.artistant.app.designsystem.component.pressScale
 import `in`.artistant.app.designsystem.rememberHaptics
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -92,6 +94,11 @@ fun WizardScreen(
     viewModel: WizardViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // The activity's RootViewModel — this composable sits above any NavHost, so
+    // `hiltViewModel()` resolves the instance the gate itself is driven by (the same one
+    // [SessionDegradedNotice] reads).
+    val rootViewModel: RootViewModel = hiltViewModel()
+    val degraded by rootViewModel.sessionDegraded.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     var confirmingExit by remember { mutableStateOf(false) }
     val haptics = rememberHaptics()
@@ -132,6 +139,31 @@ fun WizardScreen(
             )
         }
 
+        // The gate holds this tier through a token-refresh failure — the alternative is
+        // dropping a ten-step setup walk onto the auth screen over a network blip — which
+        // leaves a form that looks writable and is not. Nothing at all when the session is
+        // healthy. Under the top bar rather than over it, because the root column has
+        // already taken the status-bar inset.
+        SessionDegradedNotice()
+
+        // The one refusal the artist has to see wherever they are: Save & exit could not
+        // keep its promise, so they are still here and still signed in.
+        state.exitError?.let { message ->
+            Banner(
+                title = "Not saved",
+                detail = message,
+                tone = BannerTone.Failure,
+                actionLabel = "Dismiss",
+                onAction = viewModel::dismissExitError,
+                modifier = Modifier
+                    .padding(
+                        horizontal = AppTheme.dimens.component.gutter,
+                        vertical = AppTheme.dimens.space.sm,
+                    )
+                    .semantics { testTag = "wizard.exitError" },
+            )
+        }
+
         Box(Modifier.weight(1f)) {
             when {
                 // A blank form that fills in a frame later reads as data loss;
@@ -156,6 +188,12 @@ fun WizardScreen(
     if (confirmingExit) {
         SaveAndExitSheet(
             step = state.step,
+            // The sheet's whole body is a promise that the draft is kept. While the session
+            // cannot say who the draft belongs to, that promise is not one this app can make,
+            // so the sheet says the opposite and its CTA refuses — rather than signing the
+            // artist out of a walk it could not save. `saveAndExit` refuses again on its own
+            // for the session that degrades between opening this sheet and confirming it.
+            degraded = degraded,
             onConfirm = {
                 confirmingExit = false
                 viewModel.saveAndExit()
@@ -365,7 +403,12 @@ private const val SKIP_NOTE = "Skip for now"
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SaveAndExitSheet(step: WizardStep, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun SaveAndExitSheet(
+    step: WizardStep,
+    degraded: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val sheetState = rememberModalBottomSheetState()
@@ -397,9 +440,18 @@ private fun SaveAndExitSheet(step: WizardStep, onConfirm: () -> Unit, onDismiss:
                 )
             }
             Banner(
-                title = "Your progress is saved.",
-                tone = BannerTone.Info,
-                detail = "You'll sign out and can pick up right here when you sign back in.",
+                title = if (degraded) {
+                    "We can't save your progress right now."
+                } else {
+                    "Your progress is saved."
+                },
+                tone = if (degraded) BannerTone.Attention else BannerTone.Info,
+                detail = if (degraded) {
+                    "You're signed in but not connected, so signing out now would lose this " +
+                        "setup. Keep going — it saves itself the moment we're back."
+                } else {
+                    "You'll sign out and can pick up right here when you sign back in."
+                },
                 modifier = Modifier.padding(top = dimens.space.lg),
             )
             Row(
@@ -432,6 +484,9 @@ private fun SaveAndExitSheet(step: WizardStep, onConfirm: () -> Unit, onDismiss:
             PrimaryButton(
                 text = "Save and sign out",
                 onClick = onConfirm,
+                // Refused, not hidden: a control that disappears leaves the artist looking
+                // for it, and the banner above has already said why this one is asleep.
+                enabled = !degraded,
                 fullWidth = true,
                 modifier = Modifier
                     .padding(top = dimens.space.xl)

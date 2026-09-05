@@ -209,6 +209,18 @@ interface ActivityLog {
     /** Marks the signed-in account's own rows read. Inert while signed out. */
     suspend fun markAllRead()
 
+    /**
+     * Marks exactly [ids] read, and nothing else.
+     *
+     * The narrow half of [markAllRead], for the caller that has already decided WHICH rows
+     * it is speaking for. Opening the Activity screen snapshots the unread ids and then marks
+     * them; a push that lands between those two operations is not in the snapshot, so the
+     * screen never draws it unread — and marking it read anyway retires a notification the
+     * account has demonstrably not seen. Ids belonging to another account are ignored, on the
+     * same rule as [markAllRead].
+     */
+    suspend fun markRead(ids: Set<String>)
+
     /** Sign-out and delete-account both go through `AppPreferences.wipeAll`; this is for tests
      *  and for a caller that wants the log gone without wiping everything else. */
     suspend fun clear()
@@ -279,15 +291,27 @@ class DataStoreActivityLog @Inject constructor(
         }.onFailure { Timber.w(it, "Couldn't record activity entry") }
     }
 
-    override suspend fun markAllRead() {
+    override suspend fun markAllRead() = markMatching { true }
+
+    override suspend fun markRead(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        markMatching { it.id in ids }
+    }
+
+    /**
+     * The one read-modify-write both marks share, under the one lock.
+     *
+     * [predicate] picks among THIS account's rows only. Anything else in the blob is
+     * invisible to this session, and quietly rewriting it would be touching a record that is
+     * not ours to touch.
+     */
+    private suspend fun markMatching(predicate: (ActivityEntry) -> Boolean) {
         val account = viewer.currentUserId() ?: return
         runCatching {
             mutex.withLock {
-                // Only this account's rows. Anything else in the blob is
-                // invisible to this session, and quietly rewriting it would be
-                // touching a record that is not ours to touch.
-                val updated = decode(store.getString(KEY).first())
-                    .map { if (it.userId == account) it.copy(read = true) else it }
+                val updated = decode(store.getString(KEY).first()).map { entry ->
+                    if (entry.userId == account && predicate(entry)) entry.copy(read = true) else entry
+                }
                 store.setString(KEY, json.encodeToString(updated))
             }
         }.onFailure { Timber.w(it, "Couldn't mark activity read") }

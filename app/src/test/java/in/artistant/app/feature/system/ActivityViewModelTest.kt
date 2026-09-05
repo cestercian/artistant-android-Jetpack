@@ -2,11 +2,17 @@ package `in`.artistant.app.feature.system
 
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -128,6 +134,34 @@ class ActivityViewModelTest {
     }
 
     @Test
+    fun `a push landing between the snapshot and the mark stays unread`() = runTest {
+        // Opening the screen does two things in a row — read the unread ids, then mark them —
+        // and both are suspending store operations, so a push CAN land in between. It is not
+        // in the snapshot, so `unreadOnArrival` never draws it bold; marking it read anyway
+        // (which `markAllRead()` did, because it speaks for rows it has never seen) retired a
+        // notification the account demonstrably has not seen. The bell would go quiet for a
+        // gig request nobody ever showed them.
+        val log = InterleavingActivityLog(seeded)
+        val vm = ActivityViewModel(log)
+        subscribe(vm)
+
+        // `markSeen` runs eagerly under the unconfined dispatcher until the read of the
+        // unread ids parks in the window — which is where the push arrives.
+        vm.markSeen()
+        log.landPush(entry("landed", "gig_request", at = 400))
+        advanceUntilIdle()
+
+        assertFalse("markSeen must not speak for rows it never saw", log.markedEverything)
+        assertEquals(setOf("confirmed", "quote"), log.markedIds)
+        val stored = log.entries.first()
+        assertTrue(stored.first { it.id == "landed" }.read.not())
+        assertEquals("the bell still has something to say", 1, unreadActivityCount(stored))
+        // And the snapshot is what it always was, so the two rows that WERE there still read
+        // as unread for the rest of the visit.
+        assertTrue(vm.state.value.showsUnread(vm.state.value.all.first { it.id == "confirmed" }))
+    }
+
+    @Test
     fun `the rows that were unread on arrival still draw as unread`() = runTest {
         // Marking the STORE read must not take away the one thing the screen
         // answers: which of these had I not seen.
@@ -187,5 +221,52 @@ class ActivityViewModelTest {
         val vm = ActivityViewModel(FakeActivityLog(seeded))
         subscribe(vm)
         assertFalse(vm.state.value.hasUnread)
+    }
+
+    /**
+     * A log whose read of the unread ids happens BEFORE the window and whose answer arrives
+     * after it — which is what a DataStore read is: the blob is decoded at one instant and
+     * handed back at another, and a push recorded in between is in the store but not in the
+     * decoded list.
+     *
+     * [landPush] is deliberately non-suspending so a test can drop the push into that window
+     * without needing a second coroutine to interleave with.
+     */
+    private class InterleavingActivityLog(seed: List<ActivityEntry>) : ActivityLog {
+        private val rows = MutableStateFlow(seed)
+
+        var markedIds: Set<String> = emptySet()
+            private set
+        var markedEverything = false
+            private set
+
+        override val entries: Flow<List<ActivityEntry>> = flow {
+            val captured = rows.value
+            // The window. Under `UnconfinedTestDispatcher` this hands control back to the
+            // test body, which lands the push before the emission below resumes.
+            yield()
+            emit(captured)
+            emitAll(rows)
+        }
+
+        fun landPush(entry: ActivityEntry) {
+            rows.value = appendActivity(rows.value, entry)
+        }
+
+        override suspend fun record(entry: ActivityEntry) = landPush(entry)
+
+        override suspend fun markAllRead() {
+            markedEverything = true
+            rows.value = rows.value.map { it.copy(read = true) }
+        }
+
+        override suspend fun markRead(ids: Set<String>) {
+            markedIds = markedIds + ids
+            rows.value = rows.value.map { if (it.id in ids) it.copy(read = true) else it }
+        }
+
+        override suspend fun clear() {
+            rows.value = emptyList()
+        }
     }
 }

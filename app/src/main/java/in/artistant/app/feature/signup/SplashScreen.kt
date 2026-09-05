@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,26 +102,43 @@ fun SplashScreen(modifier: Modifier = Modifier, onSignInAgain: (() -> Unit)? = n
             )
         }
 
-        Spacer(Modifier.height(dimens.space.xl))
-        Text(
-            "Book the artist.\nMake the night.",
-            style = AppTheme.type.displayHero,
-            color = colors.onDark,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(dimens.space.md))
-        Text(
-            "Bands, DJs, comics and classical acts —\nfor brands, weddings and house shows.",
-            style = AppTheme.type.body,
-            color = colors.onDarkSoft,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(dimens.space.xl))
-        // The reconnect variant. Below the copy rather than over it: the screen still says
-        // what it always says, and this adds why it is still saying it.
-        if (onSignInAgain != null) {
-            SessionDegradedBanner(onSignInAgain = onSignInAgain)
+        // The copy and, on the reconnect variant, the only way off this screen.
+        //
+        // Deliberately NOT weighted, and deliberately scrollable. A `Column` measures its
+        // unweighted children first, against the height that is actually left, so this block
+        // is served before the hero above it and the hero absorbs the remainder — down to
+        // zero. That ordering is what makes the action reachable on the viewports where it
+        // was not: split-screen, landscape, a small phone at a large font scale. Before it,
+        // the fixed hero took its share first and the banner was placed past the bottom edge
+        // of a screen that does not scroll — the exit from a dead end, off-screen.
+        //
+        // The hero is the right thing to spend, because it is a placeholder well rather than
+        // content: nothing is lost by collapsing it, and the wordmark and copy still read.
+        Column(
+            modifier = Modifier.verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(dimens.space.xl))
+            Text(
+                "Book the artist.\nMake the night.",
+                style = AppTheme.type.displayHero,
+                color = colors.onDark,
+                textAlign = TextAlign.Center,
+            )
             Spacer(Modifier.height(dimens.space.md))
+            Text(
+                "Bands, DJs, comics and classical acts —\nfor brands, weddings and house shows.",
+                style = AppTheme.type.body,
+                color = colors.onDarkSoft,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(dimens.space.xl))
+            // The reconnect variant. Below the copy rather than over it: the screen still
+            // says what it always says, and this adds why it is still saying it.
+            if (onSignInAgain != null) {
+                SessionDegradedBanner(onSignInAgain = onSignInAgain)
+                Spacer(Modifier.height(dimens.space.md))
+            }
         }
     }
 }
@@ -131,4 +150,14 @@ private const val HERO_SCRIM_START = 0.48f
 @Composable
 private fun SplashPreview() {
     ArtistantTheme { SplashScreen() }
+}
+
+/**
+ * The reconnect variant, at a height where the old layout hid its own exit — a landscape
+ * phone, a split-screen pane, or a small device at a large font scale.
+ */
+@Preview(showBackground = true, backgroundColor = 0xFF0F100C, heightDp = 420)
+@Composable
+private fun SplashReconnectPreview() {
+    ArtistantTheme { SplashScreen(onSignInAgain = {}) }
 }

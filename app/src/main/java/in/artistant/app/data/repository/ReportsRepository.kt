@@ -131,24 +131,36 @@ data class ReportSubmission(
         if (inFlight) null else copy(inFlight = true, outcome = null, generation = generation + 1)
 
     /**
-     * The state a finished attempt lands on.
+     * The state a finished attempt lands on — **or the state untouched**, if the attempt
+     * finishing is no longer the current one.
      *
-     * The flag is released either way — it belongs to the attempt that is finishing, and an
-     * early return that left it set would wedge the retry shut for good — but a **superseded**
-     * attempt claims no outcome. Superseded means a later attempt started, or the reader
-     * discarded this one, or the screen went; claiming an outcome for a report they have moved
-     * on from is how a dismissed banner comes back from the dead.
+     * A stale completion changes NOTHING, and that includes [inFlight]. Releasing the flag
+     * "because it belongs to the attempt that is finishing" was wrong on both counts: the
+     * flag belongs to whatever is in flight NOW, and after a discard-then-new-report the
+     * answer to that is the new report. The old attempt's late completion unlocked the new
+     * one's duplicate guard mid-flight, and a second tap on Submit filed a second row in
+     * `public.reports`.
+     *
+     * The fear that motivated the release — a stale completion leaving the form wedged shut
+     * — is answered by the two things that can make a completion stale in the first place.
+     * A later attempt owns the flag and will release it when IT settles. A discard releases
+     * it in [dismissing]. And [retired] happens at `onCleared`, where there is no form left
+     * to wedge.
+     *
+     * Claiming an OUTCOME is refused for the same reason: a report the reader has moved on
+     * from must not re-raise the banner they dismissed.
      *
      * @param pending what was filed, kept for the retry if it turns out nothing holds it.
      */
     fun settling(outcome: ReportOutcome, pending: PendingReport, generation: Int): ReportSubmission {
+        if (generation != this.generation) return this
         val settled = copy(inFlight = false)
-        return when {
-            generation != this.generation -> settled
-            outcome == ReportOutcome.Failed -> settled.copy(failed = pending, outcome = null)
+        return if (outcome == ReportOutcome.Failed) {
+            settled.copy(failed = pending, outcome = null)
+        } else {
             // A retry that lands is the end of the loss it retried, so it takes the banner
             // down as well as raising its receipt.
-            else -> settled.copy(failed = null, outcome = outcome)
+            settled.copy(failed = null, outcome = outcome)
         }
     }
 
