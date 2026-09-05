@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
@@ -143,13 +144,23 @@ private class HarnessLifecycleCallbacks(
     }
 
     override fun onActivityStarted(activity: Activity) = Unit
+    // The last late-arriving flagged Intent this reported, by identity. `setIntent` keeps the
+    // stale extra for the life of the instance, and every background/foreground trip resumes
+    // the activity again — so without this, one wrong launch turns into one error line per
+    // resume, and the log reads as if the operator kept relaunching. A fresh `am start` delivers
+    // a NEW Intent object, which reports again; the same one does not.
+    private var warnedLateIntent: Intent? = null
+
     override fun onActivityResumed(activity: Activity) {
         if (installed) return
         // `MainActivity.onNewIntent` calls `setIntent`, so a flagged start that was routed to a
         // running instance is visible here — and too late to honour: nothing was created, so
         // nothing can be swapped. Say so loudly instead of quietly showing the real auth gate.
-        val raw = runCatching { activity.intent?.getStringExtra(HarnessFlags.EXTRA) }.getOrNull()
+        val intent = activity.intent ?: return
+        if (intent === warnedLateIntent) return
+        val raw = runCatching { intent.getStringExtra(HarnessFlags.EXTRA) }.getOrNull()
         if (!raw.isNullOrBlank() && HarnessFlags.parse(raw).active) {
+            warnedLateIntent = intent
             Timber.e(
                 "[harness] flags arrived on an already-running activity (singleTop → onNewIntent) " +
                     "after the DI graph was built against the real repositories; ignored. " +
