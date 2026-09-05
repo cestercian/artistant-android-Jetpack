@@ -213,7 +213,12 @@ counter-offer (no client UPDATE policy on `gig_requests`), Open gigs (RLS), Get
 verified (no KYC path), Tax details, Invite, and the update/outage gates (no
 app-config table; harness flags only). The chat composer bug was two faults —
 `Modifier.alpha(1f)` dropping the send disc's background and a missing
-`adjustResize`. **Suite 2065, 0 failures.** Device-walked on the `artistant`
+`adjustResize`. The final emulator walk added #160: `TabPane` takes a
+`background` painted under the status-bar strip (white screens no longer show
+a `page`-coloured band), and the debug harness must be launched with
+`am start -S` — a flagged start against a running `singleTop` activity goes to
+`onNewIntent`, never installs, and now logs `[harness] flags arrived on an
+already-running activity` (RELEASE.md §10). **Suite 2065, 0 failures.** Device-walked on the `artistant`
 AVD per section; the emulator's GPU state can go black under gfxstream — cold
 boot with `-gpu swiftshader_indirect`.
 
