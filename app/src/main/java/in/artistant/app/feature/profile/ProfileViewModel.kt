@@ -20,6 +20,7 @@ import `in`.artistant.app.feature.saved.SavedStore
 import `in`.artistant.app.platform.auth.SessionManager
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 import `in`.artistant.app.platform.storage.AppPreferences
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -195,6 +196,9 @@ class ProfileViewModel @Inject constructor(
     private val _state = MutableStateFlow(ProfileUiState())
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
 
+    /** @see refresh — the guard against two overlapping reloads. */
+    private var refreshJob: Job? = null
+
     init {
         refresh()
         viewModelScope.launch {
@@ -219,9 +223,17 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
-    fun refresh() = viewModelScope.launch {
+    fun refresh() {
+        // One at a time. Every read below writes the same fields, so two overlapping refreshes
+        // race each other — and `onRetry` sits one tap under the failure banner, which is
+        // exactly where somebody taps twice.
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch { load() }
+    }
+
+    private suspend fun load() {
         _state.update { it.copy(isLoading = true, error = null) }
-        val role = prefs.role.first()
+        val role = runCatching { prefs.role.first() }.getOrDefault(AppRole.Client)
         // Off the cached session, not a network call — safe to read on every
         // refresh, and it is the only place the account email and the signup
         // date exist (the `public.users` row carries neither). Published BEFORE
@@ -231,6 +243,13 @@ class ProfileViewModel @Inject constructor(
         val user = session.currentUser
         _state.update {
             it.copy(
+                // The cached role, published BEFORE the fetch for the same reason as the two
+                // fields beside it: it is already known locally. The settings list renders the
+                // whole ARTIST group off it, so publishing it only after the profile came back
+                // meant an artist watched two rows appear a network round trip into the screen.
+                // It is also the role the root gate routed on to get here, so seeding it cannot
+                // disagree with the graph the user is standing in; the fetch below settles it.
+                role = role,
                 email = user?.email,
                 joinedYear = user?.createdAt?.toEpochMilliseconds()?.let { ms ->
                     Calendar.getInstance().apply { timeInMillis = ms }.get(Calendar.YEAR)

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -83,11 +82,16 @@ fun AccountScaffold(
                     .fillMaxWidth()
                     .background(AppTheme.colors.surface)
                     .hairlineTop()
-                    // The bar owns the navigation-bar inset AND the keyboard inset: the window
-                    // is edge-to-edge and does not resize for the IME, so without `imePadding`
-                    // the delete screen's confirm button would sit under the keyboard the
-                    // moment its "type DELETE" field takes focus.
-                    .navigationBarsPadding()
+                    // The keyboard inset, and ONLY the keyboard inset. The window is
+                    // edge-to-edge and does not resize for the IME, so without `imePadding` the
+                    // delete screen's confirm button sits under the keyboard the moment its
+                    // "type DELETE" field takes focus.
+                    //
+                    // The navigation-bar inset is NOT applied here. Every screen using this
+                    // scaffold is hosted inside `TabPane`, which pads by the tab Scaffold's own
+                    // `PaddingValues` — and that bottom value already includes the light tab
+                    // bar's home-indicator zone. Applying it again lifted every CTA on the
+                    // account section a whole navigation bar above the design's bottom offset.
                     .imePadding()
                     .padding(horizontal = gutter)
                     .padding(top = dimens.space.lg, bottom = dimens.space.xl),
