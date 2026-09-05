@@ -57,7 +57,7 @@ class WhatsNewViewModel @Inject constructor(
      * cannot pass an older release off as this one.
      */
     fun showOnDemand() {
-        _visibleNote.value = ReleaseNotes.forVersion(currentVersion) ?: ReleaseNotes.mostRecent()
+        _visibleNote.value = ReleaseNotes.openedBy(currentVersion)
     }
 
     /**

@@ -51,7 +51,12 @@ data class ReleaseNote(
  */
 object ReleaseNotes {
 
-    private val notes: List<ReleaseNote> = listOf(
+    /**
+     * `internal` so the table's own invariants — appended in release order, no
+     * duplicate versions, three highlights each — can be pinned by a test
+     * without that test having to know which version is currently shipping.
+     */
+    internal val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
             version = "0.1.0",
             released = "September 2026",
@@ -91,7 +96,30 @@ object ReleaseNotes {
      * nothing is the silent tap the redesign's notes keep ruling out.
      */
     fun mostRecent(): ReleaseNote? = notes.lastOrNull()
+
+    /**
+     * The note the "What's new" row will actually open.
+     *
+     * This build's, or the most recent authored one when this build shipped
+     * without an entry — the exact rule [WhatsNewViewModel.showOnDemand] uses.
+     * Named once so the row's subtitle and the sheet that opens cannot name
+     * different releases: the subtitle used to read `BuildConfig.VERSION_NAME`
+     * straight off, so on a noteless patch release the row promised 0.1.1 and
+     * opened 0.1.0's notes.
+     */
+    fun openedBy(version: String): ReleaseNote? = forVersion(version) ?: mostRecent()
 }
+
+/**
+ * The subtitle under "What's new" in account settings — the version of the note
+ * that will open, not the version of the binary.
+ *
+ * Falls back to naming the running build only if the table is empty, which
+ * `WhatsNewDecisionTest` refuses: a row that opens nothing should not be there
+ * at all.
+ */
+fun whatsNewRowSubtitle(currentVersion: String): String =
+    "Version " + (ReleaseNotes.openedBy(currentVersion)?.version ?: currentVersion)
 
 /** What the app should do about the What's-new sheet on this launch. */
 enum class WhatsNewDecision {

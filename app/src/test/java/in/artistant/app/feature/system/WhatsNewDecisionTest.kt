@@ -62,14 +62,21 @@ class WhatsNewDecisionTest {
     }
 
     // ── the table itself ─────────────────────────────────────────────────────
+    //
+    // Structural, never pinned to `BuildConfig.VERSION_NAME`. A patch release
+    // with no entry of its own is the NORMAL case — `decideWhatsNew` and
+    // `ReleaseNotes.openedBy` both handle it deliberately — so a suite that
+    // required the running version to have a note turned shipping 0.1.1 into a
+    // red gate.
 
     @Test
-    fun `the shipped version has notes and three highlights`() {
+    fun `every authored note carries three highlights`() {
         // The design's rule: three features, and the real fixes. A table that
         // drifts to five is a changelog nobody reads.
-        val note = ReleaseNotes.forVersion(`in`.artistant.app.BuildConfig.VERSION_NAME)
-        assertNotNull("the running version needs a release note", note)
-        assertEquals(3, note!!.highlights.size)
+        assertTrue("the table must not be empty", ReleaseNotes.notes.isNotEmpty())
+        ReleaseNotes.notes.forEach { note ->
+            assertEquals("${note.version} needs exactly three highlights", 3, note.highlights.size)
+        }
     }
 
     @Test
@@ -86,19 +93,41 @@ class WhatsNewDecisionTest {
     }
 
     @Test
-    fun `mostRecent is the newest authored note`() {
-        // The table is appended in release order — see the object's note. Pinned
-        // so a future entry prepended by habit is caught here rather than by a
-        // user reading last year's notes.
-        assertEquals(`in`.artistant.app.BuildConfig.VERSION_NAME, ReleaseNotes.mostRecent()?.version)
+    fun `the table is appended in release order, and mostRecent reads the end`() {
+        // The object's rule — APPEND, never prepend — stated as the invariant
+        // rather than as "the last entry is the version we happen to ship".
+        val versions = ReleaseNotes.notes.map { it.version }
+        assertEquals("no version is authored twice", versions.distinct(), versions)
+        assertEquals(
+            "notes must be listed oldest first",
+            versions.sortedBy(::comparableVersion),
+            versions,
+        )
+        assertEquals(versions.last(), ReleaseNotes.mostRecent()?.version)
     }
 
     @Test
     fun `every highlight carries copy on both lines`() {
-        ReleaseNotes.forVersion(`in`.artistant.app.BuildConfig.VERSION_NAME)!!.highlights
-            .forEach {
-                assertTrue(it.title.isNotBlank())
-                assertTrue(it.body.isNotBlank())
-            }
+        ReleaseNotes.notes.flatMap { it.highlights }.forEach {
+            assertTrue(it.title.isNotBlank())
+            assertTrue(it.body.isNotBlank())
+        }
+    }
+
+    @Test
+    fun `the settings row names the note that will actually open`() {
+        // The row used to print `BuildConfig.VERSION_NAME`, so on a release with
+        // no entry of its own it promised one version and opened another.
+        val newest = ReleaseNotes.mostRecent()!!
+        assertEquals("Version ${newest.version}", whatsNewRowSubtitle(newest.version))
+        assertEquals("Version ${newest.version}", whatsNewRowSubtitle("99.99.99"))
+    }
+
+    /** Zero-padded per field, so "0.10.0" sorts after "0.9.0" rather than before it. */
+    private fun comparableVersion(version: String): String =
+        version.split(".").joinToString(".") { it.padStart(VERSION_FIELD_WIDTH, '0') }
+
+    private companion object {
+        const val VERSION_FIELD_WIDTH = 6
     }
 }

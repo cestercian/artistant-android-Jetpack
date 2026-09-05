@@ -37,6 +37,7 @@ import `in`.artistant.app.designsystem.component.SwitchRow
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.designsystem.theme.ArtistantTheme
+import `in`.artistant.app.feature.system.whatsNewRowSubtitle
 import `in`.artistant.app.platform.calendar.CalendarSyncService
 
 /**
@@ -337,7 +338,10 @@ private fun AccountContent(
         // app for the Play listing, and a chevron on either promises a screen that never comes.
         ListRow(
             title = "What's new",
-            subtitle = "Version ${BuildConfig.VERSION_NAME}",
+            // The version of the note that OPENS, which on a release that
+            // shipped without an entry of its own is not the running build's —
+            // see [whatsNewRowSubtitle].
+            subtitle = whatsNewRowSubtitle(BuildConfig.VERSION_NAME),
             onClick = onWhatsNew,
             trailing = {},
             modifier = Modifier.semantics { testTag = "account.whatsNew" },
