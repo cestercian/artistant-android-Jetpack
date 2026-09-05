@@ -134,10 +134,10 @@ fun ChatScreen(
     // delivery that had not happened. `Queued` gets no buzz at all rather than a
     // quieter one: it is neither good news nor bad, and the words on the sheet
     // are what carry it.
-    LaunchedEffect(state.reportOutcome, state.failedReport) {
+    LaunchedEffect(state.report.outcome, state.report.failed) {
         when {
-            state.failedReport != null -> haptics.warning()
-            state.reportOutcome == ReportOutcome.Sent -> haptics.success()
+            state.report.failed != null -> haptics.warning()
+            state.report.outcome == ReportOutcome.Sent -> haptics.success()
             else -> Unit
         }
     }
@@ -258,9 +258,7 @@ fun ChatScreen(
             muted = state.muted,
             blocked = state.blocked,
             canBlock = state.counterpartId != null,
-            reportOutcome = state.reportOutcome,
-            failedReport = state.failedReport,
-            isSubmittingReport = state.isSubmittingReport,
+            report = state.report,
             // A mute/block that didn't land is reported HERE, on the sheet the
             // tap came from, rather than in the transcript's own error slot —
             // that one speaks for the conversation failing to load and offers to

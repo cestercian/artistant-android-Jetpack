@@ -179,6 +179,10 @@ fun ArtistProfileScreen(
                 if (state.showReportSheet) {
                     ReportArtistSheet(
                         artistName = artist.name,
+                        // The guard is screen-wide — a retry in flight from the
+                        // failure banner blocks a fresh report from this form — so
+                        // the form has to show it rather than let the submit vanish.
+                        submitting = state.report.inFlight,
                         onSubmit = viewModel::submitReport,
                         onDismiss = viewModel::dismissReportSheet,
                     )
@@ -408,12 +412,12 @@ private fun LoadedProfile(
                 // report is either filed or explicitly abandoned — the reader
                 // was told nothing is holding it, and the app owes them the way
                 // to try again without retyping.
-                if (state.failedReport != null) {
+                if (state.report.failed != null) {
                     Column(
                         Modifier.padding(top = space.md),
                         verticalArrangement = Arrangement.spacedBy(space.sm),
                     ) {
-                        val retrying = state.isSubmittingReport
+                        val retrying = state.report.inFlight
                         Banner(
                             title = "Your report wasn't filed",
                             detail = "It didn't reach Artistant, and we couldn't " +
@@ -425,8 +429,16 @@ private fun LoadedProfile(
                             // is working and stop taking taps. Without that, a second
                             // tap filed the same report a second time: two rows in
                             // `public.reports` against one person for one incident.
+                            //
+                            // Through `actionEnabled`, NOT by dropping `onAction`:
+                            // the pill needs a label AND a callback to draw at all,
+                            // so nulling the callback took the control off the banner
+                            // for the length of the round trip and the "Sending
+                            // report…" label this line asks for was never once on
+                            // screen.
                             actionLabel = if (retrying) "Sending report…" else "Try again",
-                            onAction = onRetryReport.takeIf { !retrying },
+                            onAction = onRetryReport,
+                            actionEnabled = !retrying,
                         )
                         Text(
                             "Discard this report",

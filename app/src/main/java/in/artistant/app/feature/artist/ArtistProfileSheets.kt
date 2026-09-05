@@ -167,6 +167,17 @@ internal fun ProfileActionSheet(
 @Composable
 internal fun ReportArtistSheet(
     artistName: String,
+    /**
+     * A report is already out — the reader opened this form while the failure
+     * banner's retry was still in flight.
+     *
+     * The screen-wide in-flight guard swallows a second submit, and swallowing it
+     * in SILENCE is what this parameter exists to stop: the sheet closed, nothing
+     * was filed, and the reader was left believing they had reported a second
+     * person. So the CTA says what is happening and refuses the tap, exactly as
+     * `ReportConversationSheet` does on the chat side.
+     */
+    submitting: Boolean,
     onSubmit: (reason: String, details: String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -245,7 +256,7 @@ internal fun ReportArtistSheet(
                 }
                 Spacer(Modifier.height(space.lg))
                 PrimaryButton(
-                    text = "Submit report",
+                    text = if (submitting) "Sending report…" else "Submit report",
                     onClick = {
                         reason?.let {
                             haptics.warning()
@@ -254,13 +265,18 @@ internal fun ReportArtistSheet(
                     },
                     // A report with no reason is a row a moderator cannot triage, so
                     // the button waits rather than filing "Something else" on the
-                    // reporter's behalf.
-                    enabled = reason != null,
+                    // reporter's behalf. And one already in flight holds the whole
+                    // screen's guard, so a submit now would be dropped in silence.
+                    enabled = reason != null && !submitting,
                     fullWidth = true,
                 )
                 Spacer(Modifier.height(space.md))
                 Text(
-                    "Queued on this device if you're offline.",
+                    if (submitting) {
+                        "Finishing the last report first — this one will be ready in a moment."
+                    } else {
+                        "Queued on this device if you're offline."
+                    },
                     style = AppTheme.type.caption,
                     color = colors.ink4,
                     textAlign = TextAlign.Center,

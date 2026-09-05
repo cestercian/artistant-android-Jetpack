@@ -146,58 +146,12 @@ object ArtistProfileFacts {
      * [ReportOutcome.Failed] gets no toast at all. A toast is momentary and
      * unrecoverable once it fades; "nothing is holding your report" is a state
      * with an action attached, so it is a banner with a retry instead
-     * ([ArtistProfileUiState.failedReport]). Returning null here is what stops
+     * ([ArtistProfileUiState.report]). Returning null here is what stops
      * the two paths from both firing.
      */
     fun reportToast(outcome: ReportOutcome?): String? = when (outcome) {
         ReportOutcome.Sent -> "Report sent to Artistant."
         ReportOutcome.Queued -> "Report queued on this device."
         ReportOutcome.Failed, null -> null
-    }
-}
-
-/**
- * The state a report attempt STARTS from, or null when the tap must be swallowed.
- *
- * Null is the in-flight guard, and it is why this is a function rather than two
- * lines inside `submitReport`: the ViewModel cannot be built in a JVM test — it
- * reaches `SavedStore`, which reaches DataStore — so a guard written inline is a
- * guard nothing can hold to its promise. Here the double tap is a sequence two
- * calls long and the property is stated directly.
- *
- * [ArtistProfileUiState.failedReport] is deliberately carried through unchanged.
- * On a first submit it is already null; on a retry it is the banner the reader is
- * looking at, and dropping it for the length of the round trip made the banner
- * blink out and — when the retry failed too — come straight back.
- */
-internal fun ArtistProfileUiState.startingReport(): ArtistProfileUiState? =
-    if (isSubmittingReport) null else copy(showReportSheet = false, isSubmittingReport = true)
-
-/**
- * The state a finished report attempt lands on.
- *
- * [superseded] is a later attempt having started, or the screen having gone. The
- * flag is released either way — it belongs to the attempt that is finishing, and
- * an early return that left it set would wedge the retry shut for good — but no
- * outcome is claimed, because claiming one for a report the reader has moved on
- * from is how a discarded banner comes back from the dead.
- *
- * A [ReportOutcome.Failed] is durable state with the reader's own words kept for
- * the retry, never a toast, so it is the only outcome that lands in the state at
- * all. The other two are momentary and toast-shaped: [ArtistProfileFacts.reportToast]
- * raises them on the app's single host and they leave nothing here. They must still
- * CLEAR a standing banner — a retry that lands is the end of the loss it retried —
- * which is what the last branch is for.
- */
-internal fun ArtistProfileUiState.settlingReport(
-    outcome: ReportOutcome,
-    pending: PendingReport,
-    superseded: Boolean,
-): ArtistProfileUiState {
-    val settled = copy(isSubmittingReport = false)
-    return when {
-        superseded -> settled
-        outcome == ReportOutcome.Failed -> settled.copy(failedReport = pending)
-        else -> settled.copy(failedReport = null)
     }
 }
