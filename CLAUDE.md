@@ -195,11 +195,35 @@ had shipped in #82). The Aug-16 audit series was already fully merged (#84–#11
 `assembleDevRelease`, never the debug APK** (RELEASE.md §3). **Suite 1252, 0
 failures** on the five branches combined; none device-walked.
 
+**Sep 4–5, 2026 — the "Artistant iOS Light" redesign landed (PRs #141–#159).**
+Every one of the design's 138 screens was re-implemented on the light,
+single-accent system in eleven section PRs on top of the P1 foundation (#141):
+Discover & search #142, Artist profile #143, Getting started #144, Messaging &
+safety #145, Book & confirm #146, Bookings & the night #147, Wizard #148, Artist
+studio #150, Press kit #151, System & housekeeping #152, Account & settings #153,
+plus integration batches #154–#156 and a pledge-gate fix #149. Every PR went
+through Greptile (Cursor Bugbot was over its usage limit throughout) with the
+findings fixed before merge, and a second, deeper review of #153/#154/#156
+landed as #157–#159 (session gate through a refresh failure, offline cold start,
+report-submission guard, delete-account honesty, sign-out-everywhere
+verification, device-scoped prefs, bounded FCM reads). Screens the backend
+cannot back are shipped as honest states and listed as blocked in
+`docs/PARITY_CHECKLIST.md`: map search (no coordinates), promo codes, client
+counter-offer (no client UPDATE policy on `gig_requests`), Open gigs (RLS), Get
+verified (no KYC path), Tax details, Invite, and the update/outage gates (no
+app-config table; harness flags only). The chat composer bug was two faults —
+`Modifier.alpha(1f)` dropping the send disc's background and a missing
+`adjustResize`. **Suite 2065, 0 failures.** Device-walked on the `artistant`
+AVD per section; the emulator's GPU state can go black under gfxstream — cold
+boot with `-gpu swiftshader_indirect`.
+
 **Still operator / follow-ups:** upload keystore + `keystore.properties`,
 `google-services.json` + `send-push` FCM (#24), OAuth dashboard config, flip
 `subscriptionsEnabled`, PROF-10 hero pager, an app-specific baseline profile
 (needs a device), AGP 9.1 + compileSdk 37 to unlock Compose 1.11+, M8
-instrumented UI / Play upload.
+instrumented UI / Play upload; backend gaps the redesign surfaced (a client
+UPDATE policy on `gig_requests`, an app-config/status table for the update and
+outage gates, a search-alerts table for "Notify me").
 (Profile stats + community pledge shipped on `feature/parity-polish`.)
 The Aug-5 parked findings are **closed**: the audit series had already given
 `BookingStatusTimeline` two call sites (ConfirmedScreen + BookingDetail's
