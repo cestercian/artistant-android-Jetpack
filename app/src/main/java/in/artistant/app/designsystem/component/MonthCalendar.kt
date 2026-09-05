@@ -520,6 +520,16 @@ private fun DayTile(
                 fontWeight = if (marked || isToday) FontWeight.Bold else FontWeight.Medium,
             ),
             color = ink,
+            // Same rule as the dashboard's day strip, for the same reason: the
+            // seven columns are `weight(1f)`, so a tile cannot widen to suit a
+            // date. A wrapped "10" reads as two dates and a clipped one reads as
+            // a different date, so it does neither — it overhangs, visibly, and
+            // the reader sees the whole number. No font-scale cap here: a
+            // seventh of the page is roughly 48dp against the strip's 21, which
+            // holds two digits at every scale Android offers.
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Visible,
         )
     }
 }

@@ -431,3 +431,30 @@ val BrandTypography: Typography = Typography().run {
         labelSmall = labelSmall.copy(fontFamily = SansFamily),
     )
 }
+
+/**
+ * How much of the reader's font scale a **fixed-width cell** can actually spend.
+ *
+ * Almost nothing in this app needs this: type scales, boxes grow, and a taller row is the
+ * correct answer to a bigger font. The exception is a numeral in a cell whose width is
+ * decided by a grid rather than by its contents — the dashboard's fourteen-day availability
+ * strip is fourteen `weight(1f)` cells in one row, so a cell is about 21dp wide however large
+ * the type is, and a two-digit mono date at scale 2.0 is wider than that. A cell cannot be
+ * widened without taking the width from its neighbours, and there is no fifteenth column to
+ * take it from.
+ *
+ * The alternatives are all worse. Wrapping turns "10" into "1" over "0", which reads as two
+ * dates. Clipping — Compose's default with `softWrap = false` — cuts the numeral mid-glyph
+ * and shows half a digit, which reads as a different date. Ellipsis prints "…". This shrinks
+ * instead: past [cap] the numeral stops growing, so a reader at 2.0 gets the strip at
+ * [cap]-sized digits rather than at guesswork, and everything up to [cap] scales normally.
+ *
+ * Returns a MULTIPLIER for an `sp` size, not a size: `sp` is multiplied by the system scale at
+ * draw time, so dividing the declared size by the overshoot is what pins the drawn result.
+ *
+ * @param fontScale `LocalDensity.current.fontScale`.
+ * @param cap the largest scale this cell can hold. 1 or less means "no scaling at all", which
+ *   is not this function's business to allow — callers pass a real ceiling.
+ */
+fun cappedFontScale(fontScale: Float, cap: Float): Float =
+    if (fontScale > cap) cap / fontScale else 1f
