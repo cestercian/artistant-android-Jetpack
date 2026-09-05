@@ -1,5 +1,6 @@
 package `in`.artistant.app.feature.profile
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -263,13 +264,22 @@ class DeleteAccountViewModel @Inject constructor(
  * here would be the worst fabrication in the app.
  *
  * **Stage 3 is a receipt, not a goodbye**, including the 30-day backup window — which is the
- * honest part, and the part every "your account is gone" screen leaves out.
+ * honest part, and the part every "your account is gone" screen leaves out. It goes up as soon
+ * as the server row is gone and the device calendar has answered; the SIGN-OUT waits for its
+ * Close button, so a 30-second logout cannot replace the receipt while somebody is reading it.
  */
 @Composable
 fun DeleteAccountScreen(
     onBack: () -> Unit,
     /** The scripted support assistant (design 34) — stage 1's off-ramp. */
     onContactSupport: () -> Unit,
+    /**
+     * Leave the app, and ONLY when the sign-out on Close would not land.
+     *
+     * A session that cleared propagates to the root gate, which replaces this whole graph on
+     * its own — see [DeleteAccountViewModel.finish]. One that did not has no swap coming, and
+     * the receipt already tells the user to restart.
+     */
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: DeleteAccountViewModel = hiltViewModel(),
@@ -467,6 +477,11 @@ private fun DeleteReceiptStage(
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
+    // Back IS Close on this stage. The receipt draws no back affordance, and now that the
+    // sign-out waits for Close, a system back that merely popped the destination would drop
+    // somebody into a live-looking app on a session belonging to a row that no longer exists.
+    // Disabled while the sign-out is in flight, so a back tap cannot start a second one.
+    BackHandler(enabled = !state.working, onBack = onClose)
     AccountScaffold(
         modifier = modifier.semantics { testTag = "screen.deleteReceipt" },
         footer = {
