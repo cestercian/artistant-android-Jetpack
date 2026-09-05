@@ -37,27 +37,50 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * The two switches, plus the one thing that can go wrong on a screen with no network calls.
+ *
+ * [actionError] is a system handoff this device could not complete: both non-switch rows push
+ * into Android's own settings, and neither `ACTION_DISPLAY_SETTINGS` nor
+ * `ACTION_ACCESSIBILITY_SETTINGS` is guaranteed to resolve on every OEM or Go build.
+ */
+data class AccessibilityUiState(
+    val settings: AccessibilitySettings = AccessibilitySettings(),
+    val actionError: String? = null,
+)
+
 @HiltViewModel
 class AccessibilityViewModel @Inject constructor(
     private val prefs: AccessibilityPreferences,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(AccessibilitySettings())
-    val state: StateFlow<AccessibilitySettings> = _state
+    private val _state = MutableStateFlow(AccessibilityUiState())
+    val state: StateFlow<AccessibilityUiState> = _state
 
     init {
-        viewModelScope.launch { prefs.all.collect { _state.value = it } }
+        viewModelScope.launch { prefs.all.collect { s -> _state.update { it.copy(settings = s) } } }
     }
 
     /** State first, then persist — see `NotificationSettingsViewModel.set`. */
     fun setAlwaysShowLabels(enabled: Boolean) {
-        _state.update { it.copy(alwaysShowLabels = enabled) }
+        _state.update { it.copy(settings = it.settings.copy(alwaysShowLabels = enabled)) }
         viewModelScope.launch { runCatching { prefs.setAlwaysShowLabels(enabled) } }
     }
 
     fun setAutoplayVideos(enabled: Boolean) {
-        _state.update { it.copy(autoplayVideos = enabled) }
+        _state.update { it.copy(settings = it.settings.copy(autoplayVideos = enabled)) }
         viewModelScope.launch { runCatching { prefs.setAutoplayVideos(enabled) } }
     }
+
+    /**
+     * A settings screen this device could not open.
+     *
+     * Reported rather than swallowed: a row that does nothing on tap, twice, is
+     * indistinguishable from a broken app — and this is the accessibility screen, where the
+     * two rows it happens to are the ones pointing at the settings that actually matter.
+     */
+    fun reportActionError(message: String) = _state.update { it.copy(actionError = message) }
+
+    fun clearActionError() = _state.update { it.copy(actionError = null) }
 }
 
 /**
@@ -97,21 +120,37 @@ fun AccessibilityScreen(
         onBack = onBack,
         onAlwaysShowLabels = viewModel::setAlwaysShowLabels,
         onAutoplayVideos = viewModel::setAutoplayVideos,
-        onOpenTextSize = { openSystemSettings(context, Settings.ACTION_DISPLAY_SETTINGS) },
-        onOpenMotion = { openSystemSettings(context, Settings.ACTION_ACCESSIBILITY_SETTINGS) },
+        onOpenTextSize = {
+            openSystemSettings(
+                context,
+                Settings.ACTION_DISPLAY_SETTINGS,
+                "This device has no display settings screen to open. Text size lives in " +
+                    "Settings › Display.",
+            )?.let(viewModel::reportActionError)
+        },
+        onOpenMotion = {
+            openSystemSettings(
+                context,
+                Settings.ACTION_ACCESSIBILITY_SETTINGS,
+                "This device has no accessibility settings screen to open. Reduce motion " +
+                    "lives in Settings › Accessibility.",
+            )?.let(viewModel::reportActionError)
+        },
+        onDismissError = viewModel::clearActionError,
         modifier = modifier,
     )
 }
 
 @Composable
 private fun AccessibilityContent(
-    state: AccessibilitySettings,
+    state: AccessibilityUiState,
     systemReduceMotion: Boolean,
     onBack: () -> Unit,
     onAlwaysShowLabels: (Boolean) -> Unit,
     onAutoplayVideos: (Boolean) -> Unit,
     onOpenTextSize: () -> Unit,
     onOpenMotion: () -> Unit,
+    onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
@@ -154,7 +193,7 @@ private fun AccessibilityContent(
         SwitchRow(
             title = "Always show labels",
             subtitle = "Adds text under the tab-bar icons",
-            checked = state.alwaysShowLabels,
+            checked = state.settings.alwaysShowLabels,
             onCheckedChange = onAlwaysShowLabels,
             showHairline = false,
             modifier = Modifier.semantics { testTag = "a11y.alwaysShowLabels" },
@@ -166,11 +205,16 @@ private fun AccessibilityContent(
         SwitchRow(
             title = "Autoplay artist videos",
             subtitle = "Off means tap to play, always muted first",
-            checked = state.autoplayVideos,
+            checked = state.settings.autoplayVideos,
             onCheckedChange = onAutoplayVideos,
             showHairline = false,
             modifier = Modifier.semantics { testTag = "a11y.autoplay" },
         )
+
+        state.actionError?.let { message ->
+            AccountGap()
+            AccountFeedbackLine(message, colors.danger, onDismissError, "a11y.actionError")
+        }
 
         AccountGap(2)
         Text(
@@ -216,28 +260,31 @@ private fun AccessibilityFact(title: String, detail: String) {
 }
 
 /**
- * Open a system settings screen, swallowing the failure.
+ * Open a system settings screen, or return the line to show when this device has none.
  *
  * `startActivity` throws ActivityNotFoundException on the main thread straight out of a click
- * handler, and neither of these actions is guaranteed on every OEM/Go build. A settings screen
- * that will not open is a disappointment; a crash from tapping a settings row is a bug.
+ * handler, and neither of these actions is guaranteed on every OEM/Go build. A crash from
+ * tapping a settings row is a bug — but so is swallowing it: the row then does nothing at all,
+ * twice, which reads as a broken app, and it is these two rows that point at the settings this
+ * screen is actually about. So the failure is caught AND said out loud, with where to go
+ * instead.
  */
-private fun openSystemSettings(context: Context, action: String) {
-    runCatching { context.startActivity(Intent(action)) }
-}
+private fun openSystemSettings(context: Context, action: String, failure: String): String? =
+    runCatching { context.startActivity(Intent(action)); null }.getOrElse { failure }
 
 @Preview(showBackground = true, backgroundColor = 0xFFFFFFFF, heightDp = 800)
 @Composable
 private fun AccessibilityPreview() {
     ArtistantTheme {
         AccessibilityContent(
-            state = AccessibilitySettings(alwaysShowLabels = true),
+            state = AccessibilityUiState(AccessibilitySettings(alwaysShowLabels = true)),
             systemReduceMotion = false,
             onBack = {},
             onAlwaysShowLabels = {},
             onAutoplayVideos = {},
             onOpenTextSize = {},
             onOpenMotion = {},
+            onDismissError = {},
         )
     }
 }

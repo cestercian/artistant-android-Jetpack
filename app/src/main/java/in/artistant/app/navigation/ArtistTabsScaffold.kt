@@ -169,7 +169,7 @@ fun ArtistTabsScaffold() {
                 // It goes to the availability editor: the artist-side verb that
                 // actually changes what the market can see is "open a date", and
                 // that editor already exists. Not a new flow — a shortcut to one.
-                showLabels = a11ySettings.alwaysShowLabels,
+                showLabels = a11ySettings.settings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Availability",
                     icon = Icons.Filled.PlayArrow,

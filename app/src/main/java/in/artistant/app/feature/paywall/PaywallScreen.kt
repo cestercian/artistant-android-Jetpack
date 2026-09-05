@@ -97,7 +97,7 @@ fun PaywallScreen(
         onSubscribe = { viewModel.subscribe(context.findActivity(), onComplete) },
         onRetry = viewModel::load,
         onRestore = viewModel::restore,
-        onManageInPlay = { openPlaySubscription(context) },
+        onManageInPlay = { openPlaySubscription(context)?.let(viewModel::reportError) },
         onDismissPending = viewModel::dismissPending,
         modifier = modifier,
     )
@@ -114,14 +114,22 @@ fun PaywallScreen(
  *
  * `context.packageName` rather than the `applicationId` literal: the dev and staging flavours
  * carry suffixes, and the wrong package on this URL opens a store page for an app that does not
- * exist. A failure to resolve BOTH is swallowed — a store page that will not open is a
- * disappointment, not a crash out of a click handler.
+ * exist. A failure to resolve BOTH is caught rather than thrown — a store page that will not
+ * open is a disappointment, not a crash out of a click handler — and then REPORTED on the
+ * footer's error line, because a button that silently does nothing on a screen about somebody's
+ * paid subscription is worse than a sentence saying why.
+ *
+ * @return null when the page opened, or the line to show when nothing on this device could.
  */
-private fun openPlaySubscription(context: Context) {
+private fun openPlaySubscription(context: Context): String? {
     val url = "https://play.google.com/store/account/subscriptions" +
         "?package=${context.packageName}&sku=${PlayBillingService.PRODUCT_ID}"
-    runCatching {
+    return runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+        null
+    }.getOrElse {
+        "Couldn't open Google Play on this device. Manage the subscription from the Play " +
+            "Store app, under Payments and subscriptions."
     }
 }
 

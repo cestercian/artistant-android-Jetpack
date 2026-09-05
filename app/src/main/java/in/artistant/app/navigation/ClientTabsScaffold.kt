@@ -221,7 +221,7 @@ fun ClientTabsScaffold() {
                 // nothing to compose until an artist is picked — the funnel
                 // starts on a profile. A dedicated "new booking" flow is a
                 // section-PR decision, not a P1 invention.
-                showLabels = a11ySettings.alwaysShowLabels,
+                showLabels = a11ySettings.settings.alwaysShowLabels,
                 action = LightTabAction(
                     label = "Find an artist",
                     icon = Icons.Filled.Add,

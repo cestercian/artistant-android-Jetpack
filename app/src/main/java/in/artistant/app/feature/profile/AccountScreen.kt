@@ -401,25 +401,6 @@ private fun AccountContent(
     }
 }
 
-/** A tap-to-dismiss line under the list — the same affordance every action failure here gets. */
-@Composable
-private fun AccountFeedbackLine(
-    message: String,
-    color: androidx.compose.ui.graphics.Color,
-    onDismiss: () -> Unit,
-    tag: String,
-) {
-    Text(
-        message,
-        style = AppTheme.type.caption,
-        color = color,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onDismiss)
-            .padding(vertical = AppTheme.dimens.space.sm)
-            .semantics { testTag = tag },
-    )
-}
 
 /**
  * Which calendar the mirror writes to, when there is more than one to choose from.

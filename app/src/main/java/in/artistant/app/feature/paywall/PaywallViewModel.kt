@@ -125,6 +125,12 @@ class PaywallViewModel @Inject constructor(
     /** Stop showing screen 91 — the user chose to wait somewhere else. */
     fun dismissPending() = _state.update { it.copy(awaitingEntitlement = false) }
 
+    /**
+     * A system handoff the screen could not complete — no Play app and no browser for the
+     * subscription page. Reported on the footer's own error line instead of vanishing.
+     */
+    fun reportError(message: String) = _state.update { it.copy(error = message) }
+
     fun dismissError() = _state.update { it.copy(error = null) }
 }
 

@@ -1,6 +1,7 @@
 package `in`.artistant.app.feature.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import `in`.artistant.app.designsystem.component.hairlineTop
@@ -196,6 +199,33 @@ fun AccountStatBand(stats: List<AccountStat>, modifier: Modifier = Modifier) {
  * the artist band and the client band end up disagreeing about what "unknown" looks like.
  */
 fun accountStatValue(count: Int?): String = profileStatValue(count)
+
+/**
+ * A tap-to-dismiss line under a body — the affordance every action failure in this section gets.
+ *
+ * Lives here rather than in `AccountScreen` because three screens now report one: a settings row
+ * whose system handoff found no activity (no display settings, no accessibility settings, no
+ * Play listing) has to say so somewhere, and `startActivity` throwing out of a click handler
+ * takes the tab with it.
+ */
+@Composable
+fun AccountFeedbackLine(
+    message: String,
+    color: Color,
+    onDismiss: () -> Unit,
+    tag: String,
+) {
+    Text(
+        message,
+        style = AppTheme.type.caption,
+        color = color,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onDismiss)
+            .padding(vertical = AppTheme.dimens.space.sm)
+            .semantics { testTag = tag },
+    )
+}
 
 /** Vertical air between two blocks in an account body. */
 @Composable

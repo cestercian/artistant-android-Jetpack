@@ -36,9 +36,12 @@ enum class ExportRestore {
 }
 
 /**
- * How long an outstanding request stays meaningful — the same 24 hours screen 81 promises
- * ("requests take up to 24 hours to assemble"). Past it, the screen returns to Idle rather than
- * showing a spinner over a job nobody can account for.
+ * How long an outstanding request stays meaningful.
+ *
+ * A day, which is generous for a call that normally answers in seconds — the point is not to
+ * match a promised wait (the screen no longer makes one; `data-export` is synchronous) but to
+ * put a floor under how stale a restored "Requested" may be. Past it the screen returns to Idle
+ * rather than showing a spinner over a request nobody can account for.
  */
 const val EXPORT_REQUEST_TTL_MILLIS = 24L * 60 * 60 * 1000
 
