@@ -26,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import `in`.artistant.app.designsystem.component.LightTabAction
 import `in`.artistant.app.designsystem.component.LightTabBar
 import `in`.artistant.app.designsystem.component.LightTabItem
@@ -72,7 +71,6 @@ import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.AccessibilityScreen
 import `in`.artistant.app.feature.profile.AccessibilityViewModel
-import `in`.artistant.app.feature.profile.AccountScreen
 import `in`.artistant.app.feature.profile.DataExportScreen
 import `in`.artistant.app.feature.profile.DeleteAccountScreen
 import `in`.artistant.app.feature.profile.DevicesScreen
@@ -81,7 +79,6 @@ import `in`.artistant.app.feature.profile.NotificationSettingsScreen
 import `in`.artistant.app.feature.profile.ProfileScreen
 import `in`.artistant.app.feature.paywall.PaywallScreen
 import `in`.artistant.app.feature.system.ActivityScreen
-import `in`.artistant.app.feature.system.AppStore
 import `in`.artistant.app.feature.system.FeedbackScreen
 import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.RatePromptHost
@@ -160,9 +157,6 @@ fun ClientTabsScaffold() {
     // back-stack entry instead, and the sheet would be asked to open on a ViewModel nobody
     // is drawing.
     val whatsNew: WhatsNewViewModel = hiltViewModel()
-    // Screen 138's other half — the row that goes to the listing without waiting for a
-    // completed booking to earn the prompt.
-    val context = LocalContext.current
 
     // Push deep links: flip tab then push the detail/chat route.
     //
@@ -263,7 +257,12 @@ fun ClientTabsScaffold() {
                         // now was registered on both graphs with nothing
                         // pointing at it. Saved kept its Profile row (26) and is
                         // not lost with the heart that used to sit here.
-                        onOpenActivity = { nav.navigate(ClientNavRoutes.ACTIVITY) },
+                        onOpenActivity = {
+                            // Single-top: the bell is on the tab root, so a
+                            // second tap while Activity is already up would
+                            // otherwise stack a duplicate to back out of twice.
+                            nav.navigate(ClientNavRoutes.ACTIVITY) { launchSingleTop = true }
+                        },
                     )
                 }
             }
@@ -348,27 +347,15 @@ fun ClientTabsScaffold() {
                     )
                 }
             }
+            // Design 47 — the client's half of the ONE account list. Wired by
+            // [AccountDestination], which the artist graph shares; see its note.
             composable(ClientNavRoutes.ACCOUNT) {
                 TabPane(inner) {
-                    AccountScreen(
-                        onBack = { nav.popBackStack() },
-                        onBlockedAccounts = { nav.navigate(ClientNavRoutes.BLOCKED_ACCOUNTS) },
-                        onPrivacy = { nav.navigate(ClientNavRoutes.PRIVACY) },
-                        onSafetyCentre = { nav.navigate(ClientNavRoutes.SAFETY_CENTRE) },
-                        onHelpCentre = { nav.navigate(ClientNavRoutes.HELP_CENTRE) },
-                        onFeedback = { nav.navigate(ClientNavRoutes.FEEDBACK) },
-                        onActivity = { nav.navigate(ClientNavRoutes.ACTIVITY) },
-                        // Not a route: screen 137 is presented by the root's host, and this is
-                        // the root-scoped ViewModel that host draws — see [SystemRoutes].
-                        onWhatsNew = whatsNew::showOnDemand,
-                        onRateApp = { AppStore.openListing(context) },
-                        onNotifications = { nav.navigate(ClientNavRoutes.NOTIFICATIONS) },
-                        onLanguage = { nav.navigate(ClientNavRoutes.LANGUAGE) },
-                        onAccessibility = { nav.navigate(ClientNavRoutes.ACCESSIBILITY) },
-                        onDevices = { nav.navigate(ClientNavRoutes.DEVICES) },
-                        onDataExport = { nav.navigate(ClientNavRoutes.DATA_EXPORT) },
-                        onDeleteAccount = { nav.navigate(ClientNavRoutes.DELETE_ACCOUNT) },
-                        onSubscription = { nav.navigate(ClientNavRoutes.PAYWALL) },
+                    AccountDestination(
+                        nav = nav,
+                        routes = AccountRoutes.Client,
+                        whatsNew = whatsNew,
+                        ratePrompt = ratePrompt,
                     )
                 }
             }
