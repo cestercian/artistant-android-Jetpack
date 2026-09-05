@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -57,7 +56,6 @@ import `in`.artistant.app.feature.signup.LegalScreen
 import `in`.artistant.app.feature.signup.PrivacyScreen
 import `in`.artistant.app.feature.profile.AccessibilityScreen
 import `in`.artistant.app.feature.profile.AccessibilityViewModel
-import `in`.artistant.app.feature.profile.AccountScreen
 import `in`.artistant.app.feature.profile.DataExportScreen
 import `in`.artistant.app.feature.profile.DeleteAccountScreen
 import `in`.artistant.app.feature.profile.DevicesScreen
@@ -67,10 +65,10 @@ import `in`.artistant.app.feature.score.ScoreEditor
 import `in`.artistant.app.feature.score.ScoreExplainerScreen
 import `in`.artistant.app.feature.score.ScoreHistoryScreen
 import `in`.artistant.app.feature.system.ActivityScreen
-import `in`.artistant.app.feature.system.AppStore
 import `in`.artistant.app.feature.system.FeedbackScreen
 import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.ToastViewModel
+import `in`.artistant.app.feature.system.RatePromptViewModel
 import `in`.artistant.app.feature.system.WhatsNewViewModel
 import `in`.artistant.app.feature.wizard.WizardScreen
 
@@ -113,8 +111,11 @@ fun ArtistTabsScaffold() {
     // Screen 137, for the account list's "What's new" row — see [ClientTabsScaffold] for why
     // this resolves the same instance the root's `WhatsNewHost` draws.
     val whatsNew: WhatsNewViewModel = hiltViewModel()
-    // The Play listing, for the same list's "Rate Artistant" row (138).
-    val context = LocalContext.current
+    // Screen 138. The artist graph draws no `RatePromptHost` — the prompt is armed
+    // by a submitted review, which is the client's side — but the RECORD is one
+    // account-wide preference, so the settings row has to write it here too or an
+    // artist who rates from settings is asked again the next time they host.
+    val ratePrompt: RatePromptViewModel = hiltViewModel()
 
     // One-shot, for both reasons spelled out on [ClientTabsScaffold] and
     // [TabRouter]: a recreation must not re-apply a stale tab and pop the restored
@@ -220,26 +221,16 @@ fun ArtistTabsScaffold() {
             // note on this pair and the reason artist deletion is reachable at all.
             composable(ArtistNavRoutes.ACCOUNT) {
                 TabPane(inner) {
-                    AccountScreen(
-                        onBack = { nav.popBackStack() },
-                        onBlockedAccounts = { nav.navigate(ArtistNavRoutes.BLOCKED_ACCOUNTS) },
-                        onPrivacy = { nav.navigate(ArtistNavRoutes.PRIVACY) },
-                        onSafetyCentre = { nav.navigate(ArtistNavRoutes.SAFETY_CENTRE) },
-                        onHelpCentre = { nav.navigate(ArtistNavRoutes.HELP_CENTRE) },
-                        onFeedback = { nav.navigate(ArtistNavRoutes.FEEDBACK) },
-                        onActivity = { nav.navigate(ArtistNavRoutes.ACTIVITY) },
-                        // Not a route: screen 137 is presented by the root's host, and this is
-                        // the root-scoped ViewModel that host draws — see [SystemRoutes].
-                        onWhatsNew = whatsNew::showOnDemand,
-                        onRateApp = { AppStore.openListing(context) },
-                        onNotifications = { nav.navigate(ArtistNavRoutes.NOTIFICATIONS) },
-                        onLanguage = { nav.navigate(ArtistNavRoutes.LANGUAGE) },
-                        onAccessibility = { nav.navigate(ArtistNavRoutes.ACCESSIBILITY) },
-                        onDevices = { nav.navigate(ArtistNavRoutes.DEVICES) },
-                        onDataExport = { nav.navigate(ArtistNavRoutes.DATA_EXPORT) },
-                        onDeleteAccount = { nav.navigate(ArtistNavRoutes.DELETE_ACCOUNT) },
-                        onSubscription = { nav.navigate(ArtistNavRoutes.PAYWALL) },
-                        onManageAvailability = { nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY) },
+                    AccountDestination(
+                        nav = nav,
+                        routes = AccountRoutes.Artist,
+                        whatsNew = whatsNew,
+                        ratePrompt = ratePrompt,
+                        // The one role-specific tail: the client graph has no
+                        // availability editor to push.
+                        onManageAvailability = {
+                            nav.navigate(ArtistNavRoutes.MANAGE_AVAILABILITY)
+                        },
                     )
                 }
             }
@@ -313,6 +304,7 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     ActivityScreen(
                         role = AppRole.Artist,
+                        onBack = { nav.popBackStack() },
                         onOpenBooking = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
                         onOpenThread = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
                         // The three tab-only landings a push can ask for. They

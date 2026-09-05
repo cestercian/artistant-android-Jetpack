@@ -169,9 +169,14 @@ fun SkeletonRail(modifier: Modifier = Modifier) {
  * It announces itself as "Loading" and hides the blocks from the accessibility
  * tree — a screen reader has nothing useful to say about eight grey rectangles,
  * and reading their bounds one by one is worse than silence.
+ *
+ * [header] is for a screen that draws its REAL header above every state — the
+ * title, the city and the notification bell are known before the roster is, so
+ * there is nothing to placehold and a skeleton bar under a live title reads as
+ * a second, broken header.
  */
 @Composable
-fun SkeletonPage(modifier: Modifier = Modifier) {
+fun SkeletonPage(modifier: Modifier = Modifier, header: Boolean = true) {
     val dimens = AppTheme.dimens
     Column(
         modifier = modifier
@@ -183,7 +188,7 @@ fun SkeletonPage(modifier: Modifier = Modifier) {
             Modifier.clearAndSetSemantics { },
             verticalArrangement = Arrangement.spacedBy(dimens.space.lg),
         ) {
-            SkeletonHeader()
+            if (header) SkeletonHeader()
             SkeletonChips()
             SkeletonRail()
             SkeletonRail()
