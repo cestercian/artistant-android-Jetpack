@@ -443,6 +443,7 @@ fun ClientTabsScaffold() {
                 TabPane(inner) {
                     ActivityScreen(
                         role = AppRole.Client,
+                        onBack = { nav.popBackStack() },
                         onOpenBooking = { id -> nav.navigate(ClientNavRoutes.bookingDetail(id)) },
                         onOpenThread = { id -> nav.navigate(ClientNavRoutes.chat(id)) },
                         // A chat push whose thread id never arrived still has to

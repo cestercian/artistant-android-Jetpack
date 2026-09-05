@@ -313,6 +313,7 @@ fun ArtistTabsScaffold() {
                 TabPane(inner) {
                     ActivityScreen(
                         role = AppRole.Artist,
+                        onBack = { nav.popBackStack() },
                         onOpenBooking = { id -> nav.navigate(ArtistNavRoutes.bookingDetail(id)) },
                         onOpenThread = { id -> nav.navigate(ArtistNavRoutes.chat(id)) },
                         // The three tab-only landings a push can ask for. They

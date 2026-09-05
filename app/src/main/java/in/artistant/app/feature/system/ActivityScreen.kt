@@ -40,10 +40,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.designsystem.component.BackHeader
 import `in`.artistant.app.designsystem.component.Chip
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.GroupLabel
-import `in`.artistant.app.designsystem.component.ScreenHeader
 import `in`.artistant.app.designsystem.component.hairlineBottom
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -74,6 +74,14 @@ import `in`.artistant.app.navigation.PushPayloadRouter
 @Composable
 fun ActivityScreen(
     role: AppRole,
+    /**
+     * Activity is PUSHED on both graphs, and the tab bar is hidden while it is
+     * up — so the header's back circle is the only way out that is not a system
+     * gesture. It drew the tab-root `ScreenHeader` before, which has no back
+     * control at all: on a gesture-navigation device with no visible system
+     * back, the screen was a dead end.
+     */
+    onBack: () -> Unit,
     onOpenBooking: (bookingId: String) -> Unit,
     onOpenThread: (threadId: String) -> Unit,
     onOpenMessages: () -> Unit,
@@ -114,11 +122,19 @@ fun ActivityScreen(
             .background(colors.page),
     ) {
         Column(Modifier.padding(horizontal = dimens.component.gutter)) {
-            ScreenHeader(
+            BackHeader(
                 title = "Activity",
+                // Left-aligned with its subtitle under it, the way every other
+                // pushed screen that also states a fact about itself is drawn
+                // (60, 127, 34) — see `BackHeader`'s own note on `centered`.
                 subtitle = "Notifications received on this device",
-                trailing = {
-                    if (state.hasUnread) {
+                onBack = onBack,
+                centered = false,
+                // Only when there is something to mark. After the screen has
+                // been opened that means "something landed while you were
+                // reading" — see [ActivityUiState.hasUnread].
+                trailing = if (state.hasUnread) {
+                    {
                         Text(
                             text = "Mark all read",
                             style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
@@ -128,6 +144,8 @@ fun ActivityScreen(
                                 .padding(dimens.space.xs),
                         )
                     }
+                } else {
+                    null
                 },
             )
             Row(
