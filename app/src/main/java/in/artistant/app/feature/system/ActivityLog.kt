@@ -2,8 +2,11 @@ package `in`.artistant.app.feature.system
 
 import `in`.artistant.app.feature.messages.ViewerIdentity
 import `in`.artistant.app.platform.storage.KeyValueStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -234,13 +237,29 @@ class DataStoreActivityLog @Inject constructor(
      */
     private val mutex = Mutex()
 
+    /**
+     * The stored blob, parsed — off the main thread, and only when it changed.
+     *
+     * `KeyValueStore` is one DataStore file, so its flow re-emits on EVERY
+     * preference write in the app: the role, the seen version, the rate-prompt
+     * record. Without [distinctUntilChanged] each of those re-parsed a JSON
+     * string of up to [ACTIVITY_LOG_LIMIT] entries, and it did it on whatever
+     * dispatcher the collector was on — which for Discover's bell and screen
+     * 123 is the main one. [flowOn] moves the decode to [Dispatchers.Default];
+     * the filter above it is cheap but rides along, which is fine because
+     * nothing here touches the UI.
+     */
     override val entries: Flow<List<ActivityEntry>> =
-        store.getString(KEY).map { raw ->
-            // Signed out, the log shows nothing. It is not "empty" — it is not
-            // this session's to read, and the store is wiped on sign-out anyway.
-            val account = viewer.currentUserId() ?: return@map emptyList()
-            decode(raw).filter { it.userId == account }
-        }
+        store.getString(KEY)
+            .distinctUntilChanged()
+            .map { raw ->
+                // Signed out, the log shows nothing. It is not "empty" — it is
+                // not this session's to read, and the store is wiped on
+                // sign-out anyway.
+                val account = viewer.currentUserId() ?: return@map emptyList()
+                decode(raw).filter { it.userId == account }
+            }
+            .flowOn(Dispatchers.Default)
 
     override suspend fun record(entry: ActivityEntry) {
         // No session, no owner, no row. A push CAN land here between sign-out

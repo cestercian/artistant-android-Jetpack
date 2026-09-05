@@ -97,150 +97,163 @@ fun DiscoverScreen(
         onOpenSearch()
     }
 
-    PullToRefreshBox(
-        isRefreshing = state.isLoading && !state.isEmpty,
-        onRefresh = viewModel::refresh,
-        modifier = modifier
+    Column(
+        modifier
             .fillMaxSize()
             .background(AppTheme.colors.page)
             .semantics { testTag = "screen.discover" },
     ) {
-        when {
-            // Screen 59. Skeletons only while there is nothing at all to show;
-            // a refresh over a live feed gets the pull indicator instead, so the
-            // page the user is reading is never replaced by grey blocks.
-            state.isLoading && state.isEmpty && state.loadError == null -> {
-                SkeletonPage(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = gutter, vertical = dimens.space.md),
-                )
-            }
-            state.loadError != null && state.isEmpty -> {
-                EmptyState(
-                    title = "Couldn't load Discover",
-                    body = state.loadError,
-                    icon = Icons.Filled.FavoriteBorder,
-                    actionLabel = "Try again",
-                    onAction = viewModel::refresh,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            }
-            !state.isLoading && state.isEmpty -> {
-                // The copy used to read "Pull to refresh once the roster is
-                // live." — an instruction for the one gesture this branch cannot
-                // receive. PullToRefreshBox listens on a nested-scroll
-                // connection, and `EmptyState` is a plain Column with nothing
-                // scrollable in it, so no delta ever reaches the connection.
-                // Discover is also the NavHost start destination, so its
-                // ViewModel is never re-created and a tab switch won't refetch
-                // either: without a button of its own, an empty roster was a dead
-                // end.
-                EmptyState(
-                    title = if (state.selectedCategory != null) {
-                        "No ${state.selectedCategory} yet"
+        // Above the state branch, not inside the loaded one. The bell is this
+        // graph's only way to Activity from home, and it used to be composed
+        // only once the roster had landed — so a client whose feed was still
+        // loading, empty or failed had no notifications at all, and a failed
+        // feed is exactly when a missed alert matters. Nothing in the header
+        // waits on the roster: the title is a constant, the city and date come
+        // off the profile, and the dot comes off the device's own push log.
+        ScreenHeader(
+            title = "Discover",
+            subtitle = state.headerSubtitle,
+            modifier = Modifier
+                .padding(horizontal = gutter)
+                .padding(top = dimens.space.sm),
+            trailing = {
+                // The bell the design draws (02), now that it has somewhere to
+                // go: section SH shipped screen 123, and the dot counts the
+                // pushes THIS DEVICE received — the log Activity itself reads.
+                // Saved used to borrow this slot; it keeps its own row on
+                // Profile (26), which is where the design puts it.
+                IconCircle(
+                    icon = Icons.Outlined.Notifications,
+                    contentDescription = if (hasUnread) {
+                        "Activity, unread notifications"
                     } else {
-                        "No artists yet"
+                        "Activity"
                     },
-                    body = "We're onboarding the first artists right now — check back in a moment.",
-                    icon = Icons.Filled.FavoriteBorder,
-                    actionLabel = "Refresh",
-                    onAction = viewModel::refresh,
-                    secondaryLabel = state.selectedCategory?.let { "Show everything" },
-                    onSecondary = { viewModel.selectCategory(null) },
-                    modifier = Modifier.align(Alignment.Center),
+                    onClick = onOpenActivity,
+                    dot = hasUnread,
                 )
-            }
-            else -> {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        top = dimens.space.sm,
-                        bottom = dimens.size.listTailroom,
-                    ),
-                ) {
-                    item(key = "header") {
-                        ScreenHeader(
-                            title = "Discover",
-                            subtitle = state.headerSubtitle,
-                            modifier = Modifier.padding(horizontal = gutter),
-                            trailing = {
-                                // The bell the design draws (02), now that it has
-                                // somewhere to go: section SH shipped screen 123,
-                                // and the dot counts the pushes THIS DEVICE
-                                // received — the log Activity itself reads. Saved
-                                // used to borrow this slot; it keeps its own row
-                                // on Profile (26), which is where the design puts
-                                // it.
-                                IconCircle(
-                                    icon = Icons.Outlined.Notifications,
-                                    contentDescription = if (hasUnread) {
-                                        "Activity, unread notifications"
-                                    } else {
-                                        "Activity"
-                                    },
-                                    onClick = onOpenActivity,
-                                    dot = hasUnread,
+            },
+        )
+        PullToRefreshBox(
+            isRefreshing = state.isLoading && !state.isEmpty,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            when {
+                // Screen 59. Skeletons only while there is nothing at all to show;
+                // a refresh over a live feed gets the pull indicator instead, so the
+                // page the user is reading is never replaced by grey blocks.
+                state.isLoading && state.isEmpty && state.loadError == null -> {
+                    SkeletonPage(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = gutter, vertical = dimens.space.md),
+                        // The real header is already drawn above this branch; a
+                        // skeleton bar under a live title reads as a second,
+                        // broken header rather than as loading.
+                        header = false,
+                    )
+                }
+                state.loadError != null && state.isEmpty -> {
+                    EmptyState(
+                        title = "Couldn't load Discover",
+                        body = state.loadError,
+                        icon = Icons.Filled.FavoriteBorder,
+                        actionLabel = "Try again",
+                        onAction = viewModel::refresh,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+                !state.isLoading && state.isEmpty -> {
+                    // The copy used to read "Pull to refresh once the roster is
+                    // live." — an instruction for the one gesture this branch cannot
+                    // receive. PullToRefreshBox listens on a nested-scroll
+                    // connection, and `EmptyState` is a plain Column with nothing
+                    // scrollable in it, so no delta ever reaches the connection.
+                    // Discover is also the NavHost start destination, so its
+                    // ViewModel is never re-created and a tab switch won't refetch
+                    // either: without a button of its own, an empty roster was a dead
+                    // end.
+                    EmptyState(
+                        title = if (state.selectedCategory != null) {
+                            "No ${state.selectedCategory} yet"
+                        } else {
+                            "No artists yet"
+                        },
+                        body = "We're onboarding the first artists right now — check back in a moment.",
+                        icon = Icons.Filled.FavoriteBorder,
+                        actionLabel = "Refresh",
+                        onAction = viewModel::refresh,
+                        secondaryLabel = state.selectedCategory?.let { "Show everything" },
+                        onSecondary = { viewModel.selectCategory(null) },
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            top = dimens.space.sm,
+                            bottom = dimens.size.listTailroom,
+                        ),
+                    ) {
+                        item(key = "search") {
+                            SearchBarButton(
+                                hint = "Search artists, genres, cities",
+                                onClick = onOpenSearch,
+                                modifier = Modifier
+                                    .padding(horizontal = gutter)
+                                    .padding(top = dimens.space.lg),
+                            )
+                        }
+                        if (state.categories.isNotEmpty()) {
+                            item(key = "categories") {
+                                CategoryRail(
+                                    categories = state.categories,
+                                    selected = state.selectedCategory,
+                                    onSelect = viewModel::selectCategory,
+                                    modifier = Modifier.padding(top = dimens.space.md),
                                 )
-                            },
-                        )
-                    }
-                    item(key = "search") {
-                        SearchBarButton(
-                            hint = "Search artists, genres, cities",
-                            onClick = onOpenSearch,
-                            modifier = Modifier
-                                .padding(horizontal = gutter)
-                                .padding(top = dimens.space.lg),
-                        )
-                    }
-                    if (state.categories.isNotEmpty()) {
-                        item(key = "categories") {
-                            CategoryRail(
-                                categories = state.categories,
-                                selected = state.selectedCategory,
-                                onSelect = viewModel::selectCategory,
-                                modifier = Modifier.padding(top = dimens.space.md),
-                            )
+                            }
                         }
-                    }
-                    // A refresh that fails over a roster already on screen used
-                    // to be completely silent: the error branch above requires an
-                    // empty feed, so all a failed pull did was retract the
-                    // indicator — indistinguishable from a successful one, and
-                    // the user walks away believing the rails are current.
-                    // `refresh()` clears `loadError`, so it self-hides on the next
-                    // good load.
-                    state.loadError?.let { message ->
-                        item(key = "refreshError") {
-                            Banner(
-                                title = "Couldn't refresh the roster",
-                                detail = message,
-                                tone = BannerTone.Failure,
-                                actionLabel = "Retry",
-                                onAction = viewModel::refresh,
-                                modifier = Modifier
-                                    .padding(horizontal = gutter)
-                                    .padding(top = dimens.space.md)
-                                    .semantics { testTag = "discover.refreshErrorBanner" },
-                            )
+                        // A refresh that fails over a roster already on screen used
+                        // to be completely silent: the error branch above requires an
+                        // empty feed, so all a failed pull did was retract the
+                        // indicator — indistinguishable from a successful one, and
+                        // the user walks away believing the rails are current.
+                        // `refresh()` clears `loadError`, so it self-hides on the next
+                        // good load.
+                        state.loadError?.let { message ->
+                            item(key = "refreshError") {
+                                Banner(
+                                    title = "Couldn't refresh the roster",
+                                    detail = message,
+                                    tone = BannerTone.Failure,
+                                    actionLabel = "Retry",
+                                    onAction = viewModel::refresh,
+                                    modifier = Modifier
+                                        .padding(horizontal = gutter)
+                                        .padding(top = dimens.space.md)
+                                        .semantics { testTag = "discover.refreshErrorBanner" },
+                                )
+                            }
                         }
-                    }
-                    state.hero?.let { hero ->
-                        item(key = "hero") {
-                            DiscoverHero(
-                                artist = hero,
-                                saved = hero.id.lowercase() in savedIds,
-                                onToggleSave = { viewModel.toggleSaved(hero.id) },
-                                onClick = { onArtistClick(hero.id) },
-                                modifier = Modifier
-                                    .padding(horizontal = gutter)
-                                    .padding(top = dimens.space.md),
-                            )
+                        state.hero?.let { hero ->
+                            item(key = "hero") {
+                                DiscoverHero(
+                                    artist = hero,
+                                    saved = hero.id.lowercase() in savedIds,
+                                    onToggleSave = { viewModel.toggleSaved(hero.id) },
+                                    onClick = { onArtistClick(hero.id) },
+                                    modifier = Modifier
+                                        .padding(horizontal = gutter)
+                                        .padding(top = dimens.space.md),
+                                )
+                            }
                         }
-                    }
-                    state.rails.forEach { rail ->
-                        railSection(rail, onArtistClick, seeAll)
+                        state.rails.forEach { rail ->
+                            railSection(rail, onArtistClick, seeAll)
+                        }
                     }
                 }
             }

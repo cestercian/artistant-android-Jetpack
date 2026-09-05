@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -40,10 +41,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import `in`.artistant.app.designsystem.component.BackHeader
 import `in`.artistant.app.designsystem.component.Chip
 import `in`.artistant.app.designsystem.component.EmptyState
 import `in`.artistant.app.designsystem.component.GroupLabel
-import `in`.artistant.app.designsystem.component.ScreenHeader
 import `in`.artistant.app.designsystem.component.hairlineBottom
 import `in`.artistant.app.designsystem.theme.AppRole
 import `in`.artistant.app.designsystem.theme.AppTheme
@@ -74,6 +75,14 @@ import `in`.artistant.app.navigation.PushPayloadRouter
 @Composable
 fun ActivityScreen(
     role: AppRole,
+    /**
+     * Activity is PUSHED on both graphs, and the tab bar is hidden while it is
+     * up — so the header's back circle is the only way out that is not a system
+     * gesture. It drew the tab-root `ScreenHeader` before, which has no back
+     * control at all: on a gesture-navigation device with no visible system
+     * back, the screen was a dead end.
+     */
+    onBack: () -> Unit,
     onOpenBooking: (bookingId: String) -> Unit,
     onOpenThread: (threadId: String) -> Unit,
     onOpenMessages: () -> Unit,
@@ -86,6 +95,11 @@ fun ActivityScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
+
+    // Opening the screen is reading it. The rows keep their unread treatment
+    // for the length of the visit; the store does not — which is what finally
+    // clears the bell on Discover. See [ActivityViewModel.markSeen].
+    LaunchedEffect(Unit) { viewModel.markSeen() }
 
     // A row is tappable only when this graph can actually serve where its
     // notification would have gone — see [openActivity].
@@ -114,11 +128,19 @@ fun ActivityScreen(
             .background(colors.page),
     ) {
         Column(Modifier.padding(horizontal = dimens.component.gutter)) {
-            ScreenHeader(
+            BackHeader(
                 title = "Activity",
+                // Left-aligned with its subtitle under it, the way every other
+                // pushed screen that also states a fact about itself is drawn
+                // (60, 127, 34) — see `BackHeader`'s own note on `centered`.
                 subtitle = "Notifications received on this device",
-                trailing = {
-                    if (state.hasUnread) {
+                onBack = onBack,
+                centered = false,
+                // Only when there is something to mark. After the screen has
+                // been opened that means "something landed while you were
+                // reading" — see [ActivityUiState.hasUnread].
+                trailing = if (state.hasUnread) {
+                    {
                         Text(
                             text = "Mark all read",
                             style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
@@ -128,6 +150,8 @@ fun ActivityScreen(
                                 .padding(dimens.space.xs),
                         )
                     }
+                } else {
+                    null
                 },
             )
             Row(
@@ -179,6 +203,7 @@ fun ActivityScreen(
                 items(today, key = { it.id }) { entry ->
                     ActivityRow(
                         entry = entry,
+                        unread = state.showsUnread(entry),
                         accented = entry.id == state.accentedId,
                         nowMs = nowMs,
                         onClick = openFor(entry),
@@ -198,6 +223,7 @@ fun ActivityScreen(
                 items(earlier, key = { it.id }) { entry ->
                     ActivityRow(
                         entry = entry,
+                        unread = state.showsUnread(entry),
                         accented = entry.id == state.accentedId,
                         nowMs = nowMs,
                         onClick = openFor(entry),
@@ -300,6 +326,11 @@ private fun openActivity(
 @Composable
 private fun ActivityRow(
     entry: ActivityEntry,
+    /**
+     * Whether the row still DRAWS as unread, which outlives the stored flag by
+     * one visit — see [ActivityUiState.unreadOnArrival].
+     */
+    unread: Boolean,
     accented: Boolean,
     nowMs: Long,
     onClick: (() -> Unit)?,
@@ -320,7 +351,7 @@ private fun ActivityRow(
                     entry.title,
                     entry.body,
                     relativeStamp(entry.receivedAtMs, nowMs),
-                    if (entry.read) "" else "unread",
+                    if (unread) "unread" else "",
                 ).filter { it.isNotBlank() }.joinToString(". ")
             },
         horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
@@ -348,7 +379,7 @@ private fun ActivityRow(
                 // sets an unread row at 700 and a read one at 600, which survives
                 // a glance where a 8dp dot on the far edge does not.
                 style = AppTheme.type.rowTitle.copy(
-                    fontWeight = if (entry.read) FontWeight.SemiBold else FontWeight.Bold,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
                 ),
                 color = colors.ink,
                 maxLines = 2,
@@ -375,7 +406,7 @@ private fun ActivityRow(
                 color = colors.ink3,
                 maxLines = 1,
             )
-            if (!entry.read) {
+            if (unread) {
                 Box(
                     Modifier
                         .size(dimens.dashboard.bannerDot)
@@ -418,6 +449,7 @@ private fun ActivityRowPreview() {
                     body = "Fri 25 Oct is held",
                     receivedAtMs = 0L,
                 ),
+                unread = true,
                 accented = true,
                 nowMs = 120_000L,
                 onClick = {},
@@ -432,6 +464,7 @@ private fun ActivityRowPreview() {
                     receivedAtMs = 0L,
                     read = true,
                 ),
+                unread = false,
                 accented = false,
                 nowMs = 172_800_000L,
                 onClick = {},

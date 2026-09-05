@@ -2,6 +2,7 @@ package `in`.artistant.app.feature.system
 
 import `in`.artistant.app.testsupport.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -109,5 +110,82 @@ class ActivityViewModelTest {
         log.record(entry("newest", "booking_reminder_24h", at = 400))
         assertEquals("newest", vm.state.value.all.first().id)
         assertEquals("newest", vm.state.value.accentedId)
+    }
+
+    // ── seen-on-open ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `opening the screen marks the log read`() = runTest {
+        // The bug: unread could only be cleared from this screen's own header,
+        // so the bell on Discover kept its dot after the user had read every
+        // row it stood for.
+        val log = FakeActivityLog(seeded)
+        val vm = ActivityViewModel(log)
+        subscribe(vm)
+        vm.markSeen()
+        assertTrue(vm.state.value.all.all { it.read })
+        assertEquals(0, unreadActivityCount(log.entries.first()))
+    }
+
+    @Test
+    fun `the rows that were unread on arrival still draw as unread`() = runTest {
+        // Marking the STORE read must not take away the one thing the screen
+        // answers: which of these had I not seen.
+        val vm = ActivityViewModel(FakeActivityLog(seeded))
+        subscribe(vm)
+        vm.markSeen()
+        val state = vm.state.value
+        assertTrue(state.showsUnread(state.all.first { it.id == "confirmed" }))
+        assertTrue(state.showsUnread(state.all.first { it.id == "quote" }))
+        // Already read before the visit; nothing about arriving changes that.
+        assertFalse(state.showsUnread(state.all.first { it.id == "chat" }))
+        assertEquals("confirmed", state.accentedId)
+    }
+
+    @Test
+    fun `mark all read is offered only once something lands while the screen is open`() = runTest {
+        val log = FakeActivityLog(seeded)
+        val vm = ActivityViewModel(log)
+        subscribe(vm)
+        vm.markSeen()
+        assertFalse("nothing left to mark straight after opening", vm.state.value.hasUnread)
+        log.record(entry("landed", "booking_reminder_24h", at = 400))
+        assertTrue("a push arriving mid-visit brings the action back", vm.state.value.hasUnread)
+    }
+
+    @Test
+    fun `the button clears the arrival snapshot too`() = runTest {
+        // Pressing it is a statement about every row on screen, not just the
+        // ones that arrived since — so they all stop drawing as unread.
+        val vm = ActivityViewModel(FakeActivityLog(seeded))
+        subscribe(vm)
+        vm.markSeen()
+        vm.markAllRead()
+        val state = vm.state.value
+        assertTrue(state.all.none { state.showsUnread(it) })
+        assertNull(state.accentedId)
+    }
+
+    @Test
+    fun `the arrival snapshot is taken once, not again after a recomposition`() = runTest {
+        // `markSeen` runs from a composition effect, and the ViewModel outlives
+        // a configuration change. A second snapshot would be taken after the
+        // first marked everything read — every row on screen would lose its
+        // unread treatment mid-visit.
+        val vm = ActivityViewModel(FakeActivityLog(seeded))
+        subscribe(vm)
+        vm.markSeen()
+        vm.markSeen()
+        val state = vm.state.value
+        assertTrue(state.showsUnread(state.all.first { it.id == "confirmed" }))
+    }
+
+    @Test
+    fun `nothing is offered to mark before the visit has resolved`() = runTest {
+        // Between the log landing and `markSeen` answering, the action must not
+        // flash up and vanish.
+        val vm = ActivityViewModel(FakeActivityLog(seeded))
+        subscribe(vm)
+        assertFalse(vm.state.value.hasUnread)
     }
 }
