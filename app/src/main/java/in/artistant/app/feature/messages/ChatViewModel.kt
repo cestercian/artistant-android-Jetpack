@@ -13,6 +13,7 @@ import `in`.artistant.app.data.repository.MessagesRepository
 import `in`.artistant.app.data.repository.MessagesSubscription
 import `in`.artistant.app.data.repository.PendingReport
 import `in`.artistant.app.data.repository.ReportOutcome
+import `in`.artistant.app.data.repository.ReportSubmission
 import `in`.artistant.app.data.repository.ReportsRepository
 import `in`.artistant.app.data.repository.RequestsRepository
 import kotlinx.coroutines.channels.Channel
@@ -130,37 +131,19 @@ data class ChatUiState(
     val artistSubtitle: String = "",
     val artistScore: Int? = null,
     /**
-     * A report that reached SOMEWHERE — `public.reports` or this install's local
-     * log. Null until one has.
+     * Filing a report against this conversation: the receipt, the loss, the
+     * in-flight guard and the stamp that orders overlapping attempts. Shared with
+     * the artist profile — see [ReportSubmission], which owns every rule about it.
      *
-     * The distinction is the whole point: the sheet used to flip one boolean
-     * after every call and print "the report is with our safety team" over all
-     * three outcomes, including the one where nothing had been stored at all.
-     * [ReportOutcome.Queued] is not a failure and the copy must not call it one,
-     * but it is not a delivery either. [ReportOutcome.Failed] never lands here —
-     * it is durable state with an action attached, so it rides [failedReport].
+     * Unlike the profile, this surface renders its RECEIPT in place
+     * (`ReportSubmission.outcome`): the details sheet stays up through the round
+     * trip and turns into the answer, which is why the distinction between `Sent`
+     * and `Queued` has to survive here rather than fading in a toast. The sheet
+     * used to flip one boolean after every call and print "the report is with our
+     * safety team" over all three outcomes, including the one where nothing had
+     * been stored at all.
      */
-    val reportOutcome: ReportOutcome? = null,
-    /**
-     * A report nothing is holding — the insert failed AND so did the local log.
-     *
-     * Keeps the reader's own reason and note so the retry doesn't ask them to
-     * write it twice, and deliberately SURVIVES closing the sheet: the receipt
-     * is a momentary fact, but "your safety report was lost" is a state, and it
-     * goes away when it is fixed or explicitly discarded, not when a sheet is
-     * dismissed.
-     */
-    val failedReport: PendingReport? = null,
-    /**
-     * A report is in flight.
-     *
-     * The form does not close on submit — it stays up and only becomes a receipt
-     * when the outcome lands — so without this the CTA is live for the whole
-     * round trip and a second tap files the SAME report again. Duplicates are
-     * not free here: they are two rows in `public.reports` against one person for
-     * one thing, which is noise the moderation team reads as a pattern.
-     */
-    val isSubmittingReport: Boolean = false,
+    val report: ReportSubmission = ReportSubmission(),
     /**
      * The other person's user id, for blocking (mig 0087). Unlike [artistId] this
      * is populated on BOTH seats — an artist blocks a client just as a client
@@ -219,13 +202,6 @@ class ChatViewModel @Inject constructor(
     val events = _events.receiveAsFlow()
 
     private var subscription: MessagesSubscription? = null
-    /**
-     * Bumped on each report attempt, and in [onCleared], so a completion that is
-     * no longer the current one cannot write state. Same idiom, and the same
-     * reason, as [subscribeGeneration] below it.
-     */
-    private var reportGeneration = 0
-
     /** Bumped on each subscribe attempt so a superseded join is discarded. */
     private var subscribeGeneration = 0
 
@@ -703,8 +679,13 @@ class ChatViewModel @Inject constructor(
 
     /** Closing takes the sheet's own failure line with it — see [ChatUiState.actionError]. */
     fun dismissDetails() = _state.update {
-        // `failedReport` deliberately survives: see [ChatUiState.failedReport].
-        it.copy(showDetails = false, reportOutcome = null, actionError = null)
+        // The RECEIPT goes with the sheet — it was a momentary fact and it has been
+        // read. `ReportSubmission.failed` deliberately survives: see [ChatUiState.report].
+        it.copy(
+            showDetails = false,
+            report = it.report.copy(outcome = null),
+            actionError = null,
+        )
     }
 
     fun dismissSafetyBanner() = viewModelScope.launch { flagsStore.dismissSafetyBanner(threadId) }
@@ -794,13 +775,12 @@ class ChatViewModel @Inject constructor(
     fun reportConversation(reason: String, details: String? = null) {
         // One report per tap. The sheet keeps the form up for the whole round
         // trip — it has no outcome to render yet — so the CTA stays live, and a
-        // double tap used to file the row twice.
-        if (_state.value.isSubmittingReport) return
-        reportGeneration += 1
-        val myGeneration = reportGeneration
-        _state.update {
-            it.copy(reportOutcome = null, failedReport = null, isSubmittingReport = true)
-        }
+        // double tap used to file the row twice. `starting()` returns null when one
+        // is already out; that is the guard, and it is [ReportSubmission]'s, not a
+        // second copy of the profile's.
+        val started = _state.value.report.starting() ?: return
+        val myGeneration = started.generation
+        _state.update { it.copy(report = it.report.starting() ?: it.report) }
         viewModelScope.launch {
             val outcome = runCatching { reports.reportConversation(threadId, reason, details) }
                 // A throw is a contract violation (the interface promises not
@@ -808,27 +788,20 @@ class ChatViewModel @Inject constructor(
                 // one: we know nothing about where the report went.
                 .getOrDefault(ReportOutcome.Failed)
             _state.update { state ->
-                // The flag belongs to the attempt that is finishing, so it is
-                // always released — a superseded completion that returned early
-                // without clearing it would wedge the form shut for good.
-                val settled = state.copy(isSubmittingReport = false)
-                when {
-                    // Superseded or retired (see [onCleared]): the write is not
-                    // ours to make, and claiming an outcome for a report the
-                    // reader has moved on from is how a dismissed banner comes
-                    // back from the dead.
-                    myGeneration != reportGeneration -> settled
-                    outcome == ReportOutcome.Failed ->
-                        settled.copy(failedReport = PendingReport(reason, details), reportOutcome = null)
-                    else -> settled.copy(reportOutcome = outcome, failedReport = null)
-                }
+                state.copy(
+                    report = state.report.settling(
+                        outcome = outcome,
+                        pending = PendingReport(reason, details),
+                        generation = myGeneration,
+                    ),
+                )
             }
         }
     }
 
     /** Re-file the report the reader already wrote, from the failure banner. */
     fun retryReport() {
-        val pending = _state.value.failedReport ?: return
+        val pending = _state.value.report.failed ?: return
         reportConversation(pending.reason, pending.details)
     }
 
@@ -837,12 +810,13 @@ class ChatViewModel @Inject constructor(
      *
      * A separate control from [retryReport] and never a timeout: the banner says
      * nothing is holding the report, so it must not vanish on its own while that
-     * is still true.
+     * is still true. `dismissing()` also releases the in-flight flag — the retired
+     * attempt's own completion is ignored by the stamp, so nothing else ever would.
      */
-    fun discardFailedReport() = _state.update { it.copy(failedReport = null) }
+    fun discardFailedReport() = _state.update { it.copy(report = it.report.dismissing()) }
 
     override fun onCleared() {
-        reportGeneration += 1
+        _state.update { it.copy(report = it.report.retired()) }
         subscribeGeneration += 1
         subscription?.cancel()
         subscription = null

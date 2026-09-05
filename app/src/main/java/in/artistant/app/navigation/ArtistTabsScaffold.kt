@@ -70,6 +70,7 @@ import `in`.artistant.app.feature.system.HelpCentreScreen
 import `in`.artistant.app.feature.system.ToastViewModel
 import `in`.artistant.app.feature.system.RatePromptViewModel
 import `in`.artistant.app.feature.system.WhatsNewViewModel
+import `in`.artistant.app.ui.SessionDegradedTopBar
 import `in`.artistant.app.feature.wizard.WizardScreen
 
 /**
@@ -157,6 +158,10 @@ fun ArtistTabsScaffold() {
         // See [ClientTabsScaffold] — the light design has no ambient wash, just
         // the flat page ground.
         containerColor = AppTheme.colors.page,
+        // Nothing at all unless the session has stopped refreshing, in which case
+        // every destination below gets told before it loses a write. See
+        // [SessionDegradedTopBar].
+        topBar = { SessionDegradedTopBar() },
         bottomBar = {
             if (!showBottomBar) return@Scaffold
             LightTabBar(

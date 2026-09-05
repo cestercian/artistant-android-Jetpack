@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.theme.AppTheme
+import `in`.artistant.app.ui.SessionDegradedFrame
 import `in`.artistant.app.designsystem.theme.motion
 import `in`.artistant.app.designsystem.theme.motionTween
 import `in`.artistant.app.ui.auth.AuthViewModel
@@ -117,79 +118,86 @@ fun SignupFlow(
     }
 
     Box(modifier = modifier.fillMaxSize().background(AppTheme.colors.surface)) {
-        // Built here rather than inside `transitionSpec`, which is not a composable scope.
-        // motionTween owns the reduce-motion branch, so the step swap is instant for a user who
-        // has asked the system to stop animating — a raw `tween` animated regardless.
-        val fade = motionTween<Float>(AppTheme.motion.tabSwitch)
-        AnimatedContent(
-            targetState = if (state.emailSignUp) EMAIL_SIGN_UP_KEY else state.step.name,
-            transitionSpec = { fadeIn(fade) togetherWith fadeOut(fade) },
-            label = "signupStep",
-        ) { key ->
-            when {
-                key == EMAIL_SIGN_UP_KEY -> EmailSignUpScreen(onCancel = viewModel::closeEmailSignUp)
+        // The gate keeps this tier up through a token-refresh failure — dropping a half-typed
+        // profile onto the auth screen over a network blip is the bug that put it there — so
+        // the flow has to say when the session behind it cannot write. Nothing at all when the
+        // session is healthy; see [SessionDegradedFrame] for why the layout is the same shape
+        // either way.
+        SessionDegradedFrame {
+            // Built here rather than inside `transitionSpec`, which is not a composable scope.
+            // motionTween owns the reduce-motion branch, so the step swap is instant for a user who
+            // has asked the system to stop animating — a raw `tween` animated regardless.
+            val fade = motionTween<Float>(AppTheme.motion.tabSwitch)
+            AnimatedContent(
+                targetState = if (state.emailSignUp) EMAIL_SIGN_UP_KEY else state.step.name,
+                transitionSpec = { fadeIn(fade) togetherWith fadeOut(fade) },
+                label = "signupStep",
+            ) { key ->
+                when {
+                    key == EMAIL_SIGN_UP_KEY -> EmailSignUpScreen(onCancel = viewModel::closeEmailSignUp)
 
-                key == SignupStep.Welcome.name -> WelcomeScreen(
-                    termsAccepted = state.termsAccepted,
-                    onTermsToggle = viewModel::setTerms,
-                    onGetStarted = viewModel::startSignup,
-                    onLogin = viewModel::startLogin,
-                )
+                    key == SignupStep.Welcome.name -> WelcomeScreen(
+                        termsAccepted = state.termsAccepted,
+                        onTermsToggle = viewModel::setTerms,
+                        onGetStarted = viewModel::startSignup,
+                        onLogin = viewModel::startLogin,
+                    )
 
-                key == SignupStep.Role.name ->
-                    if (state.communityAgreed) {
-                        RoleScreen(
-                            selected = state.role,
-                            onPick = viewModel::pickRole,
-                            onAdvance = viewModel::advance,
-                            onBack = if (state.canGoBack) viewModel::back else null,
-                            hydrationError = profileHydrationError,
-                            onRetryHydration = onRetryHydration,
-                        )
-                    } else {
-                        CommunityCommitmentScreen(
-                            onAgree = viewModel::agreeCommunity,
-                            onBack = if (state.canGoBack) viewModel::back else null,
-                        )
-                    }
+                    key == SignupStep.Role.name ->
+                        if (state.communityAgreed) {
+                            RoleScreen(
+                                selected = state.role,
+                                onPick = viewModel::pickRole,
+                                onAdvance = viewModel::advance,
+                                onBack = if (state.canGoBack) viewModel::back else null,
+                                hydrationError = profileHydrationError,
+                                onRetryHydration = onRetryHydration,
+                            )
+                        } else {
+                            CommunityCommitmentScreen(
+                                onAgree = viewModel::agreeCommunity,
+                                onBack = if (state.canGoBack) viewModel::back else null,
+                            )
+                        }
 
-                key == SignupStep.Auth.name -> SignupAuthScreen(
-                    mode = state.mode,
-                    authNotice = state.authNotice,
-                    onCodeSent = viewModel::goToCode,
-                    onOpenEmailSignUp = viewModel::openEmailSignUp,
-                    onStartSignup = viewModel::switchToSignup,
-                    onBack = if (state.canGoBack) viewModel::back else null,
-                    onOpenLegal = { legalDoc = it },
-                )
+                    key == SignupStep.Auth.name -> SignupAuthScreen(
+                        mode = state.mode,
+                        authNotice = state.authNotice,
+                        onCodeSent = viewModel::goToCode,
+                        onOpenEmailSignUp = viewModel::openEmailSignUp,
+                        onStartSignup = viewModel::switchToSignup,
+                        onBack = if (state.canGoBack) viewModel::back else null,
+                        onOpenLegal = { legalDoc = it },
+                    )
 
-                // EnterCodeScreen clears the attempt itself on both of these — it is the
-                // screen that knows they are exits. `leaveStep` is here for the system back
-                // gesture, which never reaches a callback at all.
-                key == SignupStep.Code.name -> EnterCodeScreen(
-                    onChangeNumber = viewModel::back,
-                    onUseEmailInstead = viewModel::openEmailSignUp,
-                )
+                    // EnterCodeScreen clears the attempt itself on both of these — it is the
+                    // screen that knows they are exits. `leaveStep` is here for the system back
+                    // gesture, which never reaches a callback at all.
+                    key == SignupStep.Code.name -> EnterCodeScreen(
+                        onChangeNumber = viewModel::back,
+                        onUseEmailInstead = viewModel::openEmailSignUp,
+                    )
 
-                key == SignupStep.Profile.name -> ProfileScreen(
-                    state = state,
-                    onHandleChange = viewModel::setHandle,
-                    onNameChange = viewModel::setName,
-                    onCityChange = viewModel::setCity,
-                    onBack = viewModel::back,
-                    onContinue = viewModel::saveProfile,
-                    hydrationError = profileHydrationError,
-                    onRetryHydration = onRetryHydration,
-                )
+                    key == SignupStep.Profile.name -> ProfileScreen(
+                        state = state,
+                        onHandleChange = viewModel::setHandle,
+                        onNameChange = viewModel::setName,
+                        onCityChange = viewModel::setCity,
+                        onBack = viewModel::back,
+                        onContinue = viewModel::saveProfile,
+                        hydrationError = profileHydrationError,
+                        onRetryHydration = onRetryHydration,
+                    )
 
-                key == SignupStep.Notif.name -> NotifPermissionScreen(onAdvance = viewModel::advance)
+                    key == SignupStep.Notif.name -> NotifPermissionScreen(onAdvance = viewModel::advance)
 
-                else -> DoneScreen(
-                    firstName = state.firstName,
-                    city = state.city,
-                    role = state.role,
-                    onStartExploring = viewModel::finish,
-                )
+                    else -> DoneScreen(
+                        firstName = state.firstName,
+                        city = state.city,
+                        role = state.role,
+                        onStartExploring = viewModel::finish,
+                    )
+                }
             }
         }
     }

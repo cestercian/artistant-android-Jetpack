@@ -21,6 +21,22 @@ sealed interface RootGate {
     data object NotSignedIn : RootGate
     data object Onboarding : RootGate
 
+    /**
+     * A session we cannot refresh, met before this launch ever routed anybody.
+     *
+     * [SessionStatus.RefreshFailure] on top of [Loading] — a cold start with an expired
+     * token and no network. It is not a sign-out (the refresh token may still be good, and
+     * the signup draft must survive), but it is not a session either: while the status is
+     * `RefreshFailure`, `currentSessionOrNull()` answers null, so every read is anonymous
+     * and every write is dropped by RLS. Holding [Loading] here parked the user on the
+     * splash with no exit, because supabase-kt re-emits `RefreshFailure` every ten seconds
+     * for as long as the device is offline and publishes no other status in between.
+     *
+     * So it gets a screen of its own: the splash, plus a banner that says the app is
+     * reconnecting and a way to sign in again for anyone who would rather not wait.
+     */
+    data object Reconnecting : RootGate
+
     /** Signed-in artist whose base profile is done but whose EPK wizard isn't (`artists`
      *  row missing / `setup_complete=false`) → the M5b onboarding wizard, NOT the profile
      *  step (which they've already finished) and NOT the artist tabs (half-built dashboard).
@@ -40,29 +56,55 @@ sealed interface RootGate {
  * It used to be written as `Initializing -> Loading` with an `else` that swallowed the other
  * two, and the two it swallowed are not sign-outs:
  *
- *  - [SessionStatus.RefreshFailure] is a token refresh that could not reach the server. The
- *    session is still in memory, supabase-kt is still retrying, and `currentSessionOrNull()`
- *    still answers — the user is signed in and momentarily un-refreshed. Routing them to
- *    [RootGate.NotSignedIn] over a network blip dropped a working session onto the auth
- *    screen, and because `ArtistantNavHost` resets the signup flow on every arrival at that
- *    gate, it also threw away whatever they had typed. So it HOLDS: [current] if we have
- *    already routed, [RootGate.Loading] if we never got that far.
+ *  - [SessionStatus.RefreshFailure] is a token refresh that could not reach the server.
+ *    supabase-kt keeps the session in memory and keeps retrying, so the refresh token may
+ *    well still be good and the account is not gone. Routing it to [RootGate.NotSignedIn]
+ *    over a network blip dropped a working session onto the auth screen, and because
+ *    `ArtistantNavHost` resets the signup flow on every arrival at that gate, it also threw
+ *    away whatever they had typed.
+ *
+ *    But it is NOT "signed in and momentarily un-refreshed", which is what this used to
+ *    claim: `currentSessionOrNull()` returns the session only while `sessionStatus.value is
+ *    Authenticated`, so through a `RefreshFailure` it answers **null** — `currentUserId` is
+ *    null, Postgrest falls back to the anon key, and every write RLS gates on `auth.uid()`
+ *    is refused. The session is unusable, not merely stale. So the gate holds a routed user
+ *    where they were ([current], with a banner over it — see
+ *    [in.artistant.app.platform.auth.SessionManager.sessionDegraded]) and sends a user it
+ *    never routed to [RootGate.Reconnecting] rather than parking them on a splash that has
+ *    no exit.
  *  - An unknown future status is the same call. Holding a hydrating session costs a moment
  *    on the splash; calling it a sign-out costs the session.
  *
  * [current] is the gate on screen. Passing it in rather than reading it keeps this pure, and
- * makes "a refresh failure changes nothing" a property a test can state directly.
+ * makes "a refresh failure leaves a routed user where they were" a property a test can state
+ * directly.
+ *
+ * @param bootstrapPending the debug harness is installing a synthetic session
+ *   ([in.artistant.app.platform.auth.SessionBootstrapHold]). Whatever the real session
+ *   currently says is about to be replaced, so nothing is decided until it lands.
  */
-fun gateForSessionStatus(status: SessionStatus, current: RootGate): RootGate? = when (status) {
+fun gateForSessionStatus(
+    status: SessionStatus,
+    current: RootGate,
+    bootstrapPending: Boolean = false,
+): RootGate? = when {
+    // The harness's import is in flight. Hold screen 01: the status we can see right now is
+    // the one it is about to overwrite, and rendering the signup flow for the width of that
+    // gap is exactly what the blocking wait in HarnessInstaller used to buy with an ANR risk.
+    bootstrapPending -> RootGate.Loading
     // Not ours to answer — the caller fetches the profile and calls gateFor.
-    is SessionStatus.Authenticated -> null
+    status is SessionStatus.Authenticated -> null
     // The persisted session is still being restored: hold screen 01 rather than flash the
     // auth screen at a user who turns out to be signed in.
-    is SessionStatus.Initializing -> RootGate.Loading
+    status is SessionStatus.Initializing -> RootGate.Loading
     // The one status that actually means "no session".
-    is SessionStatus.NotAuthenticated -> RootGate.NotSignedIn
-    // RefreshFailure and anything supabase-kt adds later: still hydrating, never signed out.
-    else -> if (current == RootGate.NotSignedIn) RootGate.Loading else current
+    status is SessionStatus.NotAuthenticated -> RootGate.NotSignedIn
+    // RefreshFailure and anything supabase-kt adds later: never signed out, but never
+    // usable either. A routed user keeps their screen; anyone else gets the one that says so.
+    current is RootGate.Tabs ||
+        current == RootGate.Onboarding ||
+        current == RootGate.ArtistWizard -> current
+    else -> RootGate.Reconnecting
 }
 
 /**
@@ -97,10 +139,21 @@ data class RoutingStep(val key: String?, val route: Boolean)
  *    [SessionStatus.Initializing] is the same shape (it parks the gate on
  *    [RootGate.Loading], so a skipped re-route would hold the splash), and an unknown future
  *    status gets the safe half of the trade.
+ *
+ * @param bootstrapPending see [gateForSessionStatus]. A session that is about to be replaced
+ *   is not one to route for: the pass would fetch the profile of whoever is signed in now and
+ *   settle a gate the import immediately contradicts. Forgetting the key is what makes the
+ *   import's own `Authenticated` emission route.
  */
-fun routingStep(status: SessionStatus, generation: Int, lastRoutedKey: String?): RoutingStep =
-    when (status) {
-        is SessionStatus.Authenticated -> {
+fun routingStep(
+    status: SessionStatus,
+    generation: Int,
+    lastRoutedKey: String?,
+    bootstrapPending: Boolean = false,
+): RoutingStep =
+    when {
+        bootstrapPending -> RoutingStep(key = null, route = false)
+        status is SessionStatus.Authenticated -> {
             val key = authAdvanceKey(status.session.user?.id?.lowercase(), generation)
             RoutingStep(key = key, route = key != lastRoutedKey)
         }

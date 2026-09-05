@@ -39,8 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import `in`.artistant.app.common.util.formatInr
-import `in`.artistant.app.data.repository.PendingReport
 import `in`.artistant.app.data.repository.ReportOutcome
+import `in`.artistant.app.data.repository.ReportSubmission
 import `in`.artistant.app.designsystem.component.Avatar
 import `in`.artistant.app.designsystem.component.Banner
 import `in`.artistant.app.designsystem.component.BannerTone
@@ -84,12 +84,13 @@ fun ThreadDetailsSheet(
      * offering an action that would have to guess who to block.
      */
     canBlock: Boolean,
-    /** Non-null once a report reached the server or this device's log. */
-    reportOutcome: ReportOutcome?,
-    /** Non-null when a report is held NOWHERE — the sheet owes a retry, not a receipt. */
-    failedReport: PendingReport?,
-    /** A report is in flight; the form stays up, so its CTA has to lock itself. */
-    isSubmittingReport: Boolean,
+    /**
+     * Filing a report, in one value: the receipt once it reached the server or
+     * this device's log, the loss when it reached neither (the sheet owes a retry,
+     * not a receipt), and the in-flight flag — the form stays up through the round
+     * trip, so every control on it has to lock itself.
+     */
+    report: ReportSubmission,
     /**
      * The last mute/block toggle didn't land. Rendered above the rows, because
      * this sheet is where the tap happened and the row it belongs to has already
@@ -144,9 +145,9 @@ fun ThreadDetailsSheet(
         SheetScaffold {
             SheetTitle(
                 title = when {
-                    failedReport != null -> "Report not sent"
-                    reportOutcome == ReportOutcome.Sent -> "Report received"
-                    reportOutcome == ReportOutcome.Queued -> "Report saved on this device"
+                    report.failed != null -> "Report not sent"
+                    report.outcome == ReportOutcome.Sent -> "Report received"
+                    report.outcome == ReportOutcome.Queued -> "Report saved on this device"
                     reporting -> "Report conversation"
                     blocking -> "Block $counterpartName?"
                     else -> "Thread details"
@@ -163,16 +164,17 @@ fun ThreadDetailsSheet(
                     // Ordered so the worst outcome wins: a retry that fails
                     // again must not be covered by the receipt of the attempt
                     // before it.
-                    failedReport != null -> ReportFailure(
+                    report.failed != null -> ReportFailure(
+                        retrying = report.inFlight,
                         onRetry = onRetryReport,
                         onDiscard = onDiscardReport,
                     )
 
-                    reportOutcome != null -> ReportReceipt(counterpartName, reportOutcome)
+                    report.outcome != null -> ReportReceipt(counterpartName, report.outcome)
 
                     reporting -> ReportConversationSheet(
                         counterpartName = counterpartName,
-                        submitting = isSubmittingReport,
+                        submitting = report.inFlight,
                         onSubmit = onReport,
                         onOpenSafetyCentre = onOpenSafetyCentre,
                         onBack = { reporting = false },
@@ -614,7 +616,7 @@ private fun ReportReceipt(counterpartName: String, outcome: ReportOutcome) {
                 ReportOutcome.Queued ->
                     "Saved on this device. It hasn't reached our safety team yet — " +
                         "we'll send it the next time you're online."
-                // Unreachable: Failed rides `failedReport` and renders
+                // Unreachable: Failed rides `ReportSubmission.failed` and renders
                 // [ReportFailure]. Stated rather than defaulted, so a future
                 // outcome cannot silently inherit the delivery sentence.
                 ReportOutcome.Failed -> "This report isn't saved anywhere yet."
@@ -645,7 +647,7 @@ private fun ReportReceipt(counterpartName: String, outcome: ReportOutcome) {
  * not disappear on its own while what it says is still true.
  */
 @Composable
-private fun ReportFailure(onRetry: () -> Unit, onDiscard: () -> Unit) {
+private fun ReportFailure(retrying: Boolean, onRetry: () -> Unit, onDiscard: () -> Unit) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     Column(
@@ -656,8 +658,13 @@ private fun ReportFailure(onRetry: () -> Unit, onDiscard: () -> Unit) {
             detail = "It didn't reach our safety team, and this device couldn't hold on to " +
                 "it either. Nothing about this conversation has been reported yet.",
             tone = BannerTone.Failure,
-            actionLabel = "Try again",
+            // The banner stays up for the whole retry — `ReportSubmission.starting()`
+            // keeps the loss rather than blinking it out — so the pill says it is
+            // working and stops taking taps, instead of inviting a second row in
+            // `public.reports` about one incident.
+            actionLabel = if (retrying) "Sending report…" else "Try again",
             onAction = onRetry,
+            actionEnabled = !retrying,
             modifier = Modifier.semantics { testTag = "threadDetails.reportRetry" },
         )
         Spacer(Modifier.height(dimens.space.md))

@@ -77,6 +77,14 @@ enum class BannerTone { Info, Note, Attention, Failure, Promotion }
  *   draws that pill as dark-on-light (screen 86), which is the one place a
  *   near-black fill appears in a content block: it has to out-rank a tinted
  *   banner without spending the screen's accent on a recovery button.
+ * @param actionEnabled false while the action is WORKING — the pill stays on
+ *   screen, wearing the label the caller gives it ("Sending report…"), and stops
+ *   taking taps. It is a separate parameter because the obvious alternative,
+ *   dropping `onAction` for the round trip, does not do this: the pill needs
+ *   BOTH halves to render at all, so a null callback took the whole control off
+ *   the banner mid-tap and the in-flight label was never drawn. A recovery
+ *   button that vanishes when you press it is the one thing worse than one that
+ *   files the report twice.
  */
 @Composable
 fun Banner(
@@ -88,6 +96,7 @@ fun Banner(
     onClick: (() -> Unit)? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    actionEnabled: Boolean = true,
 ) {
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
@@ -187,7 +196,14 @@ fun Banner(
             actionLabel != null && onAction != null -> Text(
                 actionLabel,
                 style = AppTheme.type.caption.copy(fontWeight = FontWeight.Bold),
-                color = if (promotion) colors.accent else colors.onDark,
+                // Disabled takes the app's one disabled treatment — the hairline
+                // fill and `ink3` label `PrimaryButton` uses — rather than a
+                // fade, which on a tinted banner reads as a rendering fault.
+                color = when {
+                    !actionEnabled -> colors.ink3
+                    promotion -> colors.accent
+                    else -> colors.onDark
+                },
                 maxLines = 1,
                 modifier = Modifier
                     // The label stays a caption; the tap node grows to the 44dp
@@ -195,8 +211,14 @@ fun Banner(
                     .sizeIn(minWidth = dimens.size.rowMin, minHeight = dimens.size.rowMin)
                     .wrapContentSize()
                     .clip(RoundedCornerShape(dimens.radii.sm))
-                    .background(if (promotion) colors.onAccent else colors.ink)
-                    .clickable(role = Role.Button, onClick = onAction)
+                    .background(
+                        when {
+                            !actionEnabled -> colors.hairline
+                            promotion -> colors.onAccent
+                            else -> colors.ink
+                        },
+                    )
+                    .clickable(enabled = actionEnabled, role = Role.Button, onClick = onAction)
                     .padding(horizontal = dimens.space.md, vertical = dimens.space.sm),
             )
             onClick != null -> Icon(
