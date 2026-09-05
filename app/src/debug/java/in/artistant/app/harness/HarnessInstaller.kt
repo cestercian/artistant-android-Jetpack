@@ -219,10 +219,19 @@ private object HarnessSession {
                     true
                 }
                 if (settled == true) {
-                    Timber.i("[harness] synthetic $role session installed")
-                } else {
-                    Timber.w("[harness] session import did not settle in ${IMPORT_TIMEOUT_MS}ms")
+                    Timber.i("[harness] synthetic $role session installed before first frame")
+                    return@launch
                 }
+                // The restore is taking longer than the gate is willing to hold the splash
+                // for. Drop the hold and finish the import late: the operator may see the
+                // signup flow for a moment first — the behaviour this method used to have
+                // unconditionally — which is still far better than a harness launch with no
+                // session at all. The timeout bounds the HOLD, not the import.
+                Timber.w("[harness] session import did not settle in ${IMPORT_TIMEOUT_MS}ms")
+                SessionBootstrapHold.end()
+                client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
+                client.auth.importSession(fakeSession(role), autoRefresh = false)
+                Timber.i("[harness] synthetic $role session installed (late)")
             } catch (t: Throwable) {
                 // Including a cancellation: the hold below must come down either way, or the
                 // harness leaves the app holding the splash for the rest of the process.

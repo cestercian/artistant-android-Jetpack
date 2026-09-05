@@ -2,7 +2,6 @@ package `in`.artistant.app.feature.artist
 
 import `in`.artistant.app.data.model.Artist
 import `in`.artistant.app.data.model.Review
-import `in`.artistant.app.data.repository.PendingReport
 import `in`.artistant.app.data.repository.ReportOutcome
 import `in`.artistant.app.domain.score.ScoreBands
 import `in`.artistant.app.domain.score.ScoreTier
