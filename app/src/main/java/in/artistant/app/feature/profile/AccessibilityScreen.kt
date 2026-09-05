@@ -176,7 +176,8 @@ private fun AccessibilityContent(
         Text(
             "Nothing in this version of Artistant starts playing on its own — samples and " +
                 "videos wait for a tap. This switch is what an autoplaying screen would read " +
-                "if one ever ships.",
+                "if one ever ships. Both switches are saved on this device and stay put when " +
+                "you sign out: they describe the phone, not the account.",
             style = AppTheme.type.caption,
             color = colors.ink4,
             modifier = Modifier.fillMaxWidth(),
