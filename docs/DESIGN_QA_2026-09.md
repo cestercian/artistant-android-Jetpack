@@ -1,8 +1,10 @@
 # Artistant Android — designer's-eye QA of the 138 "iOS Light" screens (Sep 5, 2026)
 
-**Scope.** Every screen of the Sep-2026 light redesign (11 sections, 138 design numbers,
-including the four the checklist marks blocked) plus the design-system layer and the
-global shell they inherit. Reviewed for visual inconsistency, spacing, hierarchy, copy
+**Scope.** Every screen of the Sep-2026 light redesign — 11 sections, 138 design numbers:
+132 itemised by a section auditor, four the checklist marks blocked (21, 125, 134, 135), and
+two more (126, 136) that no repo artefact keys and that are, by elimination, the blocked map
+search and promo-code designs (see the coverage matrix) — plus the design-system layer and
+the global shell they inherit. Reviewed for visual inconsistency, spacing, hierarchy, copy
 tone / AI-slop patterns, and slow or laggy interactions.
 
 **Method.** The design export (PNG/HTML) lives outside the repo and is not in this
@@ -83,7 +85,7 @@ Severity: **P1** visibly breaks the design language or blocks/slows the user; **
 
 ## Themes
 
-Each theme is one issue. Members are listed with the auditor's id; open the appendix for the evidence block and the full "what" and "fix".
+Each theme is one issue. Members are listed with the auditor's id; the Where column is deliberately abbreviated (marked with …) — the linked issue and the appendix carry every path and line. Open the appendix for the evidence block and the full "what" and "fix".
 
 ### T01 · [P1] Opening a chat blacks out the client app behind a spinner, then a stock Material dialog
 
@@ -588,17 +590,17 @@ Each theme is one issue. Members are listed with the auditor's id; open the appe
 
 ## Screen coverage — all 138 design numbers
 
-Section codes: GS = Getting started, DS = Discover & search, AP = The artist profile, BC = Book & confirm, BN = The booking & the night, MS = Messaging & safety, WZ = Artist setup wizard, PK = Press kit & media, AS = Artist studio, AC = Account & settings, SH = System & housekeeping. A screen with no finding of its own still inherits the cross-cutting (CC) and design-system (DSYS) themes.
+Section codes: GS = Getting started, DS = Discover & search, AP = The artist profile, BC = Book & confirm, BN = The booking & the night, MS = Messaging & safety, WZ = Artist setup wizard, PK = Press kit & media, AS = Artist studio, AC = Account & settings, SH = System & housekeeping. 132 designs were itemised by a section auditor; 21, 125, 134 and 135 are blocked (not shipped, by design); 126 and 136 are the two remaining blocked designs identified by elimination (note below). A screen with no finding of its own still inherits the cross-cutting (CC) and design-system (DSYS) themes. Cells are complete — nothing is clipped; the auditor's shorthand ("F-AP-01, 02, 03") is expanded to full ids.
 
 | # | Screen (auditor's label) | Section | Files | Findings |
 |---|---|---|---|---|
 | 001 | 01 | GS | `feature/signup/SplashScreen.kt, ui/ArtistantRoot.kt` | F-GS-16, F-GS-19 |
-| 002 | 02 Discover | DS | `feature/discover/DiscoverScreen.kt, DiscoverViewModel.kt, DiscoverHero` | F-DS-01, F-DS-05, F-DS-06, F-DS-14, F-DS-17, F-DS-18, F-DS-19, F-DS-23, F-DS-24 |
+| 002 | 02 Discover | DS | `feature/discover/DiscoverScreen.kt, DiscoverViewModel.kt, DiscoverHeroLogic.kt, component/HeroCard.kt, Tile.kt` | F-DS-01, F-DS-05, F-DS-06, F-DS-14, F-DS-17, F-DS-18, F-DS-19, F-DS-23, F-DS-24 |
 | 003 | 03 Search results | DS | `feature/search/SearchScreen.kt:551-778` | F-DS-01, F-DS-04, F-DS-05, F-DS-06, F-DS-10, F-DS-15, F-DS-16, F-DS-25 |
-| 004 | 04 Artist profile | AP | `feature/artist/ArtistProfileScreen.kt, ArtistProfileMedia.kt, ArtistPr` | F-AP-01 |
-| 005 | 05 | BC | `feature/booking/BookingScreen.kt, BookingChrome.kt (FunnelStepBar, Fun` | F-BC-01, F-BC-03, F-BC-04, F-BC-05, F-BC-06, F-BC-14, F-BC-15, F-BC-17, F-BC-18, F-BC-20 |
-| 006 | 06 | BC | `feature/booking/CheckoutScreen.kt, CheckoutLogic.kt, BookingChrome.kt ` | F-BC-02, F-BC-03, F-BC-04, F-BC-07, F-BC-09, F-BC-14, F-BC-16, F-BC-17, F-BC-19 |
-| 007 | 07 | BC | `feature/booking/ConfirmedScreen.kt, BookingChrome.kt (OutcomeMark, Fun` | F-BC-04, F-BC-07, F-BC-08, F-BC-16, F-BC-17 |
+| 004 | 04 Artist profile | AP | `feature/artist/ArtistProfileScreen.kt, ArtistProfileMedia.kt, ArtistProfileFacts.kt` | F-AP-01, F-AP-02, F-AP-03, F-AP-04, F-AP-05, F-AP-08, F-AP-09, F-AP-10, F-AP-11, F-AP-12, F-AP-16, F-AP-18, F-AP-19, F-AP-21, F-AP-22, F-AP-23, F-AP-24 |
+| 005 | 05 | BC | `feature/booking/BookingScreen.kt, BookingChrome.kt (FunnelStepBar, FunnelCalendar, PackageChoiceRow, CtaBar), BookingSlots.kt` | F-BC-01, F-BC-03, F-BC-04, F-BC-05, F-BC-06, F-BC-14, F-BC-15, F-BC-17, F-BC-18, F-BC-20 |
+| 006 | 06 | BC | `feature/booking/CheckoutScreen.kt, CheckoutLogic.kt, BookingChrome.kt (FunnelBar, ActRow, TermRow, CtaCaption)` | F-BC-02, F-BC-03, F-BC-04, F-BC-07, F-BC-09, F-BC-14, F-BC-16, F-BC-17, F-BC-19 |
+| 007 | 07 | BC | `feature/booking/ConfirmedScreen.kt, BookingChrome.kt (OutcomeMark, FunnelCard)` | F-BC-04, F-BC-07, F-BC-08, F-BC-16, F-BC-17 |
 | 008 | 08 Chat | MS | `feature/messages/ChatScreen.kt, ChatQuoteCard.kt, MessageComposer.kt` | F-MS-01, F-MS-07, F-MS-09, F-MS-12, F-MS-15 |
 | 009 | 09 Studio dashboard | AS | `feature/artisthome/ArtistHomeScreen.kt:203-299, ArtistStudioLogic.kt` | F-AS-01, F-AS-02, F-AS-03, F-AS-15, F-AS-16, F-AS-17, F-AS-19, F-AS-20 |
 | 010 | 10 Bookings list | BN | `feature/bookings/BookingsScreen.kt:195-490, BookingsLogic.kt` | F-BN-08, F-BN-09, F-BN-15, F-BN-16, F-BN-17 |
@@ -607,14 +609,14 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 013 | 13 | GS | `feature/signup/NotifPermissionScreen.kt` | F-GS-03, F-GS-04, F-GS-12, F-GS-19, F-GS-20, F-GS-21 |
 | 014 | 14 Search browse | DS | `feature/search/SearchScreen.kt:365-548` | F-DS-02, F-DS-07, F-DS-17, F-DS-20, F-DS-22 |
 | 015 | 15 Filters sheet | DS | `feature/search/SearchFilterSheet.kt` | F-DS-03, F-DS-20, F-DS-21, F-DS-22 |
-| 016 | 16 Bookability (client audit) | AP | `feature/score/BookabilityScreen.kt` | F-AP-01 |
-| 017 | 17 | BC | `feature/booking/RequestQuoteScreen.kt, RequestQuoteViewModel.kt (strin` | F-BC-03, F-BC-04, F-BC-08, F-BC-12, F-BC-15, F-BC-16, F-BC-18, F-BC-19 |
+| 016 | 16 Bookability (client audit) | AP | `feature/score/BookabilityScreen.kt` | F-AP-01, F-AP-03, F-AP-07, F-AP-09, F-AP-10, F-AP-13, F-AP-20 |
+| 017 | 17 | BC | `feature/booking/RequestQuoteScreen.kt, RequestQuoteViewModel.kt (strings)` | F-BC-03, F-BC-04, F-BC-08, F-BC-12, F-BC-15, F-BC-16, F-BC-18, F-BC-19 |
 | 018 | 18 Booking detail confirmed | BN | `feature/booking/BookingDetailScreen.kt:613-691, 872-879` | F-BN-07, F-BN-10, F-BN-11, F-BN-14, F-BN-16 |
 | 019 | 19 Inbox | MS | `feature/messages/MessagesScreen.kt` | F-MS-01, F-MS-03, F-MS-04, F-MS-09, F-MS-14 |
 | 020 | 20 Review sheet | BN | `feature/booking/ReviewSheet.kt:190-347` | F-BN-02, F-BN-12, F-BN-13, F-BN-18, F-BN-19 |
 | 021 | Open gigs | — | — | blocked — not shipped (PARITY_CHECKLIST.md), by design |
 | 022 | 22 Manage availability | AS | `feature/availability/ManageAvailabilityScreen.kt` | F-AS-02, F-AS-06, F-AS-07, F-AS-08, F-AS-13, F-AS-14 |
-| 023 | 23 Press kit hub (filled) | PK | `feature/epk/EpkScreen.kt, EpkHub.kt, EpkPressKit.kt, EpkPanes.kt (Shar` | F-PK-01, F-PK-04, F-PK-06, F-PK-11, F-PK-13, F-PK-15 |
+| 023 | 23 Press kit hub (filled) | PK | `feature/epk/EpkScreen.kt, EpkHub.kt, EpkPressKit.kt, EpkPanes.kt (ShareLinkSection)` | F-PK-01, F-PK-04, F-PK-06, F-PK-11, F-PK-13, F-PK-15 |
 | 024 | 24 Pricing | WZ | `feature/wizard/WizardFormSteps.kt:245-424` | F-WZ-04, F-WZ-08, F-WZ-13, F-WZ-14 |
 | 025 | 25 Pro paywall (offer) | AC | `feature/paywall/PaywallScreen.kt:330-352` | F-AC-02, F-AC-03, F-AC-08, F-AC-09, F-AC-21 |
 | 026 | 26 Profile (client tab root) | AC | `feature/profile/ProfileScreen.kt` | F-AC-14, F-AC-18, F-AC-19, F-AC-20 |
@@ -641,8 +643,8 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 047 | 47 Account settings list | AC | `feature/profile/AccountScreen.kt` | F-AC-05, F-AC-07, F-AC-13, F-AC-14, F-AC-16, F-AC-17, F-AC-18 |
 | 048 | 48 Delete stage 2 (consequences) | AC | `feature/profile/DeleteAccountScreen.kt:420-480` | F-AC-03, F-AC-06, F-AC-12, F-AC-21 |
 | 049 | 49 Data export ready | AC | `feature/profile/DataExportScreen.kt:379-443` | F-AC-01, F-AC-02, F-AC-03, F-AC-11, F-AC-16, F-AC-17 |
-| 050 | 50 Score explainer (Score / Stats / Opportunitie | AP | `feature/score/ScoreExplainerScreen.kt, ScoreDonut.kt, ScoreOpportuniti` | F-AP-01 |
-| 051 | 51 Score history | AP | `feature/score/ScoreHistoryScreen.kt` | F-AP-03 |
+| 050 | 50 Score explainer (Score / Stats / Opportunities) | AP | `feature/score/ScoreExplainerScreen.kt, ScoreDonut.kt, ScoreOpportunities.kt, ScoreFactors.kt` | F-AP-01, F-AP-02, F-AP-03, F-AP-07, F-AP-08, F-AP-09, F-AP-10, F-AP-12, F-AP-13, F-AP-14, F-AP-17, F-AP-19, F-AP-21 |
+| 051 | 51 Score history | AP | `feature/score/ScoreHistoryScreen.kt` | F-AP-03, F-AP-07, F-AP-09, F-AP-12, F-AP-14, F-AP-15, F-AP-19, F-AP-20, F-AP-21, F-AP-24 |
 | 052 | 52 Cancel stage 2 | BN | `feature/booking/BookingDetailScreen.kt:1127-1188` | F-BN-09, F-BN-10, F-BN-12 |
 | 053 | 53 Compare by service | DS | `feature/search/CompareByServiceSheet.kt` | F-DS-18, F-DS-20 |
 | 054 | 54 Profile loading (skeleton, no nav bar) | AP | `ArtistProfileScreen.kt:222-284` | F-AP-20, F-AP-21 |
@@ -654,7 +656,7 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 060 | 60 Archived list | MS | `feature/messages/ArchivedScreen.kt` | F-MS-03, F-MS-04, F-MS-14 |
 | 061 | 61 | BC | `feature/booking/CounterOfferScreen.kt` | F-BC-13, F-BC-14, F-BC-18, F-BC-21 |
 | 062 | 62 | GS | `feature/signup/PrivacyScreen.kt, PrivacyPreferences.kt` | F-GS-02, F-GS-05, F-GS-11, F-GS-14 |
-| 063 | 63 Help centre | SH | `feature/system/HelpCentreScreen.kt, HelpCentreViewModel.kt, HelpConten` | F-SH-06, F-SH-10, F-SH-15, F-SH-16, F-SH-17, F-SH-20, F-SH-22, F-SH-24 |
+| 063 | 63 Help centre | SH | `feature/system/HelpCentreScreen.kt, HelpCentreViewModel.kt, HelpContent.kt` | F-SH-06, F-SH-10, F-SH-15, F-SH-16, F-SH-17, F-SH-20, F-SH-22, F-SH-24 |
 | 064 | 64 Send feedback | SH | `feature/system/FeedbackScreen.kt, FeedbackViewModel.kt` | F-SH-04, F-SH-06, F-SH-08, F-SH-09, F-SH-13, F-SH-18, F-SH-20 |
 | 065 | 65 Add cover sheet | PK | `feature/epk/EpkSheets.kt:249-298` | none |
 | 066 | 66 Stalled uploads sheet | PK | `feature/epk/EpkSheets.kt:787-897, EpkPressKit.kt:352-368` | F-PK-03, F-PK-10 |
@@ -662,20 +664,20 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 068 | 68 Add personality sheet | PK | `feature/epk/EpkSheets.kt:425-599` | F-PK-07, F-PK-09 |
 | 069 | 69 Account list, artist group injected | AC | `feature/profile/AccountScreen.kt:269-280` | F-AC-13, F-AC-18 |
 | 070 | 70 Chat accept narration | MS | `ChatScreen.kt:970-1000, designsystem/component/SendingNarration.kt` | none |
-| 071 | 71 | GS | `feature/signup/RoleScreen.kt (hydrationError), SignupChrome.kt (Hydrat` | F-GS-14 |
+| 071 | 71 | GS | `feature/signup/RoleScreen.kt (hydrationError), SignupChrome.kt (HydrationErrorBanner)` | F-GS-14 |
 | 072 | 72 Wizard shell / Save & exit | WZ | `feature/wizard/WizardScreen.kt, WizardScaffold.kt` | F-CC-09, F-WZ-01, F-WZ-02, F-WZ-09, F-WZ-14 |
 | 073 | 73 Report conversation sheet | MS | `feature/messages/ReportConversationSheet.kt` | F-MS-10, F-MS-13, F-MS-16 |
 | 074 | 74 Edit link sheet | PK | `feature/epk/EpkSheets.kt:617-711` | F-PK-12 |
 | 075 | 75 Add audio sheet | PK | `feature/epk/EpkSheets.kt:732-771` | F-PK-10 |
 | 076 | 76 Hub other state (upload banner) | PK | `feature/epk/EpkHub.kt:129-229, EpkPressKit.kt:295-325` | none |
-| 077 | 77 Toast | SH | `feature/system/ToastController.kt; navigation/ArtistantNavHost.kt:198-` | F-SH-03, F-SH-04, F-SH-19 |
+| 077 | 77 Toast | SH | `feature/system/ToastController.kt; navigation/ArtistantNavHost.kt:198-211; designsystem/component/Toast.kt (host half)` | F-SH-03, F-SH-04, F-SH-19 |
 | 078 | 78 Month calendar | BN | `feature/bookings/MonthCalendarScreen.kt` | F-BN-04, F-BN-05, F-BN-16 |
 | 079 | 79 Explainer — New tier | AP | `ScoreExplainerScreen.kt:317-331, 353-387` | F-AP-13, F-AP-21 |
 | 080 | 80 Explainer — failed read | AP | `ScoreExplainerScreen.kt:275-315` | F-AP-10, F-AP-19 |
 | 081 | 81 Data export idle | AC | `feature/profile/DataExportScreen.kt:289-319` | F-AC-02, F-AC-03, F-AC-11, F-AC-17 |
 | 082 | 82 Data export requested | AC | `feature/profile/DataExportScreen.kt:321-376` | F-AC-11 |
 | 083 | 83 Cancelled | BN | `feature/booking/BookingDetailScreen.kt:710-761` | F-BN-14, F-BN-15 |
-| 084 | 84 Not found | BN | `feature/booking/BookingDetailScreen.kt:987-1035, BookingDetailViewMode` | F-BN-01, F-BN-16 |
+| 084 | 84 Not found | BN | `feature/booking/BookingDetailScreen.kt:987-1035, BookingDetailViewModel.kt:30-39` | F-BN-01, F-BN-16 |
 | 085 | 85 Dashboard — cold | AS | `ArtistHomeScreen.kt:305-357` | F-AS-05, F-AS-19 |
 | 086 | 86 Dashboard — unavailable | AS | `ArtistHomeScreen.kt:363-434` | F-AS-09, F-AS-10, F-AS-11 |
 | 087 | 87 Empty kit (invitation rows) | PK | `feature/epk/EpkScreen.kt:555-566,638-643, EpkHub.kt:457-511` | F-PK-11, F-PK-13 |
@@ -690,14 +692,14 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 096 | 96 Disputed | BN | `feature/booking/BookingDetailScreen.kt:774-813, 921-960` | F-BN-03, F-BN-13 |
 | 097 | 97 Read-only | BN | `feature/booking/BookingDetailScreen.kt:816-838, 962-964` | F-BN-05, F-BN-15 |
 | 098 | 98 Review sheet, no name | BN | `feature/booking/ReviewSheet.kt:243-251` | F-BN-13 |
-| 099 | 99 Score breakdown sheet (degraded) | AP | `feature/score/ScoreBreakdownSheet.kt` | F-AP-01 |
+| 099 | 99 Score breakdown sheet (degraded) | AP | `feature/score/ScoreBreakdownSheet.kt` | F-AP-01, F-AP-03, F-AP-06, F-AP-07, F-AP-10, F-AP-13, F-AP-14 |
 | 100 | 100 Profile with scoped failure banner | AP | `ArtistProfileScreen.kt:399-408, 1161-1222` | F-AP-22, F-AP-24 |
 | 101 | 101 No-audio redirect | AP | `ArtistProfileScreen.kt:990-1037, 1083-1107` | F-AP-10, F-AP-11, F-AP-19 |
 | 102 | 102 All reviews | AP | `feature/artist/ArtistReviewsScreen.kt, ReviewSearch.kt` | F-AP-16, F-AP-19, F-AP-24 |
 | 103 | 103 Self view | AP | `ArtistProfileScreen.kt:383-393, 550-557, 1328-1335` | F-AP-17 |
 | 104 | 104 Filters, filters on | DS | `feature/search/SearchFilterSheet.kt:136-149, SearchScreen.kt:791-840` | F-DS-03, F-DS-10, F-DS-20 |
 | 105 | 105 Availability preview | AS | `ManageAvailabilityScreen.kt:187-226` | F-AS-07, F-AS-08 |
-| 106 | 106 Failed seed | AS | `ManageAvailabilityScreen.kt:298-312, ManageAvailabilityViewModel.kt:14` | F-AS-13 |
+| 106 | 106 Failed seed | AS | `ManageAvailabilityScreen.kt:298-312, ManageAvailabilityViewModel.kt:141` | F-AS-13 |
 | 107 | 107 Countered | AS | `GigRequestDetailScreen.kt:369-434` | F-AS-19 |
 | 108 | 108 Declined | AS | `GigRequestDetailScreen.kt:437-480` | none |
 | 109 | 109 Not found | AS | `GigRequestDetailScreen.kt:155-180` | none |
@@ -717,7 +719,7 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 123 | 123 Activity | SH | `feature/system/ActivityScreen.kt, ActivityViewModel.kt` | F-CC-02, F-SH-06, F-SH-11, F-SH-12, F-SH-18, F-SH-22, F-SH-23 |
 | 124 | 124 Notification settings | AC | `feature/profile/NotificationSettingsScreen.kt` | F-AC-04, F-AC-16, F-AC-22 |
 | 125 | Invite a friend | — | — | blocked — not shipped (PARITY_CHECKLIST.md), by design |
-| 126 | — | — | — | no coverage row (see note) |
+| 126 | not keyed by any auditor — one of: map search (DS) / promo codes (BC) | DS or BC | — | blocked — not shipped; identified by elimination (see note) |
 | 127 | 127 Blocked accounts | MS | `feature/profile/BlockedAccountsScreen.kt` | F-MS-02, F-MS-03, F-MS-04, F-MS-06, F-MS-11, F-MS-14 |
 | 128 | 128 Devices | AC | `feature/profile/DevicesScreen.kt` | F-AC-15, F-AC-16 |
 | 129 | 129 Accessibility | AC | `feature/profile/AccessibilityScreen.kt` | F-AC-04, F-AC-17, F-AC-21 |
@@ -727,11 +729,11 @@ Section codes: GS = Getting started, DS = Discover & search, AP = The artist pro
 | 133 | 133 Earnings | AS | `feature/artisthome/EarningsScreen.kt` | F-AS-03, F-AS-05, F-AS-15, F-AS-17, F-AS-18, F-AS-19 |
 | 134 | Tax details | — | — | blocked — not shipped (PARITY_CHECKLIST.md), by design |
 | 135 | Get verified | — | — | blocked — not shipped (PARITY_CHECKLIST.md), by design |
-| 136 | — | — | — | no coverage row (see note) |
+| 136 | not keyed by any auditor — one of: map search (DS) / promo codes (BC) | DS or BC | — | blocked — not shipped; identified by elimination (see note) |
 | 137 | 137 What's new | SH | `feature/system/WhatsNewSheet.kt, ReleaseNotes.kt` | F-CC-02, F-SH-07, F-SH-20 |
 | 138 | 138 Rate Artistant | SH | `feature/system/RatePromptSheet.kt, RatePrompt.kt` | F-SH-06, F-SH-24 |
 
-Screens without a coverage row in any report: 126, 136. They are reachable only through the section files already audited (the auditors keyed their tables by the design's primary numbers); their states are covered by the themes above but were not itemised — worth a look on the device walk.
+**On 126 and 136.** Neither number appears in the repo (code comments, `PARITY_CHECKLIST.md`, `SCREEN_INVENTORY.md`) and the design export is not in this environment, so no auditor could key a row to them. By elimination they are the only two of the 138 not accounted for: `REDESIGN_2026-09.md` §3 gives Discover & search 12 designs and Book & confirm 8, the auditors itemised 11 and 7, and every other section's count is met. CLAUDE.md and the checklist list **map search** (no coordinates) and **promo codes** (no backend) as exactly the unshipped screens of those two sections, so 126 and 136 are those two blocked designs — which number is which needs the export. Nothing ships for either, so there is nothing to audit; they are listed here so the count is honest, not to claim a review.
 
 ## Device walk
 
