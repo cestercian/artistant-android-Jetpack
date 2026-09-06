@@ -255,6 +255,7 @@ Play release (see RELEASE.md §0).
 | `docs/IMPLEMENTATION_ROADMAP.md` | Milestones M0–M8 |
 | `docs/RISKS_AND_DECISIONS.md` | iOS-only APIs, risks, security, a11y, ADRs |
 | `docs/REDESIGN_2026-09.md` | **The Sep-2026 light redesign: design language, token map, phases, agent rules** |
+| `docs/DESIGN_QA_2026-09.md` | **Sep-2026 designer's-eye QA of the 138 light screens: 270 findings in 21 themes (issues #162–#182, epic #161); raw section reports in `docs/design-qa/`** |
 
 ## The one thing I'd tell my replacement
 
