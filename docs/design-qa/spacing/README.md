@@ -30,6 +30,8 @@ Worth recording, so nobody re-files these:
 | Account list separators | 20.2 dp both ends, 56.0 dp pitch | even |
 | Tab bar height | 83.4 dp on every screen | consistent (§2 specifies 88) |
 | Booking card action buttons | equal widths, 21.0 dp inset both sides | symmetric |
+| Divider under the last conversation | present | design does the same (5 rows, 5 `border-bottom`) |
+| Profile / artist-profile stat triples | column centres evenly spaced, rules centred between them | even |
 
 ## Findings
 
@@ -37,3 +39,5 @@ Worth recording, so nobody re-files these:
 |---|---|---|
 | 1 | Header top varies 23.2 dp across the eight tab roots; Gigs draws its title at 21sp against everyone else's 26sp | `issue-header-drift.png` |
 | 2 | Studio's two standing cards differ by 26.6 dp in height where the design stretches them | `issue-studio-cards.png` |
+| 3 | Messages thread dividers are inset 80 dp at the leading edge; the design runs them the full content width | `issue-messages-divider.png` |
+| 4 | The artist-profile dock misses the design on four of its five paddings | `issue-dock.png` |
