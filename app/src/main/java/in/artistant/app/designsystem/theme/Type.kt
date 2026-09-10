@@ -193,6 +193,21 @@ data class AppType(
         fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp,
     ),
 
+    /**
+     * The fee on a gig row (design 36), the third line of the row's detail
+     * column under the act and the meta.
+     *
+     * A point smaller than [rowTitle] and a weight heavier, which is the
+     * design's own pairing: the act names the gig and the fee answers it, so
+     * the fee has to read as an answer rather than as a second title. Spelled
+     * out rather than aliased to [rowTitle] with a weight override — that is
+     * what the row did while the fee sat in a trailing column, and it made the
+     * two lines compete at the same size.
+     */
+    val rowFee: TextStyle = TextStyle(
+        fontFamily = SansFamily, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+    ),
+
     /** Filter/segment pill label. Bold at the call site when selected. */
     val chip: TextStyle = TextStyle(
         fontFamily = SansFamily, fontSize = 13.5f.sp, fontWeight = FontWeight.Medium,
