@@ -297,19 +297,30 @@ private fun GigDayRow(
                     modifier = Modifier.padding(top = dimens.space.xs / 2),
                 )
             }
-        }
-        Column(horizontalAlignment = Alignment.End) {
+            // The fee is the detail column's THIRD LINE in design 36, not a
+            // trailing figure. Stacked in a right-hand column beside the pill it
+            // took width from the act and the venue for its whole height, so the
+            // meta ellipsed ("Acoustic duo · Banga…") on a row with space to
+            // spare — and the fee and the title, both drawn at rowTitle, read as
+            // two competing headings. Under the meta it is as wide as the row.
             Text(
                 formatInr(booking.fee),
-                style = AppTheme.type.rowTitle.copy(fontWeight = FontWeight.Bold),
+                style = AppTheme.type.rowFee,
                 color = colors.ink,
                 maxLines = 1,
+                modifier = Modifier.padding(top = dimens.space.sm),
             )
-            Spacer(Modifier.height(dimens.space.xs))
-            // The app's one status→tone map, shared with Bookings, Messages
-            // and Booking detail. A second one here would drift.
-            Pill(booking.status.label, tone = bookingStatusTone(booking.status))
         }
+        // Trailing, and top-aligned by the Row's own default — which is what
+        // the design's `align-self:flex-start` asks for, so there is nothing to
+        // add here. Stated because it is easy to "fix" later by centring the
+        // row: the pill labels the whole gig and belongs level with the act
+        // that names it, not floating against a column whose height depends on
+        // whether the venue is known.
+        //
+        // The app's one status→tone map, shared with Bookings, Messages and
+        // Booking detail. A second one here would drift.
+        Pill(booking.status.label, tone = bookingStatusTone(booking.status))
     }
 }
 
