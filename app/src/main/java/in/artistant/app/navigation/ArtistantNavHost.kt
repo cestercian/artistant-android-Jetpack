@@ -9,6 +9,9 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,6 +69,20 @@ fun ArtistantNavHost() {
 
     val toastVm: ToastViewModel = hiltViewModel()
     val toast by toastVm.current.collectAsStateWithLifecycle()
+
+    // Whether the tab bar is CURRENTLY DRAWN — not whether we are inside the tab
+    // shell. The two are different facts: every pushed screen (chat, a booking,
+    // the press kit) lives under `RootGate.Tabs` with no bar on screen, and the
+    // toast host used to clear a bar that wasn't there and float 88dp up the
+    // page. Only the scaffolds know, so they report it here (#179).
+    //
+    // `rememberSaveable`, not `remember`: the controller is a `@Singleton`, so a
+    // toast that is up when the activity is recreated (a rotation, a theme
+    // switch, "don't keep activities") comes straight back — while a plain
+    // `remember` came back false and drew that first restored frame OVER the tab
+    // bar before the scaffold's effect corrected it. The saved value is whatever
+    // was true at recreation, so it restores correctly on a pushed screen too.
+    var tabBarVisible by rememberSaveable { mutableStateOf(false) }
 
     // Hoisted above the gate `when` so the same instance is shared across the NotSignedIn →
     // Onboarding swap (a VM created inside a `when` branch dies when the branch changes).
@@ -170,8 +187,12 @@ fun ArtistantNavHost() {
                         WizardScreen(onFinished = viewModel::markWizardComplete)
 
                     is RootGate.Tabs -> when (g.role) {
-                        AppRole.Client -> ClientTabsScaffold()
-                        AppRole.Artist -> ArtistTabsScaffold()
+                        AppRole.Client -> ClientTabsScaffold(
+                            onTabBarVisibilityChange = { tabBarVisible = it },
+                        )
+                        AppRole.Artist -> ArtistTabsScaffold(
+                            onTabBarVisibilityChange = { tabBarVisible = it },
+                        )
                     }
                 }
             }
@@ -206,7 +227,14 @@ fun ArtistantNavHost() {
                         ToastIcon.Info -> Icons.Outlined.Info
                         else -> Icons.Filled.Check
                     },
-                    bottomPadding = if (gate is RootGate.Tabs) gap + lightTabBarHeight() else gap,
+                    // The gate is belt to `tabBarVisible`'s braces: leaving the tab
+                    // shell entirely stops clearing the bar even for the frame
+                    // before the scaffold reports itself gone.
+                    bottomPadding = if (gate is RootGate.Tabs && tabBarVisible) {
+                        gap + lightTabBarHeight()
+                    } else {
+                        gap
+                    },
                 )
             }
         }
