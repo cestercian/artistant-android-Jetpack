@@ -91,7 +91,9 @@ private enum class ArtistTab(val route: String, val label: String, val icon: Ima
 }
 
 @Composable
-fun ArtistTabsScaffold() {
+fun ArtistTabsScaffold(
+    onTabBarVisibilityChange: (Boolean) -> Unit = {},
+) {
     val nav = rememberNavController()
     val accessibilityViewModel: AccessibilityViewModel = hiltViewModel()
     // Accessibility -> "Always show labels" (design 129). Read here rather than inside
@@ -101,6 +103,13 @@ fun ArtistTabsScaffold() {
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ArtistTab.entries.any { it.route == route }
+
+    // The root toast host (screen 77) sits ABOVE this scaffold, so it cannot read
+    // `showBottomBar` itself and cannot be reached by a CompositionLocal provided
+    // in here — it is a sibling, not a descendant. Report the fact up instead.
+    // Nothing resets it on the way out: the host also checks the gate, and this
+    // fires on the new scaffold's first composition after a role switch.
+    LaunchedEffect(showBottomBar) { onTabBarVisibilityChange(showBottomBar) }
     val tabRouter = rememberTabRouter()
     val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
     val pendingGig by tabRouter.pendingGigRequestId.collectAsStateWithLifecycle()
