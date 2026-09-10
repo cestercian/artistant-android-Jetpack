@@ -303,11 +303,19 @@ private fun GigDayRow(
             // meta ellipsed ("Acoustic duo · Banga…") on a row with space to
             // spare — and the fee and the title, both drawn at rowTitle, read as
             // two competing headings. Under the meta it is as wide as the row.
+            // Ellipsised, not clipped, and on a fee that matters more than on
+            // the two lines above it: a clipped amount does not look truncated,
+            // it looks like a SMALLER AMOUNT — "₹60,000" cut to "₹60,00" is a
+            // legible, wrong number. In the trailing column this text sized
+            // itself, so it could not be squeezed; in the weighted column a long
+            // status label on a narrow display or at a large font scale can take
+            // enough width to reach it.
             Text(
                 formatInr(booking.fee),
                 style = AppTheme.type.rowFee,
                 color = colors.ink,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = dimens.space.sm),
             )
         }
