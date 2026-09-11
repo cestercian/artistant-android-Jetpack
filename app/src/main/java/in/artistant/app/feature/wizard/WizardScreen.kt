@@ -337,9 +337,12 @@ private fun WizardFooter(state: WizardUiState, onContinue: () -> Unit, onSkip: (
             .hairlineTop()
             .navigationBarsPadding()
             .imePadding()
+            // `space.lg`, matching [BottomActionBar] and every other pinned bar.
+            // At `space.md` this was the tightest dock in the app — 12.2dp under
+            // Continue, hard against the home-indicator zone (#195).
             .padding(
                 horizontal = dimens.component.gutter,
-                vertical = dimens.space.md,
+                vertical = dimens.space.lg,
             ),
         verticalArrangement = Arrangement.spacedBy(dimens.space.md),
         horizontalAlignment = Alignment.CenterHorizontally,

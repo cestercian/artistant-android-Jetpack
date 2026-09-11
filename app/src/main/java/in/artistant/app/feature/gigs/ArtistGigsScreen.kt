@@ -46,6 +46,7 @@ import `in`.artistant.app.designsystem.component.currentCalendarMonth
 import `in`.artistant.app.designsystem.component.monthLabelFromEpoch
 import `in`.artistant.app.designsystem.component.selectedDayLabel
 import `in`.artistant.app.designsystem.component.splitClockLabel
+import `in`.artistant.app.designsystem.component.ScreenHeader
 import `in`.artistant.app.designsystem.theme.AppTheme
 
 /**
@@ -151,15 +152,22 @@ fun ArtistGigsScreen(
                     contentPadding = PaddingValues(bottom = dimens.size.listTailroom),
                 ) {
                     item(key = "masthead") {
-                        Column(Modifier.padding(horizontal = dimens.component.gutter)) {
-                            Text("Gigs", style = AppTheme.type.displaySub, color = colors.ink)
-                            Text(
-                                monthLine,
-                                style = AppTheme.type.subtitle,
-                                color = colors.ink4,
-                                modifier = Modifier.padding(top = space.xs),
-                            )
-                        }
+                        // `ScreenHeader`, like the seven other tab roots. This
+                        // used to be a hand-rolled Column at `displaySub` (21sp)
+                        // against everyone else's `screenTitle` (26sp), which
+                        // made "Gigs" visibly smaller than "Studio" one tab over
+                        // and put its title 9.5dp higher than the cluster (#187).
+                        ScreenHeader(
+                            title = "Gigs",
+                            subtitle = monthLine,
+                            modifier = Modifier
+                                .padding(horizontal = dimens.component.gutter)
+                                // The same 8dp Discover passes. Measured: without
+                                // it this title lands 8dp above Studio's and
+                                // Messages', which pick the offset up from their
+                                // own list padding.
+                                .padding(top = dimens.space.sm),
+                        )
                     }
                     item(key = "monthHeader") {
                         MonthCalendarHeader(
