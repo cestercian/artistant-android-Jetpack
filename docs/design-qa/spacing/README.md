@@ -32,6 +32,13 @@ Worth recording, so nobody re-files these:
 | Booking card action buttons | equal widths, 21.0 dp inset both sides | symmetric |
 | Divider under the last conversation | present | design does the same (5 rows, 5 `border-bottom`) |
 | Profile / artist-profile stat triples | column centres evenly spaced, rules centred between them | even |
+| Account list rhythm (both scroll positions) | 20.2 dp rules, 56.0 dp plain rows, 61.0 dp with a subtitle | even |
+| Notification / accessibility switch rows | rules 20.2 dp both ends, no orphan rules at section breaks | even |
+| Pushed-screen title centring (6 of 7) | within 1.3–1.9 dp of the midpoint | centred |
+
+### Second pass (Sep 11) — pushed settings screens
+
+Account, Activity, Notifications, Language, Accessibility, Devices, Data export, Privacy. One finding (#192); the row rhythm, rule insets and section breaks all measured clean.
 
 ## Findings
 
@@ -41,3 +48,4 @@ Worth recording, so nobody re-files these:
 | 2 | Studio's two standing cards differ by 26.6 dp in height where the design stretches them | `issue-studio-cards.png` |
 | 3 | Messages thread dividers are inset 80 dp at the leading edge; the design runs them the full content width | `issue-messages-divider.png` |
 | 4 | The artist-profile dock misses the design on four of its five paddings | `issue-dock.png` |
+| 5 | Activity is the only one of seven pushed settings screens that does not centre its title | `issue-activity-header.png` |
