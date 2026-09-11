@@ -49,3 +49,24 @@ Account, Activity, Notifications, Language, Accessibility, Devices, Data export,
 | 3 | Messages thread dividers are inset 80 dp at the leading edge; the design runs them the full content width | `issue-messages-divider.png` |
 | 4 | The artist-profile dock misses the design on four of its five paddings | `issue-dock.png` |
 | 5 | Activity is the only one of seven pushed settings screens that does not centre its title | `issue-activity-header.png` |
+| 6 | Five pinned CTA bars leave five different gaps under the button, 12.2 dp to 57.5 dp | `f02`/`f03`/`f05` + `c07`/`p06` |
+
+### Third pass (Sep 11) — booking funnel, wizard, score, signup
+
+Request quote (05), Confirm request (06), the EPK wizard, Bookability (16), Welcome (118),
+Community pledge (27), Role picker (11), Auth (12).
+
+**Bottom padding under the primary CTA, measured to the button's lowest pixel:**
+
+| Screen | Gap under the CTA |
+|---|---|
+| EPK wizard | 12.2 dp |
+| Artist profile (04) | 15.2 dp |
+| Data export (93) | 24.0 dp |
+| Request quote (05) | 28.2 dp |
+| Confirm request (06) | 57.5 dp (carries a caption under the button) |
+| **Design 04 specifies** | **30** |
+
+Measured clean in this pass: the Request-quote month grid (column centres evenly spaced, 86 px
+from each card edge to the first and last column centre), the pledge cards (16.5–17 dp apart,
+20.2 dp gutters), and the wizard's day and time chip rails.
