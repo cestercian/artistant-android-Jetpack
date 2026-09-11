@@ -39,6 +39,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.artistant.app.designsystem.component.BackHeader
@@ -130,28 +132,54 @@ fun ActivityScreen(
         Column(Modifier.padding(horizontal = dimens.component.gutter)) {
             BackHeader(
                 title = "Activity",
-                // Left-aligned with its subtitle under it, the way every other
-                // pushed screen that also states a fact about itself is drawn
-                // (60, 127, 34) — see `BackHeader`'s own note on `centered`.
+                // CENTRED, like the six other pushed screens on this settings
+                // stack. `BackHeader`'s note reserves the left-aligned form for
+                // a subtitle that states A QUANTITY OR A STATE — 60 "Archived /
+                // 4 conversations", 127 "Blocked accounts / 2 blocked". This
+                // subtitle describes the page instead, which is the same shape
+                // as Notifications ("What we send, and how"), Data export
+                // ("Your right under the DPDP Act") and Account (the masked
+                // email), and all three centre.
+                //
+                // Measured before changing it: the six peers sit within 1.3-1.9dp
+                // of the screen's midpoint and this screen sat 12.0dp left of it
+                // (#193), so the title jumped when you moved between them.
                 subtitle = "Notifications received on this device",
                 onBack = onBack,
-                centered = false,
-                // Only when there is something to mark. After the screen has
-                // been opened that means "something landed while you were
-                // reading" — see [ActivityUiState.hasUnread].
-                trailing = if (state.hasUnread) {
-                    {
-                        Text(
-                            text = "Mark all read",
-                            style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
-                            color = colors.accentInk,
-                            modifier = Modifier
-                                .clickable(role = Role.Button, onClick = viewModel::markAllRead)
-                                .padding(dimens.space.xs),
-                        )
-                    }
-                } else {
-                    null
+                // The slot is ALWAYS occupied, and always by the same width.
+                //
+                // `hasUnread` flips true and then false again within one visit —
+                // `markSeen()` publishes `unreadOnArrival` before it suspends on
+                // the DataStore write (F-SH-11 in docs/design-qa/SH.md). A slot
+                // that changed width between a 48dp spacer and this label
+                // dragged the title with it, and now that the title is centred
+                // (#193) it would travel through the centre rather than nudge
+                // left. So the label is laid out either way and only its
+                // visibility and its click target change.
+                //
+                // Reserving with the real string rather than a token width keeps
+                // this honest when the copy is translated.
+                trailing = {
+                    Text(
+                        text = "Mark all read",
+                        style = AppTheme.type.subtitle.copy(fontWeight = FontWeight.SemiBold),
+                        color = if (state.hasUnread) colors.accentInk else Color.Transparent,
+                        modifier = Modifier
+                            .then(
+                                if (state.hasUnread) {
+                                    Modifier.clickable(
+                                        role = Role.Button,
+                                        onClick = viewModel::markAllRead,
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(dimens.space.xs)
+                            // Invisible AND unreachable: a transparent label is
+                            // still a label to a screen reader.
+                            .semantics { if (!state.hasUnread) hideFromAccessibility() },
+                    )
                 },
             )
             Row(

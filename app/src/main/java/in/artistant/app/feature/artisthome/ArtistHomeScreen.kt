@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -222,21 +224,29 @@ private fun LazyListScope.readyDashboard(
     }
 
     item(key = "standing") {
+        // `IntrinsicSize.Min` + `fillMaxHeight` is the Compose spelling of the
+        // design's own layout: screen 09 puts these two in a flex row, and flex
+        // stretches its children to the row's height by default. A plain `Row`
+        // sizes each child to its own content, so "Answering faster lifts your
+        // score." wrapping to two lines left the pair 26.6dp apart at the
+        // bottom edge with their tops aligned (measured on device, #188).
+        // `weight(1f)` only ever distributed the WIDTH.
         Row(
             Modifier
                 .fillMaxWidth()
+                .height(IntrinsicSize.Min)
                 .padding(horizontal = gutter),
             horizontalArrangement = Arrangement.spacedBy(AppTheme.dimens.space.md),
         ) {
             BookabilityCard(
                 state = state,
                 onClick = onScoreExplainer,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             ReplySpeedCard(
                 state = state,
                 onClick = onScoreExplainer,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
     }

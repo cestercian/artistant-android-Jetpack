@@ -417,8 +417,8 @@ private fun SwipeableThreadRow(
  *
  * Avatar · name · stamp on the first line; the DEAL on the second when there is
  * one, the last message when there isn't; an accent count badge when it is
- * unread. Hairline under each row, inset to the text so the rules start under the
- * words rather than under the artwork.
+ * unread. Hairline under each row, running the full content width the way design
+ * 19 draws it.
  */
 @Composable
 private fun ThreadRow(
@@ -544,12 +544,13 @@ private fun ThreadRow(
                     .semantics { testTag = "messages.reviewRequest" },
             )
         }
-        HRule(
-            modifier = Modifier.padding(
-                start = dimens.component.gutter + dimens.size.avatarMd + dimens.space.md,
-                end = dimens.component.gutter,
-            ),
-        )
+        // Full content width, both ends on the gutter. Design 19 puts
+        // `border-bottom` on the ROW, whose parent is the 20px page container,
+        // so the rule runs 20/20 — and the Artistant Support card directly
+        // above it is a box on that same gutter. Insetting the start to the
+        // text put the two 60dp out of agreement (measured 80.0dp leading
+        // against 20.2dp trailing, #189).
+        HRule(modifier = Modifier.padding(horizontal = dimens.component.gutter))
     }
 }
 
@@ -655,12 +656,8 @@ private fun InboxSkeleton() {
                     )
                 }
             }
-            HRule(
-                modifier = Modifier.padding(
-                    start = dimens.component.gutter + dimens.size.avatarMd + dimens.space.md,
-                    end = dimens.component.gutter,
-                ),
-            )
+            // Same rule as a loaded row — see [ThreadRow].
+            HRule(modifier = Modifier.padding(horizontal = dimens.component.gutter))
         }
     }
 }
