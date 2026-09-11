@@ -38,7 +38,7 @@ Worth recording, so nobody re-files these:
 
 ### Second pass (Sep 11) — pushed settings screens
 
-Account, Activity, Notifications, Language, Accessibility, Devices, Data export, Privacy. One finding (#192); the row rhythm, rule insets and section breaks all measured clean.
+Account, Activity, Notifications, Language, Accessibility, Devices, Data export, Privacy. One finding (#193); the row rhythm, rule insets and section breaks all measured clean.
 
 ## Findings
 
