@@ -130,12 +130,20 @@ fun ActivityScreen(
         Column(Modifier.padding(horizontal = dimens.component.gutter)) {
             BackHeader(
                 title = "Activity",
-                // Left-aligned with its subtitle under it, the way every other
-                // pushed screen that also states a fact about itself is drawn
-                // (60, 127, 34) — see `BackHeader`'s own note on `centered`.
+                // CENTRED, like the six other pushed screens on this settings
+                // stack. `BackHeader`'s note reserves the left-aligned form for
+                // a subtitle that states A QUANTITY OR A STATE — 60 "Archived /
+                // 4 conversations", 127 "Blocked accounts / 2 blocked". This
+                // subtitle describes the page instead, which is the same shape
+                // as Notifications ("What we send, and how"), Data export
+                // ("Your right under the DPDP Act") and Account (the masked
+                // email), and all three centre.
+                //
+                // Measured before changing it: the six peers sit within 1.3-1.9dp
+                // of the screen's midpoint and this screen sat 12.0dp left of it
+                // (#193), so the title jumped when you moved between them.
                 subtitle = "Notifications received on this device",
                 onBack = onBack,
-                centered = false,
                 // Only when there is something to mark. After the screen has
                 // been opened that means "something landed while you were
                 // reading" — see [ActivityUiState.hasUnread].
