@@ -1321,7 +1321,11 @@ private fun ActionDock(
             Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = dimens.component.gutter, vertical = dimens.space.md),
+                // `space.lg`, the same vertical padding [BottomActionBar] gives
+                // every other pinned bar. At `space.md` this dock left 15.2dp
+                // under the CTA where Data export left 24.0dp and Request quote
+                // 28.2dp — five bars, five gaps, a 45dp spread (#195).
+                .padding(horizontal = dimens.component.gutter, vertical = dimens.space.lg),
             horizontalArrangement = Arrangement.spacedBy(dimens.space.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
