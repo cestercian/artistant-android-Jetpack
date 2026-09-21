@@ -125,7 +125,9 @@ private val BAR_TABS = listOf(
 private const val ARTIST_PROFILE_ROUTE = "artist/{artistId}"
 
 @Composable
-fun ClientTabsScaffold() {
+fun ClientTabsScaffold(
+    onTabBarVisibilityChange: (Boolean) -> Unit = {},
+) {
     val nav = rememberNavController()
     // The ACTIVITY's RootViewModel, not a new one: this composable is called directly from
     // `ArtistantNavHost`, above any NavHost, so `LocalViewModelStoreOwner` here is still the
@@ -140,6 +142,13 @@ fun ClientTabsScaffold() {
     val current by nav.currentBackStackEntryAsState()
     val route = current?.destination?.route
     val showBottomBar = ClientTab.entries.any { it.route == route }
+
+    // The root toast host (screen 77) sits ABOVE this scaffold, so it cannot read
+    // `showBottomBar` itself and cannot be reached by a CompositionLocal provided
+    // in here — it is a sibling, not a descendant. Report the fact up instead.
+    // Nothing resets it on the way out: the host also checks the gate, and this
+    // fires on the new scaffold's first composition after a role switch.
+    LaunchedEffect(showBottomBar) { onTabBarVisibilityChange(showBottomBar) }
     val tabRouter = rememberTabRouter()
     val pendingThread by tabRouter.pendingThreadId.collectAsStateWithLifecycle()
     val pendingBooking by tabRouter.pendingBookingDetail.collectAsStateWithLifecycle()

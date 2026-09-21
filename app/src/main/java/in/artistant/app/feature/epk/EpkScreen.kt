@@ -56,10 +56,10 @@ import `in`.artistant.app.designsystem.component.RevealOnAppear
 import `in`.artistant.app.designsystem.component.ScreenHeader
 import `in`.artistant.app.designsystem.component.SectionHeader
 import `in`.artistant.app.designsystem.component.SheetScaffold
-import `in`.artistant.app.designsystem.component.ToastHost
 import `in`.artistant.app.designsystem.theme.AppTheme
 import `in`.artistant.app.domain.artist.ArtistPrompts
 import `in`.artistant.app.domain.artist.PackagePricing
+import `in`.artistant.app.feature.system.ToastViewModel
 import `in`.artistant.app.platform.media.WizardMediaCache
 import `in`.artistant.app.platform.media.rememberSamplePlayer
 import java.io.File
@@ -103,6 +103,25 @@ fun EpkScreen(
     viewModel: EpkViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Transient confirmations for writes with no visible result ("Pricing
+    // saved.") go through the app's ONE toast host, in `ArtistantNavHost`. This
+    // screen used to mount a second one of its own, which knew nothing about the
+    // tab bar and drew every press-kit confirmation underneath it (#179).
+    //
+    // `ToastViewModel` holds no state — it is a handle on the `@Singleton`
+    // `ToastController` — so resolving one at this back-stack entry costs
+    // nothing and reaches the same controller the root host observes.
+    val toasts: ToastViewModel = hiltViewModel()
+    LaunchedEffect(state.statusNote) {
+        val note = state.statusNote ?: return@LaunchedEffect
+        toasts.show(note)
+        // The controller owns the display window now, so the note is spent the
+        // moment it is handed over. Two identical notes in a row still show
+        // twice: this clears to null between them, so the key really changes.
+        viewModel.consumeStatusNote()
+    }
+
     val colors = AppTheme.colors
     val dimens = AppTheme.dimens
     val context = LocalContext.current
@@ -262,9 +281,6 @@ fun EpkScreen(
                 )
             }
         }
-        // Transient confirmations for writes with no visible result ("Pricing
-        // saved."). The host clears itself, so nothing here has to remember to.
-        ToastHost(message = state.statusNote, onDismiss = viewModel::consumeStatusNote)
     }
 
     // ── Sheets ───────────────────────────────────────────────────────────────

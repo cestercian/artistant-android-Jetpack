@@ -28,7 +28,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -57,7 +56,10 @@ import `in`.artistant.app.designsystem.theme.motion
  * Dark on a light page, deliberately. A toast is the one piece of UI that has to
  * be readable against whatever is behind it without knowing what that is, and
  * the palette's dark surfaces exist for exactly these moments (the splash and
- * this).
+ * this). `dark` is that surface; `ink` is the text colour, and painting a
+ * surface with it was the capsule's own private black. Flat, too — the light
+ * design casts no shadows, and a near-black capsule on an off-white page needs
+ * none to separate.
  *
  * The copy states the fact — "Venue address copied", not "Success!". That is a
  * house rule, not a suggestion.
@@ -98,9 +100,14 @@ fun BoxScope.ToastHost(
         visible = message != null,
         modifier = modifier
             .align(Alignment.BottomCenter)
+            // Bottom only. `vertical` padded the TOP of the host's bounds by
+            // the same amount, so on a tab shell the node was up to two tab
+            // bars taller than the capsule inside it. Nothing visible moved,
+            // but the semantics node — a live region — claimed that whole band.
             .padding(
-                horizontal = AppTheme.dimens.component.gutter,
-                vertical = bottomPadding,
+                start = AppTheme.dimens.component.gutter,
+                end = AppTheme.dimens.component.gutter,
+                bottom = bottomPadding,
             ),
         enter = fadeIn(androidx.compose.animation.core.tween(AppTheme.motion.tabSwitch)) +
             slideInVertically(
@@ -130,9 +137,8 @@ fun Toast(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(dimens.space.md, RoundedCornerShape(dimens.radii.buttonLg))
             .clip(RoundedCornerShape(dimens.radii.buttonLg))
-            .background(colors.ink)
+            .background(colors.dark)
             .padding(horizontal = dimens.space.lg, vertical = dimens.space.md)
             .semantics {
                 // Announced when it appears rather than when focus reaches it —
